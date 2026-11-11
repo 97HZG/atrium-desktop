@@ -1,0 +1,36 @@
+#pragma once
+#include <cstdint>
+#include <vector>
+
+namespace atrium::tray {
+enum class Action { Left, Right, Double };
+enum class Route { Invoke, ContextMenu, LegacyDefault, Toolbar };
+enum class Outcome { Observed, AcceptedUnconfirmed, Unavailable };
+inline constexpr int32_t providerTimeout = static_cast<int32_t>(0x80131505u); // UIA_E_TIMEOUT
+struct Attempt { Route route; int32_t status; bool observed; };
+struct DispatchResult { Outcome outcome = Outcome::Unavailable; std::vector<Attempt> attempts; };
+// An accepted asynchronous action must not be repeated through another API: it may toggle
+// the UI back, or deliver a destructive second command. Missing evidence is not failure.
+template<class Invoke, class Observe>
+DispatchResult Dispatch(Action action, bool classic, Invoke invoke, Observe observe)
+{
+    DispatchResult result;
+    std::vector<Route> routes;
+    if (action == Action::Double) {
+        if (classic) routes.push_back(Route::Toolbar); // Invoke twice is NOT a double click
+    } else {
+        routes.push_back(action == Action::Right ? Route::ContextMenu : Route::Invoke);
+        if (classic) routes.push_back(Route::Toolbar);
+        if (action == Action::Left) routes.push_back(Route::LegacyDefault);
+    }
+    for (Route route : routes) {
+        const int32_t status = invoke(route);
+        const bool uncertain = status >= 0 || status == providerTimeout;
+        const bool observed = observe(uncertain);
+        result.attempts.push_back({route, status, observed});
+        if (observed) { result.outcome = Outcome::Observed; break; }
+        if (uncertain) { result.outcome = Outcome::AcceptedUnconfirmed; break; }
+    }
+    return result;
+}
+} // namespace atrium::tray

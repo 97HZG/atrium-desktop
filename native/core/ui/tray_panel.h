@@ -11,6 +11,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,9 @@ private:
     std::vector<TrayIcon> icons_;
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_;
+    std::optional<TrayIcon> pendingClick_;
+    std::optional<TrayIcon> pressedIcon_;
+    POINT pendingAt_{};
     bool tracking_ = false;
     RECT anchor_{}, bar_{};
     HWND previous_ = nullptr;

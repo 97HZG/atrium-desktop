@@ -22,6 +22,7 @@ namespace {
 constexpr float kCell = 40, kIcon = 20, kAir = (kCell - kIcon) / 2; // kAir: from a cell's edge to its icon
 constexpr float kSplit = 14, kFooterH = 24;                            // icons to divider to footer; footer row
 constexpr double kStageMs = 240, kStaggerMs = 14, kRippleMs = 520;
+constexpr UINT_PTR kClickTimer = 0x54524159, kRefreshTimer = 0x5452415A;
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
@@ -214,12 +215,16 @@ void TrayPanel::Open(RECT anchor, RECT bar, HWND previous)
     hoverAnim_.clear();
     openedMs_ = ClockMs();
     model_.Refresh(); // the tooltips and the set change; the panel updates when read
+    SetTimer(surface_.Hwnd(), kRefreshTimer, 1500, nullptr);
     Place();
     Log(L"tray: panel opened (%zu icons)", icons_.size());
 }
 
 void TrayPanel::Close()
 {
+    KillTimer(surface_.Hwnd(), kClickTimer);
+    KillTimer(surface_.Hwnd(), kRefreshTimer);
+    pendingClick_.reset();
     if (!surface_.Visible())
         return;
     surface_.Hide();
@@ -350,24 +355,66 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
     size_t i = size_t(std::stoul(id.substr(5)));
     if (i >= icons_.size())
         return;
+    const TrayIcon selected = pressedIcon_.value_or(icons_[i]);
     // We have the foreground: let the app take it for its window or menu.
     AllowSetForegroundWindow(ASFW_ANY);
     if (right) {
         POINT at;
         GetCursorPos(&at);
-        FollowMenu(at, icons_[i].exe);
+        FollowMenu(at, selected.exe);
     }
-    model_.Click(icons_[i], right);
-    // A left click usually opens the app's window: the panel steps aside. A
-    // right click opens the app's menu, which takes the focus and closes it.
-    if (!right)
-        Close();
+    if (!right) {
+        POINT at{};
+        GetCursorPos(&at);
+        const auto& icon = selected;
+        const bool same = pendingClick_ &&
+            (!icon.recordId.empty() ? pendingClick_->recordId == icon.recordId :
+             !icon.runtimeId.empty() && pendingClick_->runtimeId == icon.runtimeId) &&
+            std::abs(at.x - pendingAt_.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
+            std::abs(at.y - pendingAt_.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
+        if (pendingClick_) {
+            KillTimer(surface_.Hwnd(), kClickTimer);
+            if (same) model_.DoubleClick(*pendingClick_);
+            else model_.Click(*pendingClick_, false);
+            pendingClick_.reset();
+            if (same) { Close(); return; }
+        }
+        pendingClick_ = icon;
+        pendingAt_ = at;
+        // One action per gesture: do not Invoke on the first up and again on a double click.
+        if (!SetTimer(surface_.Hwnd(), kClickTimer, GetDoubleClickTime(), nullptr)) {
+            model_.Click(*pendingClick_, false);
+            pendingClick_.reset();
+            Close();
+        }
+        return;
+    }
+    if (pendingClick_) {
+        KillTimer(surface_.Hwnd(), kClickTimer);
+        pendingClick_.reset();
+    }
+    model_.Click(selected, right);
 }
 
 bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
 {
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     switch (m) {
+    case WM_TIMER:
+        if (w == kRefreshTimer) {
+            if (surface_.Visible()) model_.Refresh();
+            return true;
+        }
+        if (w == kClickTimer) {
+            KillTimer(surface_.Hwnd(), kClickTimer);
+            if (pendingClick_) {
+                model_.Click(*pendingClick_, false);
+                pendingClick_.reset();
+                Close();
+            }
+            return true;
+        }
+        return false;
     case WM_ACTIVATE:
         if (LOWORD(w) == WA_INACTIVE && surface_.Visible())
             Close();
@@ -393,6 +440,11 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_LBUTTONDOWN:
     case WM_RBUTTONDOWN:
         pressed_ = HitAt(pt);
+        pressedIcon_.reset();
+        if (pressed_.rfind(L"icon:", 0) == 0) {
+            const size_t i = size_t(std::stoul(pressed_.substr(5)));
+            if (i < icons_.size()) pressedIcon_ = icons_[i];
+        }
         if (!pressed_.empty()) {
             float s = surface_.Scale();
             rippleId_ = pressed_;
@@ -411,6 +463,7 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         surface_.Invalidate();
         if (same)
             Activate(h, m == WM_RBUTTONUP);
+        pressedIcon_.reset();
         return true;
     }
     case WM_KEYDOWN:

@@ -1,20 +1,8 @@
-// The notification area's icons (the system tray), for Atrium's own tray
-// panel. Read from the shell's UI Automation tree: the taskbar's and the
-// overflow window's tray buttons are there even while hidden, named by their
-// tooltips. A click is forwarded the same way: Invoke is the icon's left click,
-// ShowContextMenu its right click (the app opens its own menu). Nothing is
-// injected into Explorer. Reading never opens its UI; an explicit icon action
-// may initialize its lazy overflow. The picture of
-// an icon comes from Windows' record of tray icons (NotifyIconSettings: the
-// program and a snapshot of its icon), matched to the button by name, or from
-// the program's file; for an icon Windows keeps no record of (Windows 10
-// keeps none), the running program whose name is the button's. Without the
-// new XAML tray (Windows 10), the classic tray's toolbar buttons are read the
-// same way and clicked by mouse messages to the toolbar. UI Automation runs on
-// a worker thread.
+// Tray snapshots and actions; evidence contracts: docs/TRAY.md.
 #pragma once
 
 #include "shell/task_model.h"
+#include "shell/tray_click.h"
 
 #include <windows.h>
 
@@ -38,13 +26,17 @@ struct TrayIcon {
     bool inkedOnLight = false;
     bool promoted = false; // on the system taskbar rather than in its overflow
     int index = 0;         // position among the icons of the same place
+    std::vector<int> runtimeId; // UIA identity, never an ordinal click target
+    DWORD shellPid = 0; // bounds RuntimeId lifetime to this Explorer instance
+    std::wstring matchMethod;
+    bool fromRecord = false;
     std::wstring recordId; // stable Windows identity, also before the overflow UI exists
 };
 
 class TrayModel {
 public:
-    // Posts `msg` to `notify` when the list has been read (wParam 0) and when a
-    // click has been forwarded (wParam 1).
+    // Posts msg: 0=list changed, 1=observed app response, 2=verified native popup,
+    // 3=needs user intervention. No HRESULT is treated as an application acknowledgement.
     TrayModel(HWND notify, UINT msg, std::function<std::vector<PinnedApp>()> appNames = {});
     ~TrayModel();
     TrayModel(const TrayModel&) = delete;
@@ -56,6 +48,8 @@ public:
     bool Available() const; // the shell's tray was found in the last read
     // A left click (Invoke) or a right click (the context menu) on `icon`.
     void Click(const TrayIcon& icon, bool right);
+    void DoubleClick(const TrayIcon& icon);
+    void OpenSystemTray(); // explicit asynchronous fallback
     // Opens an existing background session; false when the app is not in the tray/running.
     bool OpenExisting(const std::wstring& exe);
 
@@ -66,7 +60,8 @@ private:
     struct Job {
         bool refresh = false;
         TrayIcon icon;
-        bool right = false;
+        tray::Action action = tray::Action::Left;
+        bool systemTray = false;
     };
     void Worker();
     HWND notify_;

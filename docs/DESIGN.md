@@ -319,6 +319,8 @@ WinUI 的一个限制：控件模板里被视觉状态改动的元素不能再�
 
 ## 参考
 
+托盘的数据来源、匹配依据、点击分发、诊断和验证边界见 [Tray 技术说明](TRAY.md)。
+
 - Apple Human Interface Guidelines — [Typography](https://developer.apple.com/design/human-interface-guidelines/typography)、[Layout](https://developer.apple.com/design/human-interface-guidelines/layout)、[Motion](https://developer.apple.com/design/human-interface-guidelines/motion)、[Materials](https://developer.apple.com/design/human-interface-guidelines/materials)
 - WWDC23 [Animate with springs](https://developer.apple.com/videos/play/wwdc2023/10158/)：时长与回弹的参数化，以及与刚度、阻尼的换算
 - WWDC18 [Designing Fluid Interfaces](https://developer.apple.com/videos/play/wwdc2018/803/)：可打断、速度连续
