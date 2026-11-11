@@ -689,6 +689,15 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
     std::stable_sort(candidates.begin(), candidates.end(), [&](const Candidate& a, const Candidate& b) {
         return records[a.record].order < records[b.record].order;
     });
+    // Icons in the overflow all answer with one place, the chevron's (the hidden taskbar's too):
+    // a place that several programs' icons share is no icon's own and tells no duplicate apart.
+    auto sharedPlace = [&](const RECT& at) {
+        std::set<std::wstring> exes;
+        for (const auto& o : candidates)
+            if (o.live && EqualRect(&o.bounds, &at))
+                exes.insert(records[o.record].exe);
+        return exes.size() > 1;
+    };
     // Explorer creates the overflow's UI Automation buttons only after its
     // first opening. Live shell identities exist before then; persisted records
     // alone must never resurrect icons from applications that have exited.
@@ -702,14 +711,16 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
         f.tip = r.tip.empty() ? c.names[1] : r.tip;
         if (f.tip.empty()) f.tip = c.names[3];
         const POINT center{(c.bounds.left + c.bounds.right) / 2, (c.bounds.top + c.bounds.bottom) / 2};
+        const bool ownPlace = !IsRectEmpty(&c.bounds) && !sharedPlace(c.bounds);
         if (shownExe.contains(r.exe) || shownName.contains(Key(TrayModel::Title(f.tip))) ||
-            std::any_of(shownAt.begin(), shownAt.end(), [&](const RECT& at) { return !IsRectEmpty(&at) && PtInRect(&at, center); })) {
+            (ownPlace && std::any_of(shownAt.begin(), shownAt.end(), [&](const RECT& at) { return !IsRectEmpty(&at) && PtInRect(&at, center); }))) {
             Log(L"tray: left out a second record of '%s' (%s)", TrayModel::Title(f.tip).c_str(), PathFindFileNameW(r.exe.c_str()));
             continue;
         }
         shownExe.insert(r.exe);
         shownName.insert(Key(TrayModel::Title(f.tip)));
-        shownAt.push_back(c.bounds);
+        if (ownPlace)
+            shownAt.push_back(c.bounds);
         f.promoted = r.promoted;
         f.index = int(std::count_if(buttons.begin(), buttons.end(), [&](const Found& b) { return b.promoted == f.promoted; }));
         f.bounds = c.bounds;
