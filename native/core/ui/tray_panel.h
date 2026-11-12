@@ -29,6 +29,7 @@ public:
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
     void Refresh(); // the model has a new list
+    void SetAttention(const std::vector<TaskItem>& tasks);
     void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
     HWND Hwnd() const { return surface_.Hwnd(); }
 
@@ -53,6 +54,7 @@ private:
     Surface surface_;
     TrayModel& model_;
     std::vector<TrayIcon> icons_;
+    std::vector<std::wstring> attention_;
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_;
     std::optional<TrayIcon> lastClick_;

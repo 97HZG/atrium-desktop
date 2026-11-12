@@ -267,6 +267,13 @@ void TrayPanel::Refresh()
     surface_.Invalidate();
 }
 
+void TrayPanel::SetAttention(const std::vector<TaskItem>& tasks)
+{
+    std::vector<std::wstring> next;
+    for (const auto& task : tasks) if (task.attention) next.push_back(task.key);
+    if (next != attention_) { attention_ = std::move(next); surface_.Invalidate(); }
+}
+
 float TrayPanel::Hover(Canvas& c, const std::wstring& id, bool on)
 {
     auto& f = hoverAnim_[id];
@@ -320,11 +327,11 @@ void TrayPanel::Paint(Canvas& c)
             const float inked = !icon.inked ? 0.f : icon.inkedOnLight ? dark : 1 - dark;
             wchar_t key[64];
             if (inked < 0.999f) {
-                swprintf_s(key, L"tray|%p|%d", static_cast<const void*>(icon.image.get()), iconPx);
+                swprintf_s(key, L"tray|%llu|normal|%d", icon.imageVersion, iconPx);
                 c.Image(key, *icon.image, ir, 1 - inked);
             }
             if (inked > 0.001f) {
-                swprintf_s(key, L"tray|%p|%d", static_cast<const void*>(icon.inked.get()), iconPx);
+                swprintf_s(key, L"tray|%llu|inked|%d", icon.imageVersion, iconPx);
                 c.Image(key, *icon.inked, ir, inked);
             }
         } else {
@@ -335,6 +342,13 @@ void TrayPanel::Paint(Canvas& c)
         }
         c.EndGroup();
         c.EndGroup();
+        // Only an existing task attention signal for the exact executable. No guessed unread count.
+        if (!icon.exe.empty() && std::find(attention_.begin(), attention_.end(), icon.exe) != attention_.end()) {
+            const float pulse = 0.72f + 0.28f * float(std::sin((c.now - openedMs_) * 0.006));
+            c.Fill(D2D1::RectF(ir.right - 3, ir.top - 3, ir.right + 4, ir.top + 4), 3.5f,
+                D2D1::ColorF(0.96f, 0.22f, 0.25f, pulse));
+            c.Continue();
+        }
         hits_.push_back({cell, id});
     }
 

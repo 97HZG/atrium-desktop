@@ -21,6 +21,7 @@ struct TrayIcon {
     std::wstring tip;      // the tooltip; may span lines
     std::wstring exe;      // the program it belongs to, when recognised
     std::shared_ptr<const IconImage> image; // null when unknown
+    uint64_t imageVersion = 0; // renderer cache identity; allocator addresses can be reused
     // A one-shade glyph (white or black, as many tray icons are drawn for the taskbar's theme)
     // redrawn in the other ink: for bright glass (`inkedOnLight`) or dark. Null for coloured icons.
     std::shared_ptr<const IconImage> inked;

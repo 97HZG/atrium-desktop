@@ -25,6 +25,9 @@ add_executable(tray_click_tests tray_click.cpp)
 target_include_directories(tray_click_tests PRIVATE ../core)
 add_test(NAME tray_click COMMAND tray_click_tests)
 
+add_executable(tray_notify_probe EXCLUDE_FROM_ALL tray_notify_probe.cpp)
+target_link_libraries(tray_notify_probe PRIVATE ole32)
+
 # Manual, read-only by default. Explicit --click uses the actual TrayModel worker.
 add_executable(tray_live_probe EXCLUDE_FROM_ALL tray_live_probe.cpp ../core/shell/tray_match.cpp ../core/log.cpp)
 target_include_directories(tray_live_probe PRIVATE ../core)

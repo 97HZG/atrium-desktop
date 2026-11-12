@@ -131,3 +131,23 @@ native/build/tests/tests/Release/tray_live_probe.exe --visible-click 'C:\full\pa
 尚未解决：既无记录又无 UIA 元素的发现、部分树歧义产生的额外占位项、XAML 原生双击。Win10 实机、面板外观、自绘菜单实际位置仍需验收；本轮编译与逻辑测试不代替这些验收。
 
 本轮验证结果：Release 主程序和探针编译成功；tray_match、tray_click 两组 CTest 通过。真实 fixture 的 GUID/UID 左右键四项仍各收到一次正确回调；background-only 用例返回 completion=4，未进入回退；图标删除仍为 2 → 1 → 0。未替换安装版或合并分支。
+
+
+## 四项用户反馈追查（2026-11-12）
+
+新增对照 Seelen UI 固定版本 `1ed1a73eb3f3a6d2a541e9ceb0f280a7faaa98d5`：
+
+- [tray_hook_loader.rs](https://github.com/eythaann/Seelen-UI/blob/1ed1a73eb3f3a6d2a541e9ceb0f280a7faaa98d5/src/background/system_modules/system_tray/application/windows/tray_hook_loader.rs) 用 SetWindowsHookEx(WH_CALLWNDPROC) 加载 DLL 到 Shell_TrayWnd 所在线程。
+- [tray_icon.rs](https://github.com/eythaann/Seelen-UI/blob/1ed1a73eb3f3a6d2a541e9ceb0f280a7faaa98d5/src/background/system_modules/system_tray/application/windows/tray_icon.rs) 消费 Add/Update/Remove、位图句柄、回调消息及版本，直接编码应用动作。这解释了其动态图片与双击能力，也意味着不能按 Atrium 的无注入约束直接复用该数据源。此前对照的 YASB、ManagedShell、RetroBar 见上文；此次没有声称覆盖 GitHub 所有项目。
+- [Chromium ITrayNotify 使用](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/chrome/browser/ui/views/status_icons/status_tray_state_changer_win.cc) 提供另一种枚举思路。新增 `tray_notify_probe`，只使用进程外 COM 注册/注销回调，不设置任何偏好、不展开托盘、不广播 TaskbarCreated。本机创建与注册均 S_OK，STA 消息泵监听 500 ms 后 count=0，注销 S_OK。未将其接入生产数据源，不能假定它在其他 Windows 版本也无效。
+
+本轮可落地的改动：
+
+1. 图像缓存改用单调递增版本键，避免 allocator 地址复用使渲染缓存命中旧位图。快照优先于应用品牌图片；无效快照才走应用图片回退。注册表二次读取失败丢弃半截数据；日志记录 artwork 来源与版本。仍然只更新 Explorer 实际写入的快照，无法保证捕获 v2rayN/Clash 的每次 NIM_MODIFY。
+2. 接入 TaskModel 已存在的 attention 信号。面板仅对 task key 与托盘完整 exe 一致的项目绘制脉动红点，信号清除后消失。它表示系统窗口请求注意，不是未读计数。仅改变托盘位图、不调用窗口闪烁的 QQ/微信版本，以及按 AUMID 分组的程序，仍可能没有这个信号；不能将此描述为完整微信/QQ 未读支持。
+3. 初始读取与 shell 实例变化后，最多安排 5 次后台重试，间隔 0.5/1/2/4/8 秒，点击可唤醒等待。可覆盖启动时 Explorer/注册表迟到，不覆盖始终无记录且无 UIA 的图标。不展开系统托盘来制造数据。
+4. Steam 的 XAML 双击仍未修复。未猜测回调消息，也没有将打开已有窗口当作 Steam 原生双击的等价实现。实时动画/闪烁位图同样未取得数据源。
+
+构建 `tray_notify_probe` 命令：`cmake --build native/build/tests --config Release --target tray_notify_probe`。探针独立运行，不替换安装版；本轮未启动开发版 Atrium、未重启 Explorer。主程序构建及纯函数回归验证不替代面板视觉或第三方程序验收。
+
+本轮验证：Release 主程序、独立探针构建通过，tray_match/tray_click CTest 通过。`tray_live_probe --watch` 只读运行 16.5 秒，loaded=1、available=1、icons=11；首次读取 94 ms，日志确认 500/1000/2000/4000/8000 ms 重试安排，随后 worker 正常退出。该测试期间溢出 UIA 已物化，不代表首次开机完整性验收。检查安装版 Atrium 的两个 PID 和路径前后相同。

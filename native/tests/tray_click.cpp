@@ -1,5 +1,6 @@
 #include "shell/tray_click.h"
 #include "shell/tray_target.h"
+#include "shell/tray_image.h"
 #include <iostream>
 #include <stdexcept>
 using namespace atrium::tray;
@@ -7,6 +8,11 @@ void Check(bool value, const char* message) { if (!value) throw std::runtime_err
 int main()
 {
     try {
+        int fallbackCalls = 0;
+        auto art = LoadArtwork([] { return true; }, [&] { ++fallbackCalls; return true; });
+        Check(art == Artwork::Snapshot && fallbackCalls == 0, "valid tray state image cannot be replaced by branding");
+        art = LoadArtwork([] { return false; }, [&] { ++fallbackCalls; return true; });
+        Check(art == Artwork::Application && fallbackCalls == 1, "missing or corrupt snapshot uses application fallback");
         auto fail = [](Route) { return int32_t(-1); };
         auto unseen = [](bool) { return false; };
         auto r = Dispatch(Action::Left, true, fail, unseen);

@@ -2,6 +2,7 @@
 #include "shell/tray_model.h"
 #include "shell/tray_match.h"
 #include "shell/tray_click.h"
+#include "shell/tray_image.h"
 
 #include "log.h"
 
@@ -15,6 +16,7 @@
 #include <winrt/base.h>
 
 #include <algorithm>
+#include <chrono>
 #include <map>
 #include <set>
 
@@ -200,7 +202,9 @@ std::vector<Record> ReadRecords(bool& ordered)
         size = 0;
         if (RegGetValueW(root, name, L"IconSnapshot", RRF_RT_REG_BINARY, nullptr, nullptr, &size) == ERROR_SUCCESS && size && size < (1u << 20)) {
             r.png.resize(size);
-            RegGetValueW(root, name, L"IconSnapshot", RRF_RT_REG_BINARY, nullptr, r.png.data(), &size);
+            if (RegGetValueW(root, name, L"IconSnapshot", RRF_RT_REG_BINARY, nullptr, r.png.data(), &size) != ERROR_SUCCESS || size > r.png.size())
+                r.png.clear();
+            else r.png.resize(size);
         }
         DWORD uid = 0;
         size = sizeof(uid);
@@ -840,22 +844,35 @@ void TrayModel::Worker()
         options->put_ConnectionTimeout(250);
         options->put_TransactionTimeout(250);
     }
+    uint64_t nextImageVersion = 0;
     struct Picture {
+        uint64_t version = 0;
         std::wstring exe;
         std::vector<BYTE> snapshot;
         std::shared_ptr<const IconImage> image, inked;
         bool inkedOnLight = false;
     };
     std::map<std::wstring, Picture> pictures;
+    using Clock = std::chrono::steady_clock;
+    auto retryAt = Clock::time_point::max();
+    tray::ShellSession recoverySession;
+    bool recoveryStarted = false;
+    unsigned retries = 0;
     for (;;) {
         Job job;
         {
             std::unique_lock g(mutex_);
-            cv_.wait(g, [&] { return stop_ || !jobs_.empty(); });
+            if (retryAt == Clock::time_point::max()) cv_.wait(g, [&] { return stop_ || !jobs_.empty(); });
+            else cv_.wait_until(g, retryAt, [&] { return stop_ || !jobs_.empty(); });
             if (stop_)
                 break;
-            job = jobs_.front();
-            jobs_.pop_front();
+            if (jobs_.empty()) {
+                job.refresh = true;
+                retryAt = Clock::time_point::max();
+            } else {
+                job = jobs_.front();
+                jobs_.pop_front();
+            }
         }
         if (!uia) {
             if (!job.refresh) PostMessageW(notify_, msg_, ShowOverflow(nullptr) ? 2 : 3, 0);
@@ -871,6 +888,14 @@ void TrayModel::Worker()
                 continue;
             }
             auto session = ReadShellSession();
+            if (!recoveryStarted || session != recoverySession) {
+                recoveryStarted = true; recoverySession = session; retries = 5;
+            }
+            if (job.refresh && retries) {
+                const unsigned delay = 500u << (5 - retries--);
+                retryAt = Clock::now() + std::chrono::milliseconds(delay);
+                Log(L"tray: shell recovery refresh scheduled delayMs=%u remaining=%u", delay, retries);
+            }
             std::vector<Found> buttons = FindButtons(uia.get(), available);
             const ULONGLONG readMs = GetTickCount64() - findStart;
             auto appNames = appNames_ ? appNames_() : std::vector<PinnedApp>{};
@@ -1003,8 +1028,14 @@ void TrayModel::Worker()
                     auto& pic = pictures[key];
                     if (!pic.image || pic.exe != r.exe || pic.snapshot != r.png) {
                         IconImage img;
-                        if (!LoadAtriumIcon(r.exe, kIconPx, img) && (r.png.empty() || !DecodePng(r.png, img)) && !LoadShellImage(r.exe, kIconPx, img))
-                            img = {};
+                        const auto art = tray::LoadArtwork(
+                            [&] { return !r.png.empty() && DecodePng(r.png, img); },
+                            [&] { return LoadAtriumIcon(r.exe, kIconPx, img) || LoadShellImage(r.exe, kIconPx, img); });
+                        if (art == tray::Artwork::Missing) img = {};
+                        pic.version = ++nextImageVersion;
+                        Log(L"tray: artwork identity=%s source=%s version=%llu bytes=%zu", t.recordId.c_str(),
+                            art == tray::Artwork::Snapshot ? L"snapshot" : art == tray::Artwork::Application ? L"application" : L"missing",
+                            pic.version, r.png.size());
                         pic.exe = r.exe;
                         pic.snapshot = r.png;
                         const int tone = img.empty() ? 0 : GlyphTone(img);
@@ -1014,6 +1045,7 @@ void TrayModel::Worker()
                         pic.inkedOnLight = tone > 0;
                         pic.image = img.empty() ? nullptr : std::make_shared<const IconImage>(std::move(img));
                     }
+                    t.imageVersion = pic.version;
                     t.image = pic.image;
                     t.inked = pic.inked;
                     t.inkedOnLight = pic.inkedOnLight;

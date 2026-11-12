@@ -51,6 +51,16 @@ int wmain(int argc, wchar_t** argv)
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     winrt::com_ptr<IUIAutomation> uia;
     winrt::check_hresult(CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put())));
+    if (argc == 2 && std::wstring(argv[1]) == L"--watch") {
+        // Read-only production worker exercise, including bounded startup retries.
+        TrayModel model(nullptr, 0);
+        model.Refresh();
+        const auto until = GetTickCount64() + 16500;
+        while (GetTickCount64() < until) { Pump(); Sleep(20); }
+        std::wcout << L"worker loaded=" << model.Loaded() << L" available=" << model.Available()
+            << L" icons=" << model.Icons().size() << L'\n';
+        return model.Loaded() ? 0 : 1;
+    }
     if (argc == 2 && (std::wstring(argv[1]) == L"--fixture" || std::wstring(argv[1]) == L"--fixture-clicks")) {
         const bool interactions = std::wstring(argv[1]) == L"--fixture-clicks";
         WNDCLASSW wc{};

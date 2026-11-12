@@ -1385,6 +1385,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         const double t0 = ClockMs();
         if (g_app.stage)
             g_app.stage->Update(g_app.tasks->Snapshot(true));
+        if (g_app.trayPanel) g_app.trayPanel->SetAttention(g_app.tasks->Snapshot(true));
         const double t1 = ClockMs();
         auto items = g_app.tasks->Snapshot();
         const double t2 = ClockMs();
@@ -1417,6 +1418,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     });
     g_app.trayPanel = std::make_unique<TrayPanel>(instance, *g_app.tray);
     g_app.trayPanel->onSystemTray = OpenTray;
+    g_app.trayPanel->SetAttention(g_app.tasks->Snapshot(true));
     g_app.control = std::make_unique<ControlCenter>(instance);
     g_app.control->onChanged = UpdateStatus;
     g_app.start->onStatusRequest = UpdateStatus;
