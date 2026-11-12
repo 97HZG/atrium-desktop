@@ -5,6 +5,7 @@
 #include "bar.h"
 #include "clock.h"
 #include "log.h"
+#include "tr.h"
 #include "resource.h"
 #include "settings.h"
 #include "settings_server.h"
@@ -1131,16 +1132,23 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return TRUE;
     case WM_TRAY_ICONS:
+        if (w == 4) return 0; // accepted async action: no focus change, popup or notification
+        if (w == 5) { // explicit system-tray opening succeeded
+            if (g_app.trayPanel) g_app.trayPanel->Close();
+            return 0;
+        }
         if (w == 2 || w == 3) {
             KillTimer(h, kTrayFocusTimer);
             if (g_app.trayPanel) g_app.trayPanel->Close();
-            if (g_app.notes) {
+            static ULONGLONG lastTrayNotice = 0;
+            const auto now = GetTickCount64();
+            if (g_app.notes && (!lastTrayNotice || now - lastTrayNotice >= 30000)) {
+                lastTrayNotice = now;
                 Notice notice;
                 notice.source = L"atrium";
                 notice.app = L"Atrium";
-                notice.title = w == 2 ? L"请在系统托盘中操作" : L"系统托盘暂时无法打开";
-                notice.body = w == 2 ? L"请直接点击 Windows 隐藏图标区中的图标。" :
-                    L"Windows 尚未提供可用的托盘入口。请临时关闭“隐藏系统任务栏”，打开隐藏图标区后重试。";
+                notice.title = Tr(w == 2 ? Text::TrayManualTitle : Text::TrayUnavailableTitle);
+                notice.body = Tr(w == 2 ? Text::TrayManualBody : Text::TrayUnavailableBody);
                 g_app.notes->Post(std::move(notice));
             }
         } else if (w == 1) // a click was forwarded: see where the focus ends up

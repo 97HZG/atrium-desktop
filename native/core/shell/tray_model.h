@@ -38,7 +38,8 @@ struct TrayIcon {
 class TrayModel {
 public:
     // Posts msg: 0=list changed, 1=observed app response, 2=verified native popup,
-    // 3=needs user intervention. No HRESULT is treated as an application acknowledgement.
+    // 3=needs user intervention, 4=accepted/unconfirmed (quiet), 5=explicit popup opened.
+    // No HRESULT is treated as an application acknowledgement.
     TrayModel(HWND notify, UINT msg, std::function<std::vector<PinnedApp>()> appNames = {});
     ~TrayModel();
     TrayModel(const TrayModel&) = delete;
@@ -50,7 +51,7 @@ public:
     bool Available() const; // the shell's tray was found in the last read
     // A left click (Invoke) or a right click (the context menu) on `icon`.
     void Click(const TrayIcon& icon, bool right);
-    void DoubleClick(const TrayIcon& icon);
+    void DoubleClick(const TrayIcon& icon, bool continuation = false);
     void OpenSystemTray(); // explicit asynchronous fallback
     // Opens an existing background session; false when the app is not in the tray/running.
     bool OpenExisting(const std::wstring& exe);

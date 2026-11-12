@@ -22,15 +22,15 @@ namespace {
 constexpr float kCell = 40, kIcon = 20, kAir = (kCell - kIcon) / 2; // kAir: from a cell's edge to its icon
 constexpr float kSplit = 14, kFooterH = 24;                            // icons to divider to footer; footer row
 constexpr double kStageMs = 240, kStaggerMs = 14, kRippleMs = 520;
-constexpr UINT_PTR kClickTimer = 0x54524159, kRefreshTimer = 0x5452415A;
+constexpr UINT_PTR kRefreshTimer = 0x5452415A;
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
 
 // An app's menu opened through the hidden system tray: Explorer tells the app
 // where its (hidden) button is, and some apps open the menu there, at the
-// screen's left edge. Only a native menu from the exact executable is moved
-// to where the icon was clicked. Unknown/helper/custom popups are left alone. An
+// screen's left edge. A newly shown menu-shaped popup from the exact executable
+// is moved to the click. Unknown programs and helper processes are excluded. An
 // out-of-context event hook: nothing runs in the app or in Explorer.
 struct MenuFollow {
     HWINEVENTHOOK hook = nullptr;
@@ -109,7 +109,13 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
     if (g_follow.exe.empty() || path.empty() || elevated ||
         CompareStringOrdinal(path.c_str(), -1, g_follow.exe.c_str(), -1, TRUE) != CSTR_EQUAL) return;
     wchar_t cls[64]{};
-    if (!GetClassNameW(hwnd, cls, 64) || wcscmp(cls, L"#32768")) return;
+    if (!GetClassNameW(hwnd, cls, 64)) return;
+    const bool nativeMenu = wcscmp(cls, L"#32768") == 0;
+    const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE), ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    const bool customMenu = (style & WS_POPUP) && !(style & WS_CAPTION) &&
+        (ex & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST)) && !(ex & WS_EX_APPWINDOW) &&
+        _wcsicmp(cls, L"tooltips_class32") != 0;
+    if (!nativeMenu && !customMenu) return;
     const wchar_t* name = PathFindFileNameW(path.c_str());
     RECT r{};
     if (g_follow.menu) {
@@ -126,7 +132,7 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
         }
         return;
     }
-    // Only a newly shown native menu is eligible for the first move.
+    // Only a newly shown, menu-shaped popup from the exact executable is eligible.
     if (GetAncestor(hwnd, GA_ROOT) != hwnd || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, &r))
         return;
     const int w = r.right - r.left, h = r.bottom - r.top;
@@ -185,6 +191,7 @@ float TrayPanel::Margin() const { return std::clamp(radius_ * 0.65f, 14.f, 22.f)
 
 int TrayPanel::Cols() const
 {
+    if (columns_) return columns_;
     // At most six across, the rows as even as they can be (13 icons: 5, 5, 3), and wide enough for the footer.
     const int n = int(icons_.size()), rows = std::max(1, (n + 5) / 6);
     return std::clamp((n + rows - 1) / rows, 4, 6);
@@ -222,6 +229,8 @@ void TrayPanel::Open(RECT anchor, RECT bar, HWND previous)
     anchor_ = anchor;
     bar_ = bar;
     icons_ = model_.Icons();
+    columns_ = 0;
+    columns_ = Cols();
     hover_.clear();
     pressed_.clear();
     hoverAnim_.clear();
@@ -234,9 +243,8 @@ void TrayPanel::Open(RECT anchor, RECT bar, HWND previous)
 
 void TrayPanel::Close()
 {
-    KillTimer(surface_.Hwnd(), kClickTimer);
     KillTimer(surface_.Hwnd(), kRefreshTimer);
-    pendingClick_.reset();
+    lastClick_.reset();
     if (!surface_.Visible())
         return;
     surface_.Hide();
@@ -247,7 +255,14 @@ void TrayPanel::Refresh()
 {
     if (!surface_.Visible())
         return;
-    icons_ = model_.Icons();
+    if (!pressed_.empty()) return; // freeze hit cells until mouse-up
+    auto fresh = model_.Icons();
+    std::vector<tray::TargetKey> oldKeys, freshKeys;
+    for (const auto& icon : icons_) oldKeys.push_back(icon.Target());
+    for (const auto& icon : fresh) freshKeys.push_back(icon.Target());
+    const auto order = tray::StableOrder(oldKeys, freshKeys);
+    icons_.clear();
+    for (size_t i : order) icons_.push_back(std::move(fresh[i]));
     Place();
     surface_.Invalidate();
 }
@@ -374,36 +389,21 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
         FollowMenu(at, selected.exe);
     }
     if (!right) {
-        POINT at{};
-        GetCursorPos(&at);
-        const auto& icon = selected;
-        const bool same = pendingClick_ &&
-            tray::SameGestureTarget(pendingClick_->Target(), icon.Target()) &&
-            GetTickCount64() - pendingWhen_ <= GetDoubleClickTime() &&
-            std::abs(at.x - pendingAt_.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
-            std::abs(at.y - pendingAt_.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
-        if (pendingClick_) {
-            KillTimer(surface_.Hwnd(), kClickTimer);
-            if (same) model_.DoubleClick(*pendingClick_);
-            else model_.Click(*pendingClick_, false);
-            pendingClick_.reset();
-            if (same) { Close(); return; }
-        }
-        pendingClick_ = icon;
-        pendingAt_ = at;
-        pendingWhen_ = GetTickCount64();
-        // One action per gesture: do not Invoke on the first up and again on a double click.
-        if (!SetTimer(surface_.Hwnd(), kClickTimer, GetDoubleClickTime(), nullptr)) {
-            model_.Click(*pendingClick_, false);
-            pendingClick_.reset();
-            Close();
+        POINT at{}; GetCursorPos(&at);
+        const bool second = lastClick_ && tray::SameGestureTarget(lastClick_->Target(), selected.Target()) &&
+            GetTickCount64() - lastWhen_ <= GetDoubleClickTime() &&
+            std::abs(at.x - lastAt_.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
+            std::abs(at.y - lastAt_.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
+        if (second) {
+            model_.DoubleClick(selected, true); // first click already delivered
+            lastClick_.reset();
+        } else {
+            model_.Click(selected, false); // immediate; no double-click timer
+            lastClick_ = selected; lastAt_ = at; lastWhen_ = GetTickCount64();
         }
         return;
     }
-    if (pendingClick_) {
-        KillTimer(surface_.Hwnd(), kClickTimer);
-        pendingClick_.reset();
-    }
+    lastClick_.reset();
     model_.Click(selected, right);
 }
 
@@ -414,15 +414,6 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_TIMER:
         if (w == kRefreshTimer) {
             if (surface_.Visible()) model_.Refresh();
-            return true;
-        }
-        if (w == kClickTimer) {
-            KillTimer(surface_.Hwnd(), kClickTimer);
-            if (pendingClick_) {
-                model_.Click(*pendingClick_, false);
-                pendingClick_.reset();
-                Close();
-            }
             return true;
         }
         return false;

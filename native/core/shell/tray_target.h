@@ -68,4 +68,22 @@ inline bool SameGestureTarget(const TargetKey& a, const TargetKey& b)
         return !a.runtime.empty() && a.runtime == b.runtime && (!a.identity.empty() || a.tip == b.tip);
     return !a.identity.empty();
 }
+inline std::vector<size_t> StableOrder(const std::vector<TargetKey>& previous, const std::vector<TargetKey>& fresh)
+{
+    std::vector<size_t> order;
+    std::vector<bool> used(fresh.size());
+    for (const auto& old : previous) {
+        size_t found = static_cast<size_t>(-1), count = 0;
+        for (size_t i = 0; i < fresh.size(); ++i) {
+            const auto& next = fresh[i];
+            if (used[i] || !old.shell.Valid() || old.shell != next.shell) continue;
+            const bool same = !old.identity.empty() && !next.identity.empty() ? old.identity == next.identity :
+                !old.runtime.empty() && old.runtime == next.runtime;
+            if (same) { found = i; ++count; }
+        }
+        if (count == 1) { used[found] = true; order.push_back(found); }
+    }
+    for (size_t i = 0; i < fresh.size(); ++i) if (!used[i]) order.push_back(i);
+    return order;
+}
 } // namespace atrium::tray

@@ -55,11 +55,12 @@ private:
     std::vector<TrayIcon> icons_;
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_;
-    std::optional<TrayIcon> pendingClick_;
+    std::optional<TrayIcon> lastClick_;
     std::optional<TrayIcon> pressedIcon_;
-    POINT pendingAt_{};
-    ULONGLONG pendingWhen_ = 0;
+    POINT lastAt_{};
+    ULONGLONG lastWhen_ = 0;
     bool tracking_ = false;
+    int columns_ = 0; // fixed for one open session, so additions do not reflow existing rows
     RECT anchor_{}, bar_{};
     HWND previous_ = nullptr;
     float radius_ = 30;

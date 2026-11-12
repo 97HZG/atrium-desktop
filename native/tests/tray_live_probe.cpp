@@ -12,6 +12,7 @@ namespace {
 constexpr UINT kResult = WM_APP + 42;
 int completion = -1;
 HWND fixtureView = nullptr;
+bool fixtureRespond = true;
 std::vector<std::pair<UINT, UINT>> fixtureEvents;
 LRESULT CALLBACK ProbeProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -21,6 +22,7 @@ LRESULT CALLBACK ProbeProc(HWND h, UINT m, WPARAM w, LPARAM l)
         const bool v4 = m == WM_APP + 44;
         const UINT id = v4 ? HIWORD(l) : UINT(w), event = v4 ? LOWORD(l) : UINT(l);
         fixtureEvents.push_back({id, event});
+        if (!fixtureRespond) return 0; // valid background-only action; no window/menu response
         if (event == WM_LBUTTONUP || event == NIN_SELECT || event == NIN_KEYSELECT)
             ShowWindow(fixtureView, SW_SHOWNOACTIVATE);
         if (event == UINT(v4 ? WM_CONTEXTMENU : WM_RBUTTONUP)) {
@@ -148,6 +150,22 @@ int wmain(int argc, wchar_t** argv)
                     ok = passed && ok;
                 }
             }
+            {
+                TrayModel model(window, kResult);
+                model.Refresh();
+                ULONGLONG deadline = GetTickCount64() + 5000;
+                while (!model.Loaded() && GetTickCount64() < deadline) { Pump(); Sleep(10); }
+                fixtureRespond = false; completion = -1; fixtureEvents.clear();
+                bool clicked = false;
+                for (const auto& icon : model.Icons()) if (icon.tip == guid.szTip && _wcsicmp(icon.exe.c_str(), path) == 0) {
+                    model.Click(icon, false); clicked = true; break;
+                }
+                deadline = GetTickCount64() + 5000;
+                while (clicked && completion < 0 && GetTickCount64() < deadline) { Pump(); Sleep(10); }
+                const bool quiet = completion == 4 && !fixtureEvents.empty();
+                std::wcout << L"fixture background-only completion=" << completion << L" passed=" << quiet << L'\n';
+                ok = quiet && ok; fixtureRespond = true;
+            }
             DestroyWindow(fixtureView); fixtureView = nullptr;
         }
         Shell_NotifyIconW(NIM_DELETE, &uid);
@@ -224,7 +242,7 @@ int wmain(int argc, wchar_t** argv)
             else model.Click(*chosen, std::wstring(argv[3]) == L"right");
             deadline = GetTickCount64() + 10000;
             while (completion < 0 && GetTickCount64() < deadline) { Pump(); Sleep(10); }
-            std::wcout << L"completion=" << completion << L" (1=observed,2=system-popup,3=needs-user)\n";
+            std::wcout << L"completion=" << completion << L" (1=observed,2=system-popup,3=needs-user,4=accepted-unconfirmed,5=explicit-popup)\n";
             result = completion == 1 ? 0 : 1;
         }
     }

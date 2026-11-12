@@ -762,10 +762,10 @@ void TrayModel::Click(const TrayIcon& icon, bool right)
     cv_.notify_all();
 }
 
-void TrayModel::DoubleClick(const TrayIcon& icon)
+void TrayModel::DoubleClick(const TrayIcon& icon, bool continuation)
 {
     std::lock_guard g(mutex_);
-    jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }), {false, icon, tray::Action::Double});
+    jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }), {false, icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double});
     cv_.notify_all();
 }
 void TrayModel::OpenSystemTray()
@@ -867,7 +867,7 @@ void TrayModel::Worker()
             const ULONGLONG findStart = GetTickCount64();
             if (job.systemTray) {
                 const bool shown = ShowOverflow(uia.get());
-                PostMessageW(notify_, msg_, shown ? 2 : 3, 0);
+                PostMessageW(notify_, msg_, shown ? 5 : 3, 0);
                 continue;
             }
             auto session = ReadShellSession();
@@ -896,7 +896,7 @@ void TrayModel::Worker()
                 HRESULT state = target && target->element ? target->element->get_CurrentIsOffscreen(&offscreen) : UIA_E_ELEMENTNOTAVAILABLE;
                 if (target && target->element) target->element->get_CurrentIsEnabled(&enabled);
                 Log(L"tray: click begin action=%s tip='%s' exe='%s' identity=%s source=%s match=%s taskbarVisible=%d autoHide=%d overflowExists=%d overflowVisible=%d offscreen=%d enabled=%d stateHr=0x%08X",
-                    job.action == tray::Action::Right ? L"right" : job.action == tray::Action::Double ? L"double" : L"left",
+                    job.action == tray::Action::Right ? L"right" : job.action == tray::Action::Double ? L"double" : job.action == tray::Action::DoubleContinuation ? L"double-continuation" : L"left",
                     Title(job.icon.tip).c_str(), job.icon.exe.c_str(), job.icon.recordId.c_str(),
                     target && target->element ? L"uia" : L"record", target ? tray::MethodName(target->method) : L"missing",
                     IsWindowVisible(taskbar), (SHAppBarMessage(ABM_GETSTATE, &abd) & ABS_AUTOHIDE) != 0,
@@ -949,6 +949,11 @@ void TrayModel::Worker()
                 bool observed = result.outcome == tray::Outcome::Observed;
                 for (const auto& attempt : result.attempts)
                     Log(L"tray: click evidence route=%s observed=%d", RouteName(attempt.route), attempt.observed);
+                if (result.outcome == tray::Outcome::AcceptedUnconfirmed) {
+                    Log(L"tray: click end result=accepted-unconfirmed elapsed=%llu ms", GetTickCount64() - findStart);
+                    PostMessageW(notify_, msg_, 4, 0);
+                    continue;
+                }
                 // Only an existing visible/minimized main window, and only for a left action.
                 if (!observed && job.action != tray::Action::Right && !job.icon.exe.empty()) {
                     observed = ForegroundExisting(job.icon.exe);

@@ -56,6 +56,17 @@ int main()
         changed = a; changed.runtime = b.runtime;
         Check(!SameGestureTarget(a, changed), "record remapping cannot combine separate gestures");
         Check(!SameGestureTarget({}, {}), "unknown gestures are not identical");
+        Check(StableOrder({a,b}, {b,a}) == std::vector<size_t>{1,0}, "refresh preserves surviving icon order");
+        auto c = a; c.identity = L"guid:c"; c.runtime = {9};
+        Check(StableOrder({a,b}, {c,b,a}) == std::vector<size_t>{2,1,0}, "new icons append after survivors");
+        Check(StableOrder({a,b}, {c,b}) == std::vector<size_t>{1,0}, "removed icons disappear without reordering survivors");
+        Check(StableOrder({recordOnly,b}, {b,a}) == std::vector<size_t>{1,0}, "materializing a record preserves its place");
+        std::vector<MouseEvent> continuation;
+        PostClassicGesture(Action::DoubleContinuation, [&](MouseEvent e) { continuation.push_back(e); return true; });
+        Check(continuation == std::vector{MouseEvent::Move, MouseEvent::LeftDouble, MouseEvent::LeftUp}, "double continuation never replays first click");
+        int duplicateCalls = 0;
+        r = Dispatch(Action::DoubleContinuation, false, [&](Route) { ++duplicateCalls; return 0; }, unseen);
+        Check(r.outcome == Outcome::AcceptedUnconfirmed && r.attempts.empty() && duplicateCalls == 0, "unsupported double after immediate single stays quiet");
         for (Action action : {Action::Left, Action::Right, Action::Double}) {
             const std::vector<MouseEvent> expected = action == Action::Right ?
                 std::vector{MouseEvent::Move, MouseEvent::RightDown, MouseEvent::RightUp} : action == Action::Double ?

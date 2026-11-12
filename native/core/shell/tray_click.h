@@ -4,7 +4,7 @@
 #include <vector>
 
 namespace atrium::tray {
-enum class Action { Left, Right, Double };
+enum class Action { Left, Right, Double, DoubleContinuation };
 enum class Route { Invoke, ContextMenu, LegacyDefault, Toolbar };
 enum class Outcome { Observed, AcceptedUnconfirmed, Unavailable };
 inline constexpr int32_t providerTimeout = static_cast<int32_t>(0x80131505u); // UIA_E_TIMEOUT
@@ -16,7 +16,8 @@ template<class Post>
 Posting PostClassicGesture(Action action, Post post)
 {
     std::vector<MouseEvent> events{MouseEvent::Move};
-    if (action == Action::Right) events.insert(events.end(), {MouseEvent::RightDown, MouseEvent::RightUp});
+    if (action == Action::DoubleContinuation) events.insert(events.end(), {MouseEvent::LeftDouble, MouseEvent::LeftUp});
+    else if (action == Action::Right) events.insert(events.end(), {MouseEvent::RightDown, MouseEvent::RightUp});
     else {
         events.insert(events.end(), {MouseEvent::LeftDown, MouseEvent::LeftUp});
         if (action == Action::Double) events.insert(events.end(), {MouseEvent::LeftDouble, MouseEvent::LeftUp});
@@ -25,7 +26,7 @@ Posting PostClassicGesture(Action action, Post post)
     for (MouseEvent event : events) {
         if (!post(event)) return result;
         ++result.queued;
-        if (event == MouseEvent::LeftDown || event == MouseEvent::RightDown) result.actionQueued = true;
+        if (event == MouseEvent::LeftDown || event == MouseEvent::RightDown || event == MouseEvent::LeftDouble) result.actionQueued = true;
     }
     result.complete = true;
     return result;
@@ -37,7 +38,11 @@ DispatchResult Dispatch(Action action, bool classic, Invoke invoke, Observe obse
 {
     DispatchResult result;
     std::vector<Route> routes;
-    if (action == Action::Double) {
+    if (action == Action::DoubleContinuation && !classic) {
+        result.outcome = Outcome::AcceptedUnconfirmed; // first click already dispatched; no XAML double pattern
+        return result;
+    }
+    if (action == Action::Double || action == Action::DoubleContinuation) {
         if (classic) routes.push_back(Route::Toolbar); // Invoke twice is NOT a double click
     } else {
         routes.push_back(action == Action::Right ? Route::ContextMenu : Route::Invoke);
