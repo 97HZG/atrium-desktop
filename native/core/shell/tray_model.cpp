@@ -321,6 +321,22 @@ struct Found {
     std::vector<int> runtimeId;
 };
 
+tray::ShellSession ReadShellSession()
+{
+    tray::ShellSession session;
+    const HWND window = FindWindowW(L"Shell_TrayWnd", nullptr);
+    DWORD pid = 0;
+    if (!window || !GetWindowThreadProcessId(window, &pid)) return session;
+    if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+        FILETIME created{}, exited{}, kernel{}, user{};
+        if (GetProcessTimes(process, &created, &exited, &kernel, &user))
+            session = {pid, (uint64_t(created.dwHighDateTime) << 32) | created.dwLowDateTime,
+                       uint64_t(reinterpret_cast<uintptr_t>(window))};
+        CloseHandle(process);
+    }
+    return session;
+}
+
 std::vector<int> RuntimeId(IUIAutomationElement* element)
 {
     SAFEARRAY* id = nullptr;
@@ -843,6 +859,7 @@ void TrayModel::Worker()
                 PostMessageW(notify_, msg_, shown ? 2 : 3, 0);
                 continue;
             }
+            auto session = ReadShellSession();
             std::vector<Found> buttons = FindButtons(uia.get(), available);
             const ULONGLONG readMs = GetTickCount64() - findStart;
             auto appNames = appNames_ ? appNames_() : std::vector<PinnedApp>{};
@@ -850,19 +867,16 @@ void TrayModel::Worker()
                 bool ordered = false;
                 std::vector<Record> records;
                 auto match = MatchButtons(buttons, records, ordered, appNames);
-                DWORD shellPid = 0;
-                GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &shellPid);
                 auto resolve = [&]() -> Found* {
-                    Found* found = nullptr;
+                    std::vector<tray::TargetKey> candidates;
                     for (size_t b = 0; b < buttons.size(); ++b) {
-                        bool same = !job.icon.recordId.empty() ? buttons[b].recordId == job.icon.recordId :
-                            !job.icon.runtimeId.empty() ? job.icon.shellPid == shellPid && buttons[b].runtimeId == job.icon.runtimeId :
-                            !job.icon.exe.empty() && match[b] >= 0 && records[size_t(match[b])].exe == job.icon.exe;
-                        if (!same) continue;
-                        if (found) return nullptr; // no index/name/first-exe fallback
-                        found = &buttons[b];
+                        candidates.push_back({session, buttons[b].runtimeId, buttons[b].recordId,
+                            match[b] >= 0 ? records[size_t(match[b])].exe : L"", buttons[b].tip});
                     }
-                    return found;
+                    const auto resolved = tray::ResolveTarget(job.icon.Target(), ReadShellSession(), candidates);
+                    Log(L"tray: click resolve=%s shellPid=%lu shellStarted=%llu shellWindow=%llu",
+                        tray::ResolutionName(resolved.reason), DWORD(session.pid), session.started, session.window);
+                    return resolved.index == tray::none ? nullptr : &buttons[resolved.index];
                 };
                 Found* target = resolve();
                 HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr), overflow = OverflowWindow();
@@ -887,7 +901,7 @@ void TrayModel::Worker()
                 };
                 auto invoke = [&](tray::Route route) -> int32_t {
                     HRESULT hr = UIA_E_ELEMENTNOTAVAILABLE;
-                    if (target && target->element) {
+                    if (target && target->element && session == ReadShellSession()) {
                         if (route == tray::Route::Toolbar) hr = ToolbarClick(*target, job.action);
                         else if (route == tray::Route::ContextMenu) {
                             auto e3 = target->element.try_as<IUIAutomationElement3>();
@@ -909,9 +923,9 @@ void TrayModel::Worker()
                 // Reacquire only after a definite stale-element error. Generic E_FAIL is not evidence of staleness.
                 if (target && target->element && result.outcome == tray::Outcome::Unavailable && !result.attempts.empty() &&
                     result.attempts.front().status == int32_t(UIA_E_ELEMENTNOTAVAILABLE)) {
+                    session = ReadShellSession();
                     buttons = FindButtons(uia.get(), available);
                     match = MatchButtons(buttons, records, ordered, appNames);
-                    GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &shellPid);
                     target = resolve();
                     Log(L"tray: click reacquire resolved=%d", target != nullptr);
                     result = tray::Dispatch(job.action, target && target->toolbar, invoke, observe);
@@ -936,6 +950,15 @@ void TrayModel::Worker()
             const ULONGLONG readStart = findStart;
             ReadDiagnostics diagnostics;
             std::vector<int> match = MatchButtons(buttons, records, ordered, appNames, &diagnostics);
+            if (session != ReadShellSession()) {
+                Log(L"tray: discarded refresh spanning shell replacement");
+                Refresh();
+                continue;
+            }
+            if (!session.Valid()) {
+                buttons.clear(); match.clear();
+                available = false;
+            }
 
             std::vector<TrayIcon> icons;
             std::set<std::wstring> livePictures;
@@ -947,7 +970,7 @@ void TrayModel::Worker()
                 t.index = buttons[b].index;
                 t.recordId = buttons[b].recordId;
                 t.runtimeId = buttons[b].runtimeId;
-                GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &t.shellPid);
+                t.shell = session;
                 t.matchMethod = tray::MethodName(buttons[b].method);
                 t.fromRecord = !buttons[b].element;
                 if (match[b] >= 0) {
@@ -982,7 +1005,7 @@ void TrayModel::Worker()
                 std::lock_guard g(mutex_);
                 changed = !loaded_ || available != available_ || icons.size() != icons_.size() ||
                           !std::equal(icons.begin(), icons.end(), icons_.begin(), [](const TrayIcon& a, const TrayIcon& b) {
-                              return a.tip == b.tip && a.exe == b.exe && a.image == b.image && a.promoted == b.promoted && a.recordId == b.recordId && a.runtimeId == b.runtimeId && a.shellPid == b.shellPid && a.matchMethod == b.matchMethod && a.fromRecord == b.fromRecord;
+                              return a.tip == b.tip && a.exe == b.exe && a.image == b.image && a.promoted == b.promoted && a.recordId == b.recordId && a.runtimeId == b.runtimeId && a.shell == b.shell && a.matchMethod == b.matchMethod && a.fromRecord == b.fromRecord;
                           });
                 icons_ = std::move(icons);
                 loaded_ = true;

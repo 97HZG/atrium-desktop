@@ -368,8 +368,7 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
         GetCursorPos(&at);
         const auto& icon = selected;
         const bool same = pendingClick_ &&
-            (!icon.recordId.empty() ? pendingClick_->recordId == icon.recordId :
-             !icon.runtimeId.empty() && pendingClick_->runtimeId == icon.runtimeId) &&
+            tray::SameGestureTarget(pendingClick_->Target(), icon.Target()) &&
             std::abs(at.x - pendingAt_.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
             std::abs(at.y - pendingAt_.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
         if (pendingClick_) {

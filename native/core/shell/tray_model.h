@@ -3,6 +3,7 @@
 
 #include "shell/task_model.h"
 #include "shell/tray_click.h"
+#include "shell/tray_target.h"
 
 #include <windows.h>
 
@@ -27,10 +28,11 @@ struct TrayIcon {
     bool promoted = false; // on the system taskbar rather than in its overflow
     int index = 0;         // position among the icons of the same place
     std::vector<int> runtimeId; // UIA identity, never an ordinal click target
-    DWORD shellPid = 0; // bounds RuntimeId lifetime to this Explorer instance
+    tray::ShellSession shell; // PID + process creation time + taskbar HWND
     std::wstring matchMethod;
     bool fromRecord = false;
     std::wstring recordId; // stable Windows identity, also before the overflow UI exists
+    tray::TargetKey Target() const { return {shell, runtimeId, recordId, exe, tip}; }
 };
 
 class TrayModel {

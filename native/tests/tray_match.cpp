@@ -47,6 +47,15 @@ int main()
         Check(result.items[0].program == none, "ambiguous program name is not ownership");
         result = Match({{L"Steam", false}}, {}, {{L"browser.exe", {L"Steam - website"}, 0}});
         Check(result.items[0].program == none, "window title prefix cannot claim another app");
+        for (const auto& tip : {L"SteamVR", L"SteamHelper", L"QQMusic"}) {
+            result = Match({{tip, false}}, {}, {{L"steam.exe", {L"Steam"}}, {L"qq.exe", {L"QQ"}}});
+            Check(result.items[0].program == none, "program prefix needs a real status delimiter");
+        }
+        result = Match({{L"STEAM：正在同步", false}}, {}, {{L"steam.exe", {L"Steam"}}});
+        Check(result.items[0].program == 0, "localized status delimiter and case remain supported");
+        auto unnamedOrder = R(L"Steam", none);
+        result = Match({{L"SteamVR", false}}, {unnamedOrder});
+        Check(result.items[0].record == none, "registration name prefix also needs delimiter");
         auto a = R(L"Alpha", 0), b = R(L"Beta", 1);
         result = Match({{L"Beta", false}, {L"Alpha", false}}, {a,b});
         Check(result.items.size() == 2 && result.items[0].record == 1, "names override obsolete order");

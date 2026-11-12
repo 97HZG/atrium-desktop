@@ -23,15 +23,28 @@ std::wstring Key(const std::wstring& text)
     return out;
 }
 namespace {
+bool DelimitedPrefix(const std::wstring& text, const std::wstring& name)
+{
+    // Keep the boundary that Key removes: Steam - syncing is a status suffix,
+    // SteamVR / SteamHelper is a different name, even if Steam is the only candidate.
+    std::wstring prefix;
+    for (size_t i = 0; i < text.size(); ++i) {
+        prefix += Key(text.substr(i, 1));
+        if (prefix == name)
+            return i + 1 < text.size() && Key(text.substr(i + 1, 1)).empty();
+        if (!name.starts_with(prefix)) return false;
+    }
+    return false;
+}
 int Score(const std::wstring& tip, const std::vector<std::wstring>& names, size_t firstTitle)
 {
-    const auto key = Key(Title(tip));
+    const auto title = Title(tip), key = Key(title);
     if (key.empty()) return 0;
     int best = 0;
     for (size_t n = 0; n < names.size(); ++n) {
         const auto name = Key(Title(names[n]));
         if (name.size() < 2) continue;
-        int score = key == name ? 100 : key.starts_with(name) ? 80 : 0;
+        int score = key == name ? 100 : DelimitedPrefix(title, name) ? 80 : 0;
         if (n >= firstTitle && score != 100) score = 0;
         best = std::max(best, score);
     }

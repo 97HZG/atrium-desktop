@@ -29,7 +29,7 @@
 
 ## 点击分发
 
-1. 工作线程重新读取并匹配。优先真实身份；无真实身份时使用 RuntimeId。程序唤起请求仅允许唯一 exe 候选。删除了“相同下标”“相似提示”“同 exe 的第一个图标”等点击替代目标。
+1. 工作线程重新读取并匹配。已物化按钮优先核对原 RuntimeId，已有的真实身份和 exe 必须同时一致；不会因记录被重新配到另一个按钮而跳转。未物化记录使用唯一的存活身份；显式程序唤起请求仅允许唯一 exe 候选。PID、进程创建时间、任务栏 HWND 共同限定 shell 实例，跨实例点击拒绝自动分发；跨实例刷新丢弃重读。纯函数 `tray_target.h` 同时供点击和双击手势校验使用。
 2. 左键尝试 UIA Invoke；右键尝试 ShowContextMenu。明确失败后，经典路径发送工具栏消息；左键最后可尝试 MSAA LegacyIAccessible 的 DoDefaultAction。
 3. 经典工具栏重新核对类名、shell PID、根窗口、当前按钮矩形及转换后的客户区坐标。顺序为 MOVE、DOWN、UP；双击为 MOVE、LDOWN、LUP、LDBLCLK、LUP。只传整数坐标，无远程结构体或指针。PostMessage 只证明排队成功，不证明程序已响应。
 4. 每次动作前后，按完整 exe 路径核对程序的可见窗口、前台窗口及菜单状态。新窗口、新菜单，或左键引起前台窗口变化记作 `observed`。这是有限时间窗内的响应证据，不是应用协议回执；自绘无新 HWND 的菜单、不同 exe 的辅助进程、后台状态变化、较慢响应可能无法确认。
@@ -50,6 +50,21 @@ Win11 的结构签名不是微软公开的稳定接口；没有直接显示的�
 2026-11-11 本机没有复现 E_FAIL，因此没有把某个原因写成已证实的唯一根因。已复现 Steam 的 Invoke/ShowContextMenu 返回 S_OK 但没有可观察响应；显示溢出窗口 HWND 后，其按钮仍 offscreen=1、矩形全零。调用经过结构验证的 chevron 后，内容才可见并能通过落点核验。修复针对已证实的“请求接受不等于成功”和“只显示 HWND 不等于物化内容”；其他 E_FAIL 环境还需要新日志与对照实验。
 
 参考：[GetRect](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyicongetrect)、[Legacy DoDefaultAction](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationlegacyiaccessiblepattern-dodefaultaction)、[UIA 错误码](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-error-codes)、[BM_CLICK](https://learn.microsoft.com/en-us/windows/win32/controls/bm-click)。
+
+## 开源实现对照（2026-11-12）
+
+本次阅读固定版本的实现，按机制独立实现所需防护，没有复制第三方源码：
+
+- [ManagedShell ExplorerTrayService](https://github.com/cairoshell/ManagedShell/blob/855222035e927910ca53fd3215caef056337a048/src/ManagedShell.WindowsTray/ExplorerTrayService.cs) 用远程工具栏缓冲区和 ReadProcessMemory 读取 HWND、UID、回调消息及版本；与 Atrium 禁止跨进程内存访问的约束冲突。
+- [ManagedShell TrayService](https://github.com/cairoshell/ManagedShell/blob/855222035e927910ca53fd3215caef056337a048/src/ManagedShell.WindowsTray/TrayService.cs) 注册自己的 Shell_TrayWnd，接收 WM_COPYDATA，并调整窗口顺序、广播 TaskbarCreated。这是接管托盘宿主的架构，不能当作透明读取 Explorer 的 API 使用。
+- [ManagedShell NotifyIcon](https://github.com/cairoshell/ManagedShell/blob/855222035e927910ca53fd3215caef056337a048/src/ManagedShell.WindowsTray/NotifyIcon.cs) 根据已知 CallbackMessage、UID、Version 编码鼠标及 NIN_SELECT/WM_CONTEXTMENU；[RetroBar 控件](https://github.com/dremin/RetroBar/blob/d2b0b8535a395f3f13578d2825ca2094845c1779/RetroBar/Controls/NotifyIcon.xaml.cs) 转交鼠标事件给它。可借鉴身份与事件语义，不能仅凭 exe 或 GUID 猜这些协议字段。
+- [YASB trayhook](https://github.com/amnweb/yasb/blob/37928dfeacc579948c4b4bf12e169bcbf6006ff2/src/core/widgets/services/systray/hook/trayhook.cpp) 明确通过 SetWindowsHookEx 把 DLL 加载进 Explorer，再替换窗口过程捕获注册数据及图片；不适用于 Atrium 的无注入约束。
+
+微软的 [NOTIFYICONDATA](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-notifyicondataw) 定义了不同版本的回调打包规则。当前公开读取途径缺少回调消息、版本和完整实时位图，因此不能把“发一个 WM_RBUTTONUP 给推测窗口”当作原生等价方案。也不能承诺无条件完美替代。
+
+[GetRuntimeId 文档](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-getruntimeid) 允许 ID 随时间复用，所以没有新增把 RuntimeId 永久缓存到 exe 的映射。已知记录要求身份交叉校验；未知按钮要求 exe/提示一致。未知按钮在同一 shell 内被同名新元素复用 ID 的情形仍没有完整身份保证。
+
+这一轮还收紧了名字前缀：`Steam - 正在同步`、`STEAM：正在同步` 可作为状态提示，`SteamVR`、`SteamHelper`、`QQMusic` 不会仅因前缀被配给 Steam/QQ。完整分区的顺序匹配仍是单独的启发式，不因名字规则收紧就变成所有权证明。
 
 ## 性能与日志
 
