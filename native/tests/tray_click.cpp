@@ -56,6 +56,23 @@ int main()
         changed = a; changed.runtime = b.runtime;
         Check(!SameGestureTarget(a, changed), "record remapping cannot combine separate gestures");
         Check(!SameGestureTarget({}, {}), "unknown gestures are not identical");
+        for (Action action : {Action::Left, Action::Right, Action::Double}) {
+            const std::vector<MouseEvent> expected = action == Action::Right ?
+                std::vector{MouseEvent::Move, MouseEvent::RightDown, MouseEvent::RightUp} : action == Action::Double ?
+                std::vector{MouseEvent::Move, MouseEvent::LeftDown, MouseEvent::LeftUp, MouseEvent::LeftDouble, MouseEvent::LeftUp} :
+                std::vector{MouseEvent::Move, MouseEvent::LeftDown, MouseEvent::LeftUp};
+            std::vector<MouseEvent> actual;
+            auto posting = PostClassicGesture(action, [&](MouseEvent event) { actual.push_back(event); return true; });
+            Check(actual == expected && posting.complete, "classic message order implements native gesture");
+            for (size_t failure = 0; failure < expected.size(); ++failure) {
+                size_t calls = 0;
+                posting = PostClassicGesture(action, [&](MouseEvent) { return calls++ != failure; });
+                Check(!posting.complete && posting.queued == failure && calls == failure + 1, "posting stops at first failed message");
+                Check(posting.actionQueued == (failure > 1), "failure after button down has uncertain delivery");
+            }
+        }
+        r = Dispatch(Action::Double, true, [](Route) { return int32_t(1); }, unseen);
+        Check(r.outcome == Outcome::AcceptedUnconfirmed && r.attempts.size() == 1, "partial toolbar delivery cannot replay a gesture");
         std::cout << "tray dispatch: all scenarios passed\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

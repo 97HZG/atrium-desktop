@@ -29,13 +29,16 @@ bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.ri
 
 // An app's menu opened through the hidden system tray: Explorer tells the app
 // where its (hidden) button is, and some apps open the menu there, at the
-// screen's left edge. The next window the app shows within a moment is moved
-// to where the icon was clicked, as Windows places a tray menu. An
+// screen's left edge. Only a native menu from the exact executable is moved
+// to where the icon was clicked. Unknown/helper/custom popups are left alone. An
 // out-of-context event hook: nothing runs in the app or in Explorer.
 struct MenuFollow {
     HWINEVENTHOOK hook = nullptr;
     POINT at{};
-    std::wstring dir; // the app's folder (its helper processes are there too); empty: any app but Explorer
+    std::wstring exe;
+    UINT_PTR timer = 0;
+    DWORD pid = 0;
+    DWORD clickInput = 0;
     ULONGLONG until = 0;
     HWND menu = nullptr; // the menu moved: put back if the app moves it again meanwhile
     POINT placed{};
@@ -48,6 +51,14 @@ void StopFollow()
         UnhookWinEvent(g_follow.hook);
     g_follow.hook = nullptr;
     g_follow.menu = nullptr;
+    if (g_follow.timer) KillTimer(nullptr, g_follow.timer);
+    g_follow.timer = 0;
+    g_follow.pid = 0;
+}
+
+void CALLBACK FollowExpired(HWND, UINT, UINT_PTR timer, DWORD)
+{
+    if (timer == g_follow.timer && GetTickCount64() >= g_follow.until) StopFollow();
 }
 
 // Next to the click: above and to the right of it, else below or to the left; in the work area.
@@ -70,8 +81,36 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
         StopFollow();
         return;
     }
+    LASTINPUTINFO input{sizeof(input)};
+    if (!GetLastInputInfo(&input) || input.dwTime != g_follow.clickInput) {
+        StopFollow(); // a later user action must not have its menu moved by this click
+        return;
+    }
     if (!hwnd || idObject != OBJID_WINDOW || idChild != CHILDID_SELF)
         return;
+    if (!g_follow.menu && event != EVENT_OBJECT_SHOW) return;
+    // Revalidate ownership even on subsequent location events: HWNDs can be reused.
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!pid || (g_follow.menu && (hwnd != g_follow.menu || pid != g_follow.pid))) return;
+    std::wstring path;
+    bool elevated = true; // an unqueryable token must not authorize a move
+    if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+        wchar_t buf[32768]; DWORD size = DWORD(std::size(buf));
+        if (QueryFullProcessImageNameW(process, 0, buf, &size)) path.assign(buf, size);
+        HANDLE token = nullptr;
+        if (OpenProcessToken(process, TOKEN_QUERY, &token)) {
+            TOKEN_ELEVATION e{}; DWORD got = 0;
+            if (GetTokenInformation(token, TokenElevation, &e, sizeof(e), &got)) elevated = e.TokenIsElevated != 0;
+            CloseHandle(token);
+        }
+        CloseHandle(process);
+    }
+    if (g_follow.exe.empty() || path.empty() || elevated ||
+        CompareStringOrdinal(path.c_str(), -1, g_follow.exe.c_str(), -1, TRUE) != CSTR_EQUAL) return;
+    wchar_t cls[64]{};
+    if (!GetClassNameW(hwnd, cls, 64) || wcscmp(cls, L"#32768")) return;
+    const wchar_t* name = PathFindFileNameW(path.c_str());
     RECT r{};
     if (g_follow.menu) {
         // Moved already: some apps (WPF, a change of monitor's scale) place it once more themselves.
@@ -87,48 +126,15 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
         }
         return;
     }
-    // Some apps keep their menu window and only move it into view (an event of its place, not of its showing).
+    // Only a newly shown native menu is eligible for the first move.
     if (GetAncestor(hwnd, GA_ROOT) != hwnd || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, &r))
-        return;
-    wchar_t cls[64] = {};
-    GetClassNameW(hwnd, cls, 64);
-    const LONG style = GetWindowLongW(hwnd, GWL_STYLE), ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
-    // A menu: Windows' own, or a popup above the others (the toolkits' menus).
-    const bool menuLike = wcscmp(cls, L"#32768") == 0 || ((style & WS_POPUP) && (ex & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST))) || (ex & WS_EX_TOOLWINDOW);
-    if (!menuLike || _wcsicmp(cls, L"tooltips_class32") == 0)
         return;
     const int w = r.right - r.left, h = r.bottom - r.top;
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(MonitorFromPoint(g_follow.at, MONITOR_DEFAULTTONEAREST), &mi);
     if (w < 40 || h < 20 || w > (mi.rcWork.right - mi.rcWork.left) * 3 / 5 || h > (mi.rcWork.bottom - mi.rcWork.top) * 19 / 20)
         return; // a mark, a balloon, a window: not a menu
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    std::wstring path;
-    bool elevated = true; // its token closed to us: elevated (or protected)
-    if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
-        wchar_t buf[MAX_PATH * 2];
-        DWORD size = DWORD(std::size(buf));
-        if (QueryFullProcessImageNameW(process, 0, buf, &size))
-            path = buf;
-        HANDLE token = nullptr;
-        if (OpenProcessToken(process, TOKEN_QUERY, &token)) {
-            TOKEN_ELEVATION e{};
-            DWORD got = 0;
-            elevated = GetTokenInformation(token, TokenElevation, &e, sizeof(e), &got) && e.TokenIsElevated;
-            CloseHandle(token);
-        }
-        CloseHandle(process);
-    }
-    const wchar_t* name = PathFindFileNameW(path.c_str());
-    if (_wcsicmp(name, L"explorer.exe") == 0 || (!g_follow.dir.empty() && _wcsnicmp(path.c_str(), g_follow.dir.c_str(), g_follow.dir.size()) != 0))
-        return;
     const POINT at = g_follow.at;
-    if (elevated) { // Windows keeps an elevated app's windows from being moved by Atrium
-        StopFollow();
-        Log(L"tray: %s's menu is an elevated app's: left where it is", name);
-        return;
-    }
     if (at.x >= r.left - 48 && at.x <= r.right + 48 && at.y >= r.top - 48 && at.y <= r.bottom + 48) {
         StopFollow();
         return; // the app put it by the pointer itself
@@ -141,22 +147,28 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
     }
     Log(L"tray: %s's menu (%s) moved from %ld,%ld to %ld,%ld", name, cls, r.left, r.top, p.x, p.y);
     g_follow.menu = hwnd;
+    g_follow.pid = pid;
     g_follow.placed = p;
     g_follow.moves = 0;
     g_follow.until = GetTickCount64() + 800;
+    if (g_follow.timer) KillTimer(nullptr, g_follow.timer);
+    g_follow.timer = SetTimer(nullptr, 0, 800, FollowExpired);
+    if (!g_follow.timer) StopFollow();
 }
 
 void FollowMenu(POINT at, const std::wstring& exe)
 {
     StopFollow();
+    if (exe.empty() || _wcsicmp(PathFindFileNameW(exe.c_str()), L"explorer.exe") == 0) return;
+    LASTINPUTINFO input{sizeof(input)};
+    if (!GetLastInputInfo(&input)) return;
+    g_follow.clickInput = input.dwTime;
     g_follow.at = at;
-    g_follow.dir.clear();
-    if (!exe.empty()) {
-        // Its folder with the separator (C:\a\app.exe -> C:\a\), so that C:\ab\ is not taken for it.
-        g_follow.dir = exe.substr(0, exe.find_last_of(L"\\/") + 1);
-    }
+    g_follow.exe = exe;
     g_follow.until = GetTickCount64() + 3000; // slow apps take a while to show it
     g_follow.hook = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_LOCATIONCHANGE, nullptr, MenuShown, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    if (g_follow.hook) g_follow.timer = SetTimer(nullptr, 0, 3000, FollowExpired);
+    if (!g_follow.timer) StopFollow();
 }
 } // namespace
 
@@ -356,8 +368,6 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
     if (i >= icons_.size())
         return;
     const TrayIcon selected = pressedIcon_.value_or(icons_[i]);
-    // We have the foreground: let the app take it for its window or menu.
-    AllowSetForegroundWindow(ASFW_ANY);
     if (right) {
         POINT at;
         GetCursorPos(&at);
@@ -369,6 +379,7 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
         const auto& icon = selected;
         const bool same = pendingClick_ &&
             tray::SameGestureTarget(pendingClick_->Target(), icon.Target()) &&
+            GetTickCount64() - pendingWhen_ <= GetDoubleClickTime() &&
             std::abs(at.x - pendingAt_.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
             std::abs(at.y - pendingAt_.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
         if (pendingClick_) {
@@ -380,6 +391,7 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
         }
         pendingClick_ = icon;
         pendingAt_ = at;
+        pendingWhen_ = GetTickCount64();
         // One action per gesture: do not Invoke on the first up and again on a double click.
         if (!SetTimer(surface_.Hwnd(), kClickTimer, GetDoubleClickTime(), nullptr)) {
             model_.Click(*pendingClick_, false);

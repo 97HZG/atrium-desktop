@@ -58,6 +58,7 @@ private:
     std::optional<TrayIcon> pendingClick_;
     std::optional<TrayIcon> pressedIcon_;
     POINT pendingAt_{};
+    ULONGLONG pendingWhen_ = 0;
     bool tracking_ = false;
     RECT anchor_{}, bar_{};
     HWND previous_ = nullptr;

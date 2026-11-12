@@ -31,7 +31,7 @@
 
 1. 工作线程重新读取并匹配。已物化按钮优先核对原 RuntimeId，已有的真实身份和 exe 必须同时一致；不会因记录被重新配到另一个按钮而跳转。未物化记录使用唯一的存活身份；显式程序唤起请求仅允许唯一 exe 候选。PID、进程创建时间、任务栏 HWND 共同限定 shell 实例，跨实例点击拒绝自动分发；跨实例刷新丢弃重读。纯函数 `tray_target.h` 同时供点击和双击手势校验使用。
 2. 左键尝试 UIA Invoke；右键尝试 ShowContextMenu。明确失败后，经典路径发送工具栏消息；左键最后可尝试 MSAA LegacyIAccessible 的 DoDefaultAction。
-3. 经典工具栏重新核对类名、shell PID、根窗口、当前按钮矩形及转换后的客户区坐标。顺序为 MOVE、DOWN、UP；双击为 MOVE、LDOWN、LUP、LDBLCLK、LUP。只传整数坐标，无远程结构体或指针。PostMessage 只证明排队成功，不证明程序已响应。
+3. 经典工具栏重新核对类名、shell PID、根窗口、当前按钮矩形及转换后的客户区坐标。顺序为 MOVE、DOWN、UP；双击为 MOVE、LDOWN、LUP、LDBLCLK、LUP。只传整数坐标，无远程结构体或指针。PostMessage 只证明排队成功，不证明程序已响应。若 DOWN 已入队而后续消息失败，返回 S_FALSE、记录 queued/complete/actionQueued/error 并停止其他路径重放；不能把部分发送当成完全没发送。
 4. 每次动作前后，按完整 exe 路径核对程序的可见窗口、前台窗口及菜单状态。新窗口、新菜单，或左键引起前台窗口变化记作 `observed`。这是有限时间窗内的响应证据，不是应用协议回执；自绘无新 HWND 的菜单、不同 exe 的辅助进程、后台状态变化、较慢响应可能无法确认。
 5. `S_OK` 或 UIA 超时但没有证据记为 `accepted-unconfirmed`，不通过下一种 API 重复点击，避免切换类动作反转。其他错误若已经观察到响应，也停止重试。只有明确的 ELEMENTNOTAVAILABLE 且此前确实存在元素时，重新解析一次；不会把所有 E_FAIL 都认定为元素过期。
 6. 左键/双击失败时只允许恢复该 exe **已经存在且可见或最小化的普通窗口**，并检查是否成为前台。不显示隐藏主窗口，不 ShellExecute，不启动 exe。右键不以打开主窗口代替程序菜单。
@@ -40,6 +40,10 @@
 Win11 的结构签名不是微软公开的稳定接口；没有直接显示的图标或布局不同的版本可能不能自动打开。这时给出明确提示，不点击输入法等其他 SystemTrayIcon。BM_CLICK 是公开按钮消息，但经典系统托盘结构同样需要 Win10 实机确认。
 
 双击不是 Invoke 两次。面板用系统 GetDoubleClickTime/空间阈值识别完整手势，左键因此等待系统双击时间（通常 500 ms），按下反馈仍立即显示。经典路径发送真正的双击消息；XAML 无公开双击 Pattern，转已有窗口/系统托盘。关闭面板取消待发送手势；按下时保存图标身份，刷新重新排列不会改变目标。
+
+前台授权只交给当前核实的 shell PID，不再使用 ASFW_ANY 向所有进程开放；结果单独记录为 foreground-delegate，不作为动作成功证据。[AllowSetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-allowsetforegroundwindow) 会受用户输入与前台锁限制，授权失败时也不伪报成功。
+
+右键菜单跟随只处理**完整 exe 路径相同、可查询非提权 token、类名为 #32768 的新显示菜单**，不再用“同目录”或工具窗口外观推断菜单。未知 exe 不开启跟随；后续移动重新核对 HWND/PID/路径；新的用户输入取消跟随；定时器确保即使没有新窗口事件，hook 也会在 3 秒后卸载。自绘菜单和辅助进程菜单保留应用自行选择的位置。这收紧了行为范围，不代表这些菜单已完成定位兼容。
 
 ## E_FAIL 与 S_OK 的诊断
 
@@ -101,8 +105,16 @@ ctest --test-dir native/build/tests -C Release -R tray_ --output-on-failure
 native/build/tests/tests/Release/tray_live_probe.exe
 native/build/tests/tests/Release/tray_live_probe.exe --tree
 native/build/tests/tests/Release/tray_live_probe.exe --fixture
+native/build/tests/tests/Release/tray_live_probe.exe --fixture-clicks
 native/build/tests/tests/Release/tray_live_probe.exe --click 'C:\full\path\app.exe' right
 native/build/tests/tests/Release/tray_live_probe.exe --visible-click 'C:\full\path\app.exe' left
 ```
 
 探针默认只读；`--fixture` 只注册/删除本探针两个图标；`--click` 明确操作已有图标，exe 候选不唯一或不存在则拒绝；`--visible-click` 先打开并核验系统溢出区用于条件对照。探针链接同一生产适配层，只有快捷方式/程序图片读取被桩替代（注册表 PNG 仍可解码）；不代表完整生产图片/UI 视觉验收。它不加入自动 CTest，以免无人值守测试改变用户前台。日志仍写入正常 core.log。
+
+## 本轮验证（2026-11-12）
+
+- Release 主程序、两个纯函数测试目标与集成探针编译通过。新增目标解析、PID 复用、任务栏 HWND 替换、RuntimeId/记录冲突、名称边界、每个经典消息位置失败及部分发送不重放的测试。
+- `--fixture-clicks` 显式打开系统溢出区，使用生产 worker 操作本测试注册的 UID（旧协议）和 GUID（NOTIFYICON_VERSION_4）图标。测试自行接收真实回调，并显示测试窗口或自动关闭的菜单作为响应证据；四个左/右键用例均收到恰好一次正确 ID 的语义事件，completion=1。删除后为 `2 → 1 → 0`。taskbarVisible=0、autoHide=1，动作日志 78–94 ms；这个时长不含面板双击等待。此探针不覆盖面板菜单跟随或完整鼠标手势。
+- 首次测试暴露出本机 Explorer 没有为新测试图标生成 NotifyIconSettings 记录：GetRect 成功、UIA 有按钮，却没有记录。原先与文件名无关的测试提示无法识别 exe。将测试提示改为真实 exe stem + 状态后，生产代码按 `running` 匹配，四种操作走 RuntimeId 路径成功；测试没有伪造注册表记录或把自知的注册信息交给匹配器。说明 Win11 也可能走无记录分支；若同时缺少 UIA 按钮与记录，当前公开数据源仍无法枚举该图标。
+- 本轮没有替换正在运行的安装版 Atrium。Win10 实机、五个第三方程序的全部动作原生成功、E_FAIL 原因对照、面板视觉/菜单跟随验收仍保留为未完成项。

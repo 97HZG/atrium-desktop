@@ -379,6 +379,7 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
         for (int i = 0; i < n; ++i) {
             Found f;
             all->GetElement(i, f.element.put());
+            if (!f.element) continue;
             BSTR name = nullptr;
             if (f.element)
                 f.element->get_CurrentName(&name);
@@ -647,13 +648,25 @@ HRESULT ToolbarClick(const Found& target, tray::Action action)
     POINT at{bounds.left + (bounds.right - bounds.left) / 2, bounds.top + (bounds.bottom - bounds.top) / 2};
     if (!ScreenToClient(target.toolbar, &at) || !PtInRect(&client, at) || at.x > 32767 || at.y > 32767) return E_INVALIDARG;
     const LPARAM position = MAKELPARAM(at.x, at.y);
-    const bool right = action == tray::Action::Right;
-    auto post = [&](UINT message, WPARAM keys) { return PostMessageW(target.toolbar, message, keys, position) != FALSE; };
-    auto error = [] { DWORD code = GetLastError(); return code ? HRESULT_FROM_WIN32(code) : E_FAIL; };
-    if (!post(WM_MOUSEMOVE, 0) || !post(right ? WM_RBUTTONDOWN : WM_LBUTTONDOWN, right ? MK_RBUTTON : MK_LBUTTON)) return error();
-    if (!post(right ? WM_RBUTTONUP : WM_LBUTTONUP, 0)) return error();
-    if (action == tray::Action::Double && (!post(WM_LBUTTONDBLCLK, MK_LBUTTON) || !post(WM_LBUTTONUP, 0))) return error();
-    return S_OK; // queued, not acknowledged; Dispatch still needs response evidence
+    DWORD error = 0;
+    const auto sent = tray::PostClassicGesture(action, [&](tray::MouseEvent event) {
+        UINT message = WM_MOUSEMOVE; WPARAM keys = 0;
+        switch (event) {
+        case tray::MouseEvent::LeftDown: message = WM_LBUTTONDOWN; keys = MK_LBUTTON; break;
+        case tray::MouseEvent::LeftUp: message = WM_LBUTTONUP; break;
+        case tray::MouseEvent::LeftDouble: message = WM_LBUTTONDBLCLK; keys = MK_LBUTTON; break;
+        case tray::MouseEvent::RightDown: message = WM_RBUTTONDOWN; keys = MK_RBUTTON; break;
+        case tray::MouseEvent::RightUp: message = WM_RBUTTONUP; break;
+        default: break;
+        }
+        if (PostMessageW(target.toolbar, message, keys, position)) return true;
+        error = GetLastError();
+        return false;
+    });
+    Log(L"tray: toolbar queued=%zu complete=%d actionQueued=%d error=%lu", sent.queued, sent.complete, sent.actionQueued, error);
+    // A failure AFTER DOWN is not a safe retry: Explorer may already have notified the app.
+    // S_FALSE records partial delivery as uncertain, so Dispatch will not send another action.
+    return sent.complete ? S_OK : sent.actionQueued ? S_FALSE : error ? HRESULT_FROM_WIN32(error) : E_FAIL;
 }
 
 struct ResponseState {
@@ -767,7 +780,6 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
     if (exe.empty()) return false;
     for (const TrayIcon& icon : Icons()) {
         if (!icon.exe.empty() && _wcsicmp(AppExecutable(icon.exe).c_str(), exe.c_str()) == 0) {
-            AllowSetForegroundWindow(ASFW_ANY);
             Click(icon, false);
             return true;
         }
@@ -793,7 +805,6 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
     if (running) {
         TrayIcon icon;
         icon.exe = Lower(exe);
-        AllowSetForegroundWindow(ASFW_ANY);
         Click(icon, false);
     }
     return running;
@@ -902,6 +913,11 @@ void TrayModel::Worker()
                 auto invoke = [&](tray::Route route) -> int32_t {
                     HRESULT hr = UIA_E_ELEMENTNOTAVAILABLE;
                     if (target && target->element && session == ReadShellSession()) {
+                        // Explorer performs the notification-area callback. Grant only that
+                        // process, never ASFW_ANY or a PID inferred from a GUID rectangle.
+                        const BOOL allowed = AllowSetForegroundWindow(session.pid);
+                        Log(L"tray: click foreground-delegate pid=%lu allowed=%d error=%lu", DWORD(session.pid), allowed,
+                            allowed ? 0 : GetLastError());
                         if (route == tray::Route::Toolbar) hr = ToolbarClick(*target, job.action);
                         else if (route == tray::Route::ContextMenu) {
                             auto e3 = target->element.try_as<IUIAutomationElement3>();
