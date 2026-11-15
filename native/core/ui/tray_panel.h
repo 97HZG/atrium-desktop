@@ -50,6 +50,9 @@ private:
     int Cols() const;
     float Margin() const; // DIP: from the panel's edges to what is seen inside
     D2D1_RECT_F CellRect(size_t i) const; // icon i's cell, DIP
+    void ArmTip();  // the hovered icon's tooltip after the system's delay
+    void ShowTip();
+    void HideTip();
 
     Surface surface_;
     TrayModel& model_;
@@ -57,6 +60,8 @@ private:
     std::vector<std::wstring> attention_;
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_;
+    HWND tip_ = nullptr;   // the standard tooltip, as the system tray shows it
+    std::wstring tipFor_;  // the hover id it is for
     std::optional<TrayIcon> lastClick_;
     std::optional<TrayIcon> pressedIcon_;
     POINT lastAt_{};

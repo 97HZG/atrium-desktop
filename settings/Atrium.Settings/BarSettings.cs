@@ -46,7 +46,7 @@ internal sealed class BarSettings
     public bool ShowClock { get; set; } = true;
     public bool ShowClockSeconds { get; set; }        // seconds after the minutes (off unless chosen)
     public bool ShowTray { get; set; } = true;
-    public bool TrayHost { get; set; }                 // Atrium receives the apps' tray icons itself
+    public bool TrayHost { get; set; } = true;         // Atrium receives the apps' tray icons itself
     public bool StartTray { get; set; } = true;        // the tray's button in the start menu
     public bool StartStatus { get; set; } = true;      // its network, volume and battery buttons
     // The start menu's size and its icons' size: small | medium | large | xlarge;

@@ -1006,8 +1006,16 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
 std::vector<TrayIcon> TrayModel::Icons() const
 {
     std::lock_guard g(mutex_);
+    // Windows' own order (the system tray's), whatever was built of Explorer's tray when
+    // it was read: the same icon stays in the same place from one opening to the next.
+    auto inWindowsOrder = [](std::vector<TrayIcon> list) {
+        std::stable_sort(list.begin(), list.end(), [](const TrayIcon& a, const TrayIcon& b) { return a.order < b.order; });
+        for (size_t i = 0; i < list.size(); ++i)
+            list[i].index = int(i);
+        return list;
+    };
     if (!host_ || host_->Yielded())
-        return icons_;
+        return inWindowsOrder(icons_);
     // The hosted icons in Windows' order (where Explorer's tray has the program), the
     // rest in arrival order after them; Explorer-only icons keep their place.
     std::vector<HostIcon> hosted = host_->Icons();
@@ -1022,6 +1030,23 @@ std::vector<TrayIcon> TrayModel::Icons() const
         t.tip = h.tip;
         t.exe = h.exe;
         t.hostKey = h.key;
+        t.appTooltip = h.version >= 4 && !h.showTip;
+        const std::wstring uidKey = L"uid:" + h.exe + L"|" + std::to_wstring(h.uid);
+        for (const std::wstring& key : {h.key, uidKey, L"exe:" + h.exe})
+            if (auto o = windowsOrder_.find(key); o != windowsOrder_.end()) { t.order = o->second; break; }
+        // An app adding its icon again (TaskbarCreated) often leaves its tooltip out, and
+        // Explorer keeps the one it had: that one then.
+        if (t.tip.empty())
+            for (const TrayIcon& e : icons_)
+                if (!h.exe.empty() && e.exe == h.exe && !e.tip.empty()) { t.tip = e.tip; break; }
+        if (t.tip.empty() && !h.exe.empty()) { // none anywhere: the program's name
+            auto [it, fresh] = hostNames_.try_emplace(h.exe);
+            if (fresh) {
+                it->second = VersionString(h.exe, L"FileDescription");
+                if (it->second.empty()) it->second = PathFindFileNameW(h.exe.c_str());
+            }
+            t.tip = it->second;
+        }
         t.recordId = L"host:" + h.key;
         t.shell = kHostShell;
         t.matchMethod = L"host";
@@ -1061,9 +1086,7 @@ std::vector<TrayIcon> TrayModel::Icons() const
     }
     for (size_t i = 0; i < hosted.size(); ++i)
         if (!used[i]) out.push_back(make(hosted[i]));
-    for (size_t i = 0; i < out.size(); ++i)
-        out[i].index = int(i);
-    return out;
+    return inWindowsOrder(std::move(out));
 }
 
 bool TrayModel::Loaded() const
@@ -1279,6 +1302,7 @@ void TrayModel::Worker()
                 if (match[b] >= 0) {
                     const Record& r = records[size_t(match[b])];
                     t.exe = r.exe;
+                    t.order = r.order;
                     ++recognised;
                     const std::wstring& key = r.id;
                     livePictures.insert(key);
@@ -1310,9 +1334,24 @@ void TrayModel::Worker()
                 icons.push_back(std::move(t));
             }
             std::erase_if(pictures, [&](const auto& item) { return !livePictures.contains(item.first); });
+            // Windows' own order of the icons, for a list that does not depend on how much of
+            // Explorer's tray has been built (and for the hosted icons).
+            std::map<std::wstring, size_t> windowsOrder;
+            for (const Record& r : records) {
+                if (r.order == SIZE_MAX) continue;
+                if (r.guid != GUID_NULL) {
+                    wchar_t guid[40]{};
+                    StringFromGUID2(r.guid, guid, 40);
+                    windowsOrder.try_emplace(L"guid:" + std::wstring(guid), r.order);
+                }
+                if (r.hasUid) windowsOrder.try_emplace(L"uid:" + r.exe + L"|" + std::to_wstring(r.uid), r.order);
+                auto [it, fresh] = windowsOrder.try_emplace(L"exe:" + r.exe, r.order);
+                if (!fresh) it->second = std::min(it->second, r.order);
+            }
             bool changed;
             {
                 std::lock_guard g(mutex_);
+                windowsOrder_ = std::move(windowsOrder);
                 changed = !loaded_ || available != available_ || icons.size() != icons_.size() ||
                           !std::equal(icons.begin(), icons.end(), icons_.begin(), [](const TrayIcon& a, const TrayIcon& b) {
                               return a.tip == b.tip && a.exe == b.exe && a.image == b.image && a.promoted == b.promoted && a.recordId == b.recordId && a.runtimeId == b.runtimeId && a.shell == b.shell && a.matchMethod == b.matchMethod && a.fromRecord == b.fromRecord;

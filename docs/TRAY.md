@@ -162,11 +162,11 @@ main 上的 #49（双击）、#28 与 189bfe0（真实右键）和本分支并�
 - `accepted-unconfirmed` 的左键同样启动焦点检查，避免隐藏溢出窗口保留焦点、吞掉下一次点击。
 - 通知文本改用 main 的本地化资源（`locales/zh-Hans.json`），删除分支自带的 `tr.h`。
 
-## 接管托盘图标（设置 `trayHost`，默认关闭）
+## 接管托盘图标（设置 `trayHost`，默认开启）
 
 两种模式的区别：关闭时，Atrium 从 Windows 托盘**读回**图标（UIA 按钮 + 注册表记录，见上文），图片是 Explorer 保存的快照，点击通过 Explorer 的按钮转交；开启时，各应用的托盘图标**直接交给 Atrium**，图片实时，点击按系统托盘协议直接发给应用。
 
-参照 ManagedShell `TrayService`（Cairo、RetroBar 使用）：Atrium 在独立线程上创建隐藏的 `Shell_TrayWnd`，保持在 Explorer 同名窗口之前（每 100 ms 检查 FindWindow 结果），因此应用的 `Shell_NotifyIcon` 先到达 Atrium。
+参照 ManagedShell `TrayService`（Cairo、RetroBar 使用）：Atrium 在独立线程上创建隐藏的 `Shell_TrayWnd`，保持在 Explorer 同名窗口之前（Explorer 的任务栏显示或成为前台时立即（WinEvent 钩子），并每 100 ms 检查 FindWindow 结果），因此应用的 `Shell_NotifyIcon` 先到达 Atrium。
 
 接收与转发：
 
@@ -175,7 +175,7 @@ main 上的 #49（双击）、#28 与 189bfe0（真实右键）和本分支并�
 - dwData 0（AppBar）、WM_CLOSE、WM_COMMAND、WM_SYSCOMMAND、≥ WM_USER 的消息：转发给 Explorer（发送的用 SendMessageTimeout 4 s + SMTO_ABORTIFHUNG，投递的用 PostMessage）。
 - 启动时广播 TaskbarCreated，已运行的应用重新添加图标；收到 Explorer 自己的 TaskbarCreated（Explorer 重启）后先回到最前，1.5 s 后再广播一次，补回这段时间直接到 Explorer 的图标。
 
-点击与悬停（`shell/tray_protocol.h`，`tray_protocol` 测试）：
+点击与悬停（`shell/tray_protocol.h`，`tray_protocol` 测试）。悬停达到系统的提示延时后，面板在图标上方显示标准提示框（全部行，内容变化时原地更新，点击即消失）；版本 4 且未设 NIF_SHOWTIP 的应用由它自己绘制（NIN_POPUPOPEN），不显示标准提示框：
 
 | 动作 | 版本 0–2 | 版本 3 | 版本 4 |
 | --- | --- | --- | --- |
@@ -187,7 +187,7 @@ main 上的 #49（双击）、#28 与 189bfe0（真实右键）和本分支并�
 
 版本 0–3 的 wParam 是图标 ID、lParam 是通知；版本 4 的 wParam 是指针屏幕坐标、lParam 低字是通知、高字是图标 ID。点击前 AllowSetForegroundWindow 给图标所属进程（面板持有前台），点击会结束悬停与弹出请求。发送失败（如 UIPI 拒绝提权进程的窗口）时回到 Explorer 读取路径。
 
-列表：宿主图标按 Explorer 托盘中同一程序的位置排列，其余按到达顺序；只有 Explorer 有的图标保留，提示相同的未识别按钮不重复显示。宿主图标没有可用图片时借用 Explorer 记录的图片。
+列表：两种模式都按 Windows 自己的托盘顺序（注册表 UIOrderList；GUID、程序+ID、程序依次匹配）排列，不随 Explorer 托盘建了多少而变，同一图标每次打开都在同一位置；没有顺序记录的排在后面。应用重新添加时没带提示文字的，用 Explorer 保留的提示（转发给 Explorer 的那次修改也去掉空提示，Explorer 不会因宿主的广播丢失提示），都没有时用程序的文件描述；其余按到达顺序；只有 Explorer 有的图标保留，提示相同的未识别按钮不重复显示。宿主图标没有可用图片时借用 Explorer 记录的图片。
 
 不影响系统功能的保障：
 

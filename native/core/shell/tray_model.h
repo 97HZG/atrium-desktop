@@ -36,6 +36,8 @@ struct TrayIcon {
     bool fromRecord = false;
     std::wstring recordId; // stable Windows identity, also before the overflow UI exists
     std::wstring hostKey;  // an icon the tray host received (TrayHost); empty: read from Explorer
+    bool appTooltip = false; // a version 4 app drawing its own tooltip (NIN_POPUPOPEN): no standard one
+    size_t order = SIZE_MAX; // place in Windows' own order of the tray icons (UIOrderList), if known
     tray::TargetKey Target() const { return {shell, runtimeId, recordId, exe, tip}; }
 };
 
@@ -95,6 +97,9 @@ private:
     std::unique_ptr<TrayHost> host_;
     // Ink for a hosted one-shade glyph, by picture version.
     mutable std::map<uint64_t, std::pair<std::shared_ptr<const IconImage>, bool>> hostInk_;
+    mutable std::map<std::wstring, std::wstring> hostNames_; // program descriptions, for icons without a tooltip
+    // Windows' order of the icons by "guid:{...}", "uid:<exe>|<uid>" and "exe:<exe>" (the first of the program).
+    std::map<std::wstring, size_t> windowsOrder_;
 };
 
 } // namespace atrium

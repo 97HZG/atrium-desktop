@@ -15,6 +15,8 @@ namespace atrium {
 
 namespace {
 
+std::atomic<TrayHost*> g_host{nullptr}; // the running host, for its event hook
+
 constexpr UINT_PTR kKeepTimer = 1;      // keep the host first among Shell_TrayWnd windows; post changes
 constexpr UINT kKeepMs = 100;
 constexpr UINT_PTR kPruneTimer = 2;     // icons of windows that are gone without a NIM_DELETE
@@ -196,6 +198,12 @@ void TrayHost::Run(HANDLE ready)
     ChangeWindowMessageFilterEx(w, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
     ChangeWindowMessageFilterEx(w, taskbarCreated_, MSGFLT_ALLOW, nullptr);
     window_ = w;
+    // Explorer's taskbar comes before the host when it is shown or activated: back at
+    // once on those events (the timer below is the fallback), so that no app's call
+    // goes past the host meanwhile.
+    g_host = this;
+    HWINEVENTHOOK shown = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, nullptr, ShellEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    HWINEVENTHOOK foreground = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, ShellEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     KeepFirst();
     SetTimer(w, kKeepTimer, kKeepMs, nullptr);
     SetTimer(w, kPruneTimer, kPruneMs, nullptr);
@@ -208,6 +216,9 @@ void TrayHost::Run(HANDLE ready)
         TranslateMessage(&m);
         DispatchMessageW(&m);
     }
+    if (shown) UnhookWinEvent(shown);
+    if (foreground) UnhookWinEvent(foreground);
+    g_host = nullptr;
     window_ = nullptr;
     UnregisterClassW(L"Shell_TrayWnd", instance);
     UnregisterClassW(L"TrayNotifyWnd", instance);
@@ -220,6 +231,17 @@ void TrayHost::Broadcast()
     broadcastAt_ = GetTickCount64();
     SendNotifyMessageW(HWND_BROADCAST, taskbarCreated_, 0, 0);
     Log(L"tray host: on, apps asked to add their icons again");
+}
+
+void CALLBACK TrayHost::ShellEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG object, LONG, DWORD, DWORD)
+{
+    if (object != OBJID_WINDOW || !hwnd)
+        return;
+    wchar_t cls[32] = {};
+    if (!GetClassNameW(hwnd, cls, 32) || wcscmp(cls, L"Shell_TrayWnd") != 0)
+        return;
+    if (TrayHost* host = g_host.load())
+        host->KeepFirst(); // the host's own thread: the hook is out of context
 }
 
 LRESULT CALLBACK TrayHost::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -254,8 +276,10 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TIMER:
         if (w == kKeepTimer) {
             KeepFirst();
-            if (dirty_.exchange(false))
+            if (dirty_.exchange(false)) {
                 PostMessageW(notify_, msg_, 0, 0);
+                LogList();
+            }
         } else if (w == kPruneTimer) {
             Prune();
         } else if (w == kPopupTimer) {
@@ -358,7 +382,12 @@ LRESULT TrayHost::OnNotifyIcon(WPARAM w, const COPYDATASTRUCT* cds)
         // The host's TaskbarCreated (not a new Explorer): Explorer has the icon already
         // and refuses a second add. It is the same icon, brought up to date.
         std::vector<BYTE> copy(static_cast<const BYTE*>(cds->lpData), static_cast<const BYTE*>(cds->lpData) + cds->cbData);
-        reinterpret_cast<TrayNotifyData*>(copy.data())->message = NIM_MODIFY;
+        auto* again32 = reinterpret_cast<TrayNotifyData*>(copy.data());
+        again32->message = NIM_MODIFY;
+        // Apps adding their icon again often leave the tooltip empty (QQ, Feishu): Explorer
+        // keeps the one it has rather than losing it to the host's broadcast.
+        if ((again32->nid.uFlags & NIF_TIP) && !again32->nid.szTip[0])
+            again32->nid.uFlags &= ~NIF_TIP;
         COPYDATASTRUCT again{cds->dwData, cds->cbData, copy.data()};
         result = Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(&again));
     }
@@ -492,6 +521,31 @@ void TrayHost::KeepFirst()
     if (now - lostAt_ > 60000) // not on every round
         Log(L"tray host: Explorer's taskbar came first; moved back (%s)", again ? L"first again" : L"still second");
     lostAt_ = now;
+}
+
+// The list in the log whenever its make-up changes (not on a picture or tooltip change).
+void TrayHost::LogList()
+{
+    std::wstring keys;
+    std::vector<std::wstring> lines;
+    {
+        std::lock_guard g(mutex_);
+        for (const auto& [key, icon] : icons_) {
+            keys += key + (icon.hidden ? L"h;" : L";");
+            wchar_t line[400];
+            swprintf_s(line, L"tray host:   %s %s v%u cb=0x%X%s%s img=%dx%d '%s'", key.c_str(),
+                       icon.exe.empty() ? L"-" : PathFindFileNameW(icon.exe.c_str()), icon.version, icon.callback,
+                       icon.hidden ? L" hidden" : L"", icon.showTip ? L" showtip" : L"", icon.image ? icon.image->width : 0,
+                       icon.image ? icon.image->height : 0, icon.tip.substr(0, icon.tip.find(L'\n')).substr(0, 60).c_str());
+            lines.push_back(line);
+        }
+    }
+    if (keys == loggedKeys_)
+        return;
+    loggedKeys_ = keys;
+    Log(L"tray host: %zu icons", lines.size());
+    for (const auto& line : lines)
+        Log(L"%s", line.c_str());
 }
 
 void TrayHost::Prune()

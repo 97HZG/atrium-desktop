@@ -5,6 +5,7 @@
 #include "log.h"
 #include "motion.h"
 
+#include <commctrl.h>
 #include <shellscalingapi.h>
 #include <shlwapi.h>
 #include <windowsx.h>
@@ -24,6 +25,7 @@ constexpr float kCell = 40, kIcon = 20, kAir = (kCell - kIcon) / 2; // kAir: fro
 constexpr float kSplit = 14, kFooterH = 24;                            // icons to divider to footer; footer row
 constexpr double kStageMs = 240, kStaggerMs = 14, kRippleMs = 520;
 constexpr UINT_PTR kRefreshTimer = 0x5452415A;
+constexpr UINT_PTR kTipTimer = 0x5A15; // the hover delay before an icon's tooltip
 // After a left click the panel stays one double-click time for the second click, then
 // steps aside; Surface's own timers are 0x5A01 and 0x5A03.
 constexpr UINT_PTR kClickTimer = 0x5A11;
@@ -254,6 +256,7 @@ void TrayPanel::Open(RECT anchor, RECT bar, HWND previous)
 void TrayPanel::Close()
 {
     model_.Hover(nullptr);
+    HideTip();
     KillTimer(surface_.Hwnd(), kRefreshTimer);
     KillTimer(surface_.Hwnd(), kClickTimer);
     KillTimer(surface_.Hwnd(), kSettleTimer);
@@ -278,6 +281,80 @@ void TrayPanel::Refresh()
     for (size_t i : order) icons_.push_back(std::move(fresh[i]));
     Place();
     surface_.Invalidate();
+    if (!tipFor_.empty() && tip_ && IsWindowVisible(tip_))
+        ShowTip(); // a tooltip that changes while shown changes in place, as in the system tray
+}
+
+// The icon's tooltip, all of its lines, above its cell after the system's hover delay,
+// as the system tray shows it. Not for a version 4 app that draws its own (the tray
+// host asks it to, NIN_POPUPOPEN), nor in private mode.
+void TrayPanel::ArmTip()
+{
+    HideTip();
+    const size_t i = hover_.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(hover_.substr(5))) : icons_.size();
+    if (i >= icons_.size() || private_ || icons_[i].appTooltip || icons_[i].tip.empty())
+        return;
+    tipFor_ = hover_;
+    UINT delay = 500;
+    if (tip_)
+        delay = UINT(SendMessageW(tip_, TTM_GETDELAYTIME, TTDT_INITIAL, 0));
+    SetTimer(surface_.Hwnd(), kTipTimer, delay ? delay : 500, nullptr);
+}
+
+void TrayPanel::ShowTip()
+{
+    const size_t i = tipFor_.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(tipFor_.substr(5))) : icons_.size();
+    if (tipFor_ != hover_ || i >= icons_.size() || !surface_.Visible())
+        return;
+    if (!tip_) {
+        INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_WIN95_CLASSES};
+        InitCommonControlsEx(&icc);
+        tip_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, surface_.Hwnd(), nullptr, nullptr, nullptr);
+        if (!tip_)
+            return;
+        TTTOOLINFOW ti{sizeof(ti)};
+        ti.uFlags = TTF_TRACK | TTF_ABSOLUTE;
+        ti.hwnd = surface_.Hwnd();
+        ti.uId = 1;
+        ti.lpszText = const_cast<wchar_t*>(L"");
+        SendMessageW(tip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
+    }
+    const std::wstring text = icons_[i].tip;
+    TTTOOLINFOW ti{sizeof(ti)};
+    ti.hwnd = surface_.Hwnd();
+    ti.uId = 1;
+    ti.lpszText = const_cast<wchar_t*>(text.c_str());
+    SendMessageW(tip_, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&ti));
+    const float s = surface_.Scale();
+    SendMessageW(tip_, TTM_SETMAXTIPWIDTH, 0, LPARAM(400 * s));
+    // Centred above the icon's cell, kept on its monitor.
+    RECT win{};
+    GetWindowRect(surface_.Hwnd(), &win);
+    const D2D1_RECT_F cell = CellRect(i);
+    const LRESULT size = SendMessageW(tip_, TTM_GETBUBBLESIZE, 0, reinterpret_cast<LPARAM>(&ti));
+    const int w = LOWORD(size), h = HIWORD(size);
+    POINT at{win.left + LONG((cell.left + cell.right) / 2 * s) - w / 2, win.top + LONG(cell.top * s) - h - LONG(4 * s)};
+    MONITORINFO mi{sizeof(mi)};
+    if (GetMonitorInfoW(MonitorFromWindow(surface_.Hwnd(), MONITOR_DEFAULTTONEAREST), &mi)) {
+        at.x = std::clamp(at.x, mi.rcWork.left, std::max(mi.rcWork.left, mi.rcWork.right - w));
+        if (at.y < mi.rcWork.top)
+            at.y = win.top + LONG(cell.bottom * s) + LONG(4 * s);
+    }
+    SendMessageW(tip_, TTM_TRACKPOSITION, 0, MAKELPARAM(at.x, at.y));
+    SendMessageW(tip_, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&ti));
+}
+
+void TrayPanel::HideTip()
+{
+    KillTimer(surface_.Hwnd(), kTipTimer);
+    tipFor_.clear();
+    if (!tip_)
+        return;
+    TTTOOLINFOW ti{sizeof(ti)};
+    ti.hwnd = surface_.Hwnd();
+    ti.uId = 1;
+    SendMessageW(tip_, TTM_TRACKACTIVATE, FALSE, reinterpret_cast<LPARAM>(&ti));
 }
 
 void TrayPanel::SetAttention(const std::vector<TaskItem>& tasks)
@@ -442,6 +519,11 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     switch (m) {
     case WM_TIMER:
+        if (w == kTipTimer) {
+            KillTimer(surface_.Hwnd(), kTipTimer);
+            ShowTip();
+            return true;
+        }
         if (w == kSettleTimer) {
             KillTimer(surface_.Hwnd(), kSettleTimer);
             HWND fg = GetForegroundWindow();
@@ -486,6 +568,7 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             // A hosted icon's app is told the pointer is on it, as the system tray does.
             const size_t i = h.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(h.substr(5))) : icons_.size();
             model_.Hover(i < icons_.size() && !icons_[i].hostKey.empty() ? &icons_[i] : nullptr);
+            ArmTip();
             surface_.Invalidate();
         }
         return true;
@@ -499,6 +582,7 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     }
     case WM_MOUSELEAVE:
         tracking_ = false;
+        HideTip();
         model_.Hover(nullptr);
         hover_.clear();
         pressed_.clear();
@@ -506,6 +590,7 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     case WM_LBUTTONDOWN:
     case WM_RBUTTONDOWN:
+        HideTip(); // a click ends the tooltip, as in the system tray
         pressed_ = HitAt(pt);
         pressedIcon_.reset();
         if (pressed_.rfind(L"icon:", 0) == 0) {

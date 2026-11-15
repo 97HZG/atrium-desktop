@@ -78,6 +78,7 @@ public:
 private:
     void Run(HANDLE ready);
     static LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l);
+    static void CALLBACK ShellEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG object, LONG, DWORD, DWORD);
     LRESULT Message(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT OnNotifyIcon(WPARAM w, const COPYDATASTRUCT* cds);
     void Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage> image, LRESULT result);
@@ -86,6 +87,7 @@ private:
     void Broadcast();
     void KeepFirst();
     void Prune();
+    void LogList();
     void Popup(bool open);
 
     HWND notify_;
@@ -105,6 +107,7 @@ private:
     std::wstring hoverKey_, popupKey_; // host thread: the icon under the pointer, the one asked to show its popup
     POINT hoverAt_{};
     ULONGLONG lostAt_ = 0, broadcastAt_ = 0;
+    std::wstring loggedKeys_; // host thread: the list as last logged
 };
 
 } // namespace atrium

@@ -35,10 +35,10 @@ Require(parsed.StageMinimize && BarSettings.FromJson(parsed.ToJson(), new()).Sta
 Require(!BarSettings.FromJson(new JsonObject(), new()).ShowClockSeconds, "Old files must keep the clock at minutes.");
 Require(!new BarSettings().MagnifyNear && !BarSettings.FromJson(new JsonObject(), new()).MagnifyNear,
     "Icons must not magnify above the bar unless chosen.");
-Require(!new BarSettings().TrayHost && !BarSettings.FromJson(new JsonObject(), new()).TrayHost, "The tray host must stay off unless chosen.");
-parsed = BarSettings.FromJson(JsonNode.Parse("""{"trayHost":true}""")!.AsObject(), new());
-Require(parsed.TrayHost && BarSettings.FromJson(parsed.ToJson(), new()).TrayHost && !new BarSettings().SameAs(parsed),
-    "The tray host must survive a round trip and mark the settings dirty.");
+Require(new BarSettings().TrayHost && BarSettings.FromJson(new JsonObject(), new()).TrayHost, "Atrium hosts the tray icons unless turned off.");
+parsed = BarSettings.FromJson(JsonNode.Parse("""{"trayHost":false}""")!.AsObject(), new());
+Require(!parsed.TrayHost && !BarSettings.FromJson(parsed.ToJson(), new()).TrayHost && !new BarSettings().SameAs(parsed),
+    "Turning the tray host off must survive a round trip and mark the settings dirty.");
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"remoteVisible":true}""")!.AsObject(), new());
 Require(parsed.RemoteVisible && BarSettings.FromJson(parsed.ToJson(), new()).RemoteVisible && !new BarSettings().SameAs(parsed),
     "Remote-control mode must survive a round trip and mark the settings dirty.");
