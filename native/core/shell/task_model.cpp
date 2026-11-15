@@ -602,6 +602,11 @@ struct ScanRec {
 
 } // namespace
 
+bool HIconToImage(HICON icon, IconImage& out)
+{
+    return IconToImage(icon, out);
+}
+
 struct TaskModel::Impl {
     HWND ui;
     std::function<void()> onChanged;

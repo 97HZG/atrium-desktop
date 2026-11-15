@@ -690,6 +690,7 @@
                             <StackPanel>
                                 <TextBlock Text="Tray" Style="{StaticResource SectionStyle}" />
                                 <local:ToggleTile x:Name="TraySwitch" Title="Show on the taskbar" SwitchName="Show system tray" Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="TrayHostSwitch" Title="Receive tray icons directly" SwitchName="Receive tray icons directly" Toggled="OnBarContentToggled" Flat="True" />
                             </StackPanel>
                         </StackPanel>
 

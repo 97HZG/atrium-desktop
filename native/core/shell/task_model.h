@@ -57,6 +57,8 @@ bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out,
 bool LoadAtriumIcon(const std::wstring& exePath, int sizePx, IconImage& out);
 // Resolves a shortcut and a versioned client's app/ launcher without starting it.
 std::wstring AppExecutable(const std::wstring& path);
+// An icon's picture, premultiplied BGRA (false for a monochrome icon).
+bool HIconToImage(HICON icon, IconImage& out);
 
 class TaskModel {
 public:

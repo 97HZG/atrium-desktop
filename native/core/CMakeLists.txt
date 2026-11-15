@@ -46,6 +46,7 @@ add_executable(atrium_core WIN32
     shell/audio_devices.cpp
     shell/projection.cpp
     shell/displays.cpp
+    shell/tray_host.cpp
     shell/tray_model.cpp
     shell/tray_match.cpp
     shell/shell_verbs.cpp

@@ -245,6 +245,7 @@ void TrayPanel::Open(RECT anchor, RECT bar, HWND previous)
     hoverAnim_.clear();
     openedMs_ = ClockMs();
     model_.Refresh(); // the tooltips and the set change; the panel updates when read
+    model_.SetHostPlaces(anchor);
     SetTimer(surface_.Hwnd(), kRefreshTimer, 1500, nullptr);
     Place();
     Log(L"tray: panel opened (%zu icons)", icons_.size());
@@ -408,7 +409,7 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
     if (i >= icons_.size())
         return;
     const TrayIcon selected = pressedIcon_.value_or(icons_[i]);
-    if (right) {
+    if (right && selected.hostKey.empty()) { // a hosted icon's app is told the pointer itself
         POINT at;
         GetCursorPos(&at);
         FollowMenu(at, selected.exe);

@@ -2,6 +2,7 @@
 #include "shell/taskbar_visibility.h"
 
 #include "log.h"
+#include "shell/shell_taskbar.h"
 #include "settings.h"
 
 #include <dwmapi.h>
@@ -38,7 +39,7 @@ std::wstring StatePath()
 std::vector<HWND> Taskbars()
 {
     std::vector<HWND> out;
-    if (HWND main = FindWindowW(L"Shell_TrayWnd", nullptr))
+    if (HWND main = ShellTaskbar())
         out.push_back(main);
     for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr;)
         out.push_back(w);
@@ -61,7 +62,7 @@ bool AutoHide()
 void SetAutoHide(bool on)
 {
     APPBARDATA abd{sizeof(abd)};
-    abd.hWnd = FindWindowW(L"Shell_TrayWnd", nullptr);
+    abd.hWnd = ShellTaskbar();
     abd.lParam = on ? ABS_AUTOHIDE : ABS_ALWAYSONTOP;
     SHAppBarMessage(ABM_SETSTATE, &abd);
 }
@@ -94,7 +95,7 @@ void RefitMaximizedLater()
 void ShowTaskbars()
 {
     // Also used by the exception filter: enumerate without allocating.
-    if (HWND w = FindWindowW(L"Shell_TrayWnd", nullptr))
+    if (HWND w = ShellTaskbar())
         ShowWindow(w, SW_SHOWNA);
     for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr;)
         ShowWindow(w, SW_SHOWNA);
@@ -368,7 +369,7 @@ void SystemChrome::Enforce()
         // Hidden but not auto-hide, the taskbar keeps its strip of the work area and maximized
         // windows stop its height short of the bottom. Auto-hide can be lost after it was set:
         // set before Explorer's taskbar was ready at sign-in, Explorer restarted, another program.
-        if (FindWindowW(L"Shell_TrayWnd", nullptr) && !AutoHide()) {
+        if (ShellTaskbar() && !AutoHide()) {
             SetAutoHide(true);
             autoHideOurs_ = true;
             Save();
@@ -429,7 +430,7 @@ void SystemChrome::Watch()
     // Explorer shows its taskbar again by itself now and then: hide it the
     // moment it does.
     DWORD pid = 0;
-    GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &pid);
+    GetWindowThreadProcessId(ShellTaskbar(), &pid);
     if (!pid || pid == hookedPid_)
         return;
     if (hook_)

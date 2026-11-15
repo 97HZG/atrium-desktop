@@ -844,6 +844,7 @@
   "Use the Windows notification area": "请在系统托盘中操作",
   "Select the icon in the Windows hidden icons panel.": "请直接点击 Windows 隐藏图标区中的图标。",
   "Windows notification area is unavailable": "系统托盘暂时无法打开",
-  "Temporarily turn off Hide system taskbar, open the hidden icons panel, and try again.": "请临时关闭“隐藏系统任务栏”，打开隐藏图标区后重试。"
+  "Temporarily turn off Hide system taskbar, open the hidden icons panel, and try again.": "请临时关闭“隐藏系统任务栏”，打开隐藏图标区后重试。",
+  "Receive tray icons directly": "直接接收托盘图标"
  }
 }

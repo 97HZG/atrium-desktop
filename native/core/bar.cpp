@@ -5,6 +5,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "shell/shell_taskbar.h"
 #include "render/capture.h"
 #include "render/desktop_backdrop.h"
 #include "render/glass_renderer.h"
@@ -1495,7 +1496,7 @@ void Bar::GuardStacking(const wchar_t* why)
     if (!visible_ || tucked_ || dragging_)
         return;
     RECT bar = BarRect(), r{}, overlap{}, trayRect{};
-    HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    HWND tray = ShellTaskbar();
     bool trayOver = tray && IsWindowVisible(tray) && GetWindowRect(tray, &trayRect) && IntersectRect(&overlap, &trayRect, &bar) &&
                     overlap.bottom - overlap.top > 2;
     bool usingTray = false;

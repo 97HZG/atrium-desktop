@@ -5,6 +5,7 @@
 #include "shell/tray_image.h"
 
 #include "log.h"
+#include "shell/shell_taskbar.h"
 #include "shell/system_chrome.h"
 #include "shell/tray_pointer.h"
 
@@ -334,7 +335,7 @@ struct Found {
 tray::ShellSession ReadShellSession()
 {
     tray::ShellSession session;
-    const HWND window = FindWindowW(L"Shell_TrayWnd", nullptr);
+    const HWND window = ShellTaskbar();
     DWORD pid = 0;
     if (!window || !GetWindowThreadProcessId(window, &pid)) return session;
     if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
@@ -404,7 +405,7 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
             out.push_back(std::move(f));
         }
     };
-    collect(FindWindowW(L"Shell_TrayWnd", nullptr), true);
+    collect(ShellTaskbar(), true);
     collect(FindWindowW(L"TopLevelWindowForOverflowXamlIsland", nullptr), false);
     if (!out.empty())
         return out;
@@ -441,7 +442,7 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
             out.push_back(std::move(f));
         }
     };
-    HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    HWND tray = ShellTaskbar();
     HWND notify = tray ? FindWindowExW(tray, nullptr, L"TrayNotifyWnd", nullptr) : nullptr;
     HWND pager = notify ? FindWindowExW(notify, nullptr, L"SysPager", nullptr) : nullptr;
     legacy(pager ? FindWindowExW(pager, nullptr, L"ToolbarWindow32", nullptr) : nullptr, true);
@@ -481,7 +482,7 @@ bool ShowOverflow(IUIAutomation* uia)
     // Its non-localized structural signature is a NormalButton/SystemTrayIcon before the
     // first promoted NotifyItemIcon. Require that anchor and a later normal system button;
     // builds without this signature fail closed instead of guessing from translated names.
-    HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    HWND tray = ShellTaskbar();
     HWND bridge = tray ? FindWindowExW(tray, nullptr, L"Windows.UI.Composition.DesktopWindowContentBridge", nullptr) : nullptr;
     if (tray && !bridge) {
         // Classic shell: the unique Button directly inside TrayNotifyWnd is its chevron.
@@ -651,7 +652,7 @@ HRESULT ToolbarClick(const Found& target, tray::Action action)
     if (wcscmp(cls, L"Shell_TrayWnd") && wcscmp(cls, L"NotifyIconOverflowWindow")) return E_INVALIDARG;
     DWORD pid = 0, shellPid = 0;
     GetWindowThreadProcessId(root, &pid);
-    GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &shellPid);
+    GetWindowThreadProcessId(ShellTaskbar(), &shellPid);
     if (!pid || pid != shellPid) return E_INVALIDARG;
     RECT bounds{}, client{};
     if (!target.element || FAILED(target.element->get_CurrentBoundingRectangle(&bounds)) || IsRectEmpty(&bounds) ||
@@ -871,8 +872,56 @@ void TrayModel::Refresh()
     cv_.notify_all();
 }
 
+void TrayModel::SetHosting(bool on)
+{
+    if (on == (host_ != nullptr))
+        return;
+    // Built and torn down outside the lock: the host's thread starts or stops meanwhile.
+    std::unique_ptr<TrayHost> host = on ? std::make_unique<TrayHost>(notify_, msg_) : nullptr;
+    if (host && !host->Running())
+        host.reset();
+    {
+        std::lock_guard g(mutex_);
+        std::swap(host, host_);
+        hostInk_.clear();
+    }
+    host.reset();
+    PostMessageW(notify_, msg_, 0, 0);
+}
+
+void TrayModel::SetHostPlaces(RECT anchor)
+{
+    if (host_)
+        host_->SetPlaces(anchor);
+}
+
+bool TrayModel::ClickHosted(const TrayIcon& icon, tray::Action action)
+{
+    if (icon.hostKey.empty())
+        return false;
+    POINT at{};
+    GetCursorPos(&at);
+    if (host_ && host_->Click(icon.hostKey, action, at))
+        return true;
+    // The host could not send it (an elevated app, the host off): Explorer's button, by program.
+    TrayIcon fallback;
+    {
+        std::lock_guard g(mutex_);
+        for (const TrayIcon& t : icons_)
+            if (!icon.exe.empty() && t.exe == icon.exe) { fallback = t; break; }
+    }
+    if (fallback.exe.empty())
+        fallback.exe = icon.exe;
+    std::lock_guard g(mutex_);
+    jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }), {false, fallback, action});
+    cv_.notify_all();
+    return true;
+}
+
 void TrayModel::Click(const TrayIcon& icon, bool right)
 {
+    if (ClickHosted(icon, right ? tray::Action::Right : tray::Action::Left))
+        return;
     std::lock_guard g(mutex_);
     jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }),
                  {false, icon, right ? tray::Action::Right : tray::Action::Left});
@@ -881,6 +930,8 @@ void TrayModel::Click(const TrayIcon& icon, bool right)
 
 void TrayModel::DoubleClick(const TrayIcon& icon, bool continuation)
 {
+    if (ClickHosted(icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double))
+        return;
     std::lock_guard g(mutex_);
     jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }), {false, icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double});
     cv_.notify_all();
@@ -930,7 +981,57 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
 std::vector<TrayIcon> TrayModel::Icons() const
 {
     std::lock_guard g(mutex_);
-    return icons_;
+    if (!host_)
+        return icons_;
+    // The hosted icons in Windows' order (where Explorer's tray has the program), the
+    // rest in arrival order after them; Explorer-only icons keep their place.
+    std::vector<HostIcon> hosted = host_->Icons();
+    std::erase_if(hosted, [](const HostIcon& h) { return h.hidden; });
+    std::vector<bool> used(hosted.size());
+    std::set<std::wstring> hostedExe;
+    for (const HostIcon& h : hosted)
+        if (!h.exe.empty()) hostedExe.insert(h.exe);
+    static const tray::ShellSession kHostShell{1, 1, 1};
+    auto make = [&](const HostIcon& h) {
+        TrayIcon t;
+        t.tip = h.tip;
+        t.exe = h.exe;
+        t.hostKey = h.key;
+        t.recordId = L"host:" + h.key;
+        t.shell = kHostShell;
+        t.matchMethod = L"host";
+        t.image = h.image;
+        t.imageVersion = h.imageVersion;
+        if (!t.image) { // no picture sent (or a monochrome one): Explorer's record of the program
+            for (const TrayIcon& e : icons_)
+                if (e.exe == h.exe && e.image) { t.image = e.image; t.imageVersion = e.imageVersion; t.inked = e.inked; t.inkedOnLight = e.inkedOnLight; break; }
+        } else {
+            auto ink = hostInk_.find(h.imageVersion);
+            if (ink == hostInk_.end()) {
+                if (hostInk_.size() > 256) hostInk_.clear(); // animated icons: every frame is a version
+                const int tone = GlyphTone(*h.image);
+                ink = hostInk_.emplace(h.imageVersion, std::make_pair(
+                    tone ? std::make_shared<const IconImage>(InkedGlyph(*h.image, tone)) : nullptr, tone > 0)).first;
+            }
+            t.inked = ink->second.first;
+            t.inkedOnLight = ink->second.second;
+        }
+        return t;
+    };
+    std::vector<TrayIcon> out;
+    for (const TrayIcon& e : icons_) {
+        if (e.exe.empty() || !hostedExe.contains(e.exe)) {
+            out.push_back(e);
+            continue;
+        }
+        for (size_t i = 0; i < hosted.size(); ++i)
+            if (!used[i] && hosted[i].exe == e.exe) { used[i] = true; out.push_back(make(hosted[i])); }
+    }
+    for (size_t i = 0; i < hosted.size(); ++i)
+        if (!used[i]) out.push_back(make(hosted[i]));
+    for (size_t i = 0; i < out.size(); ++i)
+        out[i].index = int(i);
+    return out;
 }
 
 bool TrayModel::Loaded() const
@@ -1028,7 +1129,7 @@ void TrayModel::Worker()
                     return resolved.index == tray::none ? nullptr : &buttons[resolved.index];
                 };
                 Found* target = resolve();
-                HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr), overflow = OverflowWindow();
+                HWND taskbar = ShellTaskbar(), overflow = OverflowWindow();
                 APPBARDATA abd{sizeof(abd)};
                 BOOL offscreen = TRUE, enabled = FALSE;
                 HRESULT state = target && target->element ? target->element->get_CurrentIsOffscreen(&offscreen) : UIA_E_ELEMENTNOTAVAILABLE;

@@ -3,12 +3,14 @@
 
 #include "shell/task_model.h"
 #include "shell/tray_click.h"
+#include "shell/tray_host.h"
 #include "shell/tray_target.h"
 
 #include <windows.h>
 
 #include <condition_variable>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -33,6 +35,7 @@ struct TrayIcon {
     std::wstring matchMethod;
     bool fromRecord = false;
     std::wstring recordId; // stable Windows identity, also before the overflow UI exists
+    std::wstring hostKey;  // an icon the tray host received (TrayHost); empty: read from Explorer
     tray::TargetKey Target() const { return {shell, runtimeId, recordId, exe, tip}; }
 };
 
@@ -58,6 +61,11 @@ public:
     static DWORD LastSyntheticInput();
     // Opens an existing background session; false when the app is not in the tray/running.
     bool OpenExisting(const std::wstring& exe);
+    // The tray host (setting `trayHost`): the apps' icons as they send them, clicked with
+    // the shell's own messages. Icons only Explorer's tray has stay in the list. UI thread.
+    void SetHosting(bool on);
+    bool Hosting() const { return host_ != nullptr; }
+    void SetHostPlaces(RECT anchor); // the panel's place on screen, for apps that ask where their icon is
 
     // First line of a tooltip, for display.
     static std::wstring Title(const std::wstring& tip);
@@ -70,6 +78,7 @@ private:
         bool systemTray = false;
     };
     void Worker();
+    bool ClickHosted(const TrayIcon& icon, tray::Action action);
     HWND notify_;
     UINT msg_;
     std::function<std::vector<PinnedApp>()> appNames_;
@@ -79,6 +88,9 @@ private:
     std::vector<TrayIcon> icons_;
     bool loaded_ = false, available_ = false, stop_ = false;
     std::thread thread_;
+    std::unique_ptr<TrayHost> host_;
+    // Ink for a hosted one-shade glyph, by picture version.
+    mutable std::map<uint64_t, std::pair<std::shared_ptr<const IconImage>, bool>> hostInk_;
 };
 
 } // namespace atrium

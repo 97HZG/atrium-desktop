@@ -809,6 +809,7 @@ public sealed partial class MainWindow : Window
         ClockSecondsSwitch.IsOn = _current.ShowClockSeconds;
         UpdateClockOptions();
         TraySwitch.IsOn = _current.ShowTray;
+        TrayHostSwitch.IsOn = _current.TrayHost;
         StartTraySwitch.IsOn = _current.StartTray;
         StartStatusSwitch.IsOn = _current.StartStatus;
         (_current.StartSize switch { "small" => StartSmall, "large" => StartLarge, "xlarge" => StartXLarge, _ => StartMedium }).IsChecked = true;
@@ -929,6 +930,7 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.ShowTray = TraySwitch.IsOn;
+        _current.TrayHost = TrayHostSwitch.IsOn;
         _current.StartTray = StartTraySwitch.IsOn;
         _current.StartStatus = StartStatusSwitch.IsOn;
         _current.ShowStatus = StatusSwitch.IsOn;

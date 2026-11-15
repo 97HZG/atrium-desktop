@@ -552,6 +552,10 @@ void ApplySettings(const Settings& s)
         g_app.winKeyStart = keyStart;
         g_app.winNumbers = keyNumbers;
     }
+    if (g_app.tray && s.trayHost != g_app.tray->Hosting()) {
+        g_app.tray->SetHosting(s.trayHost);
+        Log(L"core: tray host %s", g_app.tray->Hosting() ? L"on" : s.trayHost ? L"failed to start" : L"off");
+    }
     if (s.remoteVisible != RemoteVisible()) {
         // The bars rebuild their backdrop on their next frame; the windows show to captures now.
         SetRemoteVisible(s.remoteVisible);

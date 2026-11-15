@@ -46,6 +46,7 @@ internal sealed class BarSettings
     public bool ShowClock { get; set; } = true;
     public bool ShowClockSeconds { get; set; }        // seconds after the minutes (off unless chosen)
     public bool ShowTray { get; set; } = true;
+    public bool TrayHost { get; set; }                 // Atrium receives the apps' tray icons itself
     public bool StartTray { get; set; } = true;        // the tray's button in the start menu
     public bool StartStatus { get; set; } = true;      // its network, volume and battery buttons
     // The start menu's size and its icons' size: small | medium | large | xlarge;
@@ -148,6 +149,7 @@ internal sealed class BarSettings
             ["showClock"] = ShowClock,
             ["showClockSeconds"] = ShowClockSeconds,
             ["showTray"] = ShowTray,
+            ["trayHost"] = TrayHost,
             ["startTray"] = StartTray,
             ["startStatus"] = StartStatus,
             ["showStatus"] = ShowStatus,
@@ -238,6 +240,7 @@ internal sealed class BarSettings
         s.ShowClock = Flag("showClock", f.ShowClock);
         s.ShowClockSeconds = Flag("showClockSeconds", f.ShowClockSeconds);
         s.ShowTray = Flag("showTray", f.ShowTray);
+        s.TrayHost = Flag("trayHost", f.TrayHost);
         s.StartTray = Flag("startTray", f.StartTray);
         s.StartStatus = Flag("startStatus", f.StartStatus);
         s.StartSize = o?["startSize"] is JsonValue ss0 && ss0.TryGetValue(out string? size) && size is "small" or "medium" or "large" or "xlarge" ? size! : f.StartSize;
@@ -317,7 +320,7 @@ internal sealed class BarSettings
         Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && HoverRise == o.HoverRise && RiseNear == o.RiseNear &&
         MagnifyNear == o.MagnifyNear && NearEnter == o.NearEnter && NearLeave == o.NearLeave && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
         ShowClockSeconds == o.ShowClockSeconds &&
-        ShowTray == o.ShowTray && StartTray == o.StartTray && StartStatus == o.StartStatus && StartSize == o.StartSize && StartIcon == o.StartIcon &&
+        ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications &&
         ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Bar == o.Bar && Widgets == o.Widgets &&
