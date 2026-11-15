@@ -816,6 +816,7 @@ public sealed partial class MainWindow : Window
         (_current.StartIcon switch { "small" => StartIconSmall, "large" => StartIconLarge, "xlarge" => StartIconXLarge, _ => StartIconMedium }).IsChecked = true;
         StatusSwitch.IsOn = _current.ShowStatus;
         NotificationsSwitch.IsOn = _current.ShowNotifications;
+        DesktopSwitch.IsOn = _current.ShowDesktop;
         AutoWidthSwitch.IsOn = _current.AutoWidth;
         HoverRiseSwitch.IsOn = _current.HoverRise;
         RiseNearSwitch.IsOn = _current.RiseNear;
@@ -936,6 +937,7 @@ public sealed partial class MainWindow : Window
         _current.StartStatus = StartStatusSwitch.IsOn;
         _current.ShowStatus = StatusSwitch.IsOn;
         _current.ShowNotifications = NotificationsSwitch.IsOn;
+        _current.ShowDesktop = DesktopSwitch.IsOn;
         Changed();
     }
 

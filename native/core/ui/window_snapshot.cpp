@@ -189,6 +189,7 @@ WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, in
                 const float g = std::min(1.f, float(largeMax) / float(std::max(pw, ph)));
                 const int lw = std::max(1, int(std::lround(pw * g))), lh = std::max(1, int(std::lround(ph * g)));
                 *large = Finish(Shrink(src, pw, ph, ww * 4, lw, lh), lw, lh, CornerRadius(window) * g, false);
+                large->corner = CornerRadius(window) * g;
             }
         }
     }
@@ -199,6 +200,19 @@ WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, in
 }
 
 } // namespace
+
+WindowPicture Smaller(const WindowPicture& picture, int largeMax)
+{
+    if (!picture.ok || std::max(picture.width, picture.height) <= largeMax)
+        return picture;
+    const float g = float(largeMax) / float(std::max(picture.width, picture.height));
+    const int w = std::max(1, int(std::lround(picture.width * g))), h = std::max(1, int(std::lround(picture.height * g)));
+    const int stride = picture.image.width * 4;
+    const uint8_t* src = picture.image.bgra.data() + size_t(kPicturePad) * stride + size_t(kPicturePad) * 4;
+    WindowPicture out = Finish(Shrink(src, picture.width, picture.height, stride, w, h), w, h, picture.corner * g, false);
+    out.corner = picture.corner * g;
+    return out;
+}
 
 WindowPicture PlaceholderPicture(const IconImage& icon, int width, int height, bool dark)
 {

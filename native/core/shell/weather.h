@@ -39,6 +39,8 @@ struct Weather {
     std::vector<WeatherHour> hours; // the next six (sunrise and sunset among them)
     std::vector<WeatherDay> days;   // today and the next days
     std::wstring error;             // why there is none (shown while !ok)
+    double lat = 0, lon = 0;        // where it is for (kept: the place again when no service can say)
+    bool placed = false;
 };
 
 // "晴", "多云", "小雨"…

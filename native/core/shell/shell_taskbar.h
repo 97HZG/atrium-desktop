@@ -38,6 +38,10 @@ struct ShellQuestion {
     ~ShellQuestion() { --g_shellQuestions; }
 };
 
+// Above 0 while Atrium's tray host steps behind Explorer's taskbar for one of Atrium's own
+// app-bar calls (AppBarMessage): it does not move itself back in front meanwhile.
+inline std::atomic_int g_hostAside{0};
+
 // SHAppBarMessage for Atrium's own calls. With Atrium's tray host first among the
 // Shell_TrayWnd windows, Windows hands the call to a window of the caller's own
 // process with an in-process pointer, which Explorer cannot read. The state calls
@@ -48,8 +52,19 @@ inline UINT_PTR AppBarMessage(DWORD message, APPBARDATA& abd)
     DWORD first = 0;
     GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &first);
     HWND shell = ShellTaskbar();
-    if (first != GetCurrentProcessId() || !shell || (message != ABM_GETSTATE && message != ABM_SETSTATE))
+    if (first != GetCurrentProcessId() || !shell)
         return SHAppBarMessage(message, &abd);
+    if (message != ABM_GETSTATE && message != ABM_SETSTATE) {
+        // Calls that answer through shared memory (an app bar's place): the host steps behind
+        // Explorer's taskbar for the moment of the call, which then goes to Explorer as usual.
+        HWND host = FindWindowW(L"Shell_TrayWnd", nullptr);
+        ++g_hostAside;
+        SetWindowPos(host, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        const UINT_PTR result = SHAppBarMessage(message, &abd);
+        SetWindowPos(host, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        --g_hostAside;
+        return result;
+    }
     struct AppBarData32 {
         DWORD cbSize;
         DWORD hWnd;

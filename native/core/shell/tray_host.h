@@ -49,6 +49,8 @@ struct HostIcon {
     uint64_t imageVersion = 0;
     bool hidden = false; // NIS_HIDDEN
     uint64_t added = 0;  // order of arrival
+    std::vector<ULONGLONG> pictureChanges; // the last few seconds' picture changes (a flashing icon)
+    ULONGLONG flashUntil = 0; // flashing (a new message in QQ or WeChat) until then
 };
 
 class TrayHost {
@@ -64,6 +66,9 @@ public:
     // leaves it there and reads Explorer's tray meanwhile.
     bool Yielded() const { return yielded_; }
     std::vector<HostIcon> Icons() const;
+    // The programs whose icon flashes now: QQ and WeChat flash theirs for a new message (they
+    // have no window to flash while they sit in the tray).
+    std::vector<std::wstring> Flashing() const;
     // Sends the shell's notifications for `action` on `key` at the screen point `at`
     // (the panel's pointer). False when the app cannot be told (gone, no callback,
     // an elevated app's window refusing Atrium's messages).
@@ -108,6 +113,7 @@ private:
     POINT hoverAt_{};
     ULONGLONG lostAt_ = 0, broadcastAt_ = 0;
     std::wstring loggedKeys_; // host thread: the list as last logged
+    bool flashing_ = false;   // host thread: some icon flashed at the last look
 };
 
 } // namespace atrium

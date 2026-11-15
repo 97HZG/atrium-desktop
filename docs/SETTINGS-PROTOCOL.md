@@ -32,6 +32,7 @@
 | `startIcon` | string | `small` / `medium` / `large` / `xlarge` | `medium`（见回退规则） | 独立于 `startSize` 的菜单图标和文件夹封面大小：34、40、52、64 DIP；对应格子宽 × 高为 62 × 82、72 × 88、94 × 100、116 × 112 DIP。设置中心和菜单空白处右键均可选四档；没有这一项时沿用 `start.json` 的 `icon`，Core 启动时回填设置 |
 | `showStatus` | bool | | true | 状态环与控制中心入口 |
 | `showNotifications` | bool | | true | 通知入口；关闭入口不关闭通知来源 |
+| `showDesktop` | bool | | true | 任务栏最右端的“显示桌面”：一条与分隔线同样的细线，点击等同 Win+D（再点一次恢复窗口） |
 | `textColor` | string | `auto` / `light` / `dark` | `auto` | 文字颜色；`auto` 按玻璃下方的实际亮度选择 |
 | `language` | string | `auto` / `zh-Hans` / `en` / locale tag | `auto` | 界面语言：`auto` 跟随 Windows 的显示语言（中文 → 简体中文，其余 → English）；`zh-Hans` 简体中文；`en` English；其他值对应 `locales/<tag>.json`。旧配置的 `zh` 视为 `zh-Hans`。任务栏、开始菜单、控制中心、通知、桌面小组件与设置中心一起切换，保存后立即生效 |
 | `autoHide` | string | `never` / `fullscreen` / `always` | `fullscreen` | 栏的显示方式：常驻；全屏时隐藏（有最大化、全屏或分屏铺满屏幕的窗口时滑出屏幕，前面再开小窗口也不出来）；一直隐藏。隐藏时，指针移到栏下方的屏幕底边栏就出现，离开后收回 |

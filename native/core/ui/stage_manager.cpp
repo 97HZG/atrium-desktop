@@ -12,6 +12,7 @@
 #include <winrt/Windows.Foundation.Collections.h>
 
 #include <algorithm>
+#include <functional>
 #include <climits>
 #include <cmath>
 #include <thread>
@@ -54,9 +55,12 @@ constexpr double kRevealInMs = 380, kRevealOutMs = 210, kRevealStagger = 32;
 // (letting clicks through) kFlightIdleMs after.
 constexpr double kFlightMs = 400, kFlightHoldMs = 150, kFlightFadeMs = 150, kFlightStepMs = 34;
 constexpr float kRestoreAt = 0.86f;
-// A flight's picture turns into a large one (at most kLargeMax px, the window's own corners) on its
-// way to the window's place, so that it is the window, sharp, when it lands.
-constexpr int kLargeMax = 1440;
+// A flight's picture turns into a large one (the window's own size and corners) on its way to the
+// window's place, so that it is the window, pixel for pixel, when it lands and fades: a smaller
+// one, enlarged, showed blurred text that turned sharp at once as the window came through. Only the
+// kLargeKept most recent are kept at full size (memory); older ones at most kLargeOld px.
+constexpr int kLargeMax = 4096, kLargeOld = 1440;
+constexpr size_t kLargeKept = 4;
 constexpr UINT kFlightIdleMs = 60000;
 // A window's picture taken this recently (the pointer went to the strip) is used as it is: the window
 // goes at once.
@@ -72,7 +76,17 @@ std::wstring StatePath()
 
 // Back without taking the foreground. Never a synchronous call into another app's window: one that
 // hangs must not hang the bar.
-void ShowQuietly(HWND h) { ShowWindowAsync(h, SW_SHOWNOACTIVATE); }
+// Up again without taking the foreground. A window minimized from maximized comes back maximized:
+// SW_SHOWNOACTIVATE alone restores its normal size, a maximized app back at half the screen (#19).
+void ShowQuietly(HWND h)
+{
+    WINDOWPLACEMENT wp{sizeof(wp)};
+    if (IsIconic(h) && GetWindowPlacement(h, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED)) {
+        ShowWindowAsync(h, SW_SHOWMAXIMIZED);
+        return;
+    }
+    ShowWindowAsync(h, SW_SHOWNOACTIVATE);
+}
 
 bool OnMonitor(HWND h, HMONITOR m) { return MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) == m; }
 
@@ -333,9 +347,13 @@ void StageManager::Update(const std::vector<TaskItem>& items)
     // Window by window: each its own item, as each has its own card. Excluded apps never
     // enter the stage model at all.
     items_.clear();
+    excludedWindows_.clear();
     for (const TaskItem& t : items) {
-        if (StageAppExcluded(excluded_, t.key))
+        if (StageAppExcluded(excluded_, t.key)) {
+            // Never put away, but still a window the strip keeps out of the way of.
+            excludedWindows_.insert(excludedWindows_.end(), t.windows.begin(), t.windows.end());
             continue;
+        }
         const bool rootHere = std::find(t.windows.begin(), t.windows.end(), root) != t.windows.end();
         for (HWND h : t.windows) {
             TaskItem w = t;
@@ -351,17 +369,22 @@ void StageManager::Update(const std::vector<TaskItem>& items)
     if (!enabled_)
         return;
     Prune();
-    Set opened;
+    Set opened, openedApps;
     for (const TaskItem& t : items_)
         if (openIntent_.Matches(AppOf(t.key), GetTickCount64()))
             for (HWND h : t.windows) {
                 BOOL here = TRUE;
                 if (IsWindow(h) && IsWindowVisible(h) && OnMonitor(h, monitor_) && !Transient(h) &&
-                    (!desktops_ || FAILED(desktops_->IsWindowOnCurrentVirtualDesktop(h, &here)) || here))
+                    (!desktops_ || FAILED(desktops_->IsWindowOnCurrentVirtualDesktop(h, &here)) || here)) {
                     opened.push_back(t.key);
+                    if (!Has(openedApps, AppOf(t.key)))
+                        openedApps.push_back(AppOf(t.key));
+                }
             }
     if (!opened.empty()) {
-        openIntent_.Cancel();
+        // Only these launches are done: another app added meanwhile still waits for its window.
+        for (const std::wstring& app : openedApps)
+            openIntent_.Done(app);
         pending_ = opened;
         pendingUntil_ = GetTickCount64() + kPendingMs;
         Stage(opened, true, nullptr, false);
@@ -580,6 +603,17 @@ void StageManager::PictureTaken()
             p.large = r.large.ok ? std::make_shared<const WindowPicture>(std::move(r.large)) : nullptr;
             p.gen = ++pictureGen_;
             p.taken = GetTickCount64();
+            // Beyond the most recent few, full-size pictures are kept smaller.
+            std::vector<std::pair<ULONGLONG, HWND>> full;
+            for (const auto& [h, q] : pictures_)
+                if (q.large && std::max(q.large->width, q.large->height) > kLargeOld)
+                    full.push_back({q.taken, h});
+            std::sort(full.begin(), full.end(), std::greater<>());
+            for (size_t i = kLargeKept; i < full.size(); ++i) {
+                Picture& q = pictures_[full[i].second];
+                q.large = std::make_shared<const WindowPicture>(Smaller(*q.large, kLargeOld));
+                flight_.ForgetImage(L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(full[i].second)) + L"|" + std::to_wstring(q.gen) + L"|L");
+            }
             PutDown(r.window, true);
         } else {
             // None taken (or a blank one): an earlier picture flies, if there is one.
@@ -681,7 +715,6 @@ void StageManager::OpenInCurrentGroup(const std::wstring& app)
 {
     if (!enabled_ || app.empty() || StageAppExcluded(excluded_, app))
         return; // excluded apps are left where they are (their own open command still works)
-    openIntent_.Cancel();
     Update(tasks_.Snapshot(true)); // the menu's snapshot may already be out of date
     Set keys;
     HWND front = nullptr;
@@ -870,13 +903,15 @@ void StageManager::KeepPicture()
     POINT p{};
     GetCursorPos(&p);
     const float s = PopupScale(WorkArea());
-    const bool titleBar = PtInRect(&r, p) && p.y < r.top + LONG(56 * s);
+    // Near the caption buttons (where a minimize comes from) the picture is kept fresh; elsewhere
+    // seldom: PrintWindow makes the app draw itself whole, costly for a browser (#50).
+    const bool titleBar = PtInRect(&r, p) && p.y < r.top + LONG(56 * s) && p.x > r.right - LONG(180 * s);
     // Just opened or back up, a window has not drawn itself yet: its picture would be blank.
     if (now - frontSince_ < kDrawnMs)
         return;
     const auto it = pictures_.find(root);
     const ULONGLONG age = it == pictures_.end() ? ULLONG_MAX : now - it->second.taken;
-    if (age < (titleBar ? 1500ULL : 6000ULL))
+    if (age < (titleBar ? 1500ULL : 20000ULL))
         return;
     pictures_[root].taken = now; // asked for: not again meanwhile
     RequestPicture(root);
@@ -1316,19 +1351,21 @@ bool StageManager::Covered()
     if (covered_)
         return covered_;
     const RECT zone = Zone();
+    std::vector<HWND> windows = excludedWindows_; // an excluded app's window over the strip counts too
     for (const TaskItem& t : items_)
-        for (HWND h : t.windows) {
-            if (parked_.contains(h) || !IsWindowVisible(h) || IsIconic(h) || !OnMonitor(h, monitor_))
-                continue;
-            RECT r{}, hit{};
-            if (FAILED(DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))) && !GetWindowRect(h, &r))
-                continue;
-            BOOL cloaked = FALSE;
-            if (SUCCEEDED(DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
-                continue; // on another virtual desktop
-            if (IntersectRect(&hit, &r, &zone))
-                return covered_ = true;
-        }
+        windows.insert(windows.end(), t.windows.begin(), t.windows.end());
+    for (HWND h : windows) {
+        if (parked_.contains(h) || !IsWindowVisible(h) || IsIconic(h) || !OnMonitor(h, monitor_))
+            continue;
+        RECT r{}, hit{};
+        if (FAILED(DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))) && !GetWindowRect(h, &r))
+            continue;
+        BOOL cloaked = FALSE;
+        if (SUCCEEDED(DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
+            continue; // on another virtual desktop
+        if (IntersectRect(&hit, &r, &zone))
+            return covered_ = true;
+    }
     return covered_;
 }
 
@@ -1528,7 +1565,7 @@ bool StageManager::Flying(HWND window) const
     return std::any_of(flights_.begin(), flights_.end(), [&](const Flight& f) { return f.window == window; });
 }
 
-void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, bool shadow, bool image)
+void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow, bool image)
 {
     if (!p.ok || p.width <= 0 || p.height <= 0 || opacity < 0.004f)
         return;
@@ -1536,9 +1573,9 @@ void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wst
     const D2D1::Matrix4x4F m = Tilt(pose.cx * s, pose.cy * s, pose.ox * s, pose.oy * s, pose.angle, kDepth * s, pose.z * s);
     const D2D1_RECT_F& r = pose.rect;
     const float f = (r.right - r.left) / float(p.width), sp = float(kShadowPad) * f, pp = float(kPicturePad) * f;
-    if (shadow && !p.shadow.empty())
+    if (shadow > 0.004f && !p.shadow.empty())
         c.ImagePerspective(key + L"|s", p.shadow, D2D1::RectF(r.left - sp, r.top - sp, r.right + sp, r.bottom + sp),
-                           m * D2D1::Matrix4x4F::Translation(0, kShadowDrop * s, 0), kShadowAlpha * opacity);
+                           m * D2D1::Matrix4x4F::Translation(0, kShadowDrop * s, 0), kShadowAlpha * opacity * shadow);
     if (image)
         c.ImagePerspective(key, p.image, D2D1::RectF(r.left - pp, r.top - pp, r.right + pp, r.bottom + pp), m, opacity);
 }
@@ -1651,12 +1688,13 @@ void StageManager::PaintFlights(Canvas& c)
         // corners where the window is (it lands as the window; it leaves as it).
         const float toPlace = f.toStrip ? 1 - e : e;
         const float large = f.large ? SmoothStep(0.15f, 0.8f, toPlace) : 0.f;
-        // Fading over its window, the picture has no shadow: the shadow fills the picture's rectangle
-        // and, fading with it, would darken the window under it for a moment (the window has its own).
-        const bool shadow = f.toStrip || over <= 0;
-        DrawPicture(c, *f.picture, f.key, p, opacity, shadow, large < 0.999f);
+        // Once the window is up under it (kRestoreAt), the picture's shadow fades as the window's own
+        // takes over, gone by the landing: cut at once it was a shadow that vanished; kept while the
+        // picture fades it would darken the window under it for a moment.
+        const float shade = f.toStrip ? 1.f : 1.f - SmoothStep(kRestoreAt - 0.04f, 1.f, t);
+        DrawPicture(c, *f.picture, f.key, p, opacity, shade, large < 0.999f);
         if (large > 0)
-            DrawPicture(c, *f.large, f.largeKey, p, opacity * large, false);
+            DrawPicture(c, *f.large, f.largeKey, p, opacity * large, 0.f);
         const bool done = f.toStrip ? t >= 1 : over >= kFlightFadeMs;
         if (done) {
             // Up again: its own animations back, unless minimizing it on the stage sends its picture

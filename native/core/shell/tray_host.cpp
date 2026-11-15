@@ -276,6 +276,15 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TIMER:
         if (w == kKeepTimer) {
             KeepFirst();
+            {
+                std::lock_guard g(mutex_);
+                const ULONGLONG now = GetTickCount64();
+                const bool flashing = std::any_of(icons_.begin(), icons_.end(), [&](const auto& i) { return i.second.flashUntil > now; });
+                if (flashing != flashing_) {
+                    flashing_ = flashing;
+                    dirty_ = true; // a flash began or ended: the bar lights or dims the app
+                }
+            }
             if (dirty_.exchange(false)) {
                 PostMessageW(notify_, msg_, 0, 0);
                 LogList();
@@ -455,6 +464,12 @@ void TrayHost::Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage
     if (nid.uFlags & NIF_ICON) {
         icon.image = std::move(image);
         icon.imageVersion = kImageBase + ++nextImage_;
+        // Four picture changes within three seconds: it flashes (an icon blinking for a message).
+        const ULONGLONG now = GetTickCount64();
+        std::erase_if(icon.pictureChanges, [&](ULONGLONG t) { return now - t > 3000; });
+        icon.pictureChanges.push_back(now);
+        if (icon.pictureChanges.size() >= 4)
+            icon.flashUntil = now + 2500;
     }
     if (nid.uFlags & NIF_TIP)
         icon.tip.assign(nid.szTip, wcsnlen(nid.szTip, std::size(nid.szTip)));
@@ -491,7 +506,7 @@ LRESULT TrayHost::OnIconRect(WPARAM w, const COPYDATASTRUCT* cds)
 void TrayHost::KeepFirst()
 {
     HWND w = window_.load();
-    if (!w || stopping_)
+    if (!w || stopping_ || g_hostAside > 0)
         return;
     HWND shell = ShellTaskbar();
     RECT want{}, have{};
@@ -565,6 +580,17 @@ std::vector<HostIcon> TrayHost::Icons() const
     for (const auto& [key, icon] : icons_)
         out.push_back(icon);
     std::sort(out.begin(), out.end(), [](const HostIcon& a, const HostIcon& b) { return a.added < b.added; });
+    return out;
+}
+
+std::vector<std::wstring> TrayHost::Flashing() const
+{
+    std::lock_guard g(mutex_);
+    std::vector<std::wstring> out;
+    const ULONGLONG now = GetTickCount64();
+    for (const auto& [key, icon] : icons_)
+        if (icon.flashUntil > now && !icon.exe.empty())
+            out.push_back(icon.exe);
     return out;
 }
 

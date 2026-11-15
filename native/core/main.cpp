@@ -70,6 +70,7 @@ constexpr UINT WM_WIN_KEY = WM_APP + 12;      // the Windows key alone (wParam 0
 constexpr UINT WM_USB = WM_APP + 13;          // the device worker has queued removal notices
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
+constexpr UINT_PTR kDisplaySettleTimer = 0x56; // once more after a display change, the topology settled
 constexpr UINT_PTR kReadyTimer = 0x54;       // only during an update startup handshake
 constexpr UINT kStatusMs = 3000;
 constexpr UINT kTrayId = 1;
@@ -1007,6 +1008,7 @@ void ConfigureBar(Bar& bar)
     bar.onStartClick = ToggleStart;
     bar.onNotifyClick = [](RECT) { g_app.notes->ToggleCenter(); };
     bar.onTrayClick = ToggleTray;
+    bar.onDesktopClick = [] { SendWinShortcut('D'); }; // the system's Show Desktop: a second click brings the windows back
     bar.onStatusClick = ToggleControl;
     bar.keepShown = [&bar] {
         return g_app.activeBar == &bar && (g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() ||
@@ -1034,6 +1036,27 @@ void ConfigureBar(Bar& bar)
             g_app.preview->Refresh(bar.Items());
     };
     bar.onCloseRequest = [] { PostMessageW(g_app.host, WM_CLOSE, 0, 0); };
+}
+
+// The bar's items, lit for attention also where an app's tray icon flashes (QQ and WeChat flash
+// theirs for a new message while they sit in the tray, with no window to flash).
+std::vector<TaskItem> BarItems()
+{
+    std::vector<TaskItem> items = g_app.tasks->Snapshot();
+    const std::vector<std::wstring> flashing = g_app.tray ? g_app.tray->Flashing() : std::vector<std::wstring>{};
+    if (flashing.empty())
+        return items;
+    for (TaskItem& t : items) {
+        if (t.attention)
+            continue;
+        std::wstring exe = g_app.tasks->FileLocation(t.key);
+        if (exe.empty())
+            continue;
+        exe = AppExecutable(exe);
+        CharLowerBuffW(exe.data(), DWORD(exe.size()));
+        t.attention = std::find(flashing.begin(), flashing.end(), exe) != flashing.end();
+    }
+    return items;
 }
 
 void SyncDisplayBars(const Settings& settings, bool refresh)
@@ -1070,7 +1093,7 @@ void SyncDisplayBars(const Settings& settings, bool refresh)
             bar->SetUnread(g_app.notes->Unread());
             g_app.secondaryBars.push_back(std::move(bar));
         }
-    const auto items = g_app.tasks->Snapshot();
+    const auto items = BarItems();
     ForBars([&](Bar& bar) {
         if (refresh)
             bar.RefreshDisplays();
@@ -1263,8 +1286,19 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             }
         } else if (w == 1) // a click was forwarded: see where the focus ends up
             SetTimer(h, kTrayFocusTimer, 600, nullptr);
-        else if (g_app.trayPanel)
-            g_app.trayPanel->Refresh();
+        else {
+            if (g_app.trayPanel)
+                g_app.trayPanel->Refresh();
+            // A tray icon began or stopped flashing: the bar lights or dims its app.
+            static std::vector<std::wstring> lastFlashing;
+            std::vector<std::wstring> flashing = g_app.tray ? g_app.tray->Flashing() : std::vector<std::wstring>{};
+            std::sort(flashing.begin(), flashing.end());
+            if (flashing != lastFlashing && g_app.tasks) {
+                lastFlashing = std::move(flashing);
+                const auto items = BarItems();
+                ForBars([&](Bar& bar) { bar.SetItems(items); });
+            }
+        }
         return 0;
     case WM_TIMER:
         if (w == kReadyTimer) {
@@ -1287,6 +1321,14 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             UpdateStatus();
             if (g_app.chrome)
                 g_app.chrome->Enforce();
+            return 0;
+        }
+        if (w == kDisplaySettleTimer) {
+            KillTimer(h, kDisplaySettleTimer);
+            if (g_app.displaysReady) {
+                Log(L"core: displays settled: renderers set up again");
+                SyncDisplayBars(g_app.displaySettings, true);
+            }
             return 0;
         }
         if (w == kTrayFocusTimer) {
@@ -1342,6 +1384,10 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (g_app.chrome)
             g_app.chrome->Enforce(); // a new display's taskbar
         SyncDisplayBars(g_app.displaySettings, true);
+        // A display coming and going (a remote-control tool's virtual display) sends this while
+        // the topology still changes; renderers set up then could keep drawing to a gone output
+        // (#66: blank bars until a restart). Once more when it has settled.
+        SetTimer(h, kDisplaySettleTimer, 2000, nullptr);
         {
             HMONITOR desktop = ResolveDisplay(ConnectedDisplays(), g_app.desktopDisplay);
             g_app.widgets->SetMonitor(desktop, true);
@@ -1530,7 +1576,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
             g_app.stage->Update(g_app.tasks->Snapshot(true));
         if (g_app.trayPanel) g_app.trayPanel->SetAttention(g_app.tasks->Snapshot(true));
         const double t1 = ClockMs();
-        auto items = g_app.tasks->Snapshot();
+        auto items = BarItems();
         const double t2 = ClockMs();
         ForBars([&](Bar& bar) { bar.SetItems(items); });
         if (g_app.preview)
@@ -1593,7 +1639,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     ConfigureBar(*g_app.bar);
     g_app.displaysReady = true;
     ApplySettings(settings);
-    g_app.bar->SetItems(g_app.tasks->Snapshot());
+    g_app.bar->SetItems(BarItems());
     g_app.server = std::make_unique<SettingsServer>(g_app.host, settings);
     // The start menu's size and its icons' size are settings (the settings show them);
     // kept in start.json before.

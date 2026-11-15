@@ -45,6 +45,7 @@ constexpr wchar_t kNotifyKey[] = L"#notify";
 constexpr wchar_t kTrayKey[] = L"#tray";
 constexpr wchar_t kStatusKey[] = L"#status";
 constexpr wchar_t kMoreKey[] = L"#more";
+constexpr wchar_t kDesktopKey[] = L"#desktop";
 // Bar entries and the clock start with '#'; app keys are AUMIDs or paths.
 bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
@@ -376,6 +377,7 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display) : debug
 
 Bar::~Bar()
 {
+    UpdateAppBar(nullptr, RECT{}, 0);
     for (HWINEVENTHOOK h : hooks_)
         if (h) {
             UnhookWinEvent(h);
@@ -461,9 +463,55 @@ std::wstring Bar::HitTest(POINT pt) const
     return {};
 }
 
+// The bar's strip of the screen while it is always shown (`reserve` px at the bottom of
+// `monitor`); 0 gives it back. Windows keeps the work area: maximized windows end above the bar.
+void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
+{
+    APPBARDATA abd{sizeof(abd)};
+    abd.hWnd = input_;
+    if (reserve <= 0 || !monitor) {
+        if (appBar_) {
+            AppBarMessage(ABM_REMOVE, abd);
+            appBar_ = false;
+            appBarReserved_ = 0;
+            appBarMonitor_ = nullptr;
+            Log(L"bar: screen strip given back");
+        }
+        return;
+    }
+    if (!appBar_) {
+        static const UINT notice = RegisterWindowMessageW(L"Atrium.AppBar");
+        abd.uCallbackMessage = notice;
+        if (!AppBarMessage(ABM_NEW, abd))
+            return;
+        appBar_ = true;
+        appBarRect_ = RECT{};
+    }
+    const RECT want{bounds.left, bounds.bottom - reserve, bounds.right, bounds.bottom};
+    if (appBarMonitor_ == monitor && appBarReserved_ == reserve && EqualRect(&appBarRect_, &want))
+        return;
+    abd.uEdge = ABE_BOTTOM;
+    abd.rc = want;
+    AppBarMessage(ABM_QUERYPOS, abd); // below another app bar (the system taskbar, if shown): above it
+    abd.rc.top = abd.rc.bottom - reserve;
+    AppBarMessage(ABM_SETPOS, abd);
+    appBarRect_ = want;
+    appBarReserved_ = reserve;
+    appBarMonitor_ = monitor;
+    Log(L"bar: keeps %d px of the screen's bottom (always shown)", reserve);
+}
+
 LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+    static const UINT appBarNotice = RegisterWindowMessageW(L"Atrium.AppBar");
+    if (m == appBarNotice && appBarNotice) {
+        if (w == ABN_POSCHANGED) { // another app bar or the taskbar moved: claim the strip again
+            appBarRect_ = RECT{};
+            Relayout();
+        }
+        return 0;
+    }
     switch (m) {
     case WM_BAR_LAYOUT:
         layoutPending_ = false;
@@ -637,6 +685,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
                 onNotifyClick(anchor);
             else if (key == kTrayKey && onTrayClick)
                 onTrayClick(anchor);
+            else if (key == kDesktopKey && onDesktopClick)
+                onDesktopClick();
             else if (key == kStatusKey && onStatusClick)
                 onStatusClick(anchor);
             else if (key == kMoreKey && onOverflow)
@@ -911,6 +961,7 @@ void Bar::Relayout()
     const bool showTray = showRight && st.showTray;
     const bool showStatus = showRight && st.showStatus;
     const bool showNotifications = showRight && st.showNotifications;
+    const bool showDesktop = showRight && st.showDesktop;
 
     // Metrics (px). Every icon sits centred on a square plate (press and drag
     // feedback); the plate has the same gap `v` to the top and bottom edge,
@@ -940,7 +991,9 @@ void Bar::Relayout()
     // as the apps; so does the status ring (battery or volume, Wi-Fi).
     // The status entry as three icons (statusStyle) is wider than a plate by about an icon.
     const int statusExtra = st.statusStyle == L"icons" ? int(std::lround(icon * 1.3f)) : 0;
-    const int rightCount = int(showTray) + int(showStatus) + int(showNotifications) + int(clockW != 0);
+    // Show Desktop: a narrow slot at the bar's right end, a thin line in it, as the system taskbar's.
+    const int deskW = showDesktop ? std::max(Px(10, s), int(std::lround(icon * 0.45))) : 0;
+    const int rightCount = int(showTray) + int(showStatus) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
     const int groupGap = rightCount ? sepGap : 0;
     const int total = int(items_.size());
     int n = total;
@@ -952,7 +1005,7 @@ void Bar::Relayout()
         w += slots ? slots * p + (slots - 1) * g : 0;    // apps
         if (rightCount)
             w += 2 * sepGap + p * (int(showTray) + int(showStatus) + int(showNotifications)) + (showStatus ? statusExtra : 0) + clockW +
-                 (rightCount - 1) * g;
+                 deskW + (rightCount - 1) * g;
         return std::max(w, barH * 2);
     };
     // The magnified bar stretches by up to (mag - 1) * range on top of its width.
@@ -1001,7 +1054,11 @@ void Bar::Relayout()
 
     const int winW = roomW + 2 * side, winH = barH + insetTop + inset;
     const int x = wa.left + (wa.right - wa.left - winW) / 2;
-    const int y = wa.bottom - Px(st.margin, s) - barH - insetTop;
+    // "Always shown": the bar keeps its strip of the screen as an app bar (as the system taskbar
+    // does), so maximized windows end above it (#40). Its own strip is not part of where it sits.
+    const int reserve = visible_ && st.bar && st.autoHide == L"never" ? Px(st.margin, s) + barH : 0;
+    const int baseBottom = int(wa.bottom) + (appBar_ && appBarMonitor_ == mon ? appBarReserved_ : 0);
+    const int y = baseBottom - Px(st.margin, s) - barH - insetTop;
 
     // Display order: during a drag the dragged app leaves its slot and the
     // others close up around the insertion point.
@@ -1079,6 +1136,7 @@ void Bar::Relayout()
         cursor -= gap;
         return left;
     };
+    const int deskLeft = rightSlot(deskW, showDesktop);
     const int bellLeft = rightSlot(plate, showNotifications);
     const int clockLeft = rightSlot(clockW, clockW != 0), clockRight = clockLeft + clockW;
     const int statusLeft = rightSlot(statusW, showStatus), statusRight = statusLeft + statusW;
@@ -1166,7 +1224,14 @@ void Bar::Relayout()
         SceneItem bell = entry(kNotifyKey, bellLeft, L"\uEA8F");
         bell.badge = unread_;
         scene.extras.push_back(std::move(bell));
-        hits_.push_back({kNotifyKey, RECT{bellLeft - gap / 2, hitTop, insetX + barW, hitBottom}});
+        hits_.push_back({kNotifyKey, RECT{bellLeft - gap / 2, hitTop, showDesktop ? deskLeft - gap / 2 : insetX + barW, hitBottom}});
+    }
+    if (showDesktop) {
+        SceneItem desk = entry(kDesktopKey, deskLeft, L"");
+        desk.plate = D2D1::RectF(float(deskLeft), plateTop, float(deskLeft + deskW), plateTop + float(plate));
+        desk.icon = D2D1::RectF(float(deskLeft), iconTop, float(deskLeft + deskW), iconTop + float(icon));
+        scene.extras.push_back(std::move(desk));
+        hits_.push_back({kDesktopKey, RECT{deskLeft - gap / 2, hitTop, insetX + barW, hitBottom}}); // to the bar's very end
     }
     if (!scene.hoverKey.empty() && std::none_of(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
@@ -1185,6 +1250,7 @@ void Bar::Relayout()
     window_ = win;
     monitor_ = mi.rcMonitor;
     hmonitor_ = mon;
+    UpdateAppBar(mon, mi.rcMonitor, reserve);
     scale_ = s;
     inset_ = inset;
     insetX_ = insetX;
@@ -1639,6 +1705,8 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
         return unread_ ? TrFormat(L"%d unread notifications", int(unread_)) : Tr(L"Notifications");
     if (key == kTrayKey)
         return Tr(L"Tray");
+    if (key == kDesktopKey)
+        return Tr(L"Show Desktop");
     if (key == kStatusKey) {
         const SystemStatus& st = status_;
         std::wstring net;
@@ -1849,6 +1917,7 @@ bool Bar::RenderSession()
             PreferPowerSavingGpu();
         if (!capture) {
             duplicationFailed_ = true;
+            duplicationRetryAt_ = GetTickCount64() + 30000;
             Log(L"render: desktop duplication unavailable (0x%08X); Windows.Graphics.Capture, Atrium kept out of screenshots",
                 static_cast<unsigned>(why));
         }
@@ -2275,6 +2344,18 @@ bool Bar::RenderSession()
         ID3D11Texture2D* frame = capture->Acquire();
         if (capture->Lost())
             return true; // a new source (display mode change, secure desktop)
+        // On Windows.Graphics.Capture after Desktop Duplication failed (it can after a lock or sleep):
+        // Desktop Duplication again once it works, not only after a restart (#19).
+        if (!remote && duplicationFailed_ && !capture->KeepsOwnWindowsOut() && GetTickCount64() >= duplicationRetryAt_) {
+            duplicationRetryAt_ = GetTickCount64() + 30000;
+            HRESULT why = S_OK;
+            bool elsewhere = false;
+            if (DuplicationCapture::Create(gpu, snap.hmonitor, frame_, why, elsewhere)) {
+                duplicationFailed_ = false;
+                Log(L"render: desktop duplication available again");
+                return true;
+            }
+        }
         if (snap.hmonitor != captureMonitor || snap.displayGeneration != captureGeneration || RemoteVisible() != remote)
             return true; // selected display or its capture source changed
         if (!snap.visible) {

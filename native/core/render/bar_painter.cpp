@@ -21,6 +21,8 @@ namespace {
 
 // Positions (items, the bar's edges) ease towards new places at this rate per second (about 0.3 s).
 constexpr float kSlideRate = 14;
+// An app asking for attention: its plate pulses kAlertPulseMs (once each kAlertPeriodMs), then stays lit.
+constexpr double kAlertPulseMs = 4000, kAlertPeriodMs = 1000;
 
 D2D1_COLOR_F InkColor(float dark)
 {
@@ -166,7 +168,16 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         float a = Approach(m.appear, 1.f, dt, 10);
         float l = Approach(m.lift, scene.dragKey == key ? 1.f : 0.f, dt, 22);
         float d = Approach(m.dot, item && item->running ? 1.f : 0.f, dt, 12);
-        moving |= h != m.hover || p != m.press || a != m.appear || l != m.lift || d != m.dot;
+        const bool asks = item && item->attention;
+        float al = Approach(m.alert, asks ? 1.f : 0.f, dt, 8);
+        if (asks && m.alertSince < 0)
+            m.alertSince = nowMs;
+        else if (!asks)
+            m.alertSince = -1;
+        // The lit plate pulses softly for its first seconds, then stays lit until the app is opened.
+        moving |= asks && nowMs - m.alertSince < kAlertPulseMs;
+        moving |= h != m.hover || p != m.press || a != m.appear || l != m.lift || d != m.dot || al != m.alert;
+        m.alert = al;
         m.hover = h;
         m.press = p;
         m.appear = a;
@@ -480,6 +491,18 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float cx = MapX(bx);
     float hover = motion::EaseOut(m.hover), lift = motion::EaseOut(m.lift);
 
+    // An app asking for attention (a window flashing: a new message, a finished task): its plate
+    // lit amber, as the system taskbar lights the button, pulsing softly at first, then steady
+    // until the app comes to the front. Under the hover wash.
+    if (m.alert > 0.001f) {
+        float pulse = 0;
+        if (m.alertSince >= 0 && lastMs_ - m.alertSince < kAlertPulseMs)
+            pulse = 0.5f - 0.5f * std::cos(2 * 3.14159265f * float((lastMs_ - m.alertSince) / kAlertPeriodMs));
+        brush->SetColor(D2D1::ColorF(1.0f, 0.62f, 0.16f, (0.26f + 0.18f * pulse) * m.alert * m.appear));
+        d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, D2D1::Point2F(bx, plate.bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, 0));
+        FillContinuousRect(d2d, plate, scene.plateRadius, brush);
+    }
+
     // 底板仅响应悬停（关闭放大时）和拖动，按下仅缩放图标。
     // Its corners are concentric with the bar's.
     float plateA = (magnifying ? 0.f : hover) + 0.4f * lift;
@@ -504,6 +527,17 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
             DrawStatusIcons(d2d, scene.status, icon, brush, ink, darkInk);
         else
             DrawStatus(d2d, scene.status, icon, brush, ink, darkInk);
+        d2d->SetTransform(D2D1::Matrix3x2F::Identity());
+        return;
+    }
+    if (it.key == L"#desktop") {
+        // Show Desktop: a thin line as tall as the separator, in its ink; brighter while hovered.
+        D2D1_COLOR_F c = ink;
+        c.a = ((ink.r < 0.5f ? 0.18f : 0.30f) + 0.35f * hover) * m.appear;
+        brush->SetColor(c);
+        const float h = (scene.bar.bottom - scene.bar.top) * 0.46f, mid = (scene.bar.top + scene.bar.bottom) / 2, x = (icon.left + icon.right) / 2;
+        d2d->SetTransform(D2D1::Matrix3x2F::Translation(cx - bx, 0));
+        d2d->FillRectangle(D2D1::RectF(x - 0.5f * s, mid - h / 2, x + 0.5f * s, mid + h / 2), brush);
         d2d->SetTransform(D2D1::Matrix3x2F::Identity());
         return;
     }

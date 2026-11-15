@@ -149,6 +149,12 @@ StartLayout LoadStartLayout()
         for (const auto& v : o.GetNamedArray(L"hidden"))
             if (v.ValueType() == json::JsonValueType::String)
                 layout.hidden.push_back(std::wstring(v.GetString()));
+    if (o.HasKey(L"windowsPins") && o.GetNamedValue(L"windowsPins").ValueType() == json::JsonValueType::Array) {
+        layout.windowsPinsKnown = true;
+        for (const auto& v : o.GetNamedArray(L"windowsPins"))
+            if (v.ValueType() == json::JsonValueType::String)
+                layout.windowsPins.push_back(std::wstring(v.GetString()));
+    }
     layout.Clamp();
     return layout;
 }
@@ -178,6 +184,12 @@ bool SaveStartLayout(const StartLayout& layout)
             tiles.Append(e);
         }
         o.SetNamedValue(L"tiles", tiles);
+    }
+    if (layout.custom && layout.windowsPinsKnown) {
+        json::JsonArray pins;
+        for (const std::wstring& id : layout.windowsPins)
+            pins.Append(json::JsonValue::CreateStringValue(id));
+        o.SetNamedValue(L"windowsPins", pins);
     }
     if (!layout.hidden.empty()) {
         json::JsonArray hidden;

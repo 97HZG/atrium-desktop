@@ -433,7 +433,7 @@ void TrayPanel::Paint(Canvas& c)
         c.EndGroup();
         c.EndGroup();
         // Only an existing task attention signal for the exact executable. No guessed unread count.
-        if (!icon.exe.empty() && std::find(attention_.begin(), attention_.end(), icon.exe) != attention_.end()) {
+        if (icon.flashing || (!icon.exe.empty() && std::find(attention_.begin(), attention_.end(), icon.exe) != attention_.end())) {
             const float pulse = 0.72f + 0.28f * float(std::sin((c.now - openedMs_) * 0.006));
             c.Fill(D2D1::RectF(ir.right - 3, ir.top - 3, ir.right + 4, ir.top + 4), 3.5f,
                 D2D1::ColorF(0.96f, 0.22f, 0.25f, pulse));

@@ -125,7 +125,8 @@ private:
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
 
     // The tiles, the rows.
-    void Rebuild();            // tiles_ from the layout (or the Windows pins) and the catalog
+    void Rebuild();
+    void SyncWindowsPins();            // tiles_ from the layout (or the Windows pins) and the catalog
     std::vector<Row> Results() const; // search matches, best first
     std::vector<Row> AllApps() const; // the A-Z list with its headings
     int PerPage() const { return cols_ * rows_; }

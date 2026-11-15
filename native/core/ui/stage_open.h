@@ -1,24 +1,28 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 
 namespace atrium {
 
-// A launch from the bar joins the stage once its window arrives, not whichever app opens next.
+// Launches from the bar that join the stage once their window arrives, not whichever app
+// opens next. Several can wait at once (A, then B, added before either window shows); each
+// lasts ten seconds, ends when its window has joined, and all end when the stage changes.
 class StageOpenIntent {
 public:
-    void Arm(const std::wstring& app, uint64_t now) { app_ = app; until_ = now + 10000; }
-    void Cancel() { app_.clear(); until_ = 0; }
+    void Arm(const std::wstring& app, uint64_t now) { apps_[app] = now + 10000; }
+    void Cancel() { apps_.clear(); }
+    void Done(const std::wstring& app) { apps_.erase(app); }
     bool Matches(const std::wstring& app, uint64_t now)
     {
-        if (now >= until_)
-            Cancel();
-        return !app_.empty() && app_ == app;
+        std::erase_if(apps_, [&](const auto& item) { return now >= item.second; });
+        return apps_.contains(app);
     }
+    bool Empty() const { return apps_.empty(); }
+
 private:
-    std::wstring app_;
-    uint64_t until_ = 0;
+    std::map<std::wstring, uint64_t> apps_;
 };
 
 } // namespace atrium

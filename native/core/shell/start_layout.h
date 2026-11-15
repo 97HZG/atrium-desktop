@@ -29,6 +29,10 @@ struct StartLayout {
     bool custom = false;           // tiles arranged by the user (else the Windows pins)
     std::vector<StartTile> tiles;
     std::vector<std::wstring> hidden; // apps kept out of the menu (but for the end of the A-Z list)
+    // The Windows start menu's pins already taken into the user's arrangement: one pinned there
+    // later is added at the end (#63); one the user removed here is not brought back.
+    std::vector<std::wstring> windowsPins;
+    bool windowsPinsKnown = false;
     void Clamp();
     std::wstring NewFolderId() const;
 };

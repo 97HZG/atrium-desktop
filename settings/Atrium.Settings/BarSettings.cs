@@ -55,6 +55,7 @@ internal sealed class BarSettings
     public string StartIcon { get; set; } = "";
     public bool ShowStatus { get; set; } = true;
     public bool ShowNotifications { get; set; } = true;
+    public bool ShowDesktop { get; set; } = true;      // the Show Desktop slot at the bar's right end
     public bool ShowRunning { get; set; } = true;
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public string Language { get; set; } = "auto"; // auto (follow Windows) | a locale tag: en, zh-Hans, ...
@@ -163,6 +164,7 @@ internal sealed class BarSettings
             ["startStatus"] = StartStatus,
             ["showStatus"] = ShowStatus,
             ["showNotifications"] = ShowNotifications,
+            ["showDesktop"] = ShowDesktop,
             ["autoWidth"] = AutoWidth,
             ["showRunning"] = ShowRunning,
             ["textColor"] = TextColor,
@@ -260,6 +262,7 @@ internal sealed class BarSettings
         s.StartIcon = o?["startIcon"] is JsonValue si0 && si0.TryGetValue(out string? iconSize) && iconSize is "small" or "medium" or "large" or "xlarge" ? iconSize! : f.StartIcon;
         s.ShowStatus = Flag("showStatus", f.ShowStatus);
         s.ShowNotifications = Flag("showNotifications", f.ShowNotifications);
+        s.ShowDesktop = Flag("showDesktop", f.ShowDesktop);
         s.AutoWidth = Flag("autoWidth", f.AutoWidth);
         s.ShowRunning = Flag("showRunning", f.ShowRunning);
         s.NotifyTimeout = Math.Clamp(Num("notifyTimeout", f.NotifyTimeout), 3, 30);
@@ -342,7 +345,7 @@ internal sealed class BarSettings
         MagnifyNear == o.MagnifyNear && NearEnter == o.NearEnter && NearLeave == o.NearLeave && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
         ShowClockSeconds == o.ShowClockSeconds &&
         ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus && StartSize == o.StartSize && StartIcon == o.StartIcon &&
-        ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications &&
+        ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
         ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&

@@ -89,6 +89,7 @@ public:
     std::function<void(RECT anchor)> onStartClick;  // the Atrium logo
     std::function<void(RECT anchor)> onNotifyClick; // the notification bell
     std::function<void(RECT anchor)> onTrayClick;   // the tray entry (Atrium's tray panel)
+    std::function<void()> onDesktopClick;           // the Show Desktop slot at the bar's right end
     std::function<void(RECT anchor)> onStatusClick; // the status icon (Wi-Fi, battery: the control centre)
     std::function<void(int notches)> onStatusWheel; // the wheel over the status icon (volume)
     // The overflow entry: apps that did not fit, in bar order.
@@ -175,6 +176,11 @@ private:
     void ShowOwnWindowsToCapture(bool visible); // render thread; waits for the UI thread
     HWND visual_ = nullptr;
     HWND input_ = nullptr;
+    void UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve);
+    bool appBar_ = false;          // registered as an app bar (always shown: the screen strip is the bar's)
+    int appBarReserved_ = 0;       // px kept at the bottom of appBarMonitor_
+    HMONITOR appBarMonitor_ = nullptr;
+    RECT appBarRect_{};
     std::unique_ptr<Surface> tooltip_;
     std::wstring tooltipText_;
     D2D1_SIZE_F tooltipSize_{};
@@ -257,6 +263,7 @@ private:
     HANDLE captureAck_ = nullptr; // the UI thread changed the windows' capture exclusion
     std::atomic<bool> captureVisible_{false}; // Atrium's windows show in screenshots (render thread)
     bool duplicationFailed_ = false;            // Desktop Duplication cannot run here: Windows.Graphics.Capture
+    ULONGLONG duplicationRetryAt_ = 0; // on Windows.Graphics.Capture: when to try Desktop Duplication again
     std::thread render_;
 };
 

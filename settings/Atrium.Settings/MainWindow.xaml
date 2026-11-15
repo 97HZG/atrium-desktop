@@ -724,6 +724,8 @@
                             <StackPanel>
                                 <TextBlock Text="Taskbar" Style="{StaticResource SectionStyle}" />
                                 <local:ToggleTile x:Name="NotificationsSwitch" Title="Notifications button" SwitchName="Show notifications button" Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="DesktopSwitch" Title="Show Desktop button" SwitchName="Show Desktop button" Toggled="OnBarContentToggled" Flat="True"
+                                                  Note="A thin line at the taskbar's right end, as on the Windows taskbar: click it to show the desktop, click again to bring the windows back." />
                             </StackPanel>
                             <StackPanel>
                                 <Grid>
@@ -776,8 +778,9 @@
                                 <local:ToggleTile x:Name="StageMinimizeSwitch" Title="Minimize to Stage Manager" SwitchName="Minimize to Stage Manager" Toggled="OnStageMinimizeToggled" Flat="True" />
                                 <StackPanel Style="{StaticResource FlatRowStyle}" Spacing="2">
                                     <TextBlock Text="Excluded from Stage Manager" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="One app per line: an executable name (for example wechat.exe), a package id prefix, or a complete app key. Their windows are never put away by Stage Manager. The Windows Snipping Tool is listed by default; add other screenshot tools whose controls must stay on screen while recording." Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap" />
-                                    <TextBox x:Name="StageExcludedBox" AcceptsReturn="True" TextWrapping="Wrap" Height="96" FontSize="13" IsSpellCheckEnabled="False" TextChanged="OnStageExcludedChanged" />
+                                    <TextBox x:Name="StageExcludedBox" AcceptsReturn="True" TextWrapping="Wrap" Height="96" FontSize="13" IsSpellCheckEnabled="False" TextChanged="OnStageExcludedChanged"
+                                             AutomationProperties.Name="Excluded from Stage Manager"
+                                             ToolTipService.ToolTip="One app per line: an executable name (for example wechat.exe), a package id prefix, or a complete app key. Their windows are never put away by Stage Manager. The Windows Snipping Tool is listed by default; add other screenshot tools whose controls must stay on screen while recording." />
                                     <Button Content="Restore defaults" Click="OnStageExcludedDefaults" HorizontalAlignment="Left" />
                                 </StackPanel>
                             </StackPanel>

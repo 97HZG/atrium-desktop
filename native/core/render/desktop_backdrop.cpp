@@ -135,11 +135,13 @@ void DesktopBackdrop::Update(const std::wstring& mode)
             StopCapture();
             retryMs_ = ClockMs() + kRetryMs;
         }
-        if (!session_ && ClockMs() >= retryMs_) {
+        if (!session_ && (starting_ || ClockMs() >= retryMs_)) {
+            const bool wasStarting = starting_ != nullptr;
             if (StartCapture()) {
                 StopWallpaper();
             } else {
-                retryMs_ = ClockMs() + kRetryMs;
+                if (wasStarting && !starting_ && retryMs_ < ClockMs())
+                    retryMs_ = ClockMs() + kRetryMs; // it failed: again in a while
                 if (!worker_.joinable())
                     StartWallpaper(); // meanwhile, the wallpaper files
             }
@@ -227,39 +229,88 @@ bool DesktopBackdrop::ChangedSince(unsigned version, const RECT& area) const
 
 bool DesktopBackdrop::StartCapture()
 {
-    desktop_ = FindWindowW(L"Progman", nullptr);
-    if (!desktop_)
-        return false;
-    try {
-        auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
-        winrt::check_hresult(interop->CreateForWindow(desktop_, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(item_)));
-        size_ = item_.Size();
-        closed_ = false;
-        item_.Closed([this](auto&&, auto&&) {
-            closed_ = true;
-            SetEvent(frameEvent_);
-        });
-        pool_ = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, size_);
-        HANDLE ev = frameEvent_;
-        pool_.FrameArrived([ev](auto&&, auto&&) { SetEvent(ev); });
-        session_ = pool_.CreateCaptureSession(item_);
-        session_.IsCursorCaptureEnabled(false);
-        try {
-            session_.IsBorderRequired(false);
-        } catch (const winrt::hresult_error&) {
-        }
-        session_.StartCapture();
-    } catch (const winrt::hresult_error& e) {
-        Log(L"render: the desktop window cannot be captured (0x%08X); widgets use the wallpaper", static_cast<unsigned>(e.code()));
-        StopCapture();
+    if (!starting_) {
+        auto start = std::make_shared<Starting>();
+        start->desktop = FindWindowW(L"Progman", nullptr);
+        if (!start->desktop)
+            return false;
+        starting_ = start;
+        startingSince_ = ClockMs();
+        std::thread([start, device = device_, ev = frameEvent_] {
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+            Starting s;
+            try {
+                auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+                winrt::check_hresult(interop->CreateForWindow(start->desktop, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(s.item)));
+                s.size = s.item.Size();
+                s.pool = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(device, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, s.size);
+                s.pool.FrameArrived([ev](auto&&, auto&&) { SetEvent(ev); });
+                s.session = s.pool.CreateCaptureSession(s.item);
+                s.session.IsCursorCaptureEnabled(false);
+                try {
+                    s.session.IsBorderRequired(false);
+                } catch (const winrt::hresult_error&) {
+                }
+                s.session.StartCapture();
+                s.ok = true;
+            } catch (const winrt::hresult_error& e) {
+                s.error = e.code();
+            }
+            std::lock_guard g(start->lock);
+            if (start->abandoned) { // too late: the render thread went on without it
+                if (s.session) s.session.Close();
+                if (s.pool) s.pool.Close();
+            } else {
+                start->item = std::move(s.item);
+                start->pool = std::move(s.pool);
+                start->session = std::move(s.session);
+                start->size = s.size;
+                start->ok = s.ok;
+                start->error = s.error;
+            }
+            start->done = true;
+            SetEvent(ev); // the render thread looks again
+        }).detach();
         return false;
     }
+    std::shared_ptr<Starting> start = starting_;
+    std::lock_guard g(start->lock);
+    if (!start->done) {
+        if (ClockMs() - startingSince_ > 5000) {
+            start->abandoned = true;
+            starting_.reset();
+            Log(L"render: the desktop window's capture did not start in 5 s; widgets use the wallpaper");
+            retryMs_ = ClockMs() + 300000.0; // not every few seconds: it may never start on this system
+        }
+        return false;
+    }
+    starting_.reset();
+    if (!start->ok) {
+        Log(L"render: the desktop window cannot be captured (0x%08X); widgets use the wallpaper", static_cast<unsigned>(start->error));
+        return false;
+    }
+    desktop_ = start->desktop;
+    item_ = std::move(start->item);
+    pool_ = std::move(start->pool);
+    session_ = std::move(start->session);
+    size_ = start->size;
+    closed_ = false;
+    HANDLE ev = frameEvent_;
+    item_.Closed([this, ev](auto&&, auto&&) {
+        closed_ = true;
+        SetEvent(ev);
+    });
     Log(L"render: widgets' backdrop: the desktop window, %dx%d", size_.Width, size_.Height);
     return true;
 }
 
 void DesktopBackdrop::StopCapture()
 {
+    if (starting_) { // still starting: dropped when it is done
+        std::lock_guard g(starting_->lock);
+        starting_->abandoned = true;
+    }
+    starting_.reset();
     if (session_)
         session_.Close();
     if (pool_)

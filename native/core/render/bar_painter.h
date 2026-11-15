@@ -129,6 +129,8 @@ private:
         bool inScene = false;
         float hop = 0;       // current bounce height, px
         float dot = 0;       // 0..1, the running dot
+        float alert = 0;     // 0..1, the app asks for attention (its plate lit, as the system taskbar's button)
+        double alertSince = -1; // when it started asking (the first seconds pulse)
         bool darkDot = false;
         InkFade dotInk;
         bool leaving = false; // the app went away: `ghost` shrinks and fades out where it was

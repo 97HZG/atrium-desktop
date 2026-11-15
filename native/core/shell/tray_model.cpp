@@ -891,6 +891,12 @@ void TrayModel::SetHosting(bool on)
     PostMessageW(notify_, msg_, 0, 0);
 }
 
+std::vector<std::wstring> TrayModel::Flashing() const
+{
+    std::lock_guard g(mutex_);
+    return host_ && !host_->Yielded() ? host_->Flashing() : std::vector<std::wstring>{};
+}
+
 void TrayModel::SetHostPlaces(RECT anchor)
 {
     if (host_)
@@ -1031,6 +1037,7 @@ std::vector<TrayIcon> TrayModel::Icons() const
         t.exe = h.exe;
         t.hostKey = h.key;
         t.appTooltip = h.version >= 4 && !h.showTip;
+        t.flashing = h.flashUntil > GetTickCount64();
         const std::wstring uidKey = L"uid:" + h.exe + L"|" + std::to_wstring(h.uid);
         for (const std::wstring& key : {h.key, uidKey, L"exe:" + h.exe})
             if (auto o = windowsOrder_.find(key); o != windowsOrder_.end()) { t.order = o->second; break; }

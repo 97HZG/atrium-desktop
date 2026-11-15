@@ -119,9 +119,21 @@ bool Locate(double& lat, double& lon, std::wstring& city)
     namespace geo = winrt::Windows::Devices::Geolocation;
     bool located = false;
     try {
-        if (geo::Geolocator::RequestAccessAsync().get() == geo::GeolocationAccessStatus::Allowed) {
+        // Bounded: on some systems (#67) the access request never completes, which left the
+        // widget waiting for good.
+        auto access = geo::Geolocator::RequestAccessAsync();
+        if (access.wait_for(std::chrono::seconds(5)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+            access.Cancel();
+            throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
+        }
+        if (access.GetResults() == geo::GeolocationAccessStatus::Allowed) {
             geo::Geolocator locator;
-            auto at = locator.GetGeopositionAsync(std::chrono::minutes(30), std::chrono::seconds(15)).get().Coordinate().Point().Position();
+            auto position = locator.GetGeopositionAsync(std::chrono::minutes(30), std::chrono::seconds(15));
+            if (position.wait_for(std::chrono::seconds(20)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+                position.Cancel();
+                throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
+            }
+            auto at = position.GetResults().Coordinate().Point().Position();
             lat = at.Latitude;
             lon = at.Longitude;
             located = true;
@@ -135,19 +147,36 @@ bool Locate(double& lat, double& lon, std::wstring& city)
     }
     if (located && !city.empty())
         return true;
-    json::JsonObject o{nullptr};
-    if (!json::JsonObject::TryParse(winrt::to_hstring(Get(LanguageIsEnglish() ? L"http://ip-api.com/json/?lang=en&fields=status,city,lat,lon"
-                                                                              : L"http://ip-api.com/json/?lang=zh-CN&fields=status,city,lat,lon",
-                                                                    true)),
-                                    o) ||
-        o.GetNamedString(L"status", L"") != L"success")
-        return located;
-    city = std::wstring(o.GetNamedString(L"city", L""));
-    if (!located) {
-        lat = o.GetNamedNumber(L"lat", 0);
-        lon = o.GetNamedNumber(L"lon", 0);
-    }
-    return true;
+    // The network's place: several services, each directly (the system's proxy would give the
+    // proxy's place), then through the proxy (a network that only reaches out through it): one
+    // service blocked or over its limit (#67) is not the end of it.
+    const bool english = LanguageIsEnglish();
+    struct Service { const wchar_t* url; const wchar_t *ok, *okValue, *city, *lat, *lon; };
+    const Service services[] = {
+        {english ? L"http://ip-api.com/json/?lang=en&fields=status,city,lat,lon" : L"http://ip-api.com/json/?lang=zh-CN&fields=status,city,lat,lon",
+         L"status", L"success", L"city", L"lat", L"lon"},
+        {english ? L"https://ipwho.is/?lang=en" : L"https://ipwho.is/?lang=zh-CN", L"success", nullptr, L"city", L"latitude", L"longitude"},
+        {L"https://ipapi.co/json/", nullptr, nullptr, L"city", L"latitude", L"longitude"},
+    };
+    for (bool direct : {true, false})
+        for (const Service& s : services) {
+            json::JsonObject o{nullptr};
+            if (!json::JsonObject::TryParse(winrt::to_hstring(Get(s.url, direct)), o))
+                continue;
+            if (s.ok && !(s.okValue ? o.GetNamedString(s.ok, L"") == s.okValue : o.GetNamedBoolean(s.ok, false)))
+                continue;
+            if (!o.HasKey(s.lat) || !o.HasKey(s.lon) || o.GetNamedValue(s.lat).ValueType() != json::JsonValueType::Number)
+                continue;
+            city = std::wstring(o.GetNamedString(s.city, L""));
+            if (!located) {
+                lat = o.GetNamedNumber(s.lat, 0);
+                lon = o.GetNamedNumber(s.lon, 0);
+            }
+            if (s.url != services[0].url || !direct)
+                Log(L"weather: placed by %s%s", s.url, direct ? L"" : L" (through the proxy)");
+            return true;
+        }
+    return located;
 }
 
 std::wstring Wide(const std::string& s)
@@ -197,6 +226,10 @@ json::JsonObject ToJson(const Weather& w)
     o.SetNamedValue(L"lo", json::JsonValue::CreateNumberValue(w.lo));
     o.SetNamedValue(L"code", json::JsonValue::CreateNumberValue(w.code));
     o.SetNamedValue(L"day", json::JsonValue::CreateBooleanValue(w.day));
+    if (w.placed) {
+        o.SetNamedValue(L"lat", json::JsonValue::CreateNumberValue(w.lat));
+        o.SetNamedValue(L"lon", json::JsonValue::CreateNumberValue(w.lon));
+    }
     json::JsonArray hours, days;
     for (const WeatherHour& h : w.hours) {
         json::JsonObject x;
@@ -229,6 +262,9 @@ bool FromJson(const json::JsonObject& o, Weather& w)
         w.lo = float(o.GetNamedNumber(L"lo", 0));
         w.code = int(o.GetNamedNumber(L"code", 0));
         w.day = o.GetNamedBoolean(L"day", true);
+        w.placed = o.HasKey(L"lat") && o.HasKey(L"lon");
+        w.lat = o.GetNamedNumber(L"lat", 0);
+        w.lon = o.GetNamedNumber(L"lon", 0);
         for (const auto& v : o.GetNamedArray(L"hours", json::JsonArray())) {
             auto x = v.GetObject();
             w.hours.push_back({std::wstring(x.GetNamedString(L"label", L"")), int(x.GetNamedNumber(L"code", 0)), x.GetNamedBoolean(L"day", true),
@@ -370,10 +406,17 @@ bool WeatherSource::Fetch()
     std::wstring city;
     if (!Locate(lat, lon, city)) {
         std::lock_guard g(lock_);
-        latest_.ok = latest_.ok && !latest_.hours.empty();
-        latest_.error = Tr(L"Location unavailable");
-        Log(L"weather: no location");
-        return false;
+        if (!latest_.placed) {
+            latest_.ok = latest_.ok && !latest_.hours.empty();
+            latest_.error = Tr(L"Location unavailable");
+            Log(L"weather: no location");
+            return false;
+        }
+        // No service could say where: the last place (a computer seldom moves far).
+        lat = latest_.lat;
+        lon = latest_.lon;
+        city = latest_.city;
+        Log(L"weather: no location now; the last place (%s)", city.c_str());
     }
     json::JsonObject o{nullptr};
     wchar_t url[512];
@@ -390,6 +433,9 @@ bool WeatherSource::Fetch()
     }
     Weather w;
     w.city = city;
+    w.lat = lat;
+    w.lon = lon;
+    w.placed = true;
     auto current = o.GetNamedObject(L"current");
     w.temp = float(current.GetNamedNumber(L"temperature_2m", 0));
     w.code = int(current.GetNamedNumber(L"weather_code", 0));

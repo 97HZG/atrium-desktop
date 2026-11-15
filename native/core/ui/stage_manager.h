@@ -153,7 +153,7 @@ private:
     D2D1_POINT_2F StripOffset() const;        // strip DIP to flight DIP
     bool Flying(HWND window) const;
     void PaintFlights(Canvas& c);
-    void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, bool shadow = true, bool image = true);
+    void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow = 1, bool image = true);
 
     TaskModel& tasks_;
     Surface surface_;
@@ -180,6 +180,7 @@ private:
     Set pending_;                      // picked in the strip, not in front yet
     ULONGLONG pendingUntil_ = 0;
     StageOpenIntent openIntent_;
+    std::vector<HWND> excludedWindows_; // windows of excluded apps: never staged, still covering the strip
     std::vector<std::wstring> excluded_ = DefaultStageExcluded();
 
     std::vector<Entry> entries_;

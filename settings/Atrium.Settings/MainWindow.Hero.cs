@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         bool Clock, double ClockX, double ClockW, double TimePx, double DatePx, double SepX,
         double StartX, double TrayX, double StatusX, double BellX,
         double K, double Centre, double Range,
-        double LoupeX0, double LoupeY0, double LoupeW, double LoupeH, double StatusExtra = 0)
+        double LoupeX0, double LoupeY0, double LoupeW, double LoupeH, double StatusExtra = 0, double DeskX = -1)
     {
         public double PlateX(int i) => BaseX + (AppsLeft + i * Pitch) * S;
 
@@ -154,9 +154,10 @@ public sealed partial class MainWindow
         double v = Math.Floor((H - P) / 2), pad = v + 4, gap = Math.Max(4, Math.Round(I * 0.18));
         double timePx = H * 0.25, datePx = H * 0.19, sepGap = 8;
         double clockW = s.ShowClock ? Math.Max(timePx * (s.ShowClockSeconds ? 4.8 : 2.75), datePx * 5.7) + 22 : 0;
-        int rightCount = (s.ShowTray ? 1 : 0) + (s.ShowStatus ? 1 : 0) + (s.ShowNotifications ? 1 : 0) + (s.ShowClock ? 1 : 0);
+        double deskW = s.ShowDesktop ? Math.Max(10, Math.Round(I * 0.45)) : 0; // the Show Desktop slot
+        int rightCount = (s.ShowTray ? 1 : 0) + (s.ShowStatus ? 1 : 0) + (s.ShowNotifications ? 1 : 0) + (s.ShowClock ? 1 : 0) + (s.ShowDesktop ? 1 : 0);
         double statusExtra = s.StatusStyle == "icons" ? Math.Round(I * 1.3) : 0; // three icons: about an icon wider
-        double rightW = (rightCount - (s.ShowClock ? 1 : 0)) * P + (s.ShowStatus ? statusExtra : 0) + clockW + Math.Max(0, rightCount - 1) * gap;
+        double rightW = (rightCount - (s.ShowClock ? 1 : 0) - (s.ShowDesktop ? 1 : 0)) * P + (s.ShowStatus ? statusExtra : 0) + clockW + deskW + Math.Max(0, rightCount - 1) * gap;
         double Content(int n) => Math.Max(2 * H, 2 * pad + P + 2 * gap + n * P + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
         double mag = Math.Clamp(s.Magnify, 1, 2), pitch = P + gap;
         double stretch = mag > 1.001 ? Math.Ceiling((mag - 1) * pitch * 2.3) : 0;
@@ -174,6 +175,7 @@ public sealed partial class MainWindow
             cursor -= gap;
             return x;
         }
+        double deskLeft = Slot(deskW, s.ShowDesktop);
         double bellLeft = Slot(P, s.ShowNotifications), clockLeft = Slot(clockW, s.ShowClock);
         double statusLeft = Slot(P + statusExtra, s.ShowStatus), trayLeft = Slot(P, s.ShowTray);
         double rightLeft = rightCount > 0 ? cursor + gap : barW - pad;
@@ -204,7 +206,7 @@ public sealed partial class MainWindow
             clockW > 0, X(clockLeft), clockW * S, timePx * S, datePx * S, rightCount > 0 ? bx + (rightLeft - sepGap) * S : -1,
             bx + pad * S, X(trayLeft), X(statusLeft), X(bellLeft),
             k, centre, range,
-            right - (lw - 10) * S, by - 10 * S, lw * S, lh * S, statusExtra * S);
+            right - (lw - 10) * S, by - 10 * S, lw * S, lh * S, statusExtra * S, deskLeft < 0 ? -1 : bx + (deskLeft + deskW / 2) * S);
     }
 
     private void UpdateHero()

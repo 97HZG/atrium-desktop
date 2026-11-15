@@ -32,7 +32,7 @@ internal sealed class BarFace
     private readonly List<Image> _icons = new();
     private readonly List<Ellipse> _dots = new();
     private readonly Border _plate = new() { IsHitTestVisible = false };
-    private readonly Rectangle _sep = new() { IsHitTestVisible = false };
+    private readonly Rectangle _sep = new() { IsHitTestVisible = false }, _desk = new() { IsHitTestVisible = false };
     private readonly FontIcon _tray = Glyph("\uE70E"), _bell = Glyph("\uEA8F");
     private readonly Border _badge = new() { IsHitTestVisible = false, Background = new SolidColorBrush(Color.FromArgb(255, 10, 133, 255)) };
     private readonly TextBlock _badgeText = new() { Text = "3", Foreground = new SolidColorBrush(Colors.White), HorizontalAlignment = HorizontalAlignment.Center,
@@ -67,7 +67,7 @@ internal sealed class BarFace
             _dots.Add(dot);
             canvas.Children.Add(dot);
         }
-        foreach (var e in new UIElement[] { _sep, _tray, _status, _statusIcons, _timeHalo, _dateHalo, _time, _date, _bell, _badge }) canvas.Children.Add(e);
+        foreach (var e in new UIElement[] { _sep, _desk, _tray, _status, _statusIcons, _timeHalo, _dateHalo, _time, _date, _bell, _badge }) canvas.Children.Add(e);
     }
 
     public IReadOnlyList<Image> Icons => _icons;
@@ -213,6 +213,18 @@ internal sealed class BarFace
             _sep.Fill = new SolidColorBrush(Color.FromArgb((byte)(255 * (darkInk ? 0.18 : 0.30)), inkColor.R, inkColor.G, inkColor.B));
             Canvas.SetLeft(_sep, X(L.SepX) - _sep.Width / 2);
             Canvas.SetTop(_sep, Y(L.BarY + (L.BarH - h) / 2));
+        }
+
+        // Show Desktop: a line like the separator at the bar's right end.
+        _desk.Visibility = L.DeskX >= 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (L.DeskX >= 0)
+        {
+            double h = L.BarH * 0.46;
+            _desk.Width = Math.Max(1, L.S * zoom);
+            _desk.Height = h * zoom;
+            _desk.Fill = new SolidColorBrush(Color.FromArgb((byte)(255 * (darkInk ? 0.18 : 0.30)), inkColor.R, inkColor.G, inkColor.B));
+            Canvas.SetLeft(_desk, X(L.DeskX) - _desk.Width / 2);
+            Canvas.SetTop(_desk, Y(L.BarY + (L.BarH - h) / 2));
         }
 
         // Glyph entries: Segoe Fluent Icons at 62 % of the icon square.

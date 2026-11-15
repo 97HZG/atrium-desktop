@@ -21,6 +21,7 @@ add_test(NAME app_processes COMMAND app_processes_tests)
 add_executable(stage_excluded_tests stage_excluded.cpp)
 target_include_directories(stage_excluded_tests PRIVATE ../core)
 target_compile_definitions(stage_excluded_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(stage_excluded_tests PRIVATE user32)
 add_test(NAME stage_excluded COMMAND stage_excluded_tests)
 
 add_executable(double_click_tests

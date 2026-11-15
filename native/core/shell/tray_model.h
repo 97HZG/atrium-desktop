@@ -37,6 +37,7 @@ struct TrayIcon {
     std::wstring recordId; // stable Windows identity, also before the overflow UI exists
     std::wstring hostKey;  // an icon the tray host received (TrayHost); empty: read from Explorer
     bool appTooltip = false; // a version 4 app drawing its own tooltip (NIN_POPUPOPEN): no standard one
+    bool flashing = false;   // its icon flashes (hosted): a message waiting
     size_t order = SIZE_MAX; // place in Windows' own order of the tray icons (UIOrderList), if known
     tray::TargetKey Target() const { return {shell, runtimeId, recordId, exe, tip}; }
 };
@@ -72,6 +73,8 @@ public:
     void MiddleClick(const TrayIcon& icon);
     void Hover(const TrayIcon* icon);
     void SetHostPlaces(RECT anchor); // the panel's place on screen, for apps that ask where their icon is
+    // The programs whose tray icon flashes now (hosted icons only): a message waiting.
+    std::vector<std::wstring> Flashing() const;
 
     // First line of a tooltip, for display.
     static std::wstring Title(const std::wstring& tip);

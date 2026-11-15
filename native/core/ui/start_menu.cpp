@@ -482,6 +482,44 @@ void StartMenu::Refresh()
     surface_.Invalidate();
 }
 
+// An arrangement of the user's own still takes what is pinned to the Windows start menu later: it
+// joins at the end (#63). A pin the user removed here stays out; one unpinned in Windows and pinned
+// again is new again.
+void StartMenu::SyncWindowsPins()
+{
+    if (!layout_.custom || !catalog_.Loaded() || pins_.empty())
+        return; // no complete list of the Windows pins (the export can fail): nothing to compare
+    std::vector<std::wstring> now;
+    for (const CatalogApp& p : pins_)
+        now.push_back(p.id);
+    if (!layout_.windowsPinsKnown) { // an arrangement from before: today's pins are its starting point
+        layout_.windowsPins = now;
+        layout_.windowsPinsKnown = true;
+        SaveStartLayout(layout_);
+        return;
+    }
+    auto has = [](const std::vector<std::wstring>& list, const std::wstring& id) { return std::find(list.begin(), list.end(), id) != list.end(); };
+    auto placed = [&](const std::wstring& id) {
+        for (const StartTile& t : layout_.tiles)
+            if (t.id == id || std::any_of(t.apps.begin(), t.apps.end(), [&](const StartTile& a) { return a.id == id; }))
+                return true;
+        return false;
+    };
+    size_t added = 0;
+    for (const CatalogApp& p : pins_)
+        if (!has(layout_.windowsPins, p.id) && !placed(p.id) && !Hidden(p.id)) {
+            layout_.tiles.push_back({p.id, p.name, {}});
+            ++added;
+        }
+    if (added || now != layout_.windowsPins) {
+        layout_.windowsPins = std::move(now);
+        layout_.Clamp();
+        SaveStartLayout(layout_);
+        if (added)
+            Log(L"start: %zu new Windows start pin(s) added at the end", added);
+    }
+}
+
 void StartMenu::Rebuild()
 {
     const std::wstring openKey = folder_ >= 0 && folder_ < int(tiles_.size()) ? tiles_[size_t(folder_)].key : L"";
@@ -503,6 +541,7 @@ void StartMenu::Rebuild()
         out = CatalogApp{t.name.empty() ? t.id : t.name, t.id, {}, {}, {}};
         return true;
     };
+    SyncWindowsPins();
     tiles_.clear();
     if (!layout_.custom) {
         for (const CatalogApp& p : pins_)
@@ -722,6 +761,10 @@ void StartMenu::Arrange(const std::function<void(std::vector<StartTile>&)>& chan
         for (const Tile& t : tiles_)
             layout_.tiles.push_back({t.key, t.name, {}});
         layout_.custom = true;
+        layout_.windowsPins.clear();
+        for (const CatalogApp& p : pins_)
+            layout_.windowsPins.push_back(p.id);
+        layout_.windowsPinsKnown = true;
         Log(L"start: arranged by the user from now on (%zu Windows pins copied)", layout_.tiles.size());
     }
     change(layout_.tiles);

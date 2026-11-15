@@ -14,6 +14,7 @@
 #include <appmodel.h>
 #include <dwmapi.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <propsys.h>
@@ -27,6 +28,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -99,6 +101,66 @@ bool IsLink(const std::wstring& path)
 std::wstring AppsFolderPath(const std::wstring& aumid)
 {
     return L"shell:AppsFolder\\" + aumid;
+}
+
+// The app id of a packaged app's executable (under WindowsApps): such a file cannot be run
+// itself (#64, Windows Terminal), its app is started by id. The package folder is
+// <name>_<version>_<arch>_<resource>_<publisher id>; the family is <name>_<publisher id>; the
+// application is the one of the package's manifest whose Executable is this file.
+std::wstring PackagedAumid(const std::wstring& exe)
+{
+    std::wstring lower = exe;
+    CharLowerBuffW(lower.data(), DWORD(lower.size()));
+    const std::wstring marker = L"\\windowsapps\\";
+    const size_t at = lower.find(marker);
+    if (at == std::wstring::npos)
+        return {};
+    const size_t start = at + marker.size(), end = exe.find(L'\\', start);
+    if (end == std::wstring::npos)
+        return {};
+    const std::wstring folder = exe.substr(start, end - start);
+    const size_t first = folder.find(L'_'), last = folder.rfind(L'_');
+    if (first == std::wstring::npos || last == first)
+        return {};
+    const std::wstring family = folder.substr(0, first) + L"_" + folder.substr(last + 1);
+    std::wstring relative = exe.substr(end + 1);
+    HANDLE file = CreateFileW((exe.substr(0, end) + L"\\AppxManifest.xml").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return {};
+    std::string xml(size_t(std::min<DWORD>(GetFileSize(file, nullptr), 1u << 20)), '\0');
+    DWORD got = 0;
+    ReadFile(file, xml.data(), DWORD(xml.size()), &got, nullptr);
+    CloseHandle(file);
+    xml.resize(got);
+    std::string rel(relative.begin(), relative.end()); // manifest paths are ASCII in practice
+    auto lowerA = [](std::string s) { for (char& ch : s) ch = char(tolower((unsigned char)ch)); return s; };
+    const std::string lx = lowerA(xml), lrel = lowerA(rel);
+    std::string id;
+    for (size_t p = lx.find("<application "); p != std::string::npos; p = lx.find("<application ", p + 1)) {
+        const size_t close = lx.find('>', p);
+        const std::string tag = xml.substr(p, close - p), ltag = lx.substr(p, close - p);
+        auto attr = [&](const char* name) {
+            const size_t a = ltag.find(std::string(" ") + name + "=\"");
+            if (a == std::string::npos) return std::string();
+            const size_t v = a + strlen(name) + 3, q = tag.find('"', v);
+            return q == std::string::npos ? std::string() : tag.substr(v, q - v);
+        };
+        const std::string executable = lowerA(attr("executable")), appId = attr("id");
+        if (id.empty())
+            id = appId; // the first application, if no executable matches
+        if (!executable.empty() && executable == lrel) {
+            id = appId;
+            break;
+        }
+    }
+    return id.empty() ? std::wstring() : family + L"!" + std::wstring(id.begin(), id.end());
+}
+
+bool IsPackagedPath(const std::wstring& path)
+{
+    std::wstring lower = path;
+    CharLowerBuffW(lower.data(), DWORD(lower.size()));
+    return lower.find(L"\\windowsapps\\") != std::wstring::npos;
 }
 
 // ---- process and window identity -----------------------------------------
@@ -1283,6 +1345,31 @@ struct TaskModel::Impl {
         return true;
     }
 
+    struct LaunchPlan {
+        std::wstring file, args, dir;
+    };
+
+    // Whether a program shows a window of its own (any visible, unowned, ordinary one).
+    static bool ShowsWindow(const std::wstring& exe)
+    {
+        struct Look { const std::wstring* exe; bool found = false; } look{&exe};
+        EnumWindows([](HWND h, LPARAM l) -> BOOL {
+            auto& k = *reinterpret_cast<Look*>(l);
+            if (!IsWindowVisible(h) || GetWindow(h, GW_OWNER) || (GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW))
+                return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(h, &pid);
+            if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+                wchar_t path[MAX_PATH * 2];
+                DWORD size = DWORD(std::size(path));
+                k.found = QueryFullProcessImageNameW(p, 0, path, &size) && _wcsicmp(path, k.exe->c_str()) == 0;
+                CloseHandle(p);
+            }
+            return !k.found;
+        }, reinterpret_cast<LPARAM>(&look));
+        return look.found;
+    }
+
     void Launch(const std::wstring& key)
     {
         const TaskItem* task = Find(key);
@@ -1293,9 +1380,33 @@ struct TaskModel::Impl {
                     return;
                 }
             auto m = meta.find(key);
-            if (m != meta.end() && openExisting && openExisting(m->second.exePath))
+            if (m != meta.end() && openExisting && openExisting(m->second.exePath)) {
+                // Its tray icon was clicked (an app running in the background). Most open their
+                // window then; one that does not within a moment is started as its pin starts it
+                // (a single-instance app then shows its window) instead of the click doing nothing (#15).
+                if (auto plan = PlanFor(key)) {
+                    std::thread([plan = *plan, exe = m->second.exePath] {
+                        Sleep(1500);
+                        if (ShowsWindow(exe))
+                            return;
+                        Log(L"tasks: %s showed no window from its tray icon: started", PathFindFileNameW(exe.c_str()));
+                        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+                        Exec(plan.file, plan.args, plan.dir);
+                        if (SUCCEEDED(com))
+                            CoUninitialize();
+                    }).detach();
+                }
                 return;
+            }
         }
+        if (auto plan = PlanFor(key))
+            Exec(plan->file, plan->args, plan->dir);
+    }
+
+    // How `key` is started: its pin's shortcut or program (a packaged program by its app id),
+    // else the running app's program or app id.
+    std::optional<LaunchPlan> PlanFor(const std::wstring& key)
+    {
         auto pit = pinByKey.find(key);
         size_t pinIndex = pit != pinByKey.end() ? pit->second : pins.size();
         if (pinIndex == pins.size()) // duplicate pins carry a suffixed key
@@ -1304,6 +1415,12 @@ struct TaskModel::Impl {
                     pinIndex = i;
         if (pinIndex < pins.size()) {
             const PinnedApp& app = pins[pinIndex].app;
+            if (!app.path.empty() && IsPackagedPath(app.path) && !IsLink(app.path)) {
+                const std::wstring aumid = !app.aumid.empty() ? app.aumid : PackagedAumid(app.path);
+                if (!aumid.empty())
+                    return LaunchPlan{AppsFolderPath(aumid), {}, {}};
+                Log(L"tasks: pin %s is a packaged program without an app id", app.name.c_str());
+            }
             if (!app.path.empty()) {
                 std::wstring dir;
                 if (!IsLink(app.path)) {
@@ -1311,27 +1428,27 @@ struct TaskModel::Impl {
                     if (slash != std::wstring::npos)
                         dir = app.path.substr(0, slash);
                 }
-                Exec(app.path, IsLink(app.path) ? std::wstring() : app.args, dir);
-            } else if (!app.aumid.empty()) {
-                Exec(AppsFolderPath(app.aumid), {}, {});
-            } else {
-                Log(L"tasks: pin %s has nothing to launch", app.name.c_str());
+                return LaunchPlan{app.path, IsLink(app.path) ? std::wstring() : app.args, dir};
             }
-            return;
+            if (!app.aumid.empty())
+                return LaunchPlan{AppsFolderPath(app.aumid), {}, {}};
+            Log(L"tasks: pin %s has nothing to launch", app.name.c_str());
+            return std::nullopt;
         }
         auto mit = meta.find(key);
         if (mit == meta.end()) {
             Log(L"tasks: launch of unknown item %s", key.c_str());
-            return;
+            return std::nullopt;
         }
         const Meta& m = mit->second;
-        bool packaged = Lower(m.exePath).find(L"\\windowsapps\\") != std::wstring::npos;
+        const bool packaged = IsPackagedPath(m.exePath);
         if (!m.exePath.empty() && !packaged)
-            Exec(m.exePath, {}, {});
-        else if (!m.aumid.empty())
-            Exec(AppsFolderPath(m.aumid), {}, {});
-        else
-            Log(L"tasks: no way to start %s", key.c_str());
+            return LaunchPlan{m.exePath, {}, {}};
+        const std::wstring aumid = !m.aumid.empty() ? m.aumid : packaged ? PackagedAumid(m.exePath) : std::wstring();
+        if (!aumid.empty())
+            return LaunchPlan{AppsFolderPath(aumid), {}, {}};
+        Log(L"tasks: no way to start %s", key.c_str());
+        return std::nullopt;
     }
 
     static void SysCommand(HWND h, WPARAM command)

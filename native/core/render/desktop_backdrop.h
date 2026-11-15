@@ -49,8 +49,22 @@ public:
     bool ChangedSince(unsigned version, const RECT& area) const;
 
 private:
-    bool StartCapture();
+    bool StartCapture(); // adopts a started capture (see Starting); false while none
     void StopCapture();
+    // Starting the capture can block (it never returned on one system: #66, the bar stayed blank),
+    // so it starts on a thread of its own; the render thread adopts it when done, or gives up.
+    struct Starting {
+        std::mutex lock;
+        bool done = false, ok = false, abandoned = false;
+        HRESULT error = S_OK;
+        HWND desktop = nullptr;
+        winrt::Windows::Graphics::Capture::GraphicsCaptureItem item{nullptr};
+        winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool pool{nullptr};
+        winrt::Windows::Graphics::Capture::GraphicsCaptureSession session{nullptr};
+        winrt::Windows::Graphics::SizeInt32 size{};
+    };
+    std::shared_ptr<Starting> starting_;
+    double startingSince_ = 0;
     void StartWallpaper();
     void StopWallpaper();
     void Store(ID3D11Texture2D* frame);

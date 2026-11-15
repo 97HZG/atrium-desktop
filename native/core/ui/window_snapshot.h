@@ -18,6 +18,7 @@ struct WindowPicture {
     IconImage image;  // the window, with kPicturePad transparent px around it
     IconImage shadow; // its shadow at half the size, kShadowPad of the picture's px around it
     int width = 0, height = 0; // the window's part of `image`, px
+    float corner = 0; // its corner radius, px
     bool ok = false;
 };
 
@@ -30,6 +31,9 @@ IconImage SoftShadow(int w, int h);
 // The picture of a placeholder window: `icon` in the middle of a plain rounded panel (a window
 // put away before Atrium started has no picture).
 WindowPicture PlaceholderPicture(const IconImage& icon, int width, int height, bool dark);
+
+// `picture` (a large one, no shadow) at most `largeMax` px either way.
+WindowPicture Smaller(const WindowPicture& picture, int largeMax);
 
 class WindowSnapshots {
 public:

@@ -54,6 +54,7 @@ struct Settings {
     bool showTray = true;
     bool showStatus = true;
     bool showNotifications = true;
+    bool showDesktop = true;         // the Show Desktop slot at the bar's right end
     bool showRunning = true;
     // The interface language of the bar, its popups, the widgets and the settings app.
     // auto follows Windows' UI language (Chinese -> zh, anything else -> en).

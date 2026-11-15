@@ -849,6 +849,8 @@
   "Windows notification area is unavailable": "系统托盘暂时无法打开",
   "Temporarily turn off Hide system taskbar, open the hidden icons panel, and try again.": "请临时关闭“隐藏系统任务栏”，打开隐藏图标区后重试。",
   "Host tray icons": "接管托盘图标",
-  "Apps hand their tray icons to Atrium: the pictures stay live, and clicks, double clicks and right clicks work as in the Windows tray. When off, Atrium reads the icons back from the Windows tray.": "各应用的托盘图标直接交给 Atrium：图标实时同步，单击、双击、右键和 Windows 托盘一致。关闭时，Atrium 从 Windows 托盘读取图标。"
+  "Apps hand their tray icons to Atrium: the pictures stay live, and clicks, double clicks and right clicks work as in the Windows tray. When off, Atrium reads the icons back from the Windows tray.": "各应用的托盘图标直接交给 Atrium：图标实时同步，单击、双击、右键和 Windows 托盘一致。关闭时，Atrium 从 Windows 托盘读取图标。",
+  "Show Desktop button": "显示桌面按钮",
+  "A thin line at the taskbar's right end, as on the Windows taskbar: click it to show the desktop, click again to bring the windows back.": "任务栏最右端的一条细线，和 Windows 任务栏一样：点击显示桌面，再点一次恢复窗口。"
  }
 }

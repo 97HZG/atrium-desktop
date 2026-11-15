@@ -1,7 +1,8 @@
 #pragma once
 
+#include <windows.h>
+
 #include <algorithm>
-#include <cwctype>
 #include <string>
 #include <vector>
 
@@ -10,10 +11,11 @@ namespace atrium {
 // Entries are executable names (wechat.exe), package prefixes (microsoft.screensketch_) or
 // complete app keys. An app is excluded when its key matches any of them; comparison is
 // case-insensitive. Excluded apps are left out of Stage Manager entirely.
+// Lowered as TaskModel lowers app keys (CharLowerBuffW), so a path with É matches its key.
 inline std::wstring LowerAppKey(std::wstring value)
 {
-    for (wchar_t& c : value)
-        c = wchar_t(towlower(c));
+    if (!value.empty())
+        CharLowerBuffW(value.data(), DWORD(value.size()));
     return value;
 }
 

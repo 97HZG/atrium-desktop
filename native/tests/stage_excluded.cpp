@@ -52,5 +52,8 @@ int main()
         require(!StageAppExcluded(defaults, L"d:\\apps\\wechat\\wechat.exe"), "other screenshot tools are opt-in");
         require(!StageAppExcluded(defaults, L"c:\\windows\\notepad.exe"), "ordinary apps stay managed");
     });
+    run("non-ASCII letters compare as Windows compares paths", [&] {
+        require(StageAppExcluded({L"C:\\Apps\\\u00c9diteur\\APP.exe"}, L"c:\\apps\\\u00e9diteur\\app.exe"), "É and é are one letter in an app key");
+    });
     return failures ? 1 : 0;
 }
