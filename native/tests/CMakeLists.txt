@@ -18,6 +18,11 @@ target_include_directories(app_processes_tests PRIVATE ../core)
 target_compile_definitions(app_processes_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_test(NAME app_processes COMMAND app_processes_tests)
 
+add_executable(stage_excluded_tests stage_excluded.cpp)
+target_include_directories(stage_excluded_tests PRIVATE ../core)
+target_compile_definitions(stage_excluded_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME stage_excluded COMMAND stage_excluded_tests)
+
 add_executable(double_click_tests
     double_click.cpp)
 target_include_directories(double_click_tests PRIVATE ../core)
@@ -84,3 +89,7 @@ add_executable(tray_host_probe EXCLUDE_FROM_ALL tray_host_probe.cpp ../core/shel
 target_include_directories(tray_host_probe PRIVATE ../core)
 target_compile_definitions(tray_host_probe PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
 target_link_libraries(tray_host_probe PRIVATE windowsapp user32 shell32 ole32 shlwapi)
+add_executable(stage_scroll_tests stage_scroll.cpp)
+target_include_directories(stage_scroll_tests PRIVATE ../core)
+target_compile_definitions(stage_scroll_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME stage_scroll COMMAND stage_scroll_tests)
