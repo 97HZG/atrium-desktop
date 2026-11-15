@@ -1,18 +1,17 @@
 // Atrium's tray panel: the notification area's icons (TrayModel) in a grid on
 // the bar's glass, above the bar's tray entry. A click is the icon's left
-// click, a second one within the double-click time its double click (some apps
-// open only on that), a right click opens the app's own menu; the name of the
-// icon under the pointer shows below the grid. A button there opens the
-// system's own hidden-icons window as a fallback.
+// click, a right click opens the app's own menu; the name of the icon under
+// the pointer shows below the grid. A button there opens the system's own
+// hidden-icons window as a fallback.
 #pragma once
 
 #include "motion.h"
 #include "shell/tray_model.h"
-#include "ui/double_click.h"
 #include "ui/surface.h"
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,6 +29,7 @@ public:
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
     void Refresh(); // the model has a new list
+    void SetAttention(const std::vector<TaskItem>& tasks);
     void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
     HWND Hwnd() const { return surface_.Hwnd(); }
 
@@ -44,9 +44,7 @@ private:
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
     void Place();
     std::wstring HitAt(POINT client) const;
-    const TrayIcon* IconAt(const std::wstring& id) const;
     void Activate(const std::wstring& id, bool right);
-    void ClickIcon(const TrayIcon& icon); // a left click: the first of a double click, or its second
     float Hover(Canvas& c, const std::wstring& id, bool on);
     D2D1_SIZE_F Size() const; // content, DIP
     int Cols() const;
@@ -56,12 +54,15 @@ private:
     Surface surface_;
     TrayModel& model_;
     std::vector<TrayIcon> icons_;
+    std::vector<std::wstring> attention_;
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_;
-    // The icon clicked last, while a second click may still complete a double
-    // click: the panel stays until then (or until the app takes the focus).
-    DoubleClick clicks_;
+    std::optional<TrayIcon> lastClick_;
+    std::optional<TrayIcon> pressedIcon_;
+    POINT lastAt_{};
+    ULONGLONG lastWhen_ = 0;
     bool tracking_ = false;
+    int columns_ = 0; // fixed for one open session, so additions do not reflow existing rows
     RECT anchor_{}, bar_{};
     HWND previous_ = nullptr;
     float radius_ = 30;

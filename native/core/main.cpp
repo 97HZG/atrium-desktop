@@ -67,7 +67,6 @@ constexpr UINT WM_STATUS = WM_APP + 10;       // lParam: SystemStatus*, read off
 constexpr UINT WM_UPDATE_READY = WM_APP + 11; // background package is validated and ready
 constexpr UINT WM_WIN_KEY = WM_APP + 12;      // the Windows key alone (wParam 0, winKeyStart), Win + 1..9, 0 (1..10, winNumbers)
 constexpr UINT WM_USB = WM_APP + 13;          // the device worker has queued removal notices
-constexpr UINT_PTR kTrayTimer = 0x51;
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
 constexpr UINT_PTR kReadyTimer = 0x54;       // only during an update startup handshake
@@ -241,37 +240,10 @@ void SendWinShortcut(WORD key, bool ctrl = false)
     SendInput(UINT(in.size()), in.data(), sizeof(INPUT));
 }
 
-// The system tray's hidden icons. Win+B (public shortcut) puts the keyboard
-// focus on the system taskbar's notification area; if that focus is the
-// "show hidden icons" button, it is invoked through UI Automation. Otherwise
-// (no hidden icons, other shell) the tray simply keeps the focus.
+// UIA and popup discovery run on the tray worker, including explicit fallback.
 void OpenTray()
 {
-    SendWinShortcut('B');
-    SetTimer(g_app.host, kTrayTimer, 350, nullptr);
-}
-
-void OpenTrayStep2()
-{
-    KillTimer(g_app.host, kTrayTimer);
-    winrt::com_ptr<IUIAutomation> uia;
-    winrt::com_ptr<IUIAutomationElement> focus;
-    if (FAILED(CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put()))) ||
-        FAILED(uia->GetFocusedElement(focus.put())) || !focus) {
-        Log(L"tray: no focused element after Win+B");
-        return;
-    }
-    BSTR id = nullptr;
-    focus->get_CurrentAutomationId(&id);
-    std::wstring automationId = id ? id : L"";
-    SysFreeString(id);
-    winrt::com_ptr<IUIAutomationInvokePattern> invoke;
-    if (automationId == L"SystemTrayIcon" &&
-        SUCCEEDED(focus->GetCurrentPatternAs(UIA_InvokePatternId, IID_PPV_ARGS(invoke.put()))) && invoke && SUCCEEDED(invoke->Invoke())) {
-        Log(L"tray: opened the hidden icons");
-        return;
-    }
-    Log(L"tray: focus is on '%s', left there (no hidden-icons button)", automationId.c_str());
+    if (g_app.tray) g_app.tray->OpenSystemTray();
 }
 
 void OpenSystem(const std::wstring& what)
@@ -1226,7 +1198,29 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_TRAY_ICONS:
-        if (w == 1) // a click was forwarded: see where the focus ends up
+        if (w == 4) { // accepted async action: no popup or notification; the focus check as after any click
+            SetTimer(h, kTrayFocusTimer, 600, nullptr);
+            return 0;
+        }
+        if (w == 5) { // explicit system-tray opening succeeded
+            if (g_app.trayPanel) g_app.trayPanel->Close();
+            return 0;
+        }
+        if (w == 2 || w == 3) {
+            KillTimer(h, kTrayFocusTimer);
+            if (g_app.trayPanel) g_app.trayPanel->Close();
+            static ULONGLONG lastTrayNotice = 0;
+            const auto now = GetTickCount64();
+            if (g_app.notes && (!lastTrayNotice || now - lastTrayNotice >= 30000)) {
+                lastTrayNotice = now;
+                Notice notice;
+                notice.source = L"atrium";
+                notice.app = L"Atrium";
+                notice.title = Tr(w == 2 ? L"Use the Windows notification area" : L"Windows notification area is unavailable");
+                notice.body = Tr(w == 2 ? L"Select the icon in the Windows hidden icons panel." : L"Temporarily turn off Hide system taskbar, open the hidden icons panel, and try again.");
+                g_app.notes->Post(std::move(notice));
+            }
+        } else if (w == 1) // a click was forwarded: see where the focus ends up
             SetTimer(h, kTrayFocusTimer, 600, nullptr);
         else if (g_app.trayPanel)
             g_app.trayPanel->Refresh();
@@ -1240,10 +1234,6 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 }
                 KillTimer(h, kReadyTimer);
             }
-            return 0;
-        }
-        if (w == kTrayTimer) {
-            OpenTrayStep2();
             return 0;
         }
         if (w == kStatusTimer) {
@@ -1497,6 +1487,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         const double t0 = ClockMs();
         if (g_app.stage)
             g_app.stage->Update(g_app.tasks->Snapshot(true));
+        if (g_app.trayPanel) g_app.trayPanel->SetAttention(g_app.tasks->Snapshot(true));
         const double t1 = ClockMs();
         auto items = g_app.tasks->Snapshot();
         const double t2 = ClockMs();
@@ -1529,6 +1520,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     });
     g_app.trayPanel = std::make_unique<TrayPanel>(instance, *g_app.tray);
     g_app.trayPanel->onSystemTray = OpenTray;
+    g_app.trayPanel->SetAttention(g_app.tasks->Snapshot(true));
     g_app.control = std::make_unique<ControlCenter>(instance);
     g_app.control->onChanged = UpdateStatus;
     g_app.start->onStatusRequest = UpdateStatus;
