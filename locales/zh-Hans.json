@@ -845,6 +845,7 @@
   "Select the icon in the Windows hidden icons panel.": "请直接点击 Windows 隐藏图标区中的图标。",
   "Windows notification area is unavailable": "系统托盘暂时无法打开",
   "Temporarily turn off Hide system taskbar, open the hidden icons panel, and try again.": "请临时关闭“隐藏系统任务栏”，打开隐藏图标区后重试。",
-  "Receive tray icons directly": "直接接收托盘图标"
+  "Host tray icons": "接管托盘图标",
+  "Apps hand their tray icons to Atrium: the pictures stay live, and clicks, double clicks and right clicks work as in the Windows tray. When off, Atrium reads the icons back from the Windows tray.": "各应用的托盘图标直接交给 Atrium：图标实时同步，单击、双击、右键和 Windows 托盘一致。关闭时，Atrium 从 Windows 托盘读取图标。"
  }
 }

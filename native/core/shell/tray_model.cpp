@@ -295,6 +295,7 @@ bool HasIcon(const std::vector<HWND>& windows, UINT uid, RECT& bounds, std::wstr
     for (HWND h : windows) {
         NOTIFYICONIDENTIFIER id{sizeof(id), h, uid, GUID_NULL};
         RECT r{};
+        ShellQuestion explorers; // Explorer's answer, not the tray host's
         if (SUCCEEDED(Shell_NotifyIconGetRect(&id, &r))) {
             bounds = r;
             DWORD pid = 0;
@@ -310,6 +311,7 @@ bool LiveIcon(const Record& record, const Program& program, RECT& bounds, std::w
 {
     if (record.guid != GUID_NULL) {
         NOTIFYICONIDENTIFIER id{sizeof(id), nullptr, 0, record.guid};
+        ShellQuestion explorers; // Explorer's answer, not the tray host's
         if (FAILED(Shell_NotifyIconGetRect(&id, &bounds))) return false;
         wchar_t guid[40]{};
         StringFromGUID2(record.guid, guid, 40);
@@ -895,14 +897,37 @@ void TrayModel::SetHostPlaces(RECT anchor)
         host_->SetPlaces(anchor);
 }
 
-bool TrayModel::ClickHosted(const TrayIcon& icon, tray::Action action)
+void TrayModel::MiddleClick(const TrayIcon& icon)
+{
+    POINT at{};
+    GetCursorPos(&at);
+    if (host_ && !icon.hostKey.empty()) {
+        host_->Hover(L"", at); // a click ends the hover and any popup it asked for
+        host_->Send(icon.hostKey, tray::HostAction::Middle, at);
+    }
+}
+
+void TrayModel::Hover(const TrayIcon* icon)
+{
+    POINT at{};
+    GetCursorPos(&at);
+    if (host_)
+        host_->Hover(icon ? icon->hostKey : L"", at);
+}
+
+bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction)
 {
     if (icon.hostKey.empty())
         return false;
     POINT at{};
     GetCursorPos(&at);
-    if (host_ && host_->Click(icon.hostKey, action, at))
+    if (host_)
+        host_->Hover(L"", at); // a click ends the hover and any popup it asked for
+    if (host_ && host_->Send(icon.hostKey, hostAction, at))
         return true;
+    const tray::Action action = hostAction == tray::HostAction::Right ? tray::Action::Right :
+        hostAction == tray::HostAction::Double ? tray::Action::Double :
+        hostAction == tray::HostAction::DoubleContinuation ? tray::Action::DoubleContinuation : tray::Action::Left;
     // The host could not send it (an elevated app, the host off): Explorer's button, by program.
     TrayIcon fallback;
     {
@@ -920,7 +945,7 @@ bool TrayModel::ClickHosted(const TrayIcon& icon, tray::Action action)
 
 void TrayModel::Click(const TrayIcon& icon, bool right)
 {
-    if (ClickHosted(icon, right ? tray::Action::Right : tray::Action::Left))
+    if (ClickHosted(icon, right ? tray::HostAction::Right : tray::HostAction::Left))
         return;
     std::lock_guard g(mutex_);
     jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }),
@@ -930,7 +955,7 @@ void TrayModel::Click(const TrayIcon& icon, bool right)
 
 void TrayModel::DoubleClick(const TrayIcon& icon, bool continuation)
 {
-    if (ClickHosted(icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double))
+    if (ClickHosted(icon, continuation ? tray::HostAction::DoubleContinuation : tray::HostAction::Double))
         return;
     std::lock_guard g(mutex_);
     jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }), {false, icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double});
@@ -981,7 +1006,7 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
 std::vector<TrayIcon> TrayModel::Icons() const
 {
     std::lock_guard g(mutex_);
-    if (!host_)
+    if (!host_ || host_->Yielded())
         return icons_;
     // The hosted icons in Windows' order (where Explorer's tray has the program), the
     // rest in arrival order after them; Explorer-only icons keep their place.
@@ -1018,8 +1043,15 @@ std::vector<TrayIcon> TrayModel::Icons() const
         }
         return t;
     };
+    // An Explorer button whose program was not recognised but whose name is a hosted
+    // icon's is that icon: not shown twice.
+    std::set<std::wstring> hostedTitles;
+    for (const HostIcon& h : hosted)
+        if (!h.tip.empty()) hostedTitles.insert(Title(h.tip));
     std::vector<TrayIcon> out;
     for (const TrayIcon& e : icons_) {
+        if (e.exe.empty() && !e.tip.empty() && hostedTitles.contains(Title(e.tip)))
+            continue;
         if (e.exe.empty() || !hostedExe.contains(e.exe)) {
             out.push_back(e);
             continue;
@@ -1138,7 +1170,7 @@ void TrayModel::Worker()
                     job.action == tray::Action::Right ? L"right" : job.action == tray::Action::Double ? L"double" : job.action == tray::Action::DoubleContinuation ? L"double-continuation" : L"left",
                     Title(job.icon.tip).c_str(), job.icon.exe.c_str(), job.icon.recordId.c_str(),
                     target && target->element ? L"uia" : L"record", target ? tray::MethodName(target->method) : L"missing",
-                    IsWindowVisible(taskbar), (SHAppBarMessage(ABM_GETSTATE, &abd) & ABS_AUTOHIDE) != 0,
+                    IsWindowVisible(taskbar), (AppBarMessage(ABM_GETSTATE, abd) & ABS_AUTOHIDE) != 0,
                     overflow != nullptr, IsWindowVisible(overflow), offscreen, enabled, unsigned(state));
                 const auto before = CaptureResponse(job.icon.exe);
                 auto observe = [&](bool accepted) {

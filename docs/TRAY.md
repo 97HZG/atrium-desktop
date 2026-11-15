@@ -162,16 +162,42 @@ main 上的 #49（双击）、#28 与 189bfe0（真实右键）和本分支并�
 - `accepted-unconfirmed` 的左键同样启动焦点检查，避免隐藏溢出窗口保留焦点、吞掉下一次点击。
 - 通知文本改用 main 的本地化资源（`locales/zh-Hans.json`），删除分支自带的 `tr.h`。
 
-## 托盘宿主（设置 `trayHost`，默认关闭）
+## 接管托盘图标（设置 `trayHost`，默认关闭）
+
+两种模式的区别：关闭时，Atrium 从 Windows 托盘**读回**图标（UIA 按钮 + 注册表记录，见上文），图片是 Explorer 保存的快照，点击通过 Explorer 的按钮转交；开启时，各应用的托盘图标**直接交给 Atrium**，图片实时，点击按系统托盘协议直接发给应用。
 
 参照 ManagedShell `TrayService`（Cairo、RetroBar 使用）：Atrium 在独立线程上创建隐藏的 `Shell_TrayWnd`，保持在 Explorer 同名窗口之前（每 100 ms 检查 FindWindow 结果），因此应用的 `Shell_NotifyIcon` 先到达 Atrium。
 
-- `WM_COPYDATA` dwData 1（图标）：当场复制 HICON 为位图，记录回调消息、版本、提示、NIS_HIDDEN，然后原样转发给 Explorer 并返回它的结果。Explorer 拒绝重复 NIM_ADD（宿主启动时的 TaskbarCreated 造成）时改发 NIM_MODIFY。Explorer 已接受、宿主未见过的 NIM_MODIFY 也建立条目。
-- dwData 3（Shell_NotifyIconGetRect）：已知图标回答面板中被点击的位置或任务栏托盘入口；其余转发。
-- dwData 0（AppBar）、WM_COMMAND、≥ WM_USER 的消息：转发给 Explorer（发送的用 SendMessageTimeout，投递的用 PostMessage）。
-- 启动时广播 TaskbarCreated，已运行的应用重新添加图标；宿主关闭或 Atrium 退出时窗口销毁，之后的调用直接到 Explorer。由于所有更新都已转发，Explorer 的托盘始终完整。
-- 点击：按 NOTIFYICON_VERSION 发送系统托盘的回调序列（MOUSEMOVE、DOWN、UP，v3+ 的 NIN_SELECT / WM_CONTEXTMENU，双击为 LBUTTONDBLCLK + LBUTTONUP），v4 的 wParam 是指针坐标；发送前 AllowSetForegroundWindow 给图标所属进程。发送失败（如 UIPI 拒绝提权进程）时回到 Explorer 读取路径。
-- 列表：宿主图标按 Explorer 托盘中同一程序的位置排列，其余按到达顺序；仅 Explorer 有的图标保留。宿主图标没有可用图片时借用 Explorer 记录的图片。
-- Atrium 自身查找 Explorer 任务栏一律使用 `ShellTaskbar()`（跳过本进程窗口）。
+接收与转发：
 
-已知边界：Explorer 的任务栏可能短暂排到前面，期间的调用只到 Explorer（宿主会错过这次更新，直到应用下次修改）；不响应 TaskbarCreated 的应用在其下次修改图标前只显示 Explorer 读取的结果；系统图标（音量、网络等）不经过这条路径。
+- `WM_COPYDATA` dwData 1（图标）：当场复制 HICON 为位图，记录回调消息、版本、提示、NIF_SHOWTIP、NIS_HIDDEN，然后原样转发给 Explorer 并返回它的结果。Explorer 拒绝重复 NIM_ADD（宿主自己广播 TaskbarCreated 造成）时改发 NIM_MODIFY。Explorer 已接受、宿主未见过的 NIM_MODIFY 也建立条目。Explorer 自身进程的图标（音量等系统图标）不接管。
+- dwData 3（Shell_NotifyIconGetRect）：已知图标回答被点击的位置，其余回答任务栏托盘入口；未知图标转发。
+- dwData 0（AppBar）、WM_CLOSE、WM_COMMAND、WM_SYSCOMMAND、≥ WM_USER 的消息：转发给 Explorer（发送的用 SendMessageTimeout 4 s + SMTO_ABORTIFHUNG，投递的用 PostMessage）。
+- 启动时广播 TaskbarCreated，已运行的应用重新添加图标；收到 Explorer 自己的 TaskbarCreated（Explorer 重启）后先回到最前，1.5 s 后再广播一次，补回这段时间直接到 Explorer 的图标。
+
+点击与悬停（`shell/tray_protocol.h`，`tray_protocol` 测试）：
+
+| 动作 | 版本 0–2 | 版本 3 | 版本 4 |
+| --- | --- | --- | --- |
+| 左键 | MOUSEMOVE、LBUTTONDOWN、LBUTTONUP | + NIN_SELECT | + NIN_SELECT |
+| 双击第二下 | LBUTTONDBLCLK、LBUTTONUP | 同左 | 同左 |
+| 右键 | MOUSEMOVE、RBUTTONDOWN、RBUTTONUP | + WM_CONTEXTMENU | + WM_CONTEXTMENU |
+| 中键 | MOUSEMOVE、MBUTTONDOWN、MBUTTONUP | 同左 | 同左 |
+| 悬停 | MOUSEMOVE | 同左 | 同左；未设 NIF_SHOWTIP 时停留 500 ms 发 NIN_POPUPOPEN，离开发 NIN_POPUPCLOSE |
+
+版本 0–3 的 wParam 是图标 ID、lParam 是通知；版本 4 的 wParam 是指针屏幕坐标、lParam 低字是通知、高字是图标 ID。点击前 AllowSetForegroundWindow 给图标所属进程（面板持有前台），点击会结束悬停与弹出请求。发送失败（如 UIPI 拒绝提权进程的窗口）时回到 Explorer 读取路径。
+
+列表：宿主图标按 Explorer 托盘中同一程序的位置排列，其余按到达顺序；只有 Explorer 有的图标保留，提示相同的未识别按钮不重复显示。宿主图标没有可用图片时借用 Explorer 记录的图片。
+
+不影响系统功能的保障：
+
+- 宿主窗口有自己的线程，UI 线程忙不会让应用的托盘调用等待；读取一次调用时出现任何异常，这次调用照样转发给 Explorer。
+- 窗口从不显示、不激活；大小跟随 Explorer 的任务栏，查找任务栏位置的程序得到同样的矩形。
+- 每次更新都已转发，Explorer 的托盘始终完整：关闭开关、Atrium 退出或崩溃时窗口随之消失，之后的调用直接到 Explorer，不需要恢复。
+- Atrium 进程或宿主线程不响应时，守护进程（开启此功能时启动）约 4 s 后把 Explorer 的任务栏排到宿主之前，应用的调用直接到 Explorer；宿主恢复后自行回到前面。
+- 另一个程序的托盘宿主（RetroBar、ExplorerPatcher 等）在前面时不争抢，期间改用读取模式；它退出后宿主回到前面并重新收集图标。
+- Atrium 自身查找 Explorer 任务栏一律使用 `ShellTaskbar()`：桌面外壳进程的 Shell_TrayWnd，跳过本进程窗口。
+
+验证：`tray_host_probe`（手动运行，需先关闭 Atrium 的此开关）注册两个测试图标（版本 0 按窗口+ID、版本 4 按 GUID），检查宿主收到图片/版本/回调、修改实时、三种点击的消息与编码、位置查询、畸形数据后仍响应、让位与回到前面、关闭后 Explorer 仍有两个图标并能删除。
+
+已知边界：Explorer 的任务栏可能短暂排到前面，期间的单次更新只到 Explorer（下次修改或重新广播后补上）；不响应 TaskbarCreated 的应用在其下次修改图标前显示为读取模式的结果；系统图标不经过这条路径；以管理员身份运行的应用可能拒绝 Atrium 的点击消息，此时退回读取模式的点击。

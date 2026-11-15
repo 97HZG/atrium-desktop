@@ -4,20 +4,84 @@
 #pragma once
 
 #include <windows.h>
+#include <shellapi.h>
+
+#include <atomic>
 
 namespace atrium {
 
-// Explorer's Shell_TrayWnd, never Atrium's own. No allocation (used by the crash handler).
-inline HWND ShellTaskbar()
+// The Shell_TrayWnd of the shell's process (the desktop's), else the first one of
+// another process than `skip` (default: this one). No allocation: the crash
+// handler and the guard use it.
+inline HWND ShellTaskbar(DWORD skip = GetCurrentProcessId())
 {
-    const DWORD self = GetCurrentProcessId();
+    DWORD shell = 0;
+    if (HWND desktop = GetShellWindow())
+        GetWindowThreadProcessId(desktop, &shell);
+    HWND other = nullptr;
     for (HWND h = nullptr; (h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) != nullptr;) {
         DWORD pid = 0;
         GetWindowThreadProcessId(h, &pid);
-        if (pid != self)
+        if (shell && pid == shell)
             return h;
+        if (pid != skip && !other)
+            other = h;
     }
-    return nullptr;
+    return other;
+}
+
+// Set while Atrium itself asks the shell where a tray icon is (the tray reader):
+// the tray host passes such questions to Explorer instead of answering them.
+inline std::atomic_int g_shellQuestions{0};
+struct ShellQuestion {
+    ShellQuestion() { ++g_shellQuestions; }
+    ~ShellQuestion() { --g_shellQuestions; }
+};
+
+// SHAppBarMessage for Atrium's own calls. With Atrium's tray host first among the
+// Shell_TrayWnd windows, Windows hands the call to a window of the caller's own
+// process with an in-process pointer, which Explorer cannot read. The state calls
+// carry everything in the message itself: they go to Explorer directly then, in
+// the shell's wire format (APPBARMSGDATAV3, handles as 32-bit values).
+inline UINT_PTR AppBarMessage(DWORD message, APPBARDATA& abd)
+{
+    DWORD first = 0;
+    GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &first);
+    HWND shell = ShellTaskbar();
+    if (first != GetCurrentProcessId() || !shell || (message != ABM_GETSTATE && message != ABM_SETSTATE))
+        return SHAppBarMessage(message, &abd);
+    struct AppBarData32 {
+        DWORD cbSize;
+        DWORD hWnd;
+        UINT uCallbackMessage;
+        UINT uEdge;
+        RECT rc;
+        INT64 lParam;
+    };
+    struct AppBarMessage32 {
+        AppBarData32 abd;
+        DWORD dwMessage;
+        DWORD padding1;
+        UINT64 hSharedMemory;
+        DWORD dwSourceProcessId;
+        DWORD padding2;
+    };
+    static_assert(sizeof(AppBarData32) == 40 && sizeof(AppBarMessage32) == 64);
+    AppBarMessage32 data{};
+    data.abd.cbSize = sizeof(AppBarData32);
+    data.abd.hWnd = DWORD(reinterpret_cast<ULONG_PTR>(abd.hWnd));
+    data.abd.uCallbackMessage = abd.uCallbackMessage;
+    data.abd.uEdge = abd.uEdge;
+    data.abd.rc = abd.rc;
+    data.abd.lParam = INT64(abd.lParam);
+    data.dwMessage = message;
+    data.dwSourceProcessId = GetCurrentProcessId();
+    COPYDATASTRUCT cds{0, sizeof(data), &data};
+    DWORD_PTR result = 0;
+    if (!SendMessageTimeoutW(shell, WM_COPYDATA, reinterpret_cast<WPARAM>(abd.hWnd), reinterpret_cast<LPARAM>(&cds),
+                             SMTO_ABORTIFHUNG, 4000, &result))
+        return 0;
+    return result;
 }
 
 } // namespace atrium

@@ -11,6 +11,7 @@
 #include "settings.h"
 #include "settings_server.h"
 #include "shell/app_catalog.h"
+#include "shell/shell_taskbar.h"
 #include "shell/app_registration.h"
 #include "shell/update_checker.h"
 #include "shell/task_model.h"
@@ -566,7 +567,7 @@ void ApplySettings(const Settings& s)
         // Without the bar, Windows' own taskbar and banners are never hidden.
         g_app.chrome->SetTaskbarHidden(s.bar && s.hideTaskbar);
         g_app.chrome->SetBannersHidden(s.bar && s.hideBanners);
-        if (s.bar && (s.hideTaskbar || s.hideBanners))
+        if ((s.bar && (s.hideTaskbar || s.hideBanners)) || s.trayHost)
             EnsureGuard();
     }
 }
@@ -606,7 +607,32 @@ int RunGuard(DWORD pid)
     HWND host = nullptr;
     int silent = 0; // checks in a row without an answer
     bool shown = false;
+    int traySilent = 0;  // the same for Atrium's tray host window (shell/tray_host.h)
+    bool trayBack = false;
     while (WaitForSingleObject(process, 2000) == WAIT_TIMEOUT) {
+        // Apps' tray calls go to the tray host first and wait for it. Not answering
+        // (Atrium hung, or its host thread), Explorer's taskbar goes in front of it so
+        // that they reach Explorer; the host moves back once it runs again.
+        HWND trayHost = nullptr;
+        for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, L"Shell_TrayWnd", nullptr)) != nullptr;) {
+            DWORD owner = 0;
+            GetWindowThreadProcessId(w, &owner);
+            if (owner == pid)
+                trayHost = w;
+        }
+        DWORD_PTR trayAnswer = 0;
+        const bool trayAlive = !trayHost || SendMessageTimeoutW(trayHost, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 1500, &trayAnswer);
+        traySilent = trayAlive ? 0 : traySilent + 1;
+        if (traySilent >= 2) {
+            if (HWND shell = ShellTaskbar(pid))
+                SetWindowPos(shell, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+            if (!trayBack)
+                Log(L"guard: Atrium's tray host (%lu) is not responding: Explorer's tray in front", pid);
+            trayBack = true;
+        } else if (trayAlive && trayBack) {
+            Log(L"guard: Atrium's tray host (%lu) responds again", pid);
+            trayBack = false;
+        }
         if (!host || !IsWindow(host)) {
             host = nullptr;
             for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, kHostClass, nullptr)) != nullptr;) {

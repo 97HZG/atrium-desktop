@@ -73,3 +73,14 @@ add_executable(tray_live_probe EXCLUDE_FROM_ALL tray_live_probe.cpp ../core/shel
 target_include_directories(tray_live_probe PRIVATE ../core)
 target_compile_definitions(tray_live_probe PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(tray_live_probe PRIVATE windowsapp user32 shell32 ole32 oleaut32 uuid shlwapi windowscodecs version)
+
+add_executable(tray_protocol_tests tray_protocol.cpp)
+target_include_directories(tray_protocol_tests PRIVATE ../core)
+target_compile_definitions(tray_protocol_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME tray_protocol COMMAND tray_protocol_tests)
+
+# Puts a tray host in front of Explorer's for a few seconds: run by hand, with Atrium's host off.
+add_executable(tray_host_probe EXCLUDE_FROM_ALL tray_host_probe.cpp ../core/shell/tray_host.cpp ../core/log.cpp)
+target_include_directories(tray_host_probe PRIVATE ../core)
+target_compile_definitions(tray_host_probe PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+target_link_libraries(tray_host_probe PRIVATE windowsapp user32 shell32 ole32 shlwapi)

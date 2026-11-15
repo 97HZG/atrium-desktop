@@ -5,6 +5,7 @@
 
 #include <objbase.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 
 #include <algorithm>
 #include <cwctype>
@@ -14,10 +15,15 @@ namespace atrium {
 
 namespace {
 
-constexpr UINT_PTR kKeepTimer = 1;   // keep the host first among Shell_TrayWnd windows; post changes
+constexpr UINT_PTR kKeepTimer = 1;      // keep the host first among Shell_TrayWnd windows; post changes
 constexpr UINT kKeepMs = 100;
-constexpr UINT_PTR kPruneTimer = 2;  // icons of windows that are gone without a NIM_DELETE
+constexpr UINT_PTR kPruneTimer = 2;     // icons of windows that are gone without a NIM_DELETE
 constexpr UINT kPruneMs = 2000;
+constexpr UINT_PTR kPopupTimer = 3;     // the dwell before a popup request (NIN_POPUPOPEN)
+constexpr UINT kPopupMs = 500;
+constexpr UINT_PTR kRecollectTimer = 4; // after Explorer's own TaskbarCreated, the host's
+constexpr UINT kRecollectMs = 1500;
+constexpr DWORD kForwardMs = 4000;      // as long as an app waits for Explorer anyway
 constexpr DWORD kSignature = 0x34753423;
 constexpr uint64_t kImageBase = 1ull << 62; // apart from TrayModel's own picture versions
 
@@ -50,6 +56,7 @@ struct NotifyIconIdentifier32 {
     DWORD signature;
     DWORD message; // 1: the top left corner, 2: the bottom right
     DWORD cbSize;
+    DWORD padding;
     DWORD hWnd;
     UINT uID;
     GUID guidItem;
@@ -68,6 +75,12 @@ std::wstring KeyOf(HWND hwnd, UINT uid, const GUID* guid)
     return key;
 }
 
+std::wstring Lower(std::wstring s)
+{
+    std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
+    return s;
+}
+
 std::wstring ProcessPath(DWORD pid)
 {
     std::wstring out;
@@ -78,16 +91,21 @@ std::wstring ProcessPath(DWORD pid)
             out.assign(path, size);
         CloseHandle(p);
     }
-    std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
     return out;
 }
 
-DWORD ShellPid()
+DWORD PidOf(HWND h)
 {
     DWORD pid = 0;
-    if (HWND shell = ShellTaskbar())
-        GetWindowThreadProcessId(shell, &pid);
+    if (h)
+        GetWindowThreadProcessId(h, &pid);
     return pid;
+}
+
+// The shell's process: the desktop's (Explorer, or whatever shell Windows runs).
+DWORD ShellPid()
+{
+    return PidOf(GetShellWindow());
 }
 
 const wchar_t* Name(DWORD message)
@@ -102,24 +120,43 @@ const wchar_t* Name(DWORD message)
     }
 }
 
+const wchar_t* Name(tray::HostAction action)
+{
+    switch (action) {
+    case tray::HostAction::Left: return L"click";
+    case tray::HostAction::Right: return L"right click";
+    case tray::HostAction::Middle: return L"middle click";
+    case tray::HostAction::Double: return L"double click";
+    case tray::HostAction::DoubleContinuation: return L"second click";
+    default: return L"hover";
+    }
+}
+
 } // namespace
 
 TrayHost::TrayHost(HWND notify, UINT msg) : notify_(notify), msg_(msg)
 {
     taskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
+    quit_ = RegisterWindowMessageW(L"Atrium.TrayHost.Quit");
+    hover_ = RegisterWindowMessageW(L"Atrium.TrayHost.Hover");
     HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    thread_ = std::thread([this, ready] {
-        threadId_ = GetCurrentThreadId();
-        Run(ready);
-    });
-    WaitForSingleObject(ready, 3000);
-    CloseHandle(ready);
+    thread_ = std::thread([this, ready] { Run(ready); });
+    if (ready) {
+        WaitForSingleObject(ready, 3000);
+        CloseHandle(ready);
+    }
 }
 
 TrayHost::~TrayHost()
 {
-    if (HWND w = window_.load())
-        PostMessageW(w, WM_CLOSE, 0, 0);
+    if (HWND w = window_.load()) {
+        // Behind Explorer's taskbar first, so that calls from now on go to Explorer; the
+        // ones already on their way are answered before the window goes.
+        stopping_ = true;
+        SetWindowPos(w, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        Sleep(100);
+        PostMessageW(w, quit_, 0, 0);
+    }
     else if (threadId_)
         PostThreadMessageW(threadId_, WM_QUIT, 0, 0);
     if (thread_.joinable())
@@ -128,6 +165,7 @@ TrayHost::~TrayHost()
 
 void TrayHost::Run(HANDLE ready)
 {
+    threadId_ = GetCurrentThreadId();
     HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = Proc;
@@ -142,26 +180,28 @@ void TrayHost::Run(HANDLE ready)
     RECT r{};
     if (HWND shell = ShellTaskbar())
         GetWindowRect(shell, &r);
-    HWND w = registered ? CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"Shell_TrayWnd", L"", WS_POPUP, r.left, r.top,
-                                          r.right - r.left, r.bottom - r.top, nullptr, nullptr, instance, this)
+    HWND w = registered ? CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"Shell_TrayWnd", L"", WS_POPUP,
+                                          r.left, r.top, r.right - r.left, r.bottom - r.top, nullptr, nullptr, instance, this)
                         : nullptr;
     if (!w) {
         Log(L"tray host: no window (%lu)", GetLastError());
-        SetEvent(ready);
+        UnregisterClassW(L"Shell_TrayWnd", instance);
+        UnregisterClassW(L"TrayNotifyWnd", instance);
+        if (ready) SetEvent(ready);
         return;
     }
     // Some apps place things by the notification area inside the taskbar.
     CreateWindowExW(0, L"TrayNotifyWnd", L"", WS_CHILD, 0, 0, r.right - r.left, r.bottom - r.top, w, nullptr, instance, nullptr);
     // Apps at a lower integrity send their icons too, as they do to Explorer.
     ChangeWindowMessageFilterEx(w, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
+    ChangeWindowMessageFilterEx(w, taskbarCreated_, MSGFLT_ALLOW, nullptr);
     window_ = w;
     KeepFirst();
     SetTimer(w, kKeepTimer, kKeepMs, nullptr);
     SetTimer(w, kPruneTimer, kPruneMs, nullptr);
-    SetEvent(ready);
-    // The apps already running add their icons again, now to the host.
-    SendNotifyMessageW(HWND_BROADCAST, taskbarCreated_, 0, 0);
-    Log(L"tray host: on, apps asked to add their icons again");
+    if (ready) SetEvent(ready);
+    if (!yielded_)
+        Broadcast();
 
     MSG m;
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
@@ -174,12 +214,30 @@ void TrayHost::Run(HANDLE ready)
     Log(L"tray host: off");
 }
 
+// The apps already running add their icons again, now through the host.
+void TrayHost::Broadcast()
+{
+    broadcastAt_ = GetTickCount64();
+    SendNotifyMessageW(HWND_BROADCAST, taskbarCreated_, 0, 0);
+    Log(L"tray host: on, apps asked to add their icons again");
+}
+
 LRESULT CALLBACK TrayHost::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (m == WM_NCCREATE)
         SetWindowLongPtrW(h, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams));
     auto* self = reinterpret_cast<TrayHost*>(GetWindowLongPtrW(h, GWLP_USERDATA));
-    return self ? self->Message(h, m, w, l) : DefWindowProcW(h, m, w, l);
+    if (!self)
+        return DefWindowProcW(h, m, w, l);
+    try {
+        return self->Message(h, m, w, l);
+    } catch (...) {
+        // Whatever went wrong here, the app's call still reaches Explorer.
+        Log(L"tray host: message 0x%04X failed; passed on", m);
+        if (m == WM_COPYDATA || m == WM_COMMAND || m >= WM_USER)
+            return self->Forward(m, w, l);
+        return DefWindowProcW(h, m, w, l);
+    }
 }
 
 LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -188,9 +246,9 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_COPYDATA: {
         const auto* cds = reinterpret_cast<const COPYDATASTRUCT*>(l);
         if (cds && cds->dwData == 1)
-            return OnNotifyIcon(h, w, cds);
+            return OnNotifyIcon(w, cds);
         if (cds && cds->dwData == 3)
-            return OnIconRect(h, w, cds);
+            return OnIconRect(w, cds);
         return Forward(m, w, l); // app bars (0) and the rest: Explorer's
     }
     case WM_TIMER:
@@ -200,24 +258,61 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
                 PostMessageW(notify_, msg_, 0, 0);
         } else if (w == kPruneTimer) {
             Prune();
+        } else if (w == kPopupTimer) {
+            KillTimer(h, kPopupTimer);
+            Popup(true);
+        } else if (w == kRecollectTimer) {
+            KillTimer(h, kRecollectTimer);
+            if (!yielded_)
+                Broadcast();
         }
         return 0;
     case WM_WINDOWPOSCHANGING:
         // Never shown, whoever asks: it only stands in for Explorer's taskbar.
         reinterpret_cast<WINDOWPOS*>(l)->flags &= ~SWP_SHOWWINDOW;
         return 0;
-    case WM_CLOSE:
-        DestroyWindow(h);
-        return 0;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
     default:
         break;
     }
-    if (m == taskbarCreated_)
-        return 0; // our own broadcast, or Explorer restarted: the apps add their icons
-    if (m == WM_COMMAND || m >= WM_USER)
+    if (m == quit_ && InSendMessageEx(nullptr) == ISMEX_NOSEND) { // posted by ~TrayHost
+        DestroyWindow(h);
+        return 0;
+    }
+    if (m == hover_) {
+        std::wstring key;
+        POINT at{};
+        {
+            std::lock_guard g(mutex_);
+            key = hoverKey_;
+            at = hoverAt_;
+        }
+        if (key != popupKey_)
+            Popup(false);
+        KillTimer(h, kPopupTimer);
+        if (!key.empty()) {
+            Send(key, tray::HostAction::HoverIn, at);
+            SetTimer(h, kPopupTimer, kPopupMs, nullptr);
+        }
+        return 0;
+    }
+    if (m == taskbarCreated_) {
+        // The host's own broadcast comes back here; any other is Explorer restarting. Its
+        // new taskbar may have come first for a moment, and the apps' new icons gone to it
+        // only: once in front again the host asks for them once more.
+        if (GetTickCount64() - broadcastAt_ > 3000) {
+            Log(L"tray host: Explorer restarted");
+            KeepFirst();
+            SetTimer(h, kRecollectTimer, kRecollectMs, nullptr);
+        }
+        return 0;
+    }
+    // A close, a command, a private message of the taskbar: Explorer's, as if sent to it.
+    if (m == WM_CLOSE || m == WM_COMMAND || m == WM_SYSCOMMAND || m >= WM_USER)
         return Forward(m, w, l);
     return DefWindowProcW(h, m, w, l);
 }
@@ -229,7 +324,7 @@ LRESULT TrayHost::Forward(UINT m, WPARAM w, LPARAM l)
         return 0;
     if (m == WM_COPYDATA || InSendMessage()) {
         DWORD_PTR result = 0;
-        if (!SendMessageTimeoutW(shell, m, w, l, SMTO_ABORTIFHUNG, 4000, &result))
+        if (!SendMessageTimeoutW(shell, m, w, l, SMTO_ABORTIFHUNG, kForwardMs, &result))
             return 0;
         return LRESULT(result);
     }
@@ -237,36 +332,54 @@ LRESULT TrayHost::Forward(UINT m, WPARAM w, LPARAM l)
     return 0;
 }
 
-LRESULT TrayHost::OnNotifyIcon(HWND, WPARAM w, const COPYDATASTRUCT* cds)
+LRESULT TrayHost::OnNotifyIcon(WPARAM w, const COPYDATASTRUCT* cds)
 {
     const auto* data = static_cast<const TrayNotifyData*>(cds->lpData);
     if (!data || cds->cbData < offsetof(TrayNotifyData, nid.szInfo) || data->signature != kSignature)
         return Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
     const NotifyIconData32& nid = data->nid;
-    const bool hasGuid = (nid.uFlags & NIF_GUID) && cds->cbData >= offsetof(TrayNotifyData, nid.guidItem) + sizeof(GUID);
-    const HWND hwnd = Handle(nid.hWnd);
-    const std::wstring key = KeyOf(hwnd, nid.uID, hasGuid ? &nid.guidItem : nullptr);
 
     // The picture is the app's: copied now, while the app waits for this call.
     std::shared_ptr<const IconImage> image;
     if ((data->message == NIM_ADD || data->message == NIM_MODIFY) && (nid.uFlags & NIF_ICON) && nid.hIcon) {
-        IconImage img;
-        if (HIconToImage(reinterpret_cast<HICON>(static_cast<ULONG_PTR>(nid.hIcon)), img))
-            image = std::make_shared<const IconImage>(std::move(img));
+        try {
+            IconImage img;
+            if (HIconToImage(reinterpret_cast<HICON>(static_cast<ULONG_PTR>(nid.hIcon)), img))
+                image = std::make_shared<const IconImage>(std::move(img));
+        } catch (...) {
+            image = nullptr;
+        }
     }
 
-    LRESULT result = Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
+    // Explorer first: what it answers is what the app is told.
     const bool shell = ShellTaskbar() != nullptr;
+    LRESULT result = Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
     if (data->message == NIM_ADD && !result && shell) {
-        // TaskbarCreated came from the host, not from a new Explorer: Explorer has the
-        // icon already and refuses a second add. It is the same icon, brought up to date.
+        // The host's TaskbarCreated (not a new Explorer): Explorer has the icon already
+        // and refuses a second add. It is the same icon, brought up to date.
         std::vector<BYTE> copy(static_cast<const BYTE*>(cds->lpData), static_cast<const BYTE*>(cds->lpData) + cds->cbData);
         reinterpret_cast<TrayNotifyData*>(copy.data())->message = NIM_MODIFY;
         COPYDATASTRUCT again{cds->dwData, cds->cbData, copy.data()};
         result = Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(&again));
     }
-    if (!shell)
-        result = TRUE; // Explorer is gone for the moment: the host keeps the icon
+    if (!shell && data->message != NIM_DELETE)
+        result = TRUE; // no Explorer for the moment: the host keeps the icon (it adds it again on TaskbarCreated)
+    try {
+        Record(cds, std::move(image), result);
+    } catch (...) {
+        Log(L"tray host: could not record a %s", Name(data->message));
+    }
+    return result;
+}
+
+void TrayHost::Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage> image, LRESULT result)
+{
+    const auto* data = static_cast<const TrayNotifyData*>(cds->lpData);
+    const NotifyIconData32& nid = data->nid;
+    const bool hasGuid = (nid.uFlags & NIF_GUID) && cds->cbData >= offsetof(TrayNotifyData, nid.guidItem) + sizeof(GUID);
+    const HWND hwnd = Handle(nid.hWnd);
+    const std::wstring key = KeyOf(hwnd, nid.uID, hasGuid ? &nid.guidItem : nullptr);
+    const bool hasVersion = cds->cbData >= offsetof(TrayNotifyData, nid.szInfoTitle);
 
     std::lock_guard g(mutex_);
     auto it = icons_.find(key);
@@ -275,25 +388,26 @@ LRESULT TrayHost::OnNotifyIcon(HWND, WPARAM w, const COPYDATASTRUCT* cds)
             icons_.erase(it);
             dirty_ = true;
         }
-        return result;
+        return;
     }
     if (data->message == NIM_SETVERSION) {
-        if (it != icons_.end())
+        if (it != icons_.end() && hasVersion) {
             it->second.version = nid.uVersion;
-        return result;
+            dirty_ = true;
+        }
+        return;
     }
     if (data->message != NIM_ADD && data->message != NIM_MODIFY)
-        return result;
-    // A change of an icon the host has not seen (added before it started, and the
-    // app ignored TaskbarCreated) that Explorer took: the host learns it from here.
+        return;
     if (it == icons_.end()) {
-        if (data->message == NIM_MODIFY && !result)
-            return result;
+        // A change of an icon the host has not seen (added before it started, the app
+        // ignored TaskbarCreated) that Explorer took: the host learns it from here.
+        if (!result)
+            return;
         // The shell's own icons (volume, network...) stay Explorer's: Atrium has its control centre.
-        DWORD pid = 0;
-        if (hwnd) GetWindowThreadProcessId(hwnd, &pid);
+        const DWORD pid = PidOf(hwnd);
         if (!pid || pid == ShellPid())
-            return result;
+            return;
         HostIcon icon;
         icon.key = key;
         icon.added = ++nextAdded_;
@@ -302,11 +416,9 @@ LRESULT TrayHost::OnNotifyIcon(HWND, WPARAM w, const COPYDATASTRUCT* cds)
     HostIcon& icon = it->second;
     if (hwnd && icon.hwnd != hwnd) {
         icon.hwnd = hwnd;
-        GetWindowThreadProcessId(hwnd, &icon.pid);
-        icon.exe = ProcessPath(icon.pid);
-        if (!icon.exe.empty())
-            icon.exe = AppExecutable(icon.exe);
-        std::transform(icon.exe.begin(), icon.exe.end(), icon.exe.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
+        icon.pid = PidOf(hwnd);
+        std::wstring path = ProcessPath(icon.pid);
+        icon.exe = path.empty() ? L"" : Lower(AppExecutable(path));
     }
     icon.uid = nid.uID;
     if (nid.uFlags & NIF_MESSAGE)
@@ -317,19 +429,19 @@ LRESULT TrayHost::OnNotifyIcon(HWND, WPARAM w, const COPYDATASTRUCT* cds)
     }
     if (nid.uFlags & NIF_TIP)
         icon.tip.assign(nid.szTip, wcsnlen(nid.szTip, std::size(nid.szTip)));
+    icon.showTip = (nid.uFlags & NIF_SHOWTIP) != 0 || icon.showTip;
     if ((nid.uFlags & NIF_STATE) && (nid.dwStateMask & NIS_HIDDEN))
         icon.hidden = (nid.dwState & NIS_HIDDEN) != 0;
     if (data->message == NIM_ADD)
-        Log(L"tray host: %s '%s' (%s) v%u -> %ld", Name(data->message), icon.tip.substr(0, icon.tip.find(L'\n')).c_str(),
-            icon.exe.empty() ? L"-" : icon.exe.c_str(), icon.version, long(result));
+        Log(L"tray host: add '%s' (%s) -> %ld", icon.tip.substr(0, icon.tip.find(L'\n')).c_str(),
+            icon.exe.empty() ? L"-" : PathFindFileNameW(icon.exe.c_str()), long(result));
     dirty_ = true;
-    return result;
 }
 
-LRESULT TrayHost::OnIconRect(HWND, WPARAM w, const COPYDATASTRUCT* cds)
+LRESULT TrayHost::OnIconRect(WPARAM w, const COPYDATASTRUCT* cds)
 {
     const auto* id = static_cast<const NotifyIconIdentifier32*>(cds->lpData);
-    if (!id || cds->cbData < sizeof(NotifyIconIdentifier32) || id->signature != kSignature)
+    if (!id || cds->cbData < sizeof(NotifyIconIdentifier32) || id->signature != kSignature || g_shellQuestions > 0)
         return Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
     const std::wstring key = KeyOf(Handle(id->hWnd), id->uID, &id->guidItem);
     RECT r{};
@@ -340,27 +452,45 @@ LRESULT TrayHost::OnIconRect(HWND, WPARAM w, const COPYDATASTRUCT* cds)
     }
     if (IsRectEmpty(&r))
         return Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
-    return id->message == 1 ? MAKELONG(short(r.left), short(r.top)) : MAKELONG(short(r.right), short(r.bottom));
+    return id->message == 1 ? MAKELONG(WORD(SHORT(r.left)), WORD(SHORT(r.top))) : MAKELONG(WORD(SHORT(r.right)), WORD(SHORT(r.bottom)));
 }
 
 // Shell_NotifyIcon finds the first Shell_TrayWnd in the z-order. Explorer's comes
 // before the host now and then (its taskbar is topmost too): the host moves back.
+// Another program's (RetroBar, ExplorerPatcher's, a second shell) is left in front:
+// two hosts pushing in turn would take the icons from both.
 void TrayHost::KeepFirst()
 {
     HWND w = window_.load();
-    if (!w)
+    if (!w || stopping_)
         return;
     HWND shell = ShellTaskbar();
     RECT want{}, have{};
     if (shell && GetWindowRect(shell, &want) && GetWindowRect(w, &have) && !EqualRect(&want, &have))
         SetWindowPos(w, nullptr, want.left, want.top, want.right - want.left, want.bottom - want.top,
                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-    if (FindWindowW(L"Shell_TrayWnd", nullptr) == w)
+    HWND first = FindWindowW(L"Shell_TrayWnd", nullptr);
+    if (first == w) {
+        if (yielded_.exchange(false)) {
+            Log(L"tray host: in front again");
+            dirty_ = true;
+            SetTimer(w, kRecollectTimer, 200, nullptr); // updates went past the host meanwhile
+        }
         return;
+    }
+    const DWORD owner = PidOf(first);
+    if (first && owner != GetCurrentProcessId() && owner != PidOf(shell)) {
+        if (!yielded_.exchange(true)) {
+            Log(L"tray host: another program's tray (pid %lu) is in front: left there", owner);
+            dirty_ = true;
+        }
+        return;
+    }
     SetWindowPos(w, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    const bool again = FindWindowW(L"Shell_TrayWnd", nullptr) == w;
     const ULONGLONG now = GetTickCount64();
-    if (now - lostAt_ > 60000) // not on every round of a tug of war
-        Log(L"tray host: Explorer's taskbar came first; moved back (%s)", FindWindowW(L"Shell_TrayWnd", nullptr) == w ? L"first again" : L"still second");
+    if (now - lostAt_ > 60000) // not on every round
+        Log(L"tray host: Explorer's taskbar came first; moved back (%s)", again ? L"first again" : L"still second");
     lostAt_ = now;
 }
 
@@ -390,10 +520,44 @@ void TrayHost::SetPlaces(RECT anchor)
     anchor_ = anchor;
 }
 
-// What Explorer sends for a click on the icon: the mouse messages, then the
-// version 3+ notifications. Version 4 puts the pointer in wParam and the icon's
-// id in lParam's high word; older versions pass the id as wParam.
-bool TrayHost::Click(const std::wstring& key, tray::Action action, POINT at)
+void TrayHost::Hover(const std::wstring& key, POINT at)
+{
+    HWND w = window_.load();
+    if (!w)
+        return;
+    {
+        std::lock_guard g(mutex_);
+        if (key == hoverKey_)
+            return;
+        hoverKey_ = key;
+        hoverAt_ = at;
+    }
+    PostMessageW(w, hover_, 0, 0);
+}
+
+// Host thread: a version 4 app that draws its own tooltip is asked to show it after
+// the dwell (NIN_POPUPOPEN) and to close it when the pointer leaves (NIN_POPUPCLOSE).
+void TrayHost::Popup(bool open)
+{
+    std::wstring key;
+    POINT at{};
+    {
+        std::lock_guard g(mutex_);
+        key = open ? hoverKey_ : popupKey_;
+        at = hoverAt_;
+        if (open) {
+            auto it = icons_.find(key);
+            if (key.empty() || it == icons_.end() || it->second.showTip || it->second.version < 4)
+                return;
+        }
+    }
+    if (key.empty())
+        return;
+    Send(key, open ? tray::HostAction::PopupOpen : tray::HostAction::PopupClose, at);
+    popupKey_ = open ? key : L"";
+}
+
+bool TrayHost::Send(const std::wstring& key, tray::HostAction action, POINT at)
 {
     HWND hwnd = nullptr;
     UINT uid = 0, callback = 0, version = 0;
@@ -408,40 +572,29 @@ bool TrayHost::Click(const std::wstring& key, tray::Action action, POINT at)
         callback = it->second.callback;
         version = it->second.version;
         pid = it->second.pid;
-        clickedKey_ = key;
-        clicked_ = {at.x - 16, at.y - 16, at.x + 16, at.y + 16};
+        if (action != tray::HostAction::HoverIn && action != tray::HostAction::PopupOpen && action != tray::HostAction::PopupClose) {
+            clickedKey_ = key;
+            clicked_ = {at.x - 16, at.y - 16, at.x + 16, at.y + 16};
+        }
     }
     if (!callback || !hwnd || !IsWindow(hwnd))
         return false;
+    const bool click = action != tray::HostAction::HoverIn && action != tray::HostAction::PopupOpen && action != tray::HostAction::PopupClose;
     // Atrium has the foreground (its panel): the app may take it for its window or menu.
-    AllowSetForegroundWindow(pid);
+    if (click)
+        AllowSetForegroundWindow(pid);
     bool ok = true;
-    auto send = [&](UINT mouse) {
-        const WPARAM wp = version >= 4 ? MAKEWPARAM(at.x, at.y) : WPARAM(uid);
-        const LPARAM lp = version >= 4 ? MAKELPARAM(mouse, uid) : LPARAM(mouse);
-        ok = SendNotifyMessageW(hwnd, callback, wp, lp) && ok;
-    };
-    send(WM_MOUSEMOVE);
-    if (action == tray::Action::Right) {
-        send(WM_RBUTTONDOWN);
-        send(WM_RBUTTONUP);
-        if (version >= 3)
-            send(WM_CONTEXTMENU);
-    } else if (action == tray::Action::DoubleContinuation) {
-        send(WM_LBUTTONDBLCLK);
-        send(WM_LBUTTONUP);
-    } else {
-        send(WM_LBUTTONDOWN);
-        send(WM_LBUTTONUP);
-        if (version >= 3)
-            send(NIN_SELECT);
-        if (action == tray::Action::Double) {
-            send(WM_LBUTTONDBLCLK);
-            send(WM_LBUTTONUP);
+    for (UINT notification : tray::CallbackSequence(action, version)) {
+        WPARAM wp = 0;
+        LPARAM lp = 0;
+        tray::EncodeCallback(version, uid, notification, at, wp, lp);
+        if (!SendNotifyMessageW(hwnd, callback, wp, lp)) {
+            ok = false; // an elevated app's window refuses Atrium's messages (UIPI)
+            break;
         }
     }
-    Log(L"tray host: %s on %s v%u -> %s", action == tray::Action::Right ? L"right click" : action == tray::Action::Left ? L"click" : L"double click",
-        key.c_str(), version, ok ? L"sent" : L"refused");
+    if (click)
+        Log(L"tray host: %s on %s v%u -> %s", Name(action), key.c_str(), version, ok ? L"sent" : L"refused");
     return ok;
 }
 

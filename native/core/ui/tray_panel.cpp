@@ -253,6 +253,7 @@ void TrayPanel::Open(RECT anchor, RECT bar, HWND previous)
 
 void TrayPanel::Close()
 {
+    model_.Hover(nullptr);
     KillTimer(surface_.Hwnd(), kRefreshTimer);
     KillTimer(surface_.Hwnd(), kClickTimer);
     KillTimer(surface_.Hwnd(), kSettleTimer);
@@ -482,12 +483,23 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         std::wstring h = HitAt(pt);
         if (h != hover_) {
             hover_ = h;
+            // A hosted icon's app is told the pointer is on it, as the system tray does.
+            const size_t i = h.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(h.substr(5))) : icons_.size();
+            model_.Hover(i < icons_.size() && !icons_[i].hostKey.empty() ? &icons_[i] : nullptr);
             surface_.Invalidate();
         }
         return true;
     }
+    case WM_MBUTTONUP: {
+        const std::wstring h = HitAt(pt);
+        const size_t i = h.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(h.substr(5))) : icons_.size();
+        if (i < icons_.size() && !icons_[i].hostKey.empty())
+            model_.MiddleClick(icons_[i]);
+        return true;
+    }
     case WM_MOUSELEAVE:
         tracking_ = false;
+        model_.Hover(nullptr);
         hover_.clear();
         pressed_.clear();
         surface_.Invalidate();

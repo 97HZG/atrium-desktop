@@ -65,6 +65,10 @@ public:
     // the shell's own messages. Icons only Explorer's tray has stay in the list. UI thread.
     void SetHosting(bool on);
     bool Hosting() const { return host_ != nullptr; }
+    // A hosted icon only (the shell protocol has these; Explorer's buttons do not):
+    // the middle button, and the pointer resting on an icon (null: on none).
+    void MiddleClick(const TrayIcon& icon);
+    void Hover(const TrayIcon* icon);
     void SetHostPlaces(RECT anchor); // the panel's place on screen, for apps that ask where their icon is
 
     // First line of a tooltip, for display.
@@ -78,7 +82,7 @@ private:
         bool systemTray = false;
     };
     void Worker();
-    bool ClickHosted(const TrayIcon& icon, tray::Action action);
+    bool ClickHosted(const TrayIcon& icon, tray::HostAction action);
     HWND notify_;
     UINT msg_;
     std::function<std::vector<PinnedApp>()> appNames_;

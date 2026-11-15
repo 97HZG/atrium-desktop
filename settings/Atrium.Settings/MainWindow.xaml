@@ -690,7 +690,8 @@
                             <StackPanel>
                                 <TextBlock Text="Tray" Style="{StaticResource SectionStyle}" />
                                 <local:ToggleTile x:Name="TraySwitch" Title="Show on the taskbar" SwitchName="Show system tray" Toggled="OnBarContentToggled" Flat="True" />
-                                <local:ToggleTile x:Name="TrayHostSwitch" Title="Receive tray icons directly" SwitchName="Receive tray icons directly" Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="TrayHostSwitch" Title="Host tray icons" SwitchName="Host tray icons" Toggled="OnBarContentToggled" Flat="True"
+                                                  Note="Apps hand their tray icons to Atrium: the pictures stay live, and clicks, double clicks and right clicks work as in the Windows tray. When off, Atrium reads the icons back from the Windows tray." />
                             </StackPanel>
                         </StackPanel>
 

@@ -56,7 +56,7 @@ bool IsTaskbar(HWND w)
 bool AutoHide()
 {
     APPBARDATA abd{sizeof(abd)};
-    return (SHAppBarMessage(ABM_GETSTATE, &abd) & ABS_AUTOHIDE) != 0;
+    return (AppBarMessage(ABM_GETSTATE, abd) & ABS_AUTOHIDE) != 0;
 }
 
 void SetAutoHide(bool on)
@@ -64,7 +64,7 @@ void SetAutoHide(bool on)
     APPBARDATA abd{sizeof(abd)};
     abd.hWnd = ShellTaskbar();
     abd.lParam = on ? ABS_AUTOHIDE : ABS_ALWAYSONTOP;
-    SHAppBarMessage(ABM_SETSTATE, &abd);
+    AppBarMessage(ABM_SETSTATE, abd);
 }
 
 // Windows maximized while the taskbar still held its strip of the work area keep that gap when the

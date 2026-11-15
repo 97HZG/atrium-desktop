@@ -25,7 +25,7 @@
 | `showClock` | bool | | true | 时钟与日期 |
 | `showClockSeconds` | bool | | false | 时钟在分钟之后显示秒；时间仍取系统的时间格式（含秒的长格式，系统格式没有秒时在分钟之后补上） |
 | `showTray` | bool | | true | 系统托盘入口 |
-| `trayHost` | bool | | false | “直接接收托盘图标”：Atrium 用自己的 Shell_TrayWnd 窗口接收各应用的托盘图标（实时图片、回调消息），并原样转发给 Explorer；点击按系统托盘协议直接发给应用。关闭时从 Explorer 的托盘读取。切换后立即生效（见 docs/TRAY.md） |
+| `trayHost` | bool | | false | “接管托盘图标”：Atrium 用自己的 Shell_TrayWnd 窗口接收各应用的托盘图标（实时图片、回调消息），并原样转发给 Explorer；点击按系统托盘协议直接发给应用。关闭时从 Explorer 的托盘读取。切换后立即生效（见 docs/TRAY.md） |
 | `startTray` | bool | | true | 开始菜单底部胶囊里的托盘按钮 |
 | `startStatus` | bool | | true | 开始菜单底部胶囊里的网络、音量和电池按钮 |
 | `startSize` | string | `small` / `medium` / `large` / `xlarge` | `medium`（见回退规则） | 开始菜单一页的网格大小：小、中、大、极大，依次为 7 × 3、9 × 4、11 × 5、13 × 6 格。设置中心、菜单握把或空白处右键可选；菜单右键只列出当前图标档位与屏幕工作区能容纳的菜单档位。没有这一项时沿用 `start.json` 的 `size`，Core 启动时回填设置；实际显示可临时降档，不改变偏好 |
