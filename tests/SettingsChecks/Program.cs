@@ -10,10 +10,14 @@ var settings = new BarSettings
 {
     DockDisplayMode = "all", DockDisplayDelay = 750, DockDisplay = @"\\?\DISPLAY#external",
     DesktopDisplay = "disconnected-screen", TaskbarApps = "primaryAndWindow", TaskbarRightPrimaryOnly = true, NotifyPlacement = "topRight",
-    HoverRise = false,
+    HoverRise = false, NearEnter = 40, NearLeave = 4,
 };
 var parsed = BarSettings.FromJson(settings.ToJson(), new());
 Require(settings.SameAs(parsed), "Display preferences must survive a settings round trip.");
+Require(parsed.NearEnter == 40 && parsed.NearLeave == 4,
+    "A four-DIP leave setting must survive a round trip independently of enter.");
+Require(BarSettings.FromJson(JsonNode.Parse("""{"nearLeave":4}""")!.AsObject(), new()).NearLeave == 4,
+    "A partial four-DIP leave update must not be replaced with the default forty-eight.");
 Require(BarSettings.FromJson(new JsonObject(), new()).SameAs(new()), "Old files must receive display defaults.");
 Require(!BarSettings.FromJson(new JsonObject(), new()).HoverRise, "Old files must keep the glass flat.");
 Require(BarSettings.FromJson(new JsonObject(), new() { HoverRise = true }).HoverRise, "Partial updates must retain enabled hover rise.");
@@ -111,7 +115,7 @@ foreach (Action<BarSettings> edit in new Action<BarSettings>[]
     s => s.DockDisplayMode = "fixed", s => s.DockDisplayDelay += 50, s => s.DockDisplay += "other",
     s => s.DesktopDisplay += "other", s => s.TaskbarApps = "all", s => s.NotifyPlacement = "dock",
     s => s.TaskbarRightPrimaryOnly = false,
-    s => s.HoverRise = true,
+    s => s.HoverRise = true, s => s.NearEnter += 2, s => s.NearLeave += 2,
 })
 {
     var changed = settings.Clone();

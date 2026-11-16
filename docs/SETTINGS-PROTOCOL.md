@@ -43,7 +43,7 @@
 | `riseNear` | bool | | true | “栏上方提前拱起”：指针停在栏上方、进入触发区（不必进到栏里）时玻璃先拱起来，图标不变大。只在 `hoverRise` 开着时有效 |
 | `magnifyNear` | bool | | false | “栏上方提前放大图标”：同样的触发区里图标提前放大。与 `hoverRise` 无关，单独生效。默认关闭，旧配置没有这一项时也是关闭 |
 | `nearEnter` | number | 2–160 | 40 | 触发区：指针离玻璃顶边多近（DIP）开始响应 |
-| `nearLeave` | number | 2–200 | 48 | 触发区：已响应后指针退到多远（DIP）才收回；小于 `nearEnter` 时按 `nearEnter` 算 |
+| `nearLeave` | number | 2–200 | 48 | 触发区：已响应后指针退到多远（DIP）才收回；与 `nearEnter` 各自独立，可以小于它 |
 | `autoWidth` | bool | | true | 宽度随内容伸缩，最大为 `width` |
 | `showRunning` | bool | | true | 显示未固定但正在运行的应用 |
 | `dockDisplayMode` | string | `primary` / `follow` / `fixed` / `all` | `primary` | 仅主屏；单个 Dock 在其他屏幕底边停留后唤出（只有接了两块以上屏幕时才查看指针）；固定屏幕；或每个扩展显示器常驻一条任务栏 |

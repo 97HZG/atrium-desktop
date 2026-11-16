@@ -18,6 +18,16 @@ target_include_directories(app_processes_tests PRIVATE ../core)
 target_compile_definitions(app_processes_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_test(NAME app_processes COMMAND app_processes_tests)
 
+add_executable(near_hover_tests near_hover.cpp)
+target_include_directories(near_hover_tests PRIVATE ../core)
+target_compile_definitions(near_hover_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME near_hover COMMAND near_hover_tests)
+
+add_executable(hover_wave_tests hover_wave.cpp ../core/near_hover.cpp ../core/render/hover_wave.cpp)
+target_include_directories(hover_wave_tests PRIVATE ../core)
+target_compile_definitions(hover_wave_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME hover_wave COMMAND hover_wave_tests)
+
 add_executable(stage_excluded_tests stage_excluded.cpp)
 target_include_directories(stage_excluded_tests PRIVATE ../core)
 target_compile_definitions(stage_excluded_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

@@ -16,6 +16,7 @@
 // The render thread also draws the glass layer of Atrium's popups.
 #pragma once
 
+#include "near_hover.h"
 #include "render/bar_painter.h"
 #include "render/glass_panel.h"
 #include "settings.h"
@@ -166,7 +167,7 @@ private:
     void UpdateCover();    // this monitor's top app is maximized or full screen, regardless of focus
     void UpdateAutoHide(); // tucks the bar away or brings it up
     void WatchPointer();   // while covered: the screen's bottom edge brings the bar up, leaving it lets it go
-    void WatchNear();      // the pointer just above the glass: the hover wave leads it (hoverRise)
+    void WatchNear(bool publish = true); // the pointer above the glass; a move publishes it with ordinary hover
     void UpdateNearWatch(); // starts or stops that watch (shown bar, hoverRise on)
     void WatchDisplays();  // summon the shared Dock on another display, after the hover delay
     void WatchDisplaysIfNeeded(); // its timer, in the follow mode with several displays
@@ -235,7 +236,7 @@ private:
     // the glass rising (hoverRise and riseNear) and the icons magnifying (magnifyNear).
     float nearX_ = -1;
     bool nearRise_ = false, nearMagnify_ = false;
-    bool nearOn_ = false; // the pointer is in the band above the glass (with a little hold)
+    NearHover near_;
     ULONGLONG leftAt_ = 0; // when the pointer left a revealed bar
     std::map<HWND, std::pair<int, ULONGLONG>> raises_; // windows we were raised over: count, first time
     HWND lastCover_ = nullptr;

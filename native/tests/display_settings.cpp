@@ -27,7 +27,13 @@ void CheckSettings()
     settings.taskbarRightPrimaryOnly = true;
     settings.notifyPlacement = L"topRight";
     settings.hoverRise = false;
+    settings.nearEnter = 40;
+    settings.nearLeave = 4;
     Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed), "settings round trip parses");
+    Require(parsed.nearEnter == 40 && parsed.nearLeave == 4,
+        "a four-DIP leave setting survives the native round trip independently of enter");
+    Require(Settings::FromJson(LR"({"nearLeave":4})", Settings{}, parsed) && parsed.nearLeave == 4,
+        "a partial four-DIP leave update is not replaced with the default forty-eight");
     Require(!parsed.hoverRise, "disabled hover rise survives saving");
     Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.hoverRise, "old settings keep the glass flat");
     Require(Settings::FromJson(LR"({})", settings, parsed) && !parsed.hoverRise, "partial updates retain disabled hover rise");
