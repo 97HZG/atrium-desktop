@@ -1117,6 +1117,8 @@ void Bar::Relayout()
     scene.nearX = nearX_ < 0 ? -1 : nearX_ + float(window_.left - x);
     scene.nearRise = nearRise_;
     scene.nearMagnify = nearMagnify_;
+    scene.alertLight = st.attentionLight;
+    scene.alertBounce = st.attentionBounce;
     scene.rippleX = scene_.rippleX + float(window_.left - x);
     scene.rippleY = scene_.rippleY + float(window_.top - y);
     scene.rippleMs = scene_.rippleMs;
@@ -1866,6 +1868,40 @@ void Bar::RenderThread()
     winrt::uninit_apartment();
 }
 
+namespace {
+
+// Whether the screen just above `bar` (screen px), as GDI reads it, has any light in it: the
+// capture's picture of the same place coming all black then means the capture is what is black
+// (duplication after a sleep on some drivers, a video in an overlay plane), not the desktop.
+bool ScreenLitAbove(RECT bar)
+{
+    constexpr int kW = 32, kH = 4;
+    const int h = std::max(8L, std::min(64L, bar.bottom - bar.top));
+    bool lit = false;
+    HDC screen = GetDC(nullptr);
+    HDC mem = CreateCompatibleDC(screen);
+    BITMAPINFO bi{};
+    bi.bmiHeader = {sizeof(BITMAPINFOHEADER), kW, -kH, 1, 32, BI_RGB};
+    void* bits = nullptr;
+    if (HBITMAP dib = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0)) {
+        HGDIOBJ old = SelectObject(mem, dib);
+        SetStretchBltMode(mem, HALFTONE);
+        if (StretchBlt(mem, 0, 0, kW, kH, screen, bar.left, bar.top - h, bar.right - bar.left, h, SRCCOPY)) {
+            GdiFlush();
+            const auto* px = static_cast<const uint8_t*>(bits);
+            for (int i = 0; i < kW * kH && !lit; ++i)
+                lit = px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2] > 24;
+        }
+        SelectObject(mem, old);
+        DeleteObject(dib);
+    }
+    DeleteDC(mem);
+    ReleaseDC(nullptr, screen);
+    return lit;
+}
+
+} // namespace
+
 bool Bar::RenderSession()
 {
     // Wait for the first layout.
@@ -1891,9 +1927,11 @@ bool Bar::RenderSession()
     std::unique_ptr<BackdropSource> capture;
     // Remote-control mode: the wallpaper, so that the screen's capture may show Atrium.
     const bool remote = RemoteVisible();
-    if (remote) {
+    // The capture came all black twice in a row: the wallpaper for a while.
+    const bool blackOut = !remote && GetTickCount64() < wallpaperUntil_;
+    if (remote || blackOut) {
         capture = std::make_unique<WallpaperCapture>(gpu, snap.hmonitor, frame_);
-        Log(L"render: remote-control mode, the glass shows the wallpaper");
+        Log(remote ? L"render: remote-control mode, the glass shows the wallpaper" : L"render: the glass shows the wallpaper for now");
     } else if (!duplicationFailed_) {
         HRESULT why = S_OK;
         bool elsewhere = false;
@@ -1928,6 +1966,8 @@ bool Bar::RenderSession()
     BarPainter painter(renderer.D2D(), renderer.DWrite());
 
     unsigned drawnGeneration = 0;
+    double blackSince = -1;        // since when the capture around the bar is all black
+    float backdropBrightest = 1;   // the brightest cell of the last backdrop read back
     std::wstring drawnText;
     bool darkClock = false, darkApps = false, drawnDark = false, drawnDarkIcons = false, animating = false;
     InkFade clockInk, appsInk; // the inks fade to a new colour, not switch
@@ -1951,6 +1991,7 @@ bool Bar::RenderSession()
         std::unique_ptr<GlassRenderer> renderer;
         unsigned pop = 0;
         bool ready = false;   // presented once (the popup was told)
+        unsigned shown = 0;   // GlassPanel::shown that `ready` was for
         unsigned presentedGen = 0;
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
         RECT window{};        // where it was last drawn: a moved panel is drawn again at once
@@ -2114,6 +2155,13 @@ bool Bar::RenderSession()
             GlassRenderer& r = *ps.renderer;
             const bool moved = !EqualRect(&ps.window, &p.window);
             bool changed = r.Width() != bufferW || r.Height() != bufferH || moved;
+            if (ps.shown != p.shown) {
+                // Shown again (a menu replaced by the next one between two frames): it waits for
+                // its glass, which is drawn and announced anew; else a plain panel stands in.
+                ps.shown = p.shown;
+                ps.ready = false;
+                changed = true;
+            }
             bool newDesktop = false, under = false;
             ps.window = p.window;
             if (moved)
@@ -2351,6 +2399,10 @@ bool Bar::RenderSession()
         }
         if (snap.hmonitor != captureMonitor || snap.displayGeneration != captureGeneration || RemoteVisible() != remote)
             return true; // selected display or its capture source changed
+        if (blackOut && GetTickCount64() >= wallpaperUntil_) {
+            Log(L"render: back to capturing the screen");
+            return true;
+        }
         if (!snap.visible) {
             // Retire the bar's reads even while hidden. Otherwise its last pending
             // slot keeps the idle loop waking every 3 ms until the bar is revealed.
@@ -2429,9 +2481,36 @@ bool Bar::RenderSession()
         gpu.context->Flush(); // the panels' copies and comparisons start now, in one submission
         capture->Release();   // after the Flush (see above)
 
+        // A taskbar gone black (reported by several users): what the capture shows around the bar
+        // is all black for a while, yet the screen above the bar is not. The capture is started
+        // again; black again soon after, the glass shows the wallpaper for two minutes.
+        if (!remote && !blackOut && renderer.HasBackdrop()) {
+            if (backdropBrightest > 0.01f) {
+                blackSince = -1;
+                if (ClockMs() - blackRestartMs_ > 30000)
+                    blackRestarts_ = 0;
+            } else if (blackSince < 0) {
+                blackSince = ClockMs();
+            } else if (ClockMs() - blackSince > 1500) {
+                blackSince = -1;
+                if (ScreenLitAbove(snap.window)) {
+                    blackRestartMs_ = ClockMs();
+                    if (++blackRestarts_ >= 2) {
+                        blackRestarts_ = 0;
+                        wallpaperUntil_ = GetTickCount64() + 120000;
+                        Log(L"render: the capture stays black over a lit screen; the wallpaper for two minutes");
+                    } else {
+                        Log(L"render: the capture is black over a lit screen; starting it again");
+                    }
+                    return true;
+                }
+            }
+        }
         bool changed = !renderer.HasPresented();
         if (auto rb = renderer.Poll()) {
             changed |= rb->changed;
+            if (!rb->luma.empty())
+                backdropBrightest = *std::max_element(rb->luma.begin(), rb->luma.end());
             // Ink per region, from what the glass shows there: the backdrop
             // luminance mixed with the tint. Hysteresis avoids flicker.
             float tm = float(1.0 - snap.settings.transparency);

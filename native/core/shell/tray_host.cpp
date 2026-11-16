@@ -130,6 +130,7 @@ const wchar_t* Name(tray::HostAction action)
     case tray::HostAction::Middle: return L"middle click";
     case tray::HostAction::Double: return L"double click";
     case tray::HostAction::DoubleContinuation: return L"second click";
+    case tray::HostAction::Open: return L"open";
     default: return L"hover";
     }
 }

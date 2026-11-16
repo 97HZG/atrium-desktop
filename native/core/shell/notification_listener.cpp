@@ -122,10 +122,19 @@ void NotificationListener::Run()
                 if (access == wunm::UserNotificationListenerAccessStatus::Allowed) {
                     auto list = listener.GetNotificationsAsync(wun::NotificationKinds::Toast).get();
                     std::map<uint32_t, size_t> now;
+                    const auto clock = winrt::clock::now();
                     for (const auto& un : list) {
-                        size_t hash = std::hash<std::wstring>{}(TextOf(un));
-                        now[un.Id()] = hash;
+                        // Reading a toast's text parses its XML: every second for every toast in the
+                        // notification centre, that was most of Atrium's idle CPU. A toast is read when
+                        // it is new, and while it is recent (senders update theirs in place soon after).
                         auto old = seen.find(un.Id());
+                        const bool recent = clock - un.CreationTime() < std::chrono::minutes(2);
+                        if (old != seen.end() && !recent) {
+                            now[un.Id()] = old->second;
+                            continue;
+                        }
+                        size_t hash = first && !recent ? 0 : std::hash<std::wstring>{}(TextOf(un));
+                        now[un.Id()] = hash;
                         if (first || (old != seen.end() && old->second == hash))
                             continue;
                         Notice n = ToNotice(un);

@@ -338,6 +338,38 @@
                             <TextBlock x:Name="NotifyCaption" Style="{StaticResource FootnoteStyle}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="4,0,0,0" />
                             <Button Grid.Column="1" Content="Show again" Click="OnReplayNotify" HorizontalAlignment="Right" />
                         </Grid>
+                        <!-- Where cards come from: the chat apps one by one, then every other app -->
+                        <StackPanel Margin="0,14,0,0">
+                            <TextBlock Text="Sources" Style="{StaticResource SectionStyle}" Margin="4,0,0,10" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <ListView x:Name="SourcesList" SelectionMode="None" IsItemClickEnabled="False" ItemContainerStyle="{StaticResource PinItemStyle}"
+                                          AutomationProperties.Name="Sources" Padding="0,4,0,4">
+                                    <ListView.ItemsPanel>
+                                        <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+                                    </ListView.ItemsPanel>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="local:SourceVm">
+                                            <Grid Padding="14,8,14,8" ColumnSpacing="14" MinHeight="60" Background="Transparent" ToolTipService.ToolTip="{x:Bind Note}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid Width="40" Height="40" VerticalAlignment="Center">
+                                                    <FontIcon Glyph="{x:Bind Glyph}" FontSize="20" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}"
+                                                              Foreground="{ThemeResource InkSecondaryBrush}" />
+                                                    <Image Source="{x:Bind Icon, Mode=OneWay}" Width="36" Height="36" />
+                                                </Grid>
+                                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Title, Mode=OneWay}" Style="{StaticResource RowTitleStyle}"
+                                                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                <ToggleSwitch Grid.Column="2" Style="{StaticResource SwitchStyle}" IsOn="{x:Bind IsOn, Mode=TwoWay}"
+                                                              AutomationProperties.Name="{x:Bind Title, Mode=OneWay}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- ==== The bar's parts: the start menu, the tray, the status entry, the time; a preview each ==== -->
@@ -417,6 +449,52 @@
                             <TextBlock x:Name="StageCaption" Style="{StaticResource FootnoteStyle}" VerticalAlignment="Center" Margin="4,0,0,0" />
                             <Button x:Name="StageReplay" Content="Demo switch" Click="OnStageReplay" HorizontalAlignment="Right" />
                         </Grid>
+                        <!-- The apps Stage Manager leaves alone (stageExcluded), shown as the pinned apps are -->
+                        <StackPanel Margin="0,14,0,0">
+                            <Grid Margin="0,0,0,10">
+                                <TextBlock Text="Excluded from Stage Manager" Style="{StaticResource SectionStyle}" Margin="4,0,0,0" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                    <Button x:Name="ExcludedDefaultsButton" Content="Restore defaults" Click="OnStageExcludedDefaults" />
+                                    <Button Content="Add app…" Click="OnAddExcluded" Style="{StaticResource PrimaryButtonStyle}"
+                                            ToolTipService.ToolTip="Their windows are never put away by Stage Manager: screenshot and recording tools whose controls must stay on screen." />
+                                </StackPanel>
+                            </Grid>
+                            <Border Style="{StaticResource GroupStyle}">
+                                <Grid>
+                                    <ListView x:Name="ExcludedList" SelectionMode="None" ItemContainerStyle="{StaticResource PinItemStyle}"
+                                              AutomationProperties.Name="Excluded from Stage Manager" Padding="0,4,0,4">
+                                        <ListView.ItemsPanel>
+                                            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+                                        </ListView.ItemsPanel>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:ExcludedVm">
+                                                <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent" Loaded="OnLocalizeTemplate">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid Width="40" Height="40" VerticalAlignment="Center">
+                                                        <FontIcon Glyph="{x:Bind Glyph}" FontSize="20" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}"
+                                                                  Foreground="{ThemeResource InkSecondaryBrush}" />
+                                                        <Image Source="{x:Bind Icon, Mode=OneWay}" Width="36" Height="36" />
+                                                    </Grid>
+                                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Title, Mode=OneWay}" Style="{StaticResource RowTitleStyle}"
+                                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                    <Button Grid.Column="2" Style="{StaticResource IconButtonStyle}" Click="{x:Bind Remove}" VerticalAlignment="Center"
+                                                            AutomationProperties.Name="{x:Bind RemoveName}" ToolTipService.ToolTip="Remove">
+                                                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                    <StackPanel x:Name="ExcludedEmpty" Visibility="Collapsed" Padding="24,36,24,36" Spacing="6" HorizontalAlignment="Center">
+                                        <TextBlock Text="Stage Manager takes in every app" Style="{StaticResource TitleStyle}" HorizontalAlignment="Center" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- ==== Displays: controls are declared here; code only binds the data. ==== -->
@@ -682,6 +760,8 @@
                                 </StackPanel>
                                 <local:ToggleTile x:Name="StartStatusSwitch" Title="Status bar" SwitchName="Status in the Start menu" Toggled="OnBarContentToggled" Flat="True" />
                                 <local:ToggleTile x:Name="StartTraySwitch" Title="Tray button" SwitchName="Tray button in the Start menu" Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="StartCenteredSwitch" Title="Center on screen" SwitchName="Start menu in the center" Toggled="OnBarContentToggled" Flat="True"
+                                                  Note="The start menu opens in the middle of the screen instead of at the left." />
                             </StackPanel>
                         </StackPanel>
 
@@ -726,6 +806,10 @@
                                 <local:ToggleTile x:Name="NotificationsSwitch" Title="Notifications button" SwitchName="Show notifications button" Toggled="OnBarContentToggled" Flat="True" />
                                 <local:ToggleTile x:Name="DesktopSwitch" Title="Show Desktop button" SwitchName="Show Desktop button" Toggled="OnBarContentToggled" Flat="True"
                                                   Note="A thin line at the taskbar's right end, as on the Windows taskbar: click it to show the desktop, click again to bring the windows back." />
+                                <local:ToggleTile x:Name="AttentionLightSwitch" Title="Highlight new messages" SwitchName="Highlight apps with new messages" Toggled="OnBarContentToggled" Flat="True"
+                                                  Note="An app with a new message has its icon lit white until it is opened; hidden while the pointer is on it." />
+                                <local:ToggleTile x:Name="AttentionBounceSwitch" Title="Bounce on new messages" SwitchName="Bounce apps with new messages" Toggled="OnBarContentToggled" Flat="True"
+                                                  Note="An app with a new message hops a few times on the taskbar." />
                             </StackPanel>
                             <StackPanel>
                                 <Grid>
@@ -743,15 +827,6 @@
                                     <local:ToggleTile x:Name="HideBodySwitch" Title="Hide notification content" SwitchName="Hide notification content" Toggled="OnHideBodyToggled" Flat="True"
                                                       Note="Cards show only the app and the title; the notification window is also excluded from screen capture and sharing." />
                                 </StackPanel>
-                            </StackPanel>
-                            <StackPanel>
-                                <TextBlock Text="Sources" Style="{StaticResource SectionStyle}" />
-                                <local:ToggleTile x:Name="ListenerSwitch" Title="Windows notifications" SwitchName="Show Windows notifications" Toggled="OnListenerToggled" Flat="True"
-                                                  Note="Apps that send system notifications, such as QQ. Allow notification access in Windows privacy settings." />
-                                <local:ToggleTile x:Name="WeChatSwitch" Title="WeChat" SwitchName="Show WeChat messages" Toggled="OnWeChatToggled" Flat="True"
-                                                  Note="Reads the chat list in WeChat's window; cards appear for new unread messages. Muted chats are ignored." />
-                                <local:ToggleTile x:Name="FeishuSwitch" Title="Feishu" SwitchName="Show Feishu messages" Toggled="OnFeishuToggled" Flat="True"
-                                                  Note="Reads the text of Feishu popups and shows it as a card; clicking the card opens Feishu." />
                             </StackPanel>
                         </StackPanel>
 
@@ -776,13 +851,6 @@
                                         </local:SegmentTrack>
                                 </StackPanel>
                                 <local:ToggleTile x:Name="StageMinimizeSwitch" Title="Minimize to Stage Manager" SwitchName="Minimize to Stage Manager" Toggled="OnStageMinimizeToggled" Flat="True" />
-                                <StackPanel Style="{StaticResource FlatRowStyle}" Spacing="2">
-                                    <TextBlock Text="Excluded from Stage Manager" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBox x:Name="StageExcludedBox" AcceptsReturn="True" TextWrapping="Wrap" Height="96" FontSize="13" IsSpellCheckEnabled="False" TextChanged="OnStageExcludedChanged"
-                                             AutomationProperties.Name="Excluded from Stage Manager"
-                                             ToolTipService.ToolTip="One app per line: an executable name (for example wechat.exe), a package id prefix, or a complete app key. Their windows are never put away by Stage Manager. The Windows Snipping Tool is listed by default; add other screenshot tools whose controls must stay on screen while recording." />
-                                    <Button Content="Restore defaults" Click="OnStageExcludedDefaults" HorizontalAlignment="Left" />
-                                </StackPanel>
                             </StackPanel>
                             <StackPanel>
                                 <TextBlock Text="Actions" Style="{StaticResource SectionStyle}" />

@@ -136,6 +136,7 @@ StartTile* Find(std::vector<StartTile>& tiles, const std::wstring& id)
 
 enum MenuCommand {
     kOpen = 1, kPinBar, kPinStart, kRemove, kOutOfFolder, kRename, kUngroup, kReset, kHide, kUnhide, kShowHidden, kAdmin, kLocation,
+    kSyncPins, kSyncFolders, kSyncBoth,
     kSize, /* + the menu's size */ kIcon = kSize + StartLayout::kSizes /* + the icons' size */
 };
 
@@ -179,12 +180,17 @@ D2D1_SIZE_F StartMenu::Size() const { return SizeFor(room_, layout_.icon); }
 D2D1_SIZE_F StartMenu::PanelSize() const { return SizeFor(grid_, layout_.icon); }
 float StartMenu::OffsetY() const { return float(surface_.Rect().bottom - surface_.Rect().top) / surface_.Scale() - H(); }
 LONG StartMenu::OffsetPx() const { return std::lround(OffsetY() * surface_.Scale()); }
+float StartMenu::OffsetX() const
+{
+    return centered_ ? std::max(0.f, (float(surface_.Rect().right - surface_.Rect().left) / surface_.Scale() - W()) / 2) : 0.f;
+}
+LONG StartMenu::OffsetXPx() const { return std::lround(OffsetX() * surface_.Scale()); }
 
 bool StartMenu::Fits(int grid, int icons) const
 {
     const D2D1_SIZE_F z = SizeFor(grid, icons);
     const float scale = PopupScale(bar_);
-    const RECT r = PopupRect(bar_, z, PopupAlign::Left);
+    const RECT r = PopupRect(bar_, z, Align());
     return r.bottom - r.top >= std::lround(z.height * scale) - 1 && r.right - r.left >= std::lround(z.width * scale) - 1;
 }
 
@@ -256,7 +262,7 @@ void StartMenu::SetSize(int grid, int icons)
     folderPage_ = std::clamp(folderPage_, 0, FolderPages() - 1);
     // The window follows the icons (the panel springs inside it, it does not).
     if (surface_.Visible()) {
-        const RECT want = PopupRect(bar_, Size(), PopupAlign::Left);
+        const RECT want = PopupRect(bar_, Size(), Align());
         const RECT have = surface_.Rect();
         if (!EqualRect(&want, &have))
             surface_.Move(want);
@@ -271,7 +277,8 @@ void StartMenu::SetSize(int grid, int icons)
 D2D1_RECT_F StartMenu::MainRect() const { return D2D1::RectF(0, 0, W(), H() - barH_ - kGap); }
 D2D1_RECT_F StartMenu::ShelfRect() const { return D2D1::RectF(0, H() - barH_, W(), H()); }
 D2D1_RECT_F StartMenu::AllButton() const { return D2D1::RectF(W() - kSearchX - kAllW, kSearchTop, W() - kSearchX, kSearchTop + kSearchH); }
-D2D1_RECT_F StartMenu::SearchRect() const { return D2D1::RectF(kSearchX, kSearchTop, AllButton().left - 8, kSearchTop + kSearchH); }
+D2D1_RECT_F StartMenu::SyncButton() const { return D2D1::RectF(AllButton().left - 8 - kSearchH, kSearchTop, AllButton().left - 8, kSearchTop + kSearchH); }
+D2D1_RECT_F StartMenu::SearchRect() const { return D2D1::RectF(kSearchX, kSearchTop, SyncButton().left - 8, kSearchTop + kSearchH); }
 float StartMenu::ListBottom() const { return MainRect().bottom - 44; }
 float StartMenu::GridX() const { return (W() - float(cols_) * CellW()) / 2; }
 float StartMenu::ButtonSize() const { return std::min(44.f, barH_ - 12); }
@@ -415,7 +422,7 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     panelW_ = z.width;
     mainH_ = z.height - kGap - barH_;
     panelV_ = mainV_ = 0;
-    RECT r = PopupRect(bar_, Size(), PopupAlign::Left);
+    RECT r = PopupRect(bar_, Size(), Align());
     Restage();
     // Pops out of the logo.
     POINT anchor{(logo.left + logo.right) / 2, r.bottom};
@@ -518,6 +525,84 @@ void StartMenu::SyncWindowsPins()
         if (added)
             Log(L"start: %zu new Windows start pin(s) added at the end", added);
     }
+}
+
+void StartMenu::OpenSyncMenu()
+{
+    if (!menu)
+        return;
+    const float s = surface_.Scale();
+    const D2D1_RECT_F b = SyncButton();
+    const POINT at = surface_.ContentToScreen(POINT{LONG(b.left * s) + OffsetXPx(), LONG((b.bottom + 6) * s) + OffsetPx()});
+    std::vector<MenuEntry> entries = {{Tr(L"Sync with the Windows start menu"), 0, false, true, true},
+                                      {Tr(L"Pinned apps and folders"), kSyncBoth},
+                                      {Tr(L"Pinned apps only"), kSyncPins},
+                                      {Tr(L"Folders and their apps only"), kSyncFolders}};
+    if (!catalog_.Loaded())
+        for (MenuEntry& e : entries)
+            e.disabled = true;
+    menuOpen_ = true;
+    menu->Open(std::move(entries), at, MenuPlace::Below,
+               [this](int cmd) {
+                   if (cmd == kSyncPins || cmd == kSyncFolders || cmd == kSyncBoth)
+                       SyncFromWindows(cmd != kSyncFolders, cmd != kSyncPins);
+               },
+               [this] {
+                   menuOpen_ = false;
+                   if (surface_.Visible() && GetForegroundWindow() == menu->Hwnd())
+                       SetForegroundWindow(surface_.Hwnd());
+               });
+}
+
+// Pins in the Windows order, at the end; a folder of All apps as a folder of its own (one of the
+// same name already here takes the apps it lacks). An app already somewhere in the menu stays where
+// it is; hidden apps stay hidden.
+void StartMenu::SyncFromWindows(bool pins, bool folders)
+{
+    pins_ = catalog_.StartPins();
+    const std::vector<CatalogFolder> windowsFolders = folders ? catalog_.StartFolders() : std::vector<CatalogFolder>{};
+    size_t apps = 0, newFolders = 0;
+    Arrange([&](std::vector<StartTile>& tiles) {
+        auto placed = [&](const std::wstring& id) {
+            for (const StartTile& t : tiles)
+                if (t.id == id || std::any_of(t.apps.begin(), t.apps.end(), [&](const StartTile& a) { return a.id == id; }))
+                    return true;
+            return false;
+        };
+        if (pins)
+            for (const CatalogApp& p : pins_)
+                if (!placed(p.id) && !Hidden(p.id)) {
+                    tiles.push_back({p.id, p.name, {}});
+                    ++apps;
+                }
+        for (const CatalogFolder& f : windowsFolders) {
+            std::vector<StartTile> missing;
+            for (const CatalogApp& a : f.apps)
+                if (!placed(a.id) && !Hidden(a.id) &&
+                    std::none_of(missing.begin(), missing.end(), [&](const StartTile& m) { return m.id == a.id; }))
+                    missing.push_back({a.id, a.name, {}});
+            auto same = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.Folder() && t.name == f.name; });
+            if (same != tiles.end()) {
+                apps += missing.size();
+                same->apps.insert(same->apps.end(), missing.begin(), missing.end());
+            } else if (missing.size() >= 2) {
+                apps += missing.size();
+                ++newFolders;
+                StartLayout ids;
+                ids.tiles = tiles;
+                tiles.push_back({ids.NewFolderId(), f.name, std::move(missing)});
+            }
+        }
+    });
+    if (pins) {
+        layout_.windowsPins.clear();
+        for (const CatalogApp& p : pins_)
+            layout_.windowsPins.push_back(p.id);
+        layout_.windowsPinsKnown = true;
+        SaveStartLayout(layout_);
+    }
+    Log(L"start: synced with the Windows start menu: %zu app(s), %zu new folder(s) (%zu pins, %zu folders there)", apps, newFolders,
+        pins_.size(), windowsFolders.size());
 }
 
 void StartMenu::Rebuild()
@@ -834,10 +919,12 @@ void StartMenu::Paint(Canvas& c)
     {
         const float winH = float(surface_.Rect().bottom - surface_.Rect().top) / surface_.Scale(), slack = resizing ? 8.f : 0.f;
         const float rw = std::max(W(), target.width) + slack, rh = std::max(H(), target.height) + slack;
-        surface_.SetRegion(D2D1::RectF(0, std::max(0.f, winH - rh), rw, winH));
+        const float winW = float(surface_.Rect().right - surface_.Rect().left) / surface_.Scale();
+        const float left = centered_ ? std::max(0.f, (winW - rw) / 2) : 0.f;
+        surface_.SetRegion(D2D1::RectF(left, std::max(0.f, winH - rh), left + rw, winH));
     }
-    const float offY = OffsetY();
-    c.BeginGroup(1, 1, 0, 0, 0, offY);
+    const float offX = OffsetX(), offY = OffsetY();
+    c.BeginGroup(1, 1, 0, 0, offX, offY);
 
     // The pieces of glass: the panel, the capsule (round like the bar) and,
     // while open, the folder's card over the tiles and the power card growing
@@ -910,6 +997,8 @@ void StartMenu::Paint(Canvas& c)
     }
     c.EndGroup();
     for (ShapeDip& sh : shapes) {
+        sh.rect.left += offX;
+        sh.rect.right += offX;
         sh.rect.top += offY;
         sh.rect.bottom += offY;
     }
@@ -953,6 +1042,12 @@ void StartMenu::PaintSearch(Canvas& c, const Theme& t)
     c.Glyph(back ? L"\uE72B" : L"\uE71D", D2D1::RectF(x, b.top, x + 16, b.bottom), 14, t.text);
     c.Text(label, D2D1::RectF(x + 22, b.top, b.right - 4, b.bottom), 13, t.text);
     hits_.push_back({b, L"allapps"});
+
+    const D2D1_RECT_F sync = SyncButton();
+    float sv = Hover(c, L"sync", hover_ == L"sync");
+    c.Fill(sync, r, Alpha(pressed_ == L"sync" ? t.press : t.hover, 0.45f + 0.55f * sv));
+    c.Glyph(L"\uE895", sync, 15, t.text);
+    hits_.push_back({sync, L"sync"});
 }
 
 // `px` is always the largest icon size (IconPx): one bitmap per app serves
@@ -1868,7 +1963,8 @@ void StartMenu::Resize(POINT screen)
     // The size nearest to where the corner is pulled (of those the screen has room for).
     const float s = surface_.Scale();
     const D2D1_SIZE_F from = SizeFor(sizeStart_, layout_.icon);
-    const float w = from.width + float(screen.x - sizeFrom_.x) / s, h = from.height + float(sizeFrom_.y - screen.y) / s;
+    // Centred, the corner moves half as far as the menu grows.
+    const float w = from.width + (centered_ ? 2.f : 1.f) * float(screen.x - sizeFrom_.x) / s, h = from.height + float(sizeFrom_.y - screen.y) / s;
     int best = grid_;
     float nearest = 1e9f;
     for (int grid = 0; grid <= room_; ++grid) {
@@ -1946,6 +2042,8 @@ void StartMenu::Activate(const std::wstring& id)
             else
                 Launch(rows[i].app);
         }
+    } else if (id == L"sync") {
+        OpenSyncMenu();
     } else if (id == L"allapps") {
         allApps_ = query_.empty() ? !allApps_ : true;
         query_.clear();
@@ -2247,7 +2345,7 @@ void StartMenu::PlaceIme()
         // Window coordinates: the content starts after the shadow margin.
         RECT win{};
         GetWindowRect(surface_.Hwnd(), &win);
-        POINT origin{surface_.Rect().left - win.left, surface_.Rect().top - win.top + OffsetPx()};
+        POINT origin{surface_.Rect().left - win.left + OffsetXPx(), surface_.Rect().top - win.top + OffsetPx()};
         // Below the field being typed in: the search, or the folder's name.
         const D2D1_RECT_F f = FolderRect();
         const float x = naming_ ? (f.left + f.right) / 2 - 60 : kSearchX + 46, y = naming_ ? f.top + 50 : kSearchTop + kSearchH + 4;
@@ -2264,8 +2362,10 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     // Mouse positions in the menu's coordinates (the panel's corner, lower in the window).
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     const POINT content = pt;
-    if (m >= WM_MOUSEFIRST && m <= WM_MOUSELAST && m != WM_MOUSEWHEEL && m != WM_MOUSEHWHEEL)
+    if (m >= WM_MOUSEFIRST && m <= WM_MOUSELAST && m != WM_MOUSEWHEEL && m != WM_MOUSEHWHEEL) {
+        pt.x -= OffsetXPx();
         pt.y -= OffsetPx();
+    }
     switch (m) {
     case WM_ACTIVATE:
         if (LOWORD(w) == WA_INACTIVE && !menuOpen_ && surface_.Visible()) {
@@ -2428,6 +2528,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL: {
         POINT client = surface_.ScreenToContent(pt);
+        client.x -= OffsetXPx();
         client.y -= OffsetPx();
         float notches = float(GET_WHEEL_DELTA_WPARAM(w)) / WHEEL_DELTA;
         if (m == WM_MOUSEWHEEL && HitAt(client) == L"volume") {

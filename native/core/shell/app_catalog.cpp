@@ -271,6 +271,100 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
     return out;
 }
 
+
+// Not an app of a folder: an uninstaller ("卸载微信", "Uninstall Git", unins000.exe), or a shortcut
+// to a document ("7-Zip Help", release notes, a web page, a folder). A shortcut with no target path
+// (a packaged app, an installer's advertised shortcut) is an app.
+bool NotAnApp(const CatalogApp& app)
+{
+    const std::wstring name = Fold(app.name), target = Fold(app.target.substr(app.target.find_last_of(L"\\/") + 1));
+    if (name.find(L"uninstall") != std::wstring::npos || name.find(L"卸载") != std::wstring::npos ||
+        name.find(L"解除安装") != std::wstring::npos || target.rfind(L"unins", 0) == 0)
+        return true;
+    return !target.empty() && !target.ends_with(L".exe");
+}
+
+// Every shortcut in `dir` and its subfolders.
+void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, std::wstring>>& links)
+{
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileExW((dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    std::vector<std::wstring> subdirs;
+    do {
+        const std::wstring name = fd.cFileName;
+        if (name == L"." || name == L"..")
+            continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            subdirs.push_back(dir + L"\\" + name);
+        else if (name.size() > 4 && Fold(name.substr(name.size() - 4)) == L".lnk")
+            links.emplace_back(L"desktopAppLink", dir + L"\\" + name);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    for (const std::wstring& sub : subdirs)
+        CollectLinks(sub, links);
+}
+
+// The All apps list's folders: each folder right under the two Start Menu\Programs folders (a
+// folder of both is one), with the shortcuts in it and in its subfolders, as All apps shows them;
+// by the name the shell shows (desktop.ini's localised name). Windows' own folders
+// (Accessibility, Windows Tools' parts, Startup) are left out.
+std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
+{
+    static const wchar_t* const kSystem[] = {L"accessibility", L"accessories", L"administrative tools", L"maintenance",
+                                             L"startup", L"system tools", L"windows powershell", L"windows tools"};
+    std::vector<std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>>> found; // shown name, its links
+    for (const KNOWNFOLDERID* id : {&FOLDERID_CommonPrograms, &FOLDERID_Programs}) {
+        PWSTR root = nullptr;
+        if (FAILED(SHGetKnownFolderPath(*id, KF_FLAG_DEFAULT, nullptr, &root)) || !root) {
+            CoTaskMemFree(root);
+            continue;
+        }
+        const std::wstring programs = root;
+        CoTaskMemFree(root);
+        WIN32_FIND_DATAW fd{};
+        HANDLE h = FindFirstFileExW((programs + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+        if (h == INVALID_HANDLE_VALUE)
+            continue;
+        do {
+            const std::wstring name = fd.cFileName, folded = Fold(name);
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || name == L"." || name == L".." ||
+                std::any_of(std::begin(kSystem), std::end(kSystem), [&](const wchar_t* s) { return folded == s; }))
+                continue;
+            const std::wstring dir = programs + L"\\" + name;
+            std::vector<std::pair<std::wstring, std::wstring>> links;
+            CollectLinks(dir, links);
+            if (links.empty())
+                continue;
+            std::wstring shown = name;
+            winrt::com_ptr<IShellItem> item;
+            if (SUCCEEDED(SHCreateItemFromParsingName(dir.c_str(), nullptr, IID_PPV_ARGS(item.put())))) {
+                PWSTR s = nullptr;
+                if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &s)) && s && *s)
+                    shown = s;
+                CoTaskMemFree(s);
+            }
+            auto it = std::find_if(found.begin(), found.end(), [&](const auto& f) { return Fold(f.first) == Fold(shown); });
+            if (it == found.end())
+                found.push_back({shown, std::move(links)});
+            else
+                it->second.insert(it->second.end(), links.begin(), links.end());
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    std::vector<CatalogFolder> out;
+    for (auto& [name, links] : found) {
+        CatalogFolder folder{name, {}};
+        for (CatalogApp& app : ResolvePins(links, apps))
+            if (!NotAnApp(app))
+                folder.apps.push_back(std::move(app));
+        if (folder.apps.size() >= 2)
+            out.push_back(std::move(folder));
+    }
+    return out;
+}
+
 } // namespace
 
 AppCatalog::AppCatalog(HWND notify, UINT readyMsg) : notify_(notify), msg_(readyMsg)
@@ -314,6 +408,12 @@ std::vector<CatalogApp> AppCatalog::StartPins() const
 {
     std::lock_guard g(mutex_);
     return startPins_;
+}
+
+std::vector<CatalogFolder> AppCatalog::StartFolders() const
+{
+    std::lock_guard g(mutex_);
+    return startFolders_;
 }
 
 void AppCatalog::PrefetchStartIcons(int px)
@@ -454,10 +554,17 @@ void AppCatalog::Worker()
             } catch (...) {
                 Log(L"catalog: start pins failed");
             }
+            std::vector<CatalogFolder> folders;
+            try {
+                folders = ReadStartFolders(apps);
+            } catch (...) {
+                Log(L"catalog: start folders failed");
+            }
             {
                 std::lock_guard g(mutex_);
                 apps_ = std::move(apps);
                 startPins_ = std::move(pins);
+                startFolders_ = std::move(folders);
                 liveIds_.clear();
                 for (const auto& app : apps_) liveIds_.insert(app.id);
                 for (const auto& app : startPins_) liveIds_.insert(app.id);

@@ -10,7 +10,9 @@
 
 namespace atrium::tray {
 
-enum class HostAction { Left, Right, Middle, Double, DoubleContinuation, HoverIn, PopupOpen, PopupClose };
+// Open: a left click without the pointer's arrival, for opening an app from the bar (the pointer is
+// not on its icon: a mouse move would open a messenger's hover message box there).
+enum class HostAction { Left, Right, Middle, Double, DoubleContinuation, HoverIn, PopupOpen, PopupClose, Open };
 
 // The notifications, in order, the shell sends for `action` to an icon of `version`.
 // HoverIn is the pointer arriving; PopupOpen/PopupClose are the rich-tooltip
@@ -31,6 +33,10 @@ inline std::vector<UINT> CallbackSequence(HostAction action, UINT version)
         return {WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP};
     case HostAction::Middle:
         return {WM_MOUSEMOVE, WM_MBUTTONDOWN, WM_MBUTTONUP};
+    case HostAction::Open:
+        if (v3)
+            return {WM_LBUTTONDOWN, WM_LBUTTONUP, NIN_SELECT};
+        return {WM_LBUTTONDOWN, WM_LBUTTONUP};
     case HostAction::DoubleContinuation:
         return {WM_LBUTTONDBLCLK, WM_LBUTTONUP};
     case HostAction::Double:

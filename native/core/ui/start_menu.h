@@ -58,6 +58,8 @@ public:
     void SetShowTray(bool on) { showTray_ = on; }
     // The network, volume and battery buttons in the capsule (setting startStatus).
     void SetShowStatus(bool on) { showStatus_ = on; }
+    // In the middle of the screen rather than above the bar's left end (setting startCentered).
+    void SetCentered(bool on) { centered_ = on; }
     // The menu's size and its icons' size (settings startSize and startIcon: small,
     // medium, large, xlarge; empty leaves the menu as it is).
     void SetPreferredSize(const std::wstring& name);
@@ -135,6 +137,10 @@ private:
     void SetPage(int page);
     // Changing the arrangement: the Windows pins copied in first, saved after.
     void Arrange(const std::function<void(std::vector<StartTile>&)>& change);
+    // The sync button: what is pinned to the Windows start menu, and the All apps list's folders
+    // with their apps, join the arrangement (nothing the user arranged moves or goes).
+    void OpenSyncMenu();
+    void SyncFromWindows(bool pins, bool folders);
     void PinToStart(const CatalogApp& app);
     bool OnStart(const std::wstring& id) const;
     bool Hidden(const std::wstring& id) const;
@@ -158,12 +164,17 @@ private:
     void UpdateRoom();                              // the largest grid that fits, at these icons
     float OffsetY() const;
     LONG OffsetPx() const;
+    // Centred, the window (the largest size that fits) has the panel in its middle.
+    float OffsetX() const;
+    LONG OffsetXPx() const;
+    PopupAlign Align() const { return centered_ ? PopupAlign::Center : PopupAlign::Left; }
     void SetSize(int grid, int icons); // the menu's size, and its icons'; the pieces spring to them
     D2D1_RECT_F MainRect() const;
     D2D1_RECT_F ShelfRect() const;
     D2D1_RECT_F PowerRect() const; // the power card when fully open
     D2D1_RECT_F SearchRect() const;
     D2D1_RECT_F AllButton() const; // "全部应用" / "返回"
+    D2D1_RECT_F SyncButton() const; // beside it: sync with the Windows start menu
     D2D1_RECT_F FolderRect() const; // the open folder's card
     float ListBottom() const;
     float GridX() const;
@@ -238,7 +249,7 @@ private:
     bool stale_ = false;    // the catalog changed while a tile was carried
     ULONGLONG lastClosed_ = 0;
     float radius_ = 30, barH_ = 60;
-    bool showTray_ = true, showStatus_ = true;
+    bool showTray_ = true, showStatus_ = true, centered_ = false;
     // The open folder.
     int folder_ = -1;
     bool folderClosing_ = false;

@@ -54,10 +54,18 @@ Require(excludedMalformed.StageExcluded.SequenceEqual(excluded.StageExcluded),
 Require(!BarSettings.FromJson(new JsonObject(), new()).ShowClockSeconds, "Old files must keep the clock at minutes.");
 Require(!new BarSettings().MagnifyNear && !BarSettings.FromJson(new JsonObject(), new()).MagnifyNear,
     "Icons must not magnify above the bar unless chosen.");
-Require(new BarSettings().ShowDesktop && !BarSettings.FromJson(JsonNode.Parse("""{"showDesktop":false}""")!.AsObject(), new()).ShowDesktop &&
-    !new BarSettings().SameAs(BarSettings.FromJson(JsonNode.Parse("""{"showDesktop":false}""")!.AsObject(), new())),
-    "The Show Desktop slot is on by default and turning it off is saved.");
+Require(!new BarSettings().ShowDesktop && BarSettings.FromJson(JsonNode.Parse("""{"showDesktop":true}""")!.AsObject(), new()).ShowDesktop &&
+    !new BarSettings().SameAs(BarSettings.FromJson(JsonNode.Parse("""{"showDesktop":true}""")!.AsObject(), new())),
+    "The Show Desktop slot is off by default and turning it on is saved.");
 Require(new BarSettings().TrayHost && BarSettings.FromJson(new JsonObject(), new()).TrayHost, "Atrium hosts the tray icons unless turned off.");
+{
+    var old = BarSettings.FromJson(new JsonObject(), new());
+    var chosen = BarSettings.FromJson(JsonNode.Parse("""{"attentionLight":false,"attentionBounce":true,"startCentered":true}""")!.AsObject(), new());
+    Require(old.AttentionLight && !old.AttentionBounce && !old.StartCentered, "Old files light apps asking for attention, without hops, the start menu at the left.");
+    Require(!chosen.AttentionLight && chosen.AttentionBounce && chosen.StartCentered && !chosen.SameAs(old) &&
+            BarSettings.FromJson(JsonNode.Parse(chosen.ToJson().ToJsonString())!.AsObject(), new()).SameAs(chosen),
+        "The attention and start menu choices are read, compared and saved.");
+}
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"trayHost":false}""")!.AsObject(), new());
 Require(!parsed.TrayHost && !BarSettings.FromJson(parsed.ToJson(), new()).TrayHost && !new BarSettings().SameAs(parsed),
     "Turning the tray host off must survive a round trip and mark the settings dirty.");

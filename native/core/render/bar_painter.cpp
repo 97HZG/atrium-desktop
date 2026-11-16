@@ -23,6 +23,9 @@ namespace {
 constexpr float kSlideRate = 14;
 // An app asking for attention: its plate pulses kAlertPulseMs (once each kAlertPeriodMs), then stays lit.
 constexpr double kAlertPulseMs = 4000, kAlertPeriodMs = 1000;
+// One hop: launch feedback, and kAlertHops of them for an app asking for attention.
+constexpr double kHopMs = 480;
+constexpr int kAlertHops = 3;
 
 D2D1_COLOR_F InkColor(float dark)
 {
@@ -135,13 +138,15 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         float l = Approach(m.lift, scene.dragKey == key ? 1.f : 0.f, dt, 22);
         float d = Approach(m.dot, item && item->running ? 1.f : 0.f, dt, 12);
         const bool asks = item && item->attention;
-        float al = Approach(m.alert, asks ? 1.f : 0.f, dt, 8);
+        // Not under the pointer: the icon grows there and would cover part of the lit plate.
+        const bool lit = asks && scene.alertLight && scene.hoverKey != key && scene.dragKey != key;
+        float al = Approach(m.alert, lit ? 1.f : 0.f, dt, 8);
         if (asks && m.alertSince < 0)
             m.alertSince = nowMs;
         else if (!asks)
             m.alertSince = -1;
         // The lit plate pulses softly for its first seconds, then stays lit until the app is opened.
-        moving |= asks && nowMs - m.alertSince < kAlertPulseMs;
+        moving |= lit && nowMs - m.alertSince < kAlertPulseMs;
         moving |= h != m.hover || p != m.press || a != m.appear || l != m.lift || d != m.dot || al != m.alert;
         m.alert = al;
         m.hover = h;
@@ -165,11 +170,19 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         // without a jolt (sin², no speed at either end), whatever the app does meanwhile.
         m.hop = 0;
         if (item->bounceMs > 0) {
-            constexpr double kHopMs = 480;
             double t = nowMs - item->bounceMs;
             if (t >= 0 && t < kHopMs) {
                 float sn = std::sin(3.14159265f * float(t / kHopMs));
                 m.hop = sn * sn;
+                moving = true;
+            }
+        }
+        // Asking for attention: a few hops of the same kind when it starts (not under the pointer).
+        if (asks && scene.alertBounce && m.alertSince >= 0 && scene.hoverKey != key && scene.dragKey != key) {
+            double t = nowMs - m.alertSince;
+            if (t >= 0 && t < kAlertHops * kHopMs) {
+                float sn = std::sin(3.14159265f * float(std::fmod(t, kHopMs) / kHopMs));
+                m.hop = std::max(m.hop, sn * sn);
                 moving = true;
             }
         }
@@ -458,13 +471,15 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float hover = motion::EaseOut(m.hover), lift = motion::EaseOut(m.lift);
 
     // An app asking for attention (a window flashing: a new message, a finished task): its plate
-    // lit amber, as the system taskbar lights the button, pulsing softly at first, then steady
-    // until the app comes to the front. Under the hover wash.
+    // lit white, pulsing softly at first, then steady until the app comes to the front. Under the
+    // hover wash.
     if (m.alert > 0.001f) {
         float pulse = 0;
         if (m.alertSince >= 0 && lastMs_ - m.alertSince < kAlertPulseMs)
             pulse = 0.5f - 0.5f * std::cos(2 * 3.14159265f * float((lastMs_ - m.alertSince) / kAlertPeriodMs));
-        brush->SetColor(D2D1::ColorF(1.0f, 0.62f, 0.16f, (0.26f + 0.18f * pulse) * m.alert * m.appear));
+        // Icons the magnification wave grows would cover it as well: it gives way to them.
+        const float clear = magnifying ? std::clamp(1.f - (grow - 1.f) * 8.f, 0.f, 1.f) : 1.f;
+        brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, (0.34f + 0.22f * pulse) * m.alert * m.appear * clear));
         d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, D2D1::Point2F(bx, plate.bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, 0));
         FillContinuousRect(d2d, plate, scene.plateRadius, brush);
     }
@@ -549,11 +564,12 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());
 
     // Running indicator: a small dot under the icon, centred in the gap to the
-    // bar's lower edge; full ink for the foreground app, amber when the app
+    // bar's lower edge; full ink for the foreground app, white when the app
     // asks for attention. It stays on the bar while the icon hops or grows.
     if (m.dot > 0.01f && lift < 0.99f) {
-        D2D1_COLOR_F c = it.attention ? D2D1::ColorF(1.0f, 0.70f, 0.18f, 0.98f) : InkColor(m.dotInk.Value(lastMs_));
-        if (!it.active && !it.attention)
+        const bool lit = it.attention && scene.alertLight;
+        D2D1_COLOR_F c = lit ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.98f) : InkColor(m.dotInk.Value(lastMs_));
+        if (!it.active && !lit)
             c.a *= 0.45f;
         c.a *= (1 - lift) * m.appear * m.dot;
         brush->SetColor(c);

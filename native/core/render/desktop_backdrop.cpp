@@ -366,6 +366,7 @@ void DesktopBackdrop::WallpaperLoop()
     if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)))
         return;
     std::wstring composed; // what the last picture was made of
+    bool composedOnce = false;
     do {
         winrt::com_ptr<IDesktopWallpaper> dw;
         winrt::com_ptr<IWICImagingFactory> wic;
@@ -421,14 +422,29 @@ void DesktopBackdrop::WallpaperLoop()
         }
         bool ok = true;
         auto local = [&](RECT r) { return RECT{r.left - virt.left, r.top - virt.top, r.right - virt.left, r.bottom - virt.top}; };
+        // A picture WIC cannot read (a format without its codec, a slideshow's file mid-change): the
+        // copy Windows made of it for the desktop. Else the glass would show the background colour,
+        // black by default: a black taskbar in remote-control mode.
+        auto place = [&](const std::wstring& path, RECT target) {
+            if (Place(wic.get(), path, target, pos, pic->pixels.data(), pic->width * 4))
+                return true;
+            const std::wstring transcoded = TranscodedWallpaper();
+            return path != transcoded && Place(wic.get(), transcoded, target, pos, pic->pixels.data(), pic->width * 4);
+        };
         if (pos == DWPOS_SPAN && !screens.empty())
-            ok = Place(wic.get(), screens[0].path, local(virt), pos, pic->pixels.data(), pic->width * 4);
+            ok = place(screens[0].path, local(virt));
         else
             for (const Screen& s : screens)
-                ok &= Place(wic.get(), s.path, local(s.rect), pos, pic->pixels.data(), pic->width * 4);
+                ok &= place(s.path, local(s.rect));
+        if (!ok && composedOnce) {
+            Log(L"render: a wallpaper could not be read; the last picture stays");
+            composed = sig;
+            continue;
+        }
         for (size_t i = 3; i < pic->pixels.size(); i += 4)
             pic->pixels[i] = 255; // opaque, as the desktop is
         composed = sig;
+        composedOnce = true;
         Log(L"render: wallpaper composed %dx%d (%zu screens, position %d)%s", pic->width, pic->height, screens.size(), int(pos),
             ok ? L"" : L", a picture could not be read");
         {

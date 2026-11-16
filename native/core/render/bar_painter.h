@@ -69,6 +69,10 @@ struct BarScene {
     float nearX = -1;          // window px; < 0 = not above the bar
     bool nearRise = false;
     bool nearMagnify = false;
+    // An app asking for attention (SceneItem::attention): its plate lit (attentionLight), its
+    // icon hopping a few times (attentionBounce).
+    bool alertLight = true;
+    bool alertBounce = false;
     // Press ripple in the glass (window px), started at ClockMs() `rippleMs`.
     float rippleX = 0, rippleY = 0;
     double rippleMs = 0;

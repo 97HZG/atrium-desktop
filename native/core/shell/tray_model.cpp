@@ -3,6 +3,7 @@
 #include "shell/tray_match.h"
 #include "shell/tray_click.h"
 #include "shell/tray_image.h"
+#include "shell/messengers.h"
 
 #include "log.h"
 #include "shell/shell_taskbar.h"
@@ -979,14 +980,15 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
     if (exe.empty()) return false;
     for (const TrayIcon& icon : Icons()) {
         if (!icon.exe.empty() && _wcsicmp(AppExecutable(icon.exe).c_str(), exe.c_str()) == 0) {
-            Click(icon, false);
+            if (!ClickHosted(icon, tray::HostAction::Open))
+                Click(icon, false);
             return true;
         }
     }
     // At startup the tray's first read may still be in progress. A resident messenger
     // must not be launched again: enqueue its exact program identity for the worker's fresh lookup.
     std::wstring name = Lower(PathFindFileNameW(exe.c_str()));
-    if (name != L"feishu.exe" && name != L"qq.exe" && name != L"weixin.exe" && name != L"wechat.exe")
+    if (MessengerOfProgram(name) == Messenger::None)
         return false;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return false;
@@ -1004,7 +1006,10 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
     if (running) {
         TrayIcon icon;
         icon.exe = Lower(exe);
-        Click(icon, false);
+        for (const TrayIcon& t : Icons()) // its hosted icon may have come meanwhile
+            if (t.exe == icon.exe) { icon = t; break; }
+        if (!ClickHosted(icon, tray::HostAction::Open))
+            Click(icon, false);
     }
     return running;
 }

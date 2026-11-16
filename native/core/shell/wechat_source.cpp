@@ -159,7 +159,7 @@ void WeChatSource::Run()
     });
     std::map<std::wstring, int> unread; // chat row id -> unread count last seen
     bool baseline = false;
-    int state = -1; // 0 no WeChat, 1 no list, 2 reading (logged on change)
+    int state = -1; // 0 no WeChat, 1 no list, 2 reading, 3 reading the held rows (logged on change)
     auto report = [&](int now, const wchar_t* text) {
         if (now != state)
             Log(L"wechat: %s", text);
@@ -167,6 +167,23 @@ void WeChatSource::Run()
     };
     std::vector<std::pair<DWORD, std::wstring>> procs;
     ULONGLONG listed = 0;
+    // The chat rows last found in a shown window. Closed to the tray, WeChat's window leaves its
+    // rows out of the tree (Qt skips hidden controls), but rows already held still read: their
+    // names keep the chat and the unread count, so messages are seen there too.
+    std::vector<winrt::com_ptr<IUIAutomationElement>> held;
+    std::wstring heldProgram;
+    auto readRow = [&](IUIAutomationElement* e, std::vector<std::pair<std::wstring, Row>>& rows) {
+        BSTR id = nullptr, name = nullptr;
+        bool ok = e && SUCCEEDED(e->get_CachedAutomationId(&id)) && SUCCEEDED(e->get_CachedName(&name)) && name;
+        if (ok) {
+            Row r = Parse(name);
+            std::wstring key = id && *id ? id : r.chat;
+            if (!r.chat.empty())
+                rows.push_back({key, r});
+        }
+        SysFreeString(id);
+        SysFreeString(name);
+    };
     {
         UiaWatch watch(uia.get(), wake_);
         UiaWindowWake windows(wake_, L"QWindowIcon");
@@ -175,7 +192,7 @@ void WeChatSource::Run()
                 std::wstring exe;
                 // Process discovery is infrequent; message events only re-read the client tree.
                 ULONGLONG tick = GetTickCount64();
-                if (!listed || tick - listed >= 10000 || (state != 2 && tick - listed >= 2000)) {
+                if (!listed || tick - listed >= 10000 || (state < 2 && tick - listed >= 2000)) {
                     procs.clear();
                     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
                     PROCESSENTRY32W pe{sizeof(pe)};
@@ -199,23 +216,17 @@ void WeChatSource::Run()
                             continue;
                         int n = 0;
                         all->get_Length(&n);
+                        std::vector<winrt::com_ptr<IUIAutomationElement>> found_;
                         for (int i = 0; i < n; ++i) {
                             winrt::com_ptr<IUIAutomationElement> e;
                             all->GetElement(i, e.put());
-                            BSTR id = nullptr, name = nullptr;
-                            if (!e || FAILED(e->get_CachedAutomationId(&id)) || FAILED(e->get_CachedName(&name)) || !name) {
-                                SysFreeString(id);
-                                SysFreeString(name);
-                                continue;
-                            }
-                            Row r = Parse(name);
-                            std::wstring key = id && *id ? id : r.chat;
-                            SysFreeString(id);
-                            SysFreeString(name);
-                            if (!r.chat.empty())
-                                rows.push_back({key, r});
+                            readRow(e.get(), rows);
+                            if (e)
+                                found_.push_back(std::move(e));
                         }
                         if (n > 0) {
+                            held = std::move(found_);
+                            heldProgram = program;
                             exe = program;
                             if (!watch.Contains(h)) {
                                 watch.Clear();
@@ -228,16 +239,36 @@ void WeChatSource::Run()
                     if (found)
                         break;
                 }
+                bool fromHeld = false;
+                if (!found && !held.empty() && !procs.empty()) {
+                    // In the tray: the rows held from when the window was shown.
+                    for (size_t i = 0; i < held.size();) {
+                        winrt::com_ptr<IUIAutomationElement> fresh;
+                        if (FAILED(held[i]->BuildUpdatedCache(cache.get(), fresh.put())) || !fresh) {
+                            held.erase(held.begin() + ptrdiff_t(i)); // gone (WeChat restarted, the list rebuilt)
+                            continue;
+                        }
+                        readRow(fresh.get(), rows);
+                        ++i;
+                    }
+                    found = fromHeld = !rows.empty();
+                    if (found) {
+                        exe = heldProgram;
+                        if (state != 3)
+                            Log(L"wechat: window hidden, reading the %zu chats held from it", held.size());
+                    }
+                }
                 if (procs.empty()) {
                     report(0, L"WeChat is not running");
+                    held.clear();
                     baseline = false; // after a restart its list is a new baseline
                 } else if (!found) {
                     report(1, L"WeChat's chat list is not readable (open its window once)");
                     baseline = false;
                 } else {
-                    if (state != 2)
+                    if (state < 2 || (state == 3 && !fromHeld))
                         Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());
-                    state = 2;
+                    state = fromHeld ? 3 : 2;
                     for (size_t i = 0; i < rows.size(); ++i) {
                         const auto& [key, r] = rows[i];
                         auto old = unread.find(key);
@@ -267,7 +298,7 @@ void WeChatSource::Run()
             }
             // Providers can omit UIA events. A slow reconciliation pass covers that case.
             if (!stop_)
-                WaitForUiaWake(wake_, state == 2 ? 2000 : 6000);
+                WaitForUiaWake(wake_, state >= 2 ? 2000 : 6000);
         }
     }
     cells = nullptr;

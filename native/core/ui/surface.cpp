@@ -44,7 +44,7 @@ RECT PopupRect(RECT bar, D2D1_SIZE_F sizeDip, PopupAlign align)
     float s = PopupScale(bar);
     int w = int(std::lround(sizeDip.width * s)), h = int(std::lround(sizeDip.height * s)), gap = int(std::lround(kPopupGapDip * s));
     int bottom = int(bar.top) - gap;
-    int left = align == PopupAlign::Left ? int(bar.left) : int(bar.right) - w;
+    int left = align == PopupAlign::Left ? int(bar.left) : align == PopupAlign::Right ? int(bar.right) - w : int(wa.left + wa.right - w) / 2;
     left = std::max(int(wa.left) + gap, std::min(left, int(wa.right) - gap - w));
     return RECT{left, std::max(int(wa.top) + gap, bottom - h), left + w, bottom};
 }
@@ -796,6 +796,7 @@ void Surface::PublishPanel()
     GlassPanel p;
     p.hwnd = hwnd_;
     p.gen = ++glassGen_;
+    p.shown = glassShown_;
     glassPending_ = true;
     p.window = window_;
     const auto buffer = BufferSize();
@@ -856,6 +857,7 @@ void Surface::SetGlassless(bool on)
         return;
     // As on Show: the content waits a little for its glass, then a plain panel stands in.
     glassReady_ = false;
+    ++glassShown_;
     shownMs_ = ClockMs();
     SetTimer(hwnd_, kGlassWaitTimer, UINT(kGlassWaitMs) + 20, nullptr);
     PublishPanel();
@@ -1032,6 +1034,7 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
         firstPaint_ = !wasHiding;
         if (!wasHiding) {
             glassReady_ = glassless_; // nothing to wait for
+            ++glassShown_;
             shownMs_ = ClockMs();
             SetTimer(hwnd_, kGlassWaitTimer, UINT(kGlassWaitMs) + 20, nullptr);
         }

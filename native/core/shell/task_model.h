@@ -77,6 +77,9 @@ public:
 
     void SetPins(const std::vector<PinnedApp>& pins);
     void SetShowRunning(bool show);
+    // A window flashed for attention (HSHELL_FLASH), also a hidden one (WeChat in the tray flashes
+    // its window for a message); called on the UI thread, while that window is not in front.
+    void SetOnFlash(std::function<void(HWND)> onFlash);
 
     // Icon for an item at `sizePx` (square), cached per key and size. Never
     // blocks for long: returns empty until loaded, then onChanged fires.

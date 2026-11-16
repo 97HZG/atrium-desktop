@@ -104,6 +104,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"magnifyNear", json::JsonValue::CreateBooleanValue(magnifyNear));
     o.SetNamedValue(L"startTray", json::JsonValue::CreateBooleanValue(startTray));
     o.SetNamedValue(L"startStatus", json::JsonValue::CreateBooleanValue(startStatus));
+    o.SetNamedValue(L"startCentered", json::JsonValue::CreateBooleanValue(startCentered));
     if (!startSize.empty())
         o.SetNamedValue(L"startSize", json::JsonValue::CreateStringValue(startSize));
     if (!startIcon.empty())
@@ -135,6 +136,11 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
     o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
     o.SetNamedValue(L"notifyFeishu", json::JsonValue::CreateBooleanValue(notifyFeishu));
+    o.SetNamedValue(L"notifyQQ", json::JsonValue::CreateBooleanValue(notifyQQ));
+    o.SetNamedValue(L"notifyWeCom", json::JsonValue::CreateBooleanValue(notifyWeCom));
+    o.SetNamedValue(L"notifyDingTalk", json::JsonValue::CreateBooleanValue(notifyDingTalk));
+    o.SetNamedValue(L"attentionLight", json::JsonValue::CreateBooleanValue(attentionLight));
+    o.SetNamedValue(L"attentionBounce", json::JsonValue::CreateBooleanValue(attentionBounce));
     o.SetNamedValue(L"bar", json::JsonValue::CreateBooleanValue(bar));
     o.SetNamedValue(L"widgets", json::JsonValue::CreateBooleanValue(widgets));
     o.SetNamedValue(L"widgetsOnRight", json::JsonValue::CreateBooleanValue(widgetsOnRight));
@@ -213,6 +219,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"magnifyNear", s.magnifyNear);
     flag(L"startTray", s.startTray);
     flag(L"startStatus", s.startStatus);
+    flag(L"startCentered", s.startCentered);
     if (o.HasKey(L"startSize") && o.GetNamedValue(L"startSize").ValueType() == json::JsonValueType::String)
         s.startSize = std::wstring(o.GetNamedString(L"startSize"));
     if (o.HasKey(L"startIcon") && o.GetNamedValue(L"startIcon").ValueType() == json::JsonValueType::String)
@@ -236,6 +243,11 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
         flag(L"notifyListener", s.notifyListener);
     flag(L"notifyWeChat", s.notifyWeChat);
     flag(L"notifyFeishu", s.notifyFeishu);
+    flag(L"notifyQQ", s.notifyQQ);
+    flag(L"notifyWeCom", s.notifyWeCom);
+    flag(L"notifyDingTalk", s.notifyDingTalk);
+    flag(L"attentionLight", s.attentionLight);
+    flag(L"attentionBounce", s.attentionBounce);
     flag(L"bar", s.bar);
     flag(L"widgets", s.widgets);
     flag(L"widgetsOnRight", s.widgetsOnRight);

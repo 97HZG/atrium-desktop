@@ -8,6 +8,9 @@
 // is not muted posts a card. Only the rows WeChat has realised (about ten,
 // the top of the list, where new messages land) are seen; nothing in WeChat
 // is changed, no accessibility switches are turned on (D29).
+// Closed to the tray, the window's rows drop out of the tree; the rows held from
+// when it was last shown still read, so cards keep coming. Before the window was
+// ever shown, WeChat's flash for a message brings a plain card (shell/messengers.h).
 #pragma once
 
 #include "ui/notifications.h"
@@ -27,6 +30,8 @@ public:
     ~WeChatSource();
     WeChatSource(const WeChatSource&) = delete;
     WeChatSource& operator=(const WeChatSource&) = delete;
+    // WeChat flashed for a message: read its chat list now.
+    void Wake() { SetEvent(wake_); }
 
 private:
     void Run();

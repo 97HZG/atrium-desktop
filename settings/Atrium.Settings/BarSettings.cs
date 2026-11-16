@@ -49,13 +49,14 @@ internal sealed class BarSettings
     public bool TrayHost { get; set; } = true;         // Atrium receives the apps' tray icons itself
     public bool StartTray { get; set; } = true;        // the tray's button in the start menu
     public bool StartStatus { get; set; } = true;      // its network, volume and battery buttons
+    public bool StartCentered { get; set; } = false;   // it opens in the middle of the screen, not at the left
     // The start menu's size and its icons' size: small | medium | large | xlarge;
     // empty: not known yet (the core fills it in from start.json).
     public string StartSize { get; set; } = "";
     public string StartIcon { get; set; } = "";
     public bool ShowStatus { get; set; } = true;
     public bool ShowNotifications { get; set; } = true;
-    public bool ShowDesktop { get; set; } = true;      // the Show Desktop slot at the bar's right end
+    public bool ShowDesktop { get; set; } = false;     // the Show Desktop slot at the bar's right end
     public bool ShowRunning { get; set; } = true;
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public string Language { get; set; } = "auto"; // auto (follow Windows) | a locale tag: en, zh-Hans, ...
@@ -76,6 +77,11 @@ internal sealed class BarSettings
     public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
     public bool NotifyFeishu { get; set; } = true;     // Feishu messages as Atrium cards (its own popup, read only)
     public bool NotifyWeChat { get; set; } = true;     // WeChat messages as Atrium cards (its chat list, read only)
+    public bool NotifyQQ { get; set; } = true;         // QQ's messages (its Windows notifications)
+    public bool NotifyWeCom { get; set; } = true;      // WeCom's messages (a card when it flashes for one)
+    public bool NotifyDingTalk { get; set; } = true;   // DingTalk's messages (likewise)
+    public bool AttentionLight { get; set; } = true;   // an app asking for attention: its icon lit white on the bar
+    public bool AttentionBounce { get; set; } = false; // its icon hops a few times
     public bool Bar { get; set; } = true;              // the glass bar module (off: Windows' taskbar and banners)
     public bool Widgets { get; set; } = true;          // desktop widgets (their layout is the core's widgets.json)
     public bool WidgetsOnRight { get; set; }
@@ -162,6 +168,7 @@ internal sealed class BarSettings
             ["trayHost"] = TrayHost,
             ["startTray"] = StartTray,
             ["startStatus"] = StartStatus,
+            ["startCentered"] = StartCentered,
             ["showStatus"] = ShowStatus,
             ["showNotifications"] = ShowNotifications,
             ["showDesktop"] = ShowDesktop,
@@ -184,6 +191,11 @@ internal sealed class BarSettings
             ["notifyListener"] = NotifyListener,
             ["notifyWeChat"] = NotifyWeChat,
             ["notifyFeishu"] = NotifyFeishu,
+            ["notifyQQ"] = NotifyQQ,
+            ["notifyWeCom"] = NotifyWeCom,
+            ["notifyDingTalk"] = NotifyDingTalk,
+            ["attentionLight"] = AttentionLight,
+            ["attentionBounce"] = AttentionBounce,
             ["bar"] = Bar,
             ["widgets"] = Widgets,
             ["widgetsOnRight"] = WidgetsOnRight,
@@ -258,6 +270,7 @@ internal sealed class BarSettings
         s.TrayHost = Flag("trayHost", f.TrayHost);
         s.StartTray = Flag("startTray", f.StartTray);
         s.StartStatus = Flag("startStatus", f.StartStatus);
+        s.StartCentered = Flag("startCentered", f.StartCentered);
         s.StartSize = o?["startSize"] is JsonValue ss0 && ss0.TryGetValue(out string? size) && size is "small" or "medium" or "large" or "xlarge" ? size! : f.StartSize;
         s.StartIcon = o?["startIcon"] is JsonValue si0 && si0.TryGetValue(out string? iconSize) && iconSize is "small" or "medium" or "large" or "xlarge" ? iconSize! : f.StartIcon;
         s.ShowStatus = Flag("showStatus", f.ShowStatus);
@@ -272,6 +285,11 @@ internal sealed class BarSettings
         s.NotifyListener = v1 ? f.NotifyListener : Flag("notifyListener", f.NotifyListener);
         s.NotifyWeChat = Flag("notifyWeChat", f.NotifyWeChat);
         s.NotifyFeishu = Flag("notifyFeishu", f.NotifyFeishu);
+        s.NotifyQQ = Flag("notifyQQ", f.NotifyQQ);
+        s.NotifyWeCom = Flag("notifyWeCom", f.NotifyWeCom);
+        s.NotifyDingTalk = Flag("notifyDingTalk", f.NotifyDingTalk);
+        s.AttentionLight = Flag("attentionLight", f.AttentionLight);
+        s.AttentionBounce = Flag("attentionBounce", f.AttentionBounce);
         s.Bar = Flag("bar", f.Bar);
         s.Widgets = Flag("widgets", f.Widgets);
         s.WidgetsOnRight = Flag("widgetsOnRight", f.WidgetsOnRight);
@@ -344,10 +362,11 @@ internal sealed class BarSettings
         Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && HoverRise == o.HoverRise && RiseNear == o.RiseNear &&
         MagnifyNear == o.MagnifyNear && NearEnter == o.NearEnter && NearLeave == o.NearLeave && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
         ShowClockSeconds == o.ShowClockSeconds &&
-        ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus && StartSize == o.StartSize && StartIcon == o.StartIcon &&
+        ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus && StartCentered == o.StartCentered && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
         ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
-        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Bar == o.Bar && Widgets == o.Widgets &&
+        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu &&
+        NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk && AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
         StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize &&
         StageExcluded.SequenceEqual(o.StageExcluded, StringComparer.OrdinalIgnoreCase) && WidgetMaterial == o.WidgetMaterial &&

@@ -166,6 +166,7 @@ public sealed partial class MainWindow : Window
         BuildRows();
         BuildTintSwatches();
         InitPins();
+        InitSources();
         InitHero();
         PhotoChanged += () =>
         {
@@ -812,11 +813,14 @@ public sealed partial class MainWindow : Window
         TrayHostSwitch.IsOn = _current.TrayHost;
         StartTraySwitch.IsOn = _current.StartTray;
         StartStatusSwitch.IsOn = _current.StartStatus;
+        StartCenteredSwitch.IsOn = _current.StartCentered;
         (_current.StartSize switch { "small" => StartSmall, "large" => StartLarge, "xlarge" => StartXLarge, _ => StartMedium }).IsChecked = true;
         (_current.StartIcon switch { "small" => StartIconSmall, "large" => StartIconLarge, "xlarge" => StartIconXLarge, _ => StartIconMedium }).IsChecked = true;
         StatusSwitch.IsOn = _current.ShowStatus;
         NotificationsSwitch.IsOn = _current.ShowNotifications;
         DesktopSwitch.IsOn = _current.ShowDesktop;
+        AttentionLightSwitch.IsOn = _current.AttentionLight;
+        AttentionBounceSwitch.IsOn = _current.AttentionBounce;
         AutoWidthSwitch.IsOn = _current.AutoWidth;
         HoverRiseSwitch.IsOn = _current.HoverRise;
         RiseNearSwitch.IsOn = _current.RiseNear;
@@ -825,9 +829,7 @@ public sealed partial class MainWindow : Window
         RunningSwitch.IsOn = _current.ShowRunning;
         HideBodySwitch.IsOn = _current.NotifyHideBody;
         (_current.NotifyPlacement == "topRight" ? NotifyAtTopRight : NotifyAtDock).IsChecked = true;
-        ListenerSwitch.IsOn = _current.NotifyListener;
-        WeChatSwitch.IsOn = _current.NotifyWeChat;
-        FeishuSwitch.IsOn = _current.NotifyFeishu;
+        RefreshSources();
         BarSwitch.IsOn = _current.Bar;
         UpdateBarModule();
         WidgetsSwitch.IsOn = _current.Widgets;
@@ -837,7 +839,7 @@ public sealed partial class MainWindow : Window
         (_current.StageOnRight ? StageRight : StageLeft).IsChecked = true;
         (_current.StageAutoHide ? StageAutoHide : StageAlways).IsChecked = true;
         StageMinimizeSwitch.IsOn = _current.StageMinimize;
-        StageExcludedBox.Text = string.Join(Environment.NewLine, _current.StageExcluded);
+        RebuildExcluded();
         (_current.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
         (_current.WidgetMaterial switch { "dusk" => MaterialDusk, "color" => MaterialColor, _ => MaterialGlass }).IsChecked = true;
         HideBannersSwitch.IsOn = _current.HideBanners;
@@ -938,6 +940,9 @@ public sealed partial class MainWindow : Window
         _current.ShowStatus = StatusSwitch.IsOn;
         _current.ShowNotifications = NotificationsSwitch.IsOn;
         _current.ShowDesktop = DesktopSwitch.IsOn;
+        _current.StartCentered = StartCenteredSwitch.IsOn;
+        _current.AttentionLight = AttentionLightSwitch.IsOn;
+        _current.AttentionBounce = AttentionBounceSwitch.IsOn;
         Changed();
     }
 
@@ -1017,19 +1022,7 @@ public sealed partial class MainWindow : Window
         Changed();
     }
 
-    private void OnListenerToggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading) return;
-        _current.NotifyListener = ListenerSwitch.IsOn;
-        Changed();
-    }
 
-    private void OnFeishuToggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading) return;
-        _current.NotifyFeishu = FeishuSwitch.IsOn;
-        Changed();
-    }
 
     // The bar module: off, its own options and the notification cards have nothing to act on.
     private void OnBarToggled(object sender, RoutedEventArgs e)
@@ -1168,20 +1161,7 @@ public sealed partial class MainWindow : Window
         Changed();
     }
 
-    private void OnStageExcludedChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_loading) return;
-        _current.StageExcluded = StageExcludedBox.Text
-            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        Changed();
-    }
 
-    private void OnStageExcludedDefaults(object sender, RoutedEventArgs e)
-    {
-        StageExcludedBox.Text = string.Join(Environment.NewLine, BarSettings.StageExcludedDefaults);
-    }
 
     private void OnWinKeyToggled(object sender, RoutedEventArgs e)
     {
@@ -1232,12 +1212,6 @@ public sealed partial class MainWindow : Window
         Changed();
     }
 
-    private void OnWeChatToggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading) return;
-        _current.NotifyWeChat = WeChatSwitch.IsOn;
-        Changed();
-    }
 
     private void OnTextColorChecked(object sender, RoutedEventArgs e)
     {

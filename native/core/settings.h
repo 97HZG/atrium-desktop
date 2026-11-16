@@ -42,6 +42,7 @@ struct Settings {
     // steps of its own.
     std::wstring startSize;
     std::wstring startIcon;
+    bool startCentered = false;       // the start menu opens in the middle of the screen, not at the left
     bool hoverRise = false;           // glass rises with the pointer's magnification wave
     // A pointer resting just above the bar is answered ahead of time: the glass rises
     // to it (with hoverRise) and the icons magnify — each on its own switch.
@@ -54,7 +55,7 @@ struct Settings {
     bool showTray = true;
     bool showStatus = true;
     bool showNotifications = true;
-    bool showDesktop = true;         // the Show Desktop slot at the bar's right end
+    bool showDesktop = false;        // the Show Desktop slot at the bar's right end
     bool showRunning = true;
     // The interface language of the bar, its popups, the widgets and the settings app.
     // auto follows Windows' UI language (Chinese -> zh, anything else -> en).
@@ -81,6 +82,12 @@ struct Settings {
     bool notifyListener = true;      // Windows notifications as Atrium cards (UserNotificationListener)
     bool notifyFeishu = true;        // Feishu messages as Atrium cards (its own popup, read through UI Automation)
     bool notifyWeChat = true;        // WeChat messages as Atrium cards (its chat list, read through UI Automation)
+    bool notifyQQ = true;            // QQ's messages (its Windows notifications; a flash without one: a plain card)
+    bool notifyWeCom = true;         // WeCom's messages (a flash of its window or tray icon: a plain card)
+    bool notifyDingTalk = true;      // DingTalk's messages (likewise)
+    // An app asking for attention (a new message: its window or tray icon flashing) on the bar.
+    bool attentionLight = true;      // its icon's plate lit white until it is opened
+    bool attentionBounce = false;    // its icon hops a few times
     // Three independent modules: the bar (with its popups and Atrium's notification cards), the
     // desktop widgets and Stage Manager. Any of them may run alone.
     bool bar = true;                 // the glass bar; off: Windows' own taskbar and banners stay in charge

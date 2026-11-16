@@ -25,6 +25,7 @@
 #include "shell/win_key.h"
 #include "shell/feishu_source.h"
 #include "shell/wechat_source.h"
+#include "shell/messengers.h"
 #include "ui/calendar_panel.h"
 #include "ui/control_center.h"
 #include "ui/desktop_widgets.h"
@@ -71,6 +72,7 @@ constexpr UINT WM_USB = WM_APP + 13;          // the device worker has queued re
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
 constexpr UINT_PTR kDisplaySettleTimer = 0x56; // once more after a display change, the topology settled
+constexpr UINT_PTR kMessengerTimer = 0x57;     // a chat app's flash: did a card with its text follow?
 constexpr UINT_PTR kReadyTimer = 0x54;       // only during an update startup handshake
 constexpr UINT kStatusMs = 3000;
 constexpr UINT kTrayId = 1;
@@ -104,6 +106,8 @@ struct App {
     std::unique_ptr<UpdateChecker> updates;
     std::unique_ptr<WeChatSource> wechat;
     std::unique_ptr<FeishuSource> feishu;
+    MessengerAlerts alerts;
+    std::array<std::wstring, size_t(Messenger::Count)> messengerProgram; // the program that flashed last
     std::unique_ptr<TrayModel> tray;
     std::unique_ptr<TrayPanel> trayPanel;
     std::unique_ptr<ControlCenter> control;
@@ -474,6 +478,68 @@ bool RunNoticeAction(const Notice& n)
     return true; // nothing to run: the click just dismisses it
 }
 
+// The chat apps' own switches (Settings ▸ Notifications ▸ Sources); other apps' Windows
+// notifications follow notifyListener.
+bool MessengerOn(Messenger m)
+{
+    const Settings& s = g_app.displaySettings;
+    switch (m) {
+    case Messenger::WeChat: return s.notifyWeChat;
+    case Messenger::QQ: return s.notifyQQ;
+    case Messenger::Feishu: return s.notifyFeishu;
+    case Messenger::WeCom: return s.notifyWeCom;
+    case Messenger::DingTalk: return s.notifyDingTalk;
+    default: return s.notifyListener;
+    }
+}
+
+std::wstring ProgramOf(HWND window)
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    std::wstring path;
+    if (HANDLE p = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr) {
+        wchar_t buf[MAX_PATH * 2];
+        DWORD len = DWORD(std::size(buf));
+        if (QueryFullProcessImageNameW(p, 0, buf, &len))
+            path.assign(buf, len);
+        CloseHandle(p);
+    }
+    return path;
+}
+
+// A chat app flashed for a message (its window, or its tray icon began to): a plain card follows
+// unless one with the message's text does (MessengerAlerts).
+void MessengerFlashed(const std::wstring& program)
+{
+    const Messenger m = MessengerOfProgram(program);
+    if (m == Messenger::None || !g_app.barOn.value_or(true) || !MessengerOn(m))
+        return;
+    g_app.messengerProgram[size_t(m)] = program;
+    if (m == Messenger::WeChat && g_app.wechat)
+        g_app.wechat->Wake();
+    if (g_app.alerts.Flash(m, GetTickCount64()))
+        SetTimer(g_app.host, kMessengerTimer, UINT(MessengerAlerts::kWaitMs + 100), nullptr);
+}
+
+void PostMessengerCard(Messenger m)
+{
+    if (!g_app.notes || !g_app.barOn.value_or(true) || !MessengerOn(m))
+        return;
+    if (HWND fg = GetForegroundWindow(); fg && MessengerOfProgram(ProgramOf(fg)) == m)
+        return; // the app is in front: the user sees the message there
+    const MessengerInfo& info = InfoOf(m);
+    const std::wstring& program = g_app.messengerProgram[size_t(m)];
+    Notice n;
+    n.source = info.key;
+    n.app = Tr(info.name);
+    n.appId = program;
+    n.title = Tr(L"New message");
+    if (!program.empty())
+        n.action = L"app:" + program;
+    g_app.notes->Post(std::move(n));
+}
+
 // Applies settings to the bar and the task model.
 void EnsureGuard();
 
@@ -495,14 +561,17 @@ void ApplySettings(const Settings& s)
     g_app.start->SetBarHeight(float(s.height)); // its status capsule is shaped like the bar
     g_app.start->SetShowTray(s.startTray);
     g_app.start->SetShowStatus(s.startStatus);
+    g_app.start->SetCentered(s.startCentered);
     g_app.start->SetPreferredSize(s.startSize);
     g_app.start->SetPreferredIcon(s.startIcon);
     g_app.notes->SetRadius(radius);
     g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody, s.notifyPlacement);
     // Notification cards belong to the bar (its bell): without it, Windows shows its own banners.
-    if (s.bar && s.notifyListener && !g_app.listener)
+    // Also for the chat apps' own Windows notifications (QQ's), each by its own switch.
+    const bool toasts = s.notifyListener || s.notifyQQ || s.notifyWeChat || s.notifyFeishu || s.notifyWeCom || s.notifyDingTalk;
+    if (s.bar && toasts && !g_app.listener)
         g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
-    else if (!(s.bar && s.notifyListener) && g_app.listener)
+    else if (!(s.bar && toasts) && g_app.listener)
         g_app.listener.reset();
     if (s.bar && s.notifyWeChat && !g_app.wechat)
         g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE);
@@ -1178,10 +1247,14 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_NOTICE:
         if (auto* n = reinterpret_cast<Notice*>(l)) {
             // Only from sources still turned on (a notice may arrive just after).
+            const Messenger m = MessengerOfNotice(n->source, n->app, n->appId);
             bool on = n->source == L"atrium" ? g_app.barOn.value_or(true) : n->source == L"wechat" ? bool(g_app.wechat)
                        : n->source == L"feishu" ? bool(g_app.feishu) : bool(g_app.listener);
-            if (g_app.notes && on)
+            on = on && (m != Messenger::None ? MessengerOn(m) : n->source != L"windows" || g_app.displaySettings.notifyListener);
+            if (g_app.notes && on) {
                 g_app.notes->Post(*n);
+                g_app.alerts.Noticed(m, GetTickCount64()); // its flash needs no plain card
+            }
             delete n;
         }
         return 0;
@@ -1294,6 +1367,9 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             std::vector<std::wstring> flashing = g_app.tray ? g_app.tray->Flashing() : std::vector<std::wstring>{};
             std::sort(flashing.begin(), flashing.end());
             if (flashing != lastFlashing && g_app.tasks) {
+                for (const std::wstring& exe : flashing)
+                    if (!std::binary_search(lastFlashing.begin(), lastFlashing.end(), exe))
+                        MessengerFlashed(exe); // QQ, WeChat in the tray: the icon began to flash
                 lastFlashing = std::move(flashing);
                 const auto items = BarItems();
                 ForBars([&](Bar& bar) { bar.SetItems(items); });
@@ -1321,6 +1397,17 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             UpdateStatus();
             if (g_app.chrome)
                 g_app.chrome->Enforce();
+            return 0;
+        }
+        if (w == kMessengerTimer) {
+            KillTimer(h, kMessengerTimer);
+            bool waiting = false;
+            for (Messenger m : g_app.alerts.Due(GetTickCount64(), &waiting)) {
+                Log(L"notify: %s flashed with no card: a plain one", InfoOf(m).key);
+                PostMessengerCard(m);
+            }
+            if (waiting)
+                SetTimer(h, kMessengerTimer, 500, nullptr);
             return 0;
         }
         if (w == kDisplaySettleTimer) {
@@ -1572,9 +1659,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     StartJumpListIndex(settings.windowsContextMenu);
     g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
         const double t0 = ClockMs();
+        const std::vector<TaskItem> all = g_app.tasks->Snapshot(true); // once for both
         if (g_app.stage)
-            g_app.stage->Update(g_app.tasks->Snapshot(true));
-        if (g_app.trayPanel) g_app.trayPanel->SetAttention(g_app.tasks->Snapshot(true));
+            g_app.stage->Update(all);
+        if (g_app.trayPanel) g_app.trayPanel->SetAttention(all);
         const double t1 = ClockMs();
         auto items = BarItems();
         const double t2 = ClockMs();
@@ -1590,6 +1678,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     }, [](const std::wstring& exe) {
         return g_app.tray->OpenExisting(exe);
     });
+    g_app.tasks->SetOnFlash([](HWND window) { MessengerFlashed(ProgramOf(window)); });
     g_app.catalog = std::make_unique<AppCatalog>(g_app.host, WM_CATALOG);
     g_app.start = std::make_unique<StartMenu>(instance, *g_app.tasks, *g_app.catalog);
     {

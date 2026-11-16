@@ -37,6 +37,9 @@ int main()
     Check(CallbackSequence(HostAction::PopupOpen, 4) == V{NIN_POPUPOPEN} && CallbackSequence(HostAction::PopupClose, 4) == V{NIN_POPUPCLOSE},
           "v4 popup requests");
     Check(CallbackSequence(HostAction::HoverIn, 0) == V{WM_MOUSEMOVE}, "hover is a mouse move");
+    Check(CallbackSequence(HostAction::Open, 0) == V{WM_LBUTTONDOWN, WM_LBUTTONUP} &&
+              CallbackSequence(HostAction::Open, 4) == V{WM_LBUTTONDOWN, WM_LBUTTONUP, NIN_SELECT},
+          "opening from the bar is a click without the pointer's arrival");
 
     WPARAM w = 0;
     LPARAM l = 0;

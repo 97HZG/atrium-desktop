@@ -50,6 +50,9 @@ struct GlassPanel {
     float rippleX = 0, rippleY = 0; // press ripple centre, window px
     double rippleMs = 0;      // ClockMs() of the press; 0 = none
     unsigned gen = 0;         // bumped with every change: aligns content with the presented glass
+    // Bumped whenever the popup waits for its glass again (shown anew). A hide and show within one
+    // frame never leave the render thread's list: this tells it to say "ready" again all the same.
+    unsigned shown = 0;
     POINT offset{};          // texture origin inside a stable desktop host, committed with Present
 };
 

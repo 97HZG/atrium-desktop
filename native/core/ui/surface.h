@@ -64,11 +64,11 @@ struct ShapeDip {
 class Surface;
 
 // Where every popup goes (D32): kPopupGapDip above the bar's glass; the start
-// menu's left edge on the bar's left edge, the right group's panels (tray,
-// control centre, calendar, notifications) with their right edge on the
-// bar's right edge; inside the work area. `bar` and the result are screen px.
+// menu's left edge on the bar's left edge (or centred on the screen: startCentered),
+// the right group's panels (tray, control centre, calendar, notifications) with their
+// right edge on the bar's right edge; inside the work area. `bar` and the result are screen px.
 constexpr float kPopupGapDip = 12;
-enum class PopupAlign { Left, Right };
+enum class PopupAlign { Left, Right, Center };
 float PopupScale(RECT bar); // px per DIP on the bar's monitor
 RECT PopupRect(RECT bar, D2D1_SIZE_F sizeDip, PopupAlign align);
 
@@ -241,6 +241,7 @@ private:
     bool glassReady_ = false;
     bool frameWanted_ = false;
     unsigned glassGen_ = 0;  // of the panel last published
+    unsigned glassShown_ = 0; // GlassPanel::shown
     bool glassPending_ = false; // published since the last content frame
     bool presentPending_ = false; // one content buffer awaiting its glass; input stays responsive
     std::optional<RECT> nextResize_;

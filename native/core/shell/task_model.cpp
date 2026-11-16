@@ -7,6 +7,7 @@
 
 #include "shell/task_model.h"
 #include "shell/app_processes.h"
+#include "shell/messengers.h"
 
 #include "log.h"
 
@@ -201,11 +202,20 @@ std::wstring StoreAumid(IPropertyStore* store)
     return result;
 }
 
-std::wstring WindowAumid(HWND h)
+// relaunch: the command the window asks to be started again with (a browser's web app names
+// itself there: --app-id).
+std::wstring WindowAumid(HWND h, std::wstring* relaunch = nullptr)
 {
     winrt::com_ptr<IPropertyStore> store;
     if (FAILED(SHGetPropertyStoreForWindow(h, IID_PPV_ARGS(store.put()))) || !store)
         return {};
+    if (relaunch) {
+        PROPVARIANT v;
+        PropVariantInit(&v);
+        if (SUCCEEDED(store->GetValue(PKEY_AppUserModel_RelaunchCommand, &v)) && v.vt == VT_LPWSTR && v.pwszVal)
+            *relaunch = v.pwszVal;
+        PropVariantClear(&v);
+    }
     return StoreAumid(store.get());
 }
 
@@ -238,18 +248,67 @@ std::wstring HostedUwpAumid(HWND frame, DWORD framePid)
     return ctx.aumid;
 }
 
+// A browser's web app (an installed site in its own window, Chrome's and Edge's): its own app,
+// not the browser, though the browser's program runs it.
+bool IsWebApp(const std::wstring& aumid, const std::wstring& command)
+{
+    std::wstring id = Lower(aumid), c = Lower(command);
+    return id.find(L"_crx_") != std::wstring::npos || c.find(L"--app-id=") != std::wstring::npos || c.find(L"--app=") != std::wstring::npos;
+}
+
+// The program that started this process, where it verifiably is the app's launcher (#52, Baidu
+// Netdisk: BaiduNetdisk.exe starts module\BrowserEngine\BaiduNetdiskUnite.exe, whose window is the
+// app's): the same session, started before it, in a folder above its program, which is named after
+// it. A game started by its store (a folder below too, another name) stays apart.
+std::wstring LauncherOf(HANDLE process, DWORD pid, ULONGLONG created, const std::wstring& exePath)
+{
+    using Query = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+    static const auto query = reinterpret_cast<Query>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess"));
+    struct Basic { // PROCESS_BASIC_INFORMATION
+        LONG exitStatus;
+        PVOID peb;
+        ULONG_PTR affinity;
+        LONG priority;
+        ULONG_PTR pid, parent;
+    } info{};
+    if (!query || query(process, 0 /* ProcessBasicInformation */, &info, sizeof(info), nullptr) < 0 || !info.parent)
+        return {};
+    const DWORD parentPid = DWORD(info.parent);
+    DWORD session = 0, parentSession = 0;
+    if (!ProcessIdToSessionId(pid, &session) || !ProcessIdToSessionId(parentPid, &parentSession) || session != parentSession)
+        return {};
+    HandleCloser parent(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, parentPid));
+    FILETIME c{}, e{}, k{}, u{};
+    if (!parent.h || !GetProcessTimes(parent.h, &c, &e, &k, &u) || ((ULONGLONG(c.dwHighDateTime) << 32) | c.dwLowDateTime) > created)
+        return {}; // that id is another, later process now
+    std::wstring launcher = ImagePath(parent.h);
+    const size_t slash = launcher.find_last_of(L'\\');
+    if (slash == std::wstring::npos)
+        return {};
+    std::wstring dir = Lower(launcher.substr(0, slash + 1)), own = Lower(exePath);
+    if (!own.starts_with(dir) || own.find(L'\\', dir.size()) == std::wstring::npos)
+        return {}; // not in a folder below the launcher's
+    std::wstring stem = Lower(FileStem(launcher));
+    if (stem.size() < 4 || !Lower(FileStem(exePath)).starts_with(stem))
+        return {};
+    return launcher;
+}
+
 struct WinInfo {
     DWORD pid = 0;
     std::wstring exePath;   // empty if the process could not be opened
     std::wstring aumid;     // original case
     std::wstring key;       // lowercase grouping key
     ULONGLONG created = 0;  // process creation time, orders newly seen groups
+    bool webApp = false;    // a browser's web app (IsWebApp)
+    std::wstring launcher;  // no app identity of its own: the program that started it (LauncherOf)
 };
 
 WinInfo ComputeInfo(HWND h, DWORD pid, const wchar_t* cls)
 {
     WinInfo wi;
     wi.pid = pid;
+    std::wstring relaunch;
     bool frame = wcscmp(cls, L"ApplicationFrameWindow") == 0;
     HandleCloser proc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (frame) {
@@ -258,7 +317,7 @@ WinInfo ComputeInfo(HWND h, DWORD pid, const wchar_t* cls)
             wi.aumid = WindowAumid(h);
         // exePath stays empty: it would be ApplicationFrameHost.exe for every app.
     } else {
-        wi.aumid = WindowAumid(h);
+        wi.aumid = WindowAumid(h, &relaunch);
         if (proc.h) {
             wi.exePath = ImagePath(proc.h);
             if (wi.aumid.empty())
@@ -270,6 +329,9 @@ WinInfo ComputeInfo(HWND h, DWORD pid, const wchar_t* cls)
         if (GetProcessTimes(proc.h, &c, &e, &k, &u))
             wi.created = (static_cast<ULONGLONG>(c.dwHighDateTime) << 32) | c.dwLowDateTime;
     }
+    wi.webApp = IsWebApp(wi.aumid, relaunch);
+    if (wi.aumid.empty() && proc.h && !wi.exePath.empty() && wi.created)
+        wi.launcher = LauncherOf(proc.h, pid, wi.created, wi.exePath);
     if (!wi.aumid.empty())
         wi.key = Lower(wi.aumid);
     else if (!wi.exePath.empty())
@@ -317,7 +379,7 @@ bool IsAppWindow(HWND h, DWORD& pid, wchar_t* cls, int clsCap, std::wstring& tit
 // ---- shortcuts and names -----------------------------------------------------
 
 // Loads a .lnk without resolving it (no disk search, no UI).
-bool ReadLink(const std::wstring& path, std::wstring& target, std::wstring& aumid)
+bool ReadLink(const std::wstring& path, std::wstring& target, std::wstring& aumid, std::wstring* args = nullptr)
 {
     winrt::com_ptr<IShellLinkW> link;
     if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(link.put()))))
@@ -328,6 +390,11 @@ bool ReadLink(const std::wstring& path, std::wstring& target, std::wstring& aumi
     wchar_t buf[MAX_PATH * 2] = {};
     if (SUCCEEDED(link->GetPath(buf, ARRAYSIZE(buf), nullptr, 0)))
         target = buf;
+    if (args) {
+        std::wstring line(1024, L'\0');
+        if (SUCCEEDED(link->GetArguments(line.data(), int(line.size()))))
+            *args = line.c_str();
+    }
     if (auto store = link.try_as<IPropertyStore>())
         aumid = StoreAumid(store.get());
     return true;
@@ -577,6 +644,9 @@ struct Pin {
     std::wstring exe;    // same, original case
     std::wstring aumid;  // also resolved from the shortcut
     bool multipleWindows = false;
+    // Starts one browser profile or web app (--profile-directory, --app-id): only windows of that
+    // identity are its, never the browser's other windows.
+    bool specific = false;
 };
 
 Pin ResolvePin(const PinnedApp& app)
@@ -584,16 +654,17 @@ Pin ResolvePin(const PinnedApp& app)
     Pin p;
     p.app = app;
     std::wstring aumid = app.aumid;
-    std::wstring target;
+    std::wstring target, args = app.args;
     if (!app.path.empty()) {
         if (IsLink(app.path)) {
             std::wstring linkAumid;
-            if (ReadLink(app.path, target, linkAumid) && aumid.empty())
+            if (ReadLink(app.path, target, linkAumid, &args) && aumid.empty())
                 aumid = linkAumid; // the link's own AUMID wins over the path
         } else {
             target = app.path;
         }
     }
+    p.specific = IsWebApp(aumid, args) || Lower(args).find(L"--profile-directory") != std::wstring::npos;
     p.exe = AppExecutable(target);
     p.aumid = aumid;
     PinnedApp resolved = app;
@@ -673,6 +744,7 @@ struct TaskModel::Impl {
     HWND ui;
     std::function<void()> onChanged;
     std::function<bool(const std::wstring&)> openExisting;
+    std::function<void(HWND)> onFlash;
     ComScope com;
     UINT shellHookMsg = 0;
     UINT readyMsg = 0;
@@ -797,6 +869,15 @@ struct TaskModel::Impl {
         HWND root = GetAncestor(fg, GA_ROOTOWNER);
         lastActive[fg] = ++seq;
         attention.erase(fg);
+        // The app in front: also a window of it that flashed hidden (in the tray) has been answered.
+        DWORD fgPid = 0;
+        GetWindowThreadProcessId(fg, &fgPid);
+        if (fgPid)
+            std::erase_if(attention, [&](HWND h) {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(h, &pid);
+                return pid == fgPid;
+            });
         if (root && root != fg) {
             lastActive[root] = ++seq;
             attention.erase(root);
@@ -848,8 +929,11 @@ struct TaskModel::Impl {
             if (!root)
                 root = hwnd;
             HWND fg = GetForegroundWindow();
-            if (root != fg && root != GetAncestor(fg, GA_ROOTOWNER))
+            if (root != fg && root != GetAncestor(fg, GA_ROOTOWNER)) {
                 attention.insert(root);
+                if (onFlash)
+                    onFlash(root);
+            }
         }
         MarkDirty(); // window created/destroyed/activated/redrawn
     }
@@ -941,9 +1025,16 @@ struct TaskModel::Impl {
         if (it != pinByKey.end())
             return int(it->second);
         // Desktop launchers can give the actual window a different identity or executable.
-        // Exact AUMIDs still win; an executable shared by several pins is ambiguous.
-        if (!info.exePath.empty()) {
+        // Exact AUMIDs still win; an executable shared by several pins is ambiguous. A web app
+        // is not its browser.
+        if (!info.exePath.empty() && !info.webApp) {
             auto jt = pinByTarget.find(Lower(info.exePath));
+            if (jt != pinByTarget.end() && jt->second < pins.size())
+                return int(jt->second);
+        }
+        // A window without an identity of its own, of a program its pinned launcher started.
+        if (!info.launcher.empty()) {
+            auto jt = pinByTarget.find(Lower(info.launcher));
             if (jt != pinByTarget.end() && jt->second < pins.size())
                 return int(jt->second);
         }
@@ -1024,6 +1115,24 @@ struct TaskModel::Impl {
                 if (f == firstSeen.end() || (r->info.created && r->info.created < f->second))
                     firstSeen[key] = r->info.created;
             }
+        }
+
+        // A window that flashed while hidden (WeChat, WeCom in the tray flash theirs for a message)
+        // lights its app's item, found by its program.
+        for (HWND h : attention) {
+            if (std::any_of(scan.begin(), scan.end(), [&](const ScanRec& r) { return r.hwnd == h; }))
+                continue;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(h, &pid);
+            HandleCloser proc(pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr);
+            const std::wstring exe = proc.h ? ImagePath(proc.h) : std::wstring();
+            if (exe.empty())
+                continue;
+            for (TaskItem& t : out)
+                if (const Meta& m = newMeta[t.key]; !m.exePath.empty() && _wcsicmp(m.exePath.c_str(), exe.c_str()) == 0) {
+                    t.attention = true;
+                    break;
+                }
         }
 
         // A shortcut may point to a launcher; retain the actual app identity after it hides.
@@ -1135,9 +1244,9 @@ struct TaskModel::Impl {
                 auto [it, added] = pinByTarget.emplace(target, pins.size());
                 if (!added && it->second != pins.size()) it->second = size_t(-1);
             };
-            // Browser profile shortcuts keep their explicit identity.
-            std::wstring id = Lower(p.aumid);
-            if (!(id.starts_with(L"chrome.") || id.starts_with(L"msedge."))) {
+            // A browser profile's or web app's shortcut keeps its explicit identity; the browser's
+            // own pin takes its other windows, whichever profile (#52).
+            if (!p.specific) {
                 addTarget(p.target);
                 addTarget(Lower(p.exe));
             }
@@ -1384,11 +1493,17 @@ struct TaskModel::Impl {
                 // Its tray icon was clicked (an app running in the background). Most open their
                 // window then; one that does not within a moment is started as its pin starts it
                 // (a single-instance app then shows its window) instead of the click doing nothing (#15).
-                if (auto plan = PlanFor(key)) {
+                // Never a chat app: WeChat, QQ and the like run several accounts side by side, and
+                // starting one again opens another one's login window.
+                if (auto plan = PlanFor(key); plan && MessengerOfProgram(m->second.exePath) == Messenger::None) {
                     std::thread([plan = *plan, exe = m->second.exePath] {
-                        Sleep(1500);
-                        if (ShowsWindow(exe))
-                            return;
+                        // Watched throughout, not once at the end: a window that came slowly, or
+                        // came and was closed again meanwhile, was the app answering.
+                        for (int i = 0; i < 30; ++i) {
+                            Sleep(100);
+                            if (ShowsWindow(exe))
+                                return;
+                        }
                         Log(L"tasks: %s showed no window from its tray icon: started", PathFindFileNameW(exe.c_str()));
                         const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
                         Exec(plan.file, plan.args, plan.dir);
@@ -1730,6 +1845,11 @@ void TaskModel::SetPins(const std::vector<PinnedApp>& pins)
 void TaskModel::SetShowRunning(bool show)
 {
     impl_->SetShowRunning(show);
+}
+
+void TaskModel::SetOnFlash(std::function<void(HWND)> onFlash)
+{
+    impl_->onFlash = std::move(onFlash);
 }
 
 IconImage TaskModel::Icon(const std::wstring& key, int sizePx)

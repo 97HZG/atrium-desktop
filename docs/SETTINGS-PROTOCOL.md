@@ -28,11 +28,12 @@
 | `trayHost` | bool | | true | “接管托盘图标”：Atrium 用自己的 Shell_TrayWnd 窗口接收各应用的托盘图标（实时图片、回调消息），并原样转发给 Explorer；点击按系统托盘协议直接发给应用。关闭时从 Explorer 的托盘读取。切换后立即生效（见 docs/TRAY.md） |
 | `startTray` | bool | | true | 开始菜单底部胶囊里的托盘按钮 |
 | `startStatus` | bool | | true | 开始菜单底部胶囊里的网络、音量和电池按钮 |
+| `startCentered` | bool | | false | 开始菜单在屏幕水平居中打开；关闭时左边缘对齐任务栏玻璃左端 |
 | `startSize` | string | `small` / `medium` / `large` / `xlarge` | `medium`（见回退规则） | 开始菜单一页的网格大小：小、中、大、极大，依次为 7 × 3、9 × 4、11 × 5、13 × 6 格。设置中心、菜单握把或空白处右键可选；菜单右键只列出当前图标档位与屏幕工作区能容纳的菜单档位。没有这一项时沿用 `start.json` 的 `size`，Core 启动时回填设置；实际显示可临时降档，不改变偏好 |
 | `startIcon` | string | `small` / `medium` / `large` / `xlarge` | `medium`（见回退规则） | 独立于 `startSize` 的菜单图标和文件夹封面大小：34、40、52、64 DIP；对应格子宽 × 高为 62 × 82、72 × 88、94 × 100、116 × 112 DIP。设置中心和菜单空白处右键均可选四档；没有这一项时沿用 `start.json` 的 `icon`，Core 启动时回填设置 |
 | `showStatus` | bool | | true | 状态环与控制中心入口 |
 | `showNotifications` | bool | | true | 通知入口；关闭入口不关闭通知来源 |
-| `showDesktop` | bool | | true | 任务栏最右端的“显示桌面”：一条与分隔线同样的细线，点击等同 Win+D（再点一次恢复窗口） |
+| `showDesktop` | bool | | false | 任务栏最右端的“显示桌面”：一条与分隔线同样的细线，点击等同 Win+D（再点一次恢复窗口） |
 | `textColor` | string | `auto` / `light` / `dark` | `auto` | 文字颜色；`auto` 按玻璃下方的实际亮度选择 |
 | `language` | string | `auto` / `zh-Hans` / `en` / locale tag | `auto` | 界面语言：`auto` 跟随 Windows 的显示语言（中文 → 简体中文，其余 → English）；`zh-Hans` 简体中文；`en` English；其他值对应 `locales/<tag>.json`。旧配置的 `zh` 视为 `zh-Hans`。任务栏、开始菜单、控制中心、通知、桌面小组件与设置中心一起切换，保存后立即生效 |
 | `autoHide` | string | `never` / `fullscreen` / `always` | `fullscreen` | 栏的显示方式：常驻；全屏时隐藏（有最大化、全屏或分屏铺满屏幕的窗口时滑出屏幕，前面再开小窗口也不出来）；一直隐藏。隐藏时，指针移到栏下方的屏幕底边栏就出现，离开后收回 |
@@ -56,9 +57,14 @@
 | `notifyTimeout` | number | 3–30 s | 6 | 通知弹出后停留的时间（指针停在卡片上时不计时） |
 | `notifyPlacement` | string | `dock` / `topRight` | `dock` | 默认在任务栏上方堆叠；右上角模式下，弹窗和铃铛打开的通知中心均固定在系统主屏工作区右上角，新通知从右侧淡入，已有通知平滑下移；通知中心的操作区在列表上方，超出屏幕高度可滚动 |
 | `notifyHideBody` | bool | | false | 隐藏通知正文；同时把通知窗口排除在截图和屏幕共享之外 |
-| `notifyListener` | bool | | true | 通过 UserNotificationListener 把 Windows 通知显示为 Atrium 卡片（系统横幅仍会出现，除非用户在 Windows 里关闭该应用的横幅） |
-| `notifyWeChat` | bool | | true | 实验：读取微信窗口的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片 |
+| `notifyListener` | bool | | true | 通过 UserNotificationListener 把其他应用的 Windows 通知显示为 Atrium 卡片（系统横幅仍会出现，除非用户在 Windows 里关闭该应用的横幅）；微信、QQ、飞书、企业微信、钉钉的通知由各自的开关决定 |
+| `notifyWeChat` | bool | | true | 读取微信的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片；窗口打开过一次后，关到托盘也能读到会话名与摘要；读不到时，微信为消息闪烁即显示“微信 · 新消息” |
 | `notifyFeishu` | bool | | true | 读取飞书自己的消息弹窗里的文字（UI 自动化，只读），同时显示为 Atrium 卡片 |
+| `notifyQQ` | bool | | true | QQ 的消息：它的 Windows 通知；QQ 缩在托盘里闪烁却没有通知时，显示一张“QQ · 新消息”卡片 |
+| `notifyWeCom` | bool | | true | 企业微信的消息：它的窗口或托盘图标闪烁时，显示一张“企业微信 · 新消息”卡片 |
+| `notifyDingTalk` | bool | | true | 钉钉的消息：同上，“钉钉 · 新消息” |
+| `attentionLight` | bool | | true | 应用请求注意（窗口或托盘图标闪烁，例如新消息）时，任务栏图标底板亮白色、运行圆点变白，直到切到该应用；指针停在该图标上或放大波及它时暂时隐藏 |
+| `attentionBounce` | bool | | false | 应用开始请求注意时，任务栏图标跳动三下（与启动时的跳动相同）；指针停在该图标上时不跳 |
 | `bar` | bool | | true | 玻璃任务栏模块：关闭时栏的窗口隐藏，开始菜单、托盘、控制中心、日历与通知中心随之关闭，通知来源停止接收（Windows 自己的横幅照常出现），`hideTaskbar` 与 `hideBanners` 不再生效；渲染线程继续为小组件与菜单绘制玻璃。与 `widgets`、`stageManager` 互不依赖 |
 | `widgets` | bool | | true | 桌面小组件；布局由 Core 存于 `widgets.json`（D35）。中号时钟和中号数字时钟的世界时钟城市可在小组件右键菜单“更改城市…”里逐个换，存为该小组件的 `cities`（城市名数组，按显示顺序；没有这一项时用北京、东京、伦敦、纽约，数字时钟用后三个） |
 | `widgetsOnRight` | bool | | false | 小组件逻辑网格从右侧排布；切换时镜像现有列，不改写 `widgets.json` |

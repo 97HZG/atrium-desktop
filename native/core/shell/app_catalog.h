@@ -27,6 +27,13 @@ struct CatalogApp {
     std::wstring args;    // the link's arguments (a browser's --app=..., a profile)
 };
 
+// A folder of the Windows start menu's All apps list (a folder of shortcuts under Start Menu\Programs,
+// "Git", "7-Zip"), by its shown name, with its apps; Windows' own folders and uninstallers left out.
+struct CatalogFolder {
+    std::wstring name;
+    std::vector<CatalogApp> apps;
+};
+
 class AppCatalog {
 public:
     // Posts `readyMsg` to `notify` when the list or an icon becomes available.
@@ -40,6 +47,8 @@ public:
     std::vector<CatalogApp> Apps() const; // sorted by name (user locale)
     // Pinned to the Windows start menu (not the taskbar: those are the bar's pins).
     std::vector<CatalogApp> StartPins() const;
+    // The All apps list's folders holding two apps or more (read with the apps).
+    std::vector<CatalogFolder> StartFolders() const;
     IconImage Icon(const std::wstring& id, int px); // empty until loaded
     // The start pins' icons at `px` are read after every refresh, so the start
     // menu's first opening shows them at once (requests for icons on screen go first).
@@ -65,6 +74,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::vector<CatalogApp> apps_, startPins_;
+    std::vector<CatalogFolder> startFolders_;
     // Worker only: the exported layout and the layout file's time it is from.
     std::vector<std::pair<std::wstring, std::wstring>> layout_; // key (packagedAppId | desktopAppLink), value
     FILETIME layoutTime_{};

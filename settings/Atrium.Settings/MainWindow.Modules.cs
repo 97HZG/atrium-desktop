@@ -609,6 +609,27 @@ public sealed partial class MainWindow
             Kick();
         }
 
+        // The popup closes and opens again (a choice of where it opens): `between` runs while it is away.
+        protected void Replay(Action between)
+        {
+            if (!_open || !HasFrame)
+            {
+                between();
+                return;
+            }
+            PopOut();
+            var timer = M.DispatcherQueue.CreateTimer();
+            timer.Interval = TimeSpan.FromMilliseconds(160);
+            timer.IsRepeating = false;
+            timer.Tick += (_, _) =>
+            {
+                between();
+                _postedKey = "";
+                if (Active && _open) PopIn();
+            };
+            timer.Start();
+        }
+
         private void PopOut()
         {
             var visual = ElementCompositionPreview.GetElementVisual(_pop);
@@ -657,6 +678,8 @@ public sealed partial class MainWindow
         // The panel's size, springing (kResize) to the chosen one; the icons' size picks the cells.
         private int _size = -1, _icon = -1;
         private double _pw, _pv, _mh, _mv;
+        // Where it opens: on the bar's left end, or in the middle (startCentered).
+        private bool _centered, _wantCentered;
         // The capsule.
         private readonly Ellipse _avatar = new() { Fill = new SolidColorBrush(Color.FromArgb(230, 0x0A, 0x84, 0xFF)), IsHitTestVisible = false };
         private readonly TextBlock _initial = Words(13, new SolidColorBrush(Colors.White), true, TextAlignment.Center), _user;
@@ -735,8 +758,15 @@ public sealed partial class MainWindow
         // The menu's own scale (stage DIP per menu DIP): the scene's, less where the panel would not fit.
         private double MenuScale => S * Math.Min(1, Math.Min((W - 32) / Math.Max(1, _pw * S), (PopupBottom - 8) / Math.Max(1, (_mh + Gap + BarHeight) * S)));
 
-        // On the bar's left end, as in PopupRect; keep the panel inside the stage.
-        private double MenuLeft => Math.Clamp(Bar!.BarX, 16, Math.Max(16, W - 16 - _pw * MenuScale));
+        // On the bar's left end or in the middle of the screen, as in PopupRect; keep the panel inside the stage.
+        private double MenuLeft
+        {
+            get
+            {
+                double w = _pw * MenuScale, left = _centered ? (W - w) / 2 : Bar!.BarX;
+                return Math.Clamp(left, 16, Math.Max(16, W - 16 - w));
+            }
+        }
 
         protected override void Entered()
         {
@@ -744,6 +774,7 @@ public sealed partial class MainWindow
             _icon = ChosenIcon;
             (_pw, _mh) = (Panel(_size, _icon).Width, Panel(_size, _icon).Height);
             _pv = _mv = 0;
+            _centered = _wantCentered = M._current.StartCentered;
             _placed = false;
             foreach (var b in _buttons) b.Placed = false;
             _dividerA = -1;
@@ -758,6 +789,12 @@ public sealed partial class MainWindow
             if (!HasFrame) Entered();
             _size = Chosen;
             _icon = ChosenIcon;
+            // Moved to the middle or back: it closes and opens there again, out of the start button.
+            if (_wantCentered != M._current.StartCentered)
+            {
+                _wantCentered = M._current.StartCentered;
+                Replay(() => _centered = _wantCentered);
+            }
         }
 
         protected override bool Step(double dt)
