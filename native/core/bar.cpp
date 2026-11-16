@@ -558,7 +558,9 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         std::wstring hover = HitTest(pt);
         bool magnify = scene_.magnify > 1.001f;
-        if (hover != scene_.hoverKey || (magnify && (scene_.pointerX != float(pt.x) || scene_.pointerY != float(pt.y)))) {
+        // Of the pointer's height only its side of the glass's top edge matters to the wave.
+        const bool crossed = (scene_.pointerY < scene_.bar.top) != (float(pt.y) < scene_.bar.top);
+        if (hover != scene_.hoverKey || (magnify && (scene_.pointerX != float(pt.x) || crossed))) {
             if (hover != scene_.hoverKey) {
                 scene_.hoverKey = hover;
                 // With a preview up, the next app's windows follow the pointer without the tooltip's delay.
@@ -570,6 +572,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             scene_.pointerX = float(pt.x);
             WatchNear(false); // current cursor Y and near flags belong to this same snapshot
             Publish();
+        } else if (magnify && float(pt.y) < scene_.bar.top) {
+            WatchNear(); // above the glass a move straight up may end the early response: published if it did
         }
         return 0;
     }
