@@ -29,6 +29,7 @@
 | `startTray` | bool | | true | 开始菜单底部胶囊里的托盘按钮 |
 | `startStatus` | bool | | true | 开始菜单底部胶囊里的网络、音量和电池按钮 |
 | `startCentered` | bool | | false | 开始菜单在屏幕水平居中打开；关闭时左边缘对齐任务栏玻璃左端 |
+| `startWithBar` | bool | | false | 用 Win 键打开开始菜单时，自动隐藏中的任务栏一起升起；菜单开着时保持显示，关闭后像指针离开一样再收回。全屏应用在前时不升起。需要打开 `winKeyStart` |
 | `startSize` | string | `small` / `medium` / `large` / `xlarge` | `medium`（见回退规则） | 开始菜单一页的网格大小：小、中、大、极大，依次为 7 × 3、9 × 4、11 × 5、13 × 6 格。设置中心、菜单握把或空白处右键可选；菜单右键只列出当前图标档位与屏幕工作区能容纳的菜单档位。没有这一项时沿用 `start.json` 的 `size`，Core 启动时回填设置；实际显示可临时降档，不改变偏好 |
 | `startIcon` | string | `small` / `medium` / `large` / `xlarge` | `medium`（见回退规则） | 独立于 `startSize` 的菜单图标和文件夹封面大小：34、40、52、64 DIP；对应格子宽 × 高为 62 × 82、72 × 88、94 × 100、116 × 112 DIP。设置中心和菜单空白处右键均可选四档；没有这一项时沿用 `start.json` 的 `icon`，Core 启动时回填设置 |
 | `showStatus` | bool | | true | 状态环与控制中心入口 |
@@ -55,7 +56,7 @@
 | `taskbarRightPrimaryOnly` | bool | | false | 仅在系统主屏显示任务栏右侧元素；副屏隐藏托盘、状态圆环、时钟日期、通知入口及分隔线，不保留占位；各元素原有的显示开关保持不变，也适用于跨屏唤出和固定显示器模式 |
 | `windowsContextMenu` | bool | | true | 图标右键菜单显示 Windows 风格的内容：程序自己的跳转列表（已固定、常用、最近使用的文件夹和工作区、任务），以及“以管理员身份运行”“属性”；关闭后恢复 Atrium 原来的菜单。旧配置没有这一项时为开启 |
 | `notifyTimeout` | number | 3–30 s | 6 | 通知弹出后停留的时间（指针停在卡片上时不计时） |
-| `notifyPlacement` | string | `dock` / `topRight` | `dock` | 默认在任务栏上方堆叠；右上角模式下，弹窗和铃铛打开的通知中心均固定在系统主屏工作区右上角，新通知从右侧淡入，已有通知平滑下移；通知中心的操作区在列表上方，超出屏幕高度可滚动 |
+| `notifyPlacement` | string | `dock` / `topLeft` / `topRight` / `bottomLeft` / `bottomRight` | `dock` | 默认在任务栏上方堆叠；角落模式下，弹窗和铃铛打开的通知中心均固定在系统主屏工作区的该角，最新的一条贴着角落，新通知从所在一侧的屏幕边缘淡入，已有通知平滑让位（上方的角向下、下方的角向上）；通知中心的操作区在靠角的一端（上方的角在列表上方，下方的角在列表下方），超出屏幕高度可滚动 |
 | `notifyHideBody` | bool | | false | 隐藏通知正文；同时把通知窗口排除在截图和屏幕共享之外 |
 | `notifyListener` | bool | | true | 通过 UserNotificationListener 把其他应用的 Windows 通知显示为 Atrium 卡片（系统横幅仍会出现，除非用户在 Windows 里关闭该应用的横幅）；微信、QQ、飞书、企业微信、钉钉的通知由各自的开关决定 |
 | `notifyWeChat` | bool | | true | 读取微信的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片；窗口打开过一次后，关到托盘也能读到会话名与摘要；读不到时，微信为消息闪烁即显示“微信 · 新消息” |
@@ -74,7 +75,7 @@
 | `stageOnRight` | bool | | false | 台前调度的窗口放在屏幕右侧；默认左侧 |
 | `stageAutoHide` | bool | | false | 悬停弹出：台前调度平时隐藏，指针碰到那一侧的屏幕边缘时才滑出；默认常驻：压在侧边位置上的普通窗口来到前台时挪到旁边；窗口最大化、被拖到上面或应用铺满整个屏幕时让开（指针碰到屏幕边缘时滑出） |
 | `stageMinimize` | bool | | false | 窗口最小化到台前调度：前面的窗口最小化后，它的画面直接飞进一侧的卡片（不播放系统的最小化动画），点卡片换回前面；默认关闭（最小化的窗口不进台前调度） |
-| `stageExcluded` | string[] | | Windows 截图工具 | 不参与台前调度的应用名单：这些应用的窗口永远不会被台前调度收起，任务栏菜单也不提供“添加到当前组”；每项可以是可执行文件名（如 `wechat.exe`，匹配任意安装路径）、完整应用键，或包名前缀（如 `microsoft.screensketch_`，按 AUMID 前缀匹配），不区分大小写。默认只包含 Windows 截图工具（SnippingTool / ScreenClippingHost / ScreenSketch 包），其他截图工具可在设置中心自行添加；清空名单即全部参与台前调度 |
+| `stageExcluded` | string[] | | Windows 截图工具 | 不参与台前调度的应用名单：这些应用的窗口永远不会被台前调度收起，任务栏菜单也不提供“添加到当前组”；每项可以是可执行文件名（如 `wechat.exe`，匹配任意安装路径）、完整应用键，或包名前缀（如 `microsoft.screensketch_`，按 AUMID 前缀匹配），以反斜杠结尾的文件夹路径匹配其中所有程序（设置中心“查找游戏”加入的 Steam、Epic 游戏即按安装文件夹；Xbox Game Bar 识别过的游戏按程序完整路径），不区分大小写。另外，占满整个屏幕的窗口（全屏游戏、全屏视频）无论是否在名单里都不会被收起。默认只包含 Windows 截图工具（SnippingTool / ScreenClippingHost / ScreenSketch 包），其他截图工具可在设置中心自行添加；清空名单即全部参与台前调度 |
 | `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37）。隐藏期间另有一个看护进程（`Atrium.exe --guard <pid>`）：Atrium 无论怎样结束（崩溃、被结束进程），它都立刻还原任务栏、自动隐藏设置和请勿打扰；Atrium 约 15 秒无响应时先显示任务栏 |
 | `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；Windows 已是“仅优先”等更宽松的勿扰模式时也改为“仅闹钟”；自动播放（AutoPlay）的 U 盘通知能穿透勿扰，另关掉它自己的横幅开关（通知仍在通知中心并成为 Atrium 卡片）；而“弹出成功”（可安全移除硬件）的系统提示在勿扰下被整体拦截（连通知中心都不进），Atrium 监听卷设备事件自己弹出拔出卡片（能确认弹出时与直接拔出的文案不同，不受本设置影响，`bar` 开着就有）。设备扫描与卷标读取在后台进行，也识别报告为固定介质的 USB 移动硬盘；失败的扫描不视作所有设备已拔出。关闭或退出时恢复原来的模式和开关（D37） |
 | `winKeyStart` | bool | | false | 单独按下 Win 键时打开 Atrium 的开始菜单，Windows 的开始菜单不出现。低级键盘钩子在单独的线程上先扣下 Win 键：后面跟了别的键（Win + E 等）就把两个键一起交给 Windows，单独松开则 Windows 始终没有收到它。前台是管理员权限的窗口时（补发的按键送不进去）不拦截。Win + L 由系统在钩子之前处理，不受影响。需要打开 `bar` |

@@ -69,7 +69,7 @@ void Settings::Clamp()
         dockDisplayMode = L"primary";
     if (taskbarApps != L"primaryAndWindow" && taskbarApps != L"window")
         taskbarApps = L"all";
-    if (notifyPlacement != L"topRight")
+    if (notifyPlacement != L"topLeft" && notifyPlacement != L"topRight" && notifyPlacement != L"bottomLeft" && notifyPlacement != L"bottomRight")
         notifyPlacement = L"dock";
     if (pins && pins->size() > 64)
         pins->resize(64);
@@ -105,6 +105,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"startTray", json::JsonValue::CreateBooleanValue(startTray));
     o.SetNamedValue(L"startStatus", json::JsonValue::CreateBooleanValue(startStatus));
     o.SetNamedValue(L"startCentered", json::JsonValue::CreateBooleanValue(startCentered));
+    o.SetNamedValue(L"startWithBar", json::JsonValue::CreateBooleanValue(startWithBar));
     if (!startSize.empty())
         o.SetNamedValue(L"startSize", json::JsonValue::CreateStringValue(startSize));
     if (!startIcon.empty())
@@ -220,6 +221,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"startTray", s.startTray);
     flag(L"startStatus", s.startStatus);
     flag(L"startCentered", s.startCentered);
+    flag(L"startWithBar", s.startWithBar);
     if (o.HasKey(L"startSize") && o.GetNamedValue(L"startSize").ValueType() == json::JsonValueType::String)
         s.startSize = std::wstring(o.GetNamedString(L"startSize"));
     if (o.HasKey(L"startIcon") && o.GetNamedValue(L"startIcon").ValueType() == json::JsonValueType::String)

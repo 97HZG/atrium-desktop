@@ -29,6 +29,9 @@ public:
     virtual void Release() = 0;
     // The source stopped (the display mode changed, the secure desktop came): make a new one.
     virtual bool Lost() const { return false; }
+    // A source that sends a frame only when its picture changes (the wallpaper): its last frame
+    // again, for a glass that missed it or lost its copy; null for sources that keep sending.
+    virtual ID3D11Texture2D* Again() { return nullptr; }
     // Whether Atrium's windows may show in other captures while this one runs.
     virtual bool KeepsOwnWindowsOut() const = 0;
     virtual const wchar_t* Name() const = 0;

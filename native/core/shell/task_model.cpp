@@ -16,6 +16,7 @@
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <tlhelp32.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <propsys.h>
@@ -1479,6 +1480,24 @@ struct TaskModel::Impl {
         return look.found;
     }
 
+    // Whether a process of this program runs (with a window or without, in the tray).
+    static bool Runs(const std::wstring& exe)
+    {
+        const wchar_t* name = PathFindFileNameW(exe.c_str());
+        bool found = false;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        PROCESSENTRY32W pe{sizeof(pe)};
+        for (BOOL ok = snap != INVALID_HANDLE_VALUE && Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe)) {
+            if (_wcsicmp(pe.szExeFile, name) != 0)
+                continue;
+            HandleCloser p(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID));
+            found = p.h && _wcsicmp(ImagePath(p.h).c_str(), exe.c_str()) == 0;
+        }
+        if (snap != INVALID_HANDLE_VALUE)
+            CloseHandle(snap);
+        return found;
+    }
+
     void Launch(const std::wstring& key)
     {
         const TaskItem* task = Find(key);
@@ -1511,6 +1530,12 @@ struct TaskModel::Impl {
                             CoUninitialize();
                     }).detach();
                 }
+                return;
+            }
+            // A chat app running in the tray whose icon could not be clicked (not listed yet, the
+            // tray not hosted): started again, it would open another account's login window.
+            if (m != meta.end() && MessengerOfProgram(m->second.exePath) != Messenger::None && Runs(m->second.exePath)) {
+                Log(L"tasks: %s runs, its tray icon not reached: not started again", PathFindFileNameW(m->second.exePath.c_str()));
                 return;
             }
         }

@@ -102,6 +102,11 @@ void CheckSettings()
     Require(Settings::FromJson(LR"({"notifyPlacement":"bad"})", Settings{}, parsed) && parsed.notifyPlacement == L"dock", "invalid notification placement uses the default");
     Require(Settings::FromJson(LR"({"notifyPlacement":false})", settings, parsed) && parsed.notifyPlacement == L"topRight", "malformed notification placement retains the current value");
     Require(Settings::FromJson(LR"({"notifyPlacement":"dock"})", settings, parsed) && parsed.notifyPlacement == L"dock", "notification placement can return to the default");
+    for (const wchar_t* corner : {L"topLeft", L"topRight", L"bottomLeft", L"bottomRight"}) {
+        settings.notifyPlacement = corner;
+        Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.notifyPlacement == corner, "every corner of the main screen survives saving");
+    }
+    settings.notifyPlacement = L"topRight";
     Require(Settings::FromJson(LR"({"dockDisplayMode":"bad","taskbarApps":"bad","dockDisplayDelay":99999})", Settings{}, parsed) &&
             parsed.dockDisplayMode == L"primary" && parsed.taskbarApps == L"all" && parsed.dockDisplayDelay == 2000, "invalid values are normalized");
     Require(Settings::FromJson(LR"({"dockDisplayDelay":-1})", Settings{}, parsed) && parsed.dockDisplayDelay == 100, "delay has a lower bound");
@@ -229,6 +234,15 @@ void CheckNotificationLayout()
     auto scaledCentre = notification::TopRightLayout(negative, 1.5f, 384, 112, 10, 12, 2, controls);
     Require(EqualRect(&scaledCentre.rect, &scaled.rect) && scaledCentre.contentTop == controls,
         "the notification centre shares the popup's negative-coordinate and DPI placement");
+
+    auto topLeft = notification::CornerLayout(work, 1, 384, 112, 10, 12, 1, 0, true, false);
+    Require(topLeft.rect.left == 12 && topLeft.rect.top == 12 && topLeft.rect.right == 396, "the top left corner mirrors the top right one");
+    auto bottomRight = notification::CornerLayout(work, 1, 384, 112, 10, 12, 5, controls, false, true);
+    Require(EqualRect(&bottomRight.rect, &burst.rect) && bottomRight.contentTop == 0 && bottomRight.viewHeight == centre.viewHeight,
+        "a bottom corner's centre keeps its controls below the cards, in the same room");
+    auto bottomLeft = notification::CornerLayout(negative, 1.5f, 384, 112, 10, 12, 2, 0, true, true);
+    Require(bottomLeft.rect.left == -2542 && bottomLeft.rect.bottom == 1182 && bottomLeft.rect.right - bottomLeft.rect.left == 576,
+        "the bottom left corner supports negative coordinates and monitor DPI");
 }
 }
 

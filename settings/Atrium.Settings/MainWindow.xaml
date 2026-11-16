@@ -455,6 +455,8 @@
                                 <TextBlock Text="Excluded from Stage Manager" Style="{StaticResource SectionStyle}" Margin="4,0,0,0" VerticalAlignment="Center" />
                                 <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
                                     <Button x:Name="ExcludedDefaultsButton" Content="Restore defaults" Click="OnStageExcludedDefaults" />
+                                    <Button Content="Find games…" Click="OnFindGames"
+                                            ToolTipService.ToolTip="Lists the games installed with Steam, Epic or seen by the Xbox Game Bar; the ones you choose are never put away." />
                                     <Button Content="Add app…" Click="OnAddExcluded" Style="{StaticResource PrimaryButtonStyle}"
                                             ToolTipService.ToolTip="Their windows are never put away by Stage Manager: screenshot and recording tools whose controls must stay on screen." />
                                 </StackPanel>
@@ -591,9 +593,10 @@
                                     <TextBlock Text="Atrium Desktop" Style="{StaticResource LargeTitleStyle}" />
                                     <TextBlock x:Name="VersionText" Style="{StaticResource RowNoteStyle}" Typography.NumeralAlignment="Tabular" />
                                     <TextBlock Style="{StaticResource RowNoteStyle}" Margin="0,6,0,0"
-                                               Text="Glass taskbar and desktop widgets" />
-                                    <HyperlinkButton NavigateUri="https://github.com/wynter-yaxley/atrium-desktop" Padding="0" Margin="0,6,0,0"
-                                                     Content="github.com/wynter-yaxley/atrium-desktop" />
+                                               Text="A native glass desktop for Windows 11: a floating taskbar and desktop widgets with real-time refraction" />
+                                    <TextBlock Style="{StaticResource RowNoteStyle}" Margin="0,6,0,0">
+                                        <Hyperlink NavigateUri="https://github.com/wynter-yaxley/atrium-desktop" UnderlineStyle="None">github.com/wynter-yaxley/atrium-desktop</Hyperlink>
+                                    </TextBlock>
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -631,9 +634,13 @@
                             </Border>
                         </StackPanel>
 
-                        <TextBlock Style="{StaticResource FootnoteStyle}" Margin="4,0,0,0"
-                                   Text="Interface font: MiSans, copyright Xiaomi Inc., used under the MiSans Font Intellectual Property License Agreement." />
-                        <HyperlinkButton NavigateUri="https://unsplash.com/@martz90" Content="Sample photo: Martin Martz / Unsplash" Padding="4,0" />
+                        <StackPanel Spacing="6" Margin="4,0,0,0">
+                            <TextBlock Style="{StaticResource FootnoteStyle}"
+                                       Text="Interface font: MiSans, copyright Xiaomi Inc., used under the MiSans Font Intellectual Property License Agreement." />
+                            <TextBlock Style="{StaticResource FootnoteStyle}">
+                                <Hyperlink NavigateUri="https://unsplash.com/@martz90" UnderlineStyle="None">Sample photo: Martin Martz / Unsplash</Hyperlink>
+                            </TextBlock>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- A narrow window: the inspector's groups come here, under the page (OnContentSizeChanged) -->
@@ -762,6 +769,8 @@
                                 <local:ToggleTile x:Name="StartTraySwitch" Title="Tray button" SwitchName="Tray button in the Start menu" Toggled="OnBarContentToggled" Flat="True" />
                                 <local:ToggleTile x:Name="StartCenteredSwitch" Title="Center on screen" SwitchName="Start menu in the center" Toggled="OnBarContentToggled" Flat="True"
                                                   Note="The start menu opens in the middle of the screen instead of at the left." />
+                                <local:ToggleTile x:Name="StartWithBarSwitch" Title="Win key shows the taskbar" SwitchName="Win key shows the taskbar too" Toggled="OnBarContentToggled" Flat="True"
+                                                  Note="When the taskbar is hidden, the Windows key brings it up with the start menu. Needs Win key opens Start menu." />
                             </StackPanel>
                         </StackPanel>
 
@@ -821,7 +830,16 @@
                                         <TextBlock Text="Notification position" Style="{StaticResource RowTitleStyle}" />
                                         <local:SegmentTrack>
                                             <RadioButton x:Name="NotifyAtDock" GroupName="notifyplacement" Content="Follow taskbar" Tag="dock" Style="{StaticResource SegmentStyle}" Checked="OnNotifyPlacementChecked" />
-                                            <RadioButton x:Name="NotifyAtTopRight" GroupName="notifyplacement" Content="Top right" Tag="topRight" Style="{StaticResource SegmentStyle}" Checked="OnNotifyPlacementChecked" />
+                                            <RadioButton x:Name="NotifyAtCorner" GroupName="notifyplacement" Content="Screen corner" Tag="corner" Style="{StaticResource SegmentStyle}" Checked="OnNotifyPlacementChecked" />
+                                        </local:SegmentTrack>
+                                    </StackPanel>
+                                    <StackPanel x:Name="NotifyCornerRow" Style="{StaticResource FlatRowStyle}" Visibility="Collapsed">
+                                        <TextBlock Text="Corner of the main screen" Style="{StaticResource RowTitleStyle}" />
+                                        <local:SegmentTrack>
+                                            <RadioButton x:Name="NotifyTopLeft" GroupName="notifycorner" Content="Top left" Tag="topLeft" Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
+                                            <RadioButton x:Name="NotifyTopRight" GroupName="notifycorner" Content="Top right" Tag="topRight" Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
+                                            <RadioButton x:Name="NotifyBottomLeft" GroupName="notifycorner" Content="Bottom left" Tag="bottomLeft" Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
+                                            <RadioButton x:Name="NotifyBottomRight" GroupName="notifycorner" Content="Bottom right" Tag="bottomRight" Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
                                         </local:SegmentTrack>
                                     </StackPanel>
                                     <local:ToggleTile x:Name="HideBodySwitch" Title="Hide notification content" SwitchName="Hide notification content" Toggled="OnHideBodyToggled" Flat="True"

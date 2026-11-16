@@ -814,6 +814,7 @@ public sealed partial class MainWindow : Window
         StartTraySwitch.IsOn = _current.StartTray;
         StartStatusSwitch.IsOn = _current.StartStatus;
         StartCenteredSwitch.IsOn = _current.StartCentered;
+        StartWithBarSwitch.IsOn = _current.StartWithBar;
         (_current.StartSize switch { "small" => StartSmall, "large" => StartLarge, "xlarge" => StartXLarge, _ => StartMedium }).IsChecked = true;
         (_current.StartIcon switch { "small" => StartIconSmall, "large" => StartIconLarge, "xlarge" => StartIconXLarge, _ => StartIconMedium }).IsChecked = true;
         StatusSwitch.IsOn = _current.ShowStatus;
@@ -828,7 +829,11 @@ public sealed partial class MainWindow : Window
         UpdateRiseNearDependent();
         RunningSwitch.IsOn = _current.ShowRunning;
         HideBodySwitch.IsOn = _current.NotifyHideBody;
-        (_current.NotifyPlacement == "topRight" ? NotifyAtTopRight : NotifyAtDock).IsChecked = true;
+        bool notifyCorner = BarSettings.NotifyCorners.Contains(_current.NotifyPlacement);
+        if (notifyCorner) _notifyCorner = _current.NotifyPlacement;
+        (notifyCorner ? NotifyAtCorner : NotifyAtDock).IsChecked = true;
+        NotifyCornerRow.Visibility = notifyCorner ? Visibility.Visible : Visibility.Collapsed;
+        (_notifyCorner switch { "topLeft" => NotifyTopLeft, "bottomLeft" => NotifyBottomLeft, "bottomRight" => NotifyBottomRight, _ => NotifyTopRight }).IsChecked = true;
         RefreshSources();
         BarSwitch.IsOn = _current.Bar;
         UpdateBarModule();
@@ -941,6 +946,7 @@ public sealed partial class MainWindow : Window
         _current.ShowNotifications = NotificationsSwitch.IsOn;
         _current.ShowDesktop = DesktopSwitch.IsOn;
         _current.StartCentered = StartCenteredSwitch.IsOn;
+        _current.StartWithBar = StartWithBarSwitch.IsOn;
         _current.AttentionLight = AttentionLightSwitch.IsOn;
         _current.AttentionBounce = AttentionBounceSwitch.IsOn;
         Changed();
@@ -1222,11 +1228,25 @@ public sealed partial class MainWindow : Window
 
     private void OnNotifyPlacementChecked(object sender, RoutedEventArgs e)
     {
+        bool corner = (string)((RadioButton)sender).Tag == "corner";
+        NotifyCornerRow.Visibility = corner ? Visibility.Visible : Visibility.Collapsed;
         if (_loading) return;
-        _current.NotifyPlacement = (string)((RadioButton)sender).Tag;
+        // A corner: the one chosen last (top right at first, as before there were four).
+        _current.NotifyPlacement = corner ? _notifyCorner : "dock";
         _notifyEntrancePending = true;
         Changed();
     }
+
+    private void OnNotifyCornerChecked(object sender, RoutedEventArgs e)
+    {
+        _notifyCorner = (string)((RadioButton)sender).Tag;
+        if (_loading || _current.NotifyPlacement == _notifyCorner) return;
+        _current.NotifyPlacement = _notifyCorner;
+        _notifyEntrancePending = true;
+        Changed();
+    }
+
+    private string _notifyCorner = "topRight";
 
     private void Changed()
     {

@@ -860,11 +860,17 @@ void Bar::WatchDisplaysIfNeeded()
         KillTimer(input_, kDisplayTimer);
 }
 
-void Bar::RefreshDisplays()
+void Bar::RefreshDisplays(bool workAreaOnly)
 {
+    std::vector<DisplayInfo> before = std::move(displays_);
     displays_ = ConnectedDisplays();
     WatchDisplaysIfNeeded();
-    ++displayGeneration_; // HMONITOR can be reused after a mode or adapter change.
+    const bool same = workAreaOnly && std::equal(before.begin(), before.end(), displays_.begin(), displays_.end(),
+        [](const DisplayInfo& a, const DisplayInfo& b) {
+            return a.monitor == b.monitor && a.id == b.id && EqualRect(&a.bounds, &b.bounds) && a.primary == b.primary;
+        });
+    if (!same)
+        ++displayGeneration_; // HMONITOR can be reused after a mode or adapter change.
     summonMonitor_ = nullptr;
     if (dragging_)
         EndDrag(false);
@@ -1438,6 +1444,15 @@ void Bar::UpdateCover()
         SetTimer(input_, kPointerTimer, kPointerMs, nullptr);
     else
         KillTimer(input_, kPointerTimer);
+    UpdateAutoHide();
+}
+
+void Bar::Reveal()
+{
+    if (!covered_ || revealed_ || !visible_ || FullScreenInFront(hmonitor_))
+        return;
+    revealed_ = true;
+    leftAt_ = 0;
     UpdateAutoHide();
 }
 
@@ -2023,6 +2038,14 @@ bool Bar::RenderSession()
     // its new place even when the screen has not changed and no frame comes:
     // for a second after a move the newest frame is kept.
     winrt::com_ptr<ID3D11Texture2D> lastFrame;
+    // Where the bar's backdrop was last taken, and whether a frame came while the bar was hidden:
+    // a source that sends frames only on change (the wallpaper, once a minute in a slideshow)
+    // gives its last one again when the bar shows, moves or is resized (its backdrop is blank).
+    RECT backdropAt{};
+    bool missedFrame = false;
+    // Until the first backdrop comes (the wallpaper takes a second to decode), the glass would
+    // show black: the bar waits for it, a little.
+    const double sessionStartMs = ClockMs();
     double panelMovedMs = -1e9;
     // A popup that opens needs it too (Atrium's own windows bring no frame):
     // otherwise it is kept at most every 100 ms.
@@ -2408,6 +2431,7 @@ bool Bar::RenderSession()
             // slot keeps the idle loop waking every 3 ms until the bar is revealed.
             renderer.Poll();
             drawnGeneration = 0; // its ink and glass are measured again when revealed
+            missedFrame |= frame != nullptr;
             bool lost = false;
             winrt::com_ptr<ID3D11Texture2D> hidden;
             hidden.copy_from(frame);
@@ -2460,10 +2484,21 @@ bool Bar::RenderSession()
             }
         } else if (frozen && snap.generation != drawnGeneration) {
             source = frozen; // size-dependent textures were recreated
+        } else if (missedFrame || !renderer.HasBackdrop() || !EqualRect(&backdropAt, &snap.window)) {
+            // No new frame, yet the glass needs one: its backdrop is blank (resized, a new
+            // session), stale (it moved) or a frame came while it was hidden. The newest picture
+            // held: the source's own (it sends only on change), else the frame kept for popups.
+            if (ID3D11Texture2D* again = capture->Again())
+                source.copy_from(again);
+            else if (!freeze && lastFrame)
+                source = lastFrame;
         }
         bool hadBackdrop = source != nullptr;
-        if (source)
+        if (source) {
             renderer.UpdateBackdrop(source.get(), snap.window.left - snap.monitor.left, snap.window.top - snap.monitor.top);
+            backdropAt = snap.window;
+            missedFrame = false;
+        }
         {
             bool lost = false;
             if (!freeze)
@@ -2555,8 +2590,8 @@ bool Bar::RenderSession()
                 workMs.push_back(elapsedMs());
             continue;
         }
-        if (!renderer.Ready()) {
-            barOwed = true; // the last frame is not on screen yet: drawn when it is
+        if (!renderer.Ready() || (!renderer.HasBackdrop() && ClockMs() - sessionStartMs < 1500)) {
+            barOwed = true; // the last frame is not on screen yet, or no backdrop: drawn when it is
             continue;
         }
         barOwed = false;

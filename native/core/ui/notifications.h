@@ -71,7 +71,8 @@ private:
         float y = 0, inset = 0, alpha = 0;
         float content = 1; // the card's text (cards behind the stack's front show none)
         bool placed = false;
-        float x = 0; // top-right arrivals slide in from the screen edge
+        float x = 0; // a corner's arrivals slide in from the screen edge
+        double enterAt = 0; // ... once the cards before it have moved aside (ClockMs)
     };
     struct View {
         std::unique_ptr<Surface> surface;
@@ -134,7 +135,7 @@ private:
     uint64_t nextId_ = 1;
     double timeout_ = 6;
     bool hideBody_ = false;
-    bool topRight_ = false;
+    bool corner_ = false, left_ = false, bottom_ = false; // notifyPlacement: a corner of the main screen
     ULONGLONG centerClosed_ = 0;
     float radius_ = 20;
     std::map<uint64_t, double> leaving_; // closing cards: ClockMs() when closed

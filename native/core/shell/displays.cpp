@@ -126,6 +126,16 @@ bool FullScreenInFront(HMONITOR monitor)
     return r.left <= mi.rcMonitor.left && r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
 }
 
+bool FillsScreen(HWND window)
+{
+    MONITORINFO mi{sizeof(mi)};
+    RECT r{};
+    if (!IsWindowVisible(window) || IsIconic(window) || IsZoomed(window) ||
+        !GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &mi) || !GetWindowRect(window, &r))
+        return false;
+    return r.left <= mi.rcMonitor.left && r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
+}
+
 std::vector<TaskItem> TaskItemsForDisplay(const std::vector<TaskItem>& items, const std::wstring& mode, bool primary,
     HMONITOR monitor, HWND foreground, const std::function<HMONITOR(HWND)>& monitorOf)
 {

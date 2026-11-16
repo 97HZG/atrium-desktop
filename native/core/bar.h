@@ -56,7 +56,9 @@ public:
     void Apply(const Settings& s);
     void SetItems(std::vector<TaskItem> items);
     void Relayout();
-    void RefreshDisplays(); // topology, resolution or work-area changed
+    // Topology, resolution or work-area changed. A work area alone (Windows' taskbar shown or
+    // hidden) keeps the renderer: rebuilding it leaves the glass without a backdrop for a while.
+    void RefreshDisplays(bool workAreaOnly = false);
     const std::wstring& DisplayOverride() const { return displayOverride_; }
     HMONITOR TaskMonitor() const { return filterTasks_ ? hmonitor_ : nullptr; }
     const std::vector<TaskItem>& Items() const { return items_; }
@@ -68,6 +70,9 @@ public:
     void SetStatus(const SystemStatus& status);
     // The app at `index` (0-based, in bar order) as a click on it would (Win + digit).
     void ActivateIndex(int index);
+    // An auto-hidden bar comes up (the Windows key's start menu, startWithBar); it goes again as
+    // when the pointer brought it, once nothing keeps it shown.
+    void Reveal();
     // Screen rectangle of an entry ("#start", "#notify", an app key); empty if not shown.
     RECT EntryRect(const std::wstring& key) const;
     // Screen rectangle of the glass shape.

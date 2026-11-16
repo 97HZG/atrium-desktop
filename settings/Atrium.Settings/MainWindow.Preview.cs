@@ -63,13 +63,24 @@ public sealed partial class MainWindow
         double radius = Math.Min(Math.Clamp(s.CornerRadius, 8, Math.Max(8, s.Height / 2)), CardH / 2);
         double W = NotifyStage.ActualWidth, H = NotifyStage.ActualHeight;
         if (W < CardW + 48 || H < CardH + 60) { W = Math.Max(W, CardW + 48); H = Math.Max(H, CardH + 60); }
-        bool topRight = s.NotifyPlacement == "topRight";
-        // Over the bar, right-aligned with it (the bell's popup); or the screen's top right corner.
-        var bar = ShowNotifyBar(W, H);
+        var (corner, left, bottom) = NotifyCorner(s.NotifyPlacement);
+        // Over the bar, right-aligned with it (the bell's popup); or a corner of the screen, the
+        // newest card at the corner and the one before it beside it in the column.
+        // At a corner the bar is shown smaller: the column has the room beside and above it.
+        // At a corner the picture is the whole screen, smaller: the cards at the bar's scale, so that
+        // where they stand (which corner, over the bar or at the top) shows at a glance.
+        var bar = ShowNotifyBar(W, H, corner);
+        double k = corner ? bar.S : 1;
+        _notifyCardScale = k;
+        double cw = CardW * k, ch = CardH * k, peek = CardPeek * k, edge = 18;
         double barRight = Math.Min(bar.BarX + bar.BarW, W - 16);
-        var front = new GlassTile(topRight ? W - 24 - CardW : barRight - CardW, topRight ? 24 : bar.BarY - 12 * bar.S - CardH, CardW, CardH, radius);
-        var back = topRight ? new GlassTile(front.X, front.Y + CardH + CardPeek, CardW, CardH, radius)
+        double bottomY = bar.BarY - 12 * bar.S - ch;
+        var front = corner ? new GlassTile(left ? edge : W - edge - cw, bottom ? bottomY : edge, cw, ch, radius * k)
+            : new GlassTile(barRight - CardW, bottomY, CardW, CardH, radius);
+        var back = corner ? new GlassTile(front.X, bottom ? front.Y - peek - ch : front.Y + ch + peek, cw, ch, radius * k)
             : new GlassTile(front.X + CardInset, front.Y - CardPeek, CardW - 2 * CardInset, CardH, radius);
+        ScaleNotifyText(NotifyFrontText, k);
+        ScaleNotifyText(NotifyBackText, k);
 
         NotifyCards.Width = W;
         NotifyCards.Height = H;
@@ -85,13 +96,21 @@ public sealed partial class MainWindow
         backCard.Width = back.W + 2 * pad; backCard.Height = back.H + 2 * pad;
         frontCard.Width = front.W + 2 * pad; frontCard.Height = front.H + 2 * pad;
         UpdateNotifyText(s);
-        NotifyBackText.Visibility = topRight ? Visibility.Visible : Visibility.Collapsed;
+        NotifyBackText.Visibility = corner ? Visibility.Visible : Visibility.Collapsed;
         Canvas.SetLeft(backCard, back.X - pad); Canvas.SetTop(backCard, back.Y - pad);
         Canvas.SetLeft(frontCard, front.X - pad); Canvas.SetTop(frontCard, front.Y - pad);
         _notifyEntrancePending |= animate;
-        string caption = topRight
-            ? s.NotifyHideBody ? "Primary top-right · new notifications slide in · hides after {0:0} s · content hidden"
-                               : "Primary top-right · new notifications slide in · hides after {0:0} s"
+        if (_notifyEntrancePending && _notifyPreviewRendered)
+        {
+            // Unseen until their glass for the new place has come; the entrance then shows them (else
+            // they would stand there a moment with the glass of where they were).
+            var cards = ElementCompositionPreview.GetElementVisual(NotifyCards);
+            cards.StopAnimation("Opacity");
+            cards.Opacity = 0;
+        }
+        string caption = corner
+            ? s.NotifyHideBody ? "Main screen corner · new notifications slide in · hides after {0:0} s · content hidden"
+                               : "Main screen corner · new notifications slide in · hides after {0:0} s"
             : s.NotifyHideBody ? "Follow the taskbar · hides after {0:0} s · content hidden" : "Follow the taskbar · hides after {0:0} s";
         NotifyCaption.Text = Loc.F(caption, s.NotifyTimeout);
 
@@ -119,10 +138,45 @@ public sealed partial class MainWindow
     }
 
     private BarFace? _notifyFace;
+    private double _notifyBarScale; // the scale of the bar shown (0: none yet)
+    private const double SmallNotifyBar = 0.55; // the whole screen at a corner, in the picture's height
+    private double _notifyCardScale = 1;
+    private readonly Dictionary<FrameworkElement, (double Left, double Top, double Width, double Height, double Font)> _notifyTextAt = new();
+
+    // A card's text at the cards' scale: places, widths and sizes (a transform would be cut by its layout).
+    private void ScaleNotifyText(Canvas text, double k)
+    {
+        foreach (var child in text.Children.OfType<FrameworkElement>().Prepend(text))
+        {
+            if (!_notifyTextAt.TryGetValue(child, out var at))
+                _notifyTextAt[child] = at = (Canvas.GetLeft(child), Canvas.GetTop(child), child.Width, child.Height, child is TextBlock t ? t.FontSize : 0);
+            if (child != text)
+            {
+                Canvas.SetLeft(child, at.Left * k);
+                Canvas.SetTop(child, at.Top * k);
+            }
+            if (!double.IsNaN(at.Width)) child.Width = at.Width * k;
+            if (!double.IsNaN(at.Height)) child.Height = at.Height * k;
+            if (child is TextBlock block) block.FontSize = at.Font * k;
+        }
+    }
+
+    private void ResizeNotifyBar(BarGeometry L, float from)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(NotifyBar);
+        var compositor = visual.Compositor;
+        visual.CenterPoint = new Vector3((float)(L.BarX + L.BarW / 2), (float)(L.BarY + L.BarH), 0); // its bottom stays
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0f), new Vector2(0f, 1f));
+        scale.InsertKeyFrame(0, new Vector3(from, from, 1));
+        scale.InsertKeyFrame(1, Vector3.One, ease);
+        scale.Duration = TimeSpan.FromMilliseconds(380);
+        visual.StartAnimation("Scale", scale);
+    }
     private readonly Image _notifyBarGlass = new() { Stretch = Stretch.Fill, IsHitTestVisible = false };
 
     // The bar at the bottom of the notifications' picture, as on the pages of its parts.
-    private BarGeometry ShowNotifyBar(double w, double h)
+    private BarGeometry ShowNotifyBar(double w, double h, bool small)
     {
         if (_notifyFace == null)
         {
@@ -134,7 +188,7 @@ public sealed partial class MainWindow
         NotifyBar.Width = w;
         NotifyBar.Height = h;
         NotifyBar.Clip = new RectangleGeometry { Rect = new Rect(0, 0, w, h) };
-        double scale = Math.Min(1.0, (w - 48) / (HeroReferenceW + 2 * GlassSpec.InsetDip));
+        double scale = Math.Min(1.0, (w - 48) / (HeroReferenceW + 2 * GlassSpec.InsetDip)) * (small ? SmallNotifyBar : 1);
         var L = BarLayout(_current, w, h, scale, false);
         var tile = new GlassTile(L.BarX, L.BarY, L.BarW, L.BarH, L.Radius);
         PostTiles(NotifyBar, w, h, scale, new[] { tile }, null, f =>
@@ -155,6 +209,11 @@ public sealed partial class MainWindow
             var clock = DateTime.Now;
             _notifyFace.SetClock(clock.ToString(_current.ShowClockSeconds ? "H:mm:ss" : "H:mm"), clock.ToString("yyyy/M/d"));
             _notifyFace.Layout(L, dark, L.N, running, 2, 1, 0, 0, StatusLook.Current());
+            // Its new size has come: it grows or shrinks there from the size it had, on the
+            // compositor (one picture, scaled: nothing is drawn again meanwhile).
+            if (_notifyBarScale > 0 && Math.Abs(_notifyBarScale - scale) > 0.001)
+                ResizeNotifyBar(L, (float)(_notifyBarScale / scale));
+            _notifyBarScale = scale;
         }, overlays: true, scaled: true);
         return L;
     }
@@ -197,15 +256,18 @@ public sealed partial class MainWindow
             _notifyEntrancePending = true;
             return;
         }
-        if (_current.NotifyPlacement == "topRight")
+        if (NotifyCorner(_current.NotifyPlacement) is (true, bool left, bool bottom))
         {
             var visual = ElementCompositionPreview.GetElementVisual(NotifyCards);
             visual.StopAnimation("Scale");
             visual.StopAnimation("Opacity");
             visual.Scale = Vector3.One;
             visual.Opacity = 1;
-            AnimateNotifyCard(NotifyBackCard, new Vector3(0, -(float)(CardH + CardPeek), 0), false);
-            AnimateNotifyCard(NotifyFrontCard, new Vector3((float)CardW, 0, 0), true);
+            // The card before moves aside for the new one, which comes in from the screen's edge.
+            float k = (float)_notifyCardScale, step = (float)(CardH + CardPeek) * k;
+            // The new one waits until the one before has left its place, else it would pass over it.
+            AnimateNotifyCard(NotifyBackCard, new Vector3(0, bottom ? step : -step, 0), false);
+            AnimateNotifyCard(NotifyFrontCard, new Vector3((left ? -1 : 1) * (float)CardW * k, 0, 0), true, MakeRoomSeconds);
             return;
         }
         // The default popup still opens from the taskbar bell.
@@ -245,7 +307,12 @@ public sealed partial class MainWindow
             AnimateNotifyCard(card, new Vector3(0, 18, 0), true);
     }
 
-    private static void AnimateNotifyCard(FrameworkElement card, Vector3 offset, bool fade)
+    private static (bool Corner, bool Left, bool Bottom) NotifyCorner(string placement) =>
+        (BarSettings.NotifyCorners.Contains(placement), placement.EndsWith("Left"), placement.StartsWith("bottom"));
+
+    private const double MakeRoomSeconds = 0.17; // kMakeRoomMs of the native cards
+
+    private static void AnimateNotifyCard(FrameworkElement card, Vector3 offset, bool fade, double delay = 0)
     {
         ElementCompositionPreview.SetIsTranslationEnabled(card, true);
         var content = ElementCompositionPreview.GetElementVisual(card);
@@ -261,6 +328,8 @@ public sealed partial class MainWindow
         NotificationFrames(compositor, moveTime, t => ApproachSample(t, 16), (time, value, ease) =>
             move.InsertKeyFrame(time, offset * (float)(1 - value), ease));
         move.InsertKeyFrame(1, Vector3.Zero);
+        move.DelayTime = TimeSpan.FromSeconds(delay);
+        move.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
         content.StartAnimation("Translation", move);
         if (!fade) return;
 
@@ -271,6 +340,8 @@ public sealed partial class MainWindow
         NotificationFrames(compositor, fadeTime, t => ApproachSample(t, 12), (time, value, ease) =>
             opacity.InsertKeyFrame(time, (float)value, ease));
         opacity.InsertKeyFrame(1, 1);
+        opacity.DelayTime = TimeSpan.FromSeconds(delay);
+        opacity.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
         content.StartAnimation("Opacity", opacity);
     }
 

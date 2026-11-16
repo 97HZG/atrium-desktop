@@ -60,9 +60,10 @@ Require(!new BarSettings().ShowDesktop && BarSettings.FromJson(JsonNode.Parse(""
 Require(new BarSettings().TrayHost && BarSettings.FromJson(new JsonObject(), new()).TrayHost, "Atrium hosts the tray icons unless turned off.");
 {
     var old = BarSettings.FromJson(new JsonObject(), new());
-    var chosen = BarSettings.FromJson(JsonNode.Parse("""{"attentionLight":false,"attentionBounce":true,"startCentered":true}""")!.AsObject(), new());
-    Require(old.AttentionLight && !old.AttentionBounce && !old.StartCentered, "Old files light apps asking for attention, without hops, the start menu at the left.");
-    Require(!chosen.AttentionLight && chosen.AttentionBounce && chosen.StartCentered && !chosen.SameAs(old) &&
+    var chosen = BarSettings.FromJson(JsonNode.Parse("""{"attentionLight":false,"attentionBounce":true,"startCentered":true,"startWithBar":true}""")!.AsObject(), new());
+    Require(old.AttentionLight && !old.AttentionBounce && !old.StartCentered && !old.StartWithBar,
+        "Old files light apps asking for attention, without hops, the start menu at the left, alone.");
+    Require(!chosen.AttentionLight && chosen.AttentionBounce && chosen.StartCentered && chosen.StartWithBar && !chosen.SameAs(old) &&
             BarSettings.FromJson(JsonNode.Parse(chosen.ToJson().ToJsonString())!.AsObject(), new()).SameAs(chosen),
         "The attention and start menu choices are read, compared and saved.");
 }

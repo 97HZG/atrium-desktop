@@ -201,6 +201,7 @@ private:
     bool peek_ = false;                // shown over the stage because the pointer asked
     ULONGLONG edgeSince_ = 0, leftAt_ = 0;
     bool onDesktop_ = false;           // the desktop was in front at the last look
+    ULONGLONG desktopSince_ = 0;       // since when the desktop has been in front (0: it is not)
     bool covered_ = false;
     ULONGLONG coveredAt_ = 0;
 };

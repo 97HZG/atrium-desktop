@@ -33,6 +33,8 @@ bool AtDisplayBottom(POINT pointer, const RECT& bounds); // bottom edge, strictl
 // area, or a game holds the screen exclusively: as with Windows' taskbar, the pointer at the
 // screen's edges brings nothing up over it (a full-screen game losing the top drops to the desktop).
 bool FullScreenInFront(HMONITOR monitor);
+// This window fills its whole screen (a game, a video, F11; maximized fills only the work area).
+bool FillsScreen(HWND window);
 bool FilterTasksOnDisplay(const std::wstring& mode, bool primary);
 std::vector<TaskItem> TaskItemsForDisplay(const std::vector<TaskItem>& items, const std::wstring& mode, bool primary,
     HMONITOR monitor, HWND foreground, const std::function<HMONITOR(HWND)>& monitorOf);

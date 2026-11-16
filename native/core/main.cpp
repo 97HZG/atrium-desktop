@@ -142,7 +142,7 @@ template<class Action> void ForBars(Action action)
 }
 
 void ConfigureBar(Bar& bar);
-void SyncDisplayBars(const Settings& settings, bool refresh = false);
+void SyncDisplayBars(const Settings& settings, bool refresh = false, bool workAreaOnly = false);
 
 // GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS: Windows reports every change of the
 // built-in screen's brightness (keys, quick settings, our slider), and the
@@ -1128,7 +1128,7 @@ std::vector<TaskItem> BarItems()
     return items;
 }
 
-void SyncDisplayBars(const Settings& settings, bool refresh)
+void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
 {
     const auto displays = ConnectedDisplays();
     // Keep existing renderers when changing appearance; only retire disconnected or unused bars.
@@ -1165,7 +1165,7 @@ void SyncDisplayBars(const Settings& settings, bool refresh)
     const auto items = BarItems();
     ForBars([&](Bar& bar) {
         if (refresh)
-            bar.RefreshDisplays();
+            bar.RefreshDisplays(workAreaOnly);
         bar.Apply(settings);
         bar.SetItems(items);
         bar.SetVisible(settings.bar);
@@ -1236,6 +1236,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             HWND fg = GetForegroundWindow();
             DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0, me = GetCurrentThreadId();
             bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
+            if (g_app.displaySettings.startWithBar)
+                g_app.bar->Reveal(); // kept up while the menu is open (keepShown)
             g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), fg);
             if (attached)
                 AttachThreadInput(me, fgThread, FALSE);
@@ -1484,7 +1486,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_SETTINGCHANGE:
         if (w == SPI_SETWORKAREA && g_app.displaysReady) {
-            SyncDisplayBars(g_app.displaySettings, true);
+            SyncDisplayBars(g_app.displaySettings, true, true);
             HMONITOR desktop = ResolveDisplay(ConnectedDisplays(), g_app.desktopDisplay);
             g_app.widgets->SetMonitor(desktop, true);
             g_app.stage->SetMonitor(desktop, true);
@@ -1648,6 +1650,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     }
     const bool capturable = wcsstr(cmdLine, L"--debug-capturable") != nullptr;
     g_app.capturable = capturable;
+    // Before the bar: its render thread chooses its backdrop from it at once (else it starts on
+    // the screen's capture and starts again on the wallpaper when the settings are applied).
+    SetRemoteVisible(settings.remoteVisible);
+    if (settings.remoteVisible)
+        Log(L"core: remote-control mode on: Atrium shows in every capture, the glass shows the wallpaper");
     g_app.bar = std::make_unique<Bar>(instance, capturable);
     g_app.activeBar = g_app.bar.get();
     // The bar's render thread draws the popups' glass from its capture.

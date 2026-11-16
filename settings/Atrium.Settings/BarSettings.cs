@@ -50,6 +50,7 @@ internal sealed class BarSettings
     public bool StartTray { get; set; } = true;        // the tray's button in the start menu
     public bool StartStatus { get; set; } = true;      // its network, volume and battery buttons
     public bool StartCentered { get; set; } = false;   // it opens in the middle of the screen, not at the left
+    public bool StartWithBar { get; set; } = false;    // the Windows key brings an auto-hidden bar up with it
     // The start menu's size and its icons' size: small | medium | large | xlarge;
     // empty: not known yet (the core fills it in from start.json).
     public string StartSize { get; set; } = "";
@@ -72,7 +73,8 @@ internal sealed class BarSettings
     // system's ("run as administrator", "properties").
     public bool WindowsContextMenu { get; set; } = true;
     public double NotifyTimeout { get; set; } = 6;    // seconds a popup stays
-    public string NotifyPlacement { get; set; } = "dock"; // dock (default) | topRight
+    public string NotifyPlacement { get; set; } = "dock"; // dock (default) | topLeft | topRight | bottomLeft | bottomRight
+    public static readonly string[] NotifyCorners = { "topLeft", "topRight", "bottomLeft", "bottomRight" };
     public bool NotifyHideBody { get; set; }           // privacy: no message text, excluded from capture
     public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
     public bool NotifyFeishu { get; set; } = true;     // Feishu messages as Atrium cards (its own popup, read only)
@@ -169,6 +171,7 @@ internal sealed class BarSettings
             ["startTray"] = StartTray,
             ["startStatus"] = StartStatus,
             ["startCentered"] = StartCentered,
+            ["startWithBar"] = StartWithBar,
             ["showStatus"] = ShowStatus,
             ["showNotifications"] = ShowNotifications,
             ["showDesktop"] = ShowDesktop,
@@ -271,6 +274,7 @@ internal sealed class BarSettings
         s.StartTray = Flag("startTray", f.StartTray);
         s.StartStatus = Flag("startStatus", f.StartStatus);
         s.StartCentered = Flag("startCentered", f.StartCentered);
+        s.StartWithBar = Flag("startWithBar", f.StartWithBar);
         s.StartSize = o?["startSize"] is JsonValue ss0 && ss0.TryGetValue(out string? size) && size is "small" or "medium" or "large" or "xlarge" ? size! : f.StartSize;
         s.StartIcon = o?["startIcon"] is JsonValue si0 && si0.TryGetValue(out string? iconSize) && iconSize is "small" or "medium" or "large" or "xlarge" ? iconSize! : f.StartIcon;
         s.ShowStatus = Flag("showStatus", f.ShowStatus);
@@ -326,7 +330,8 @@ internal sealed class BarSettings
         s.TaskbarApps = apps is "primaryAndWindow" or "window" ? apps : "all";
         s.TaskbarRightPrimaryOnly = Flag("taskbarRightPrimaryOnly", f.TaskbarRightPrimaryOnly);
         s.WindowsContextMenu = Flag("windowsContextMenu", f.WindowsContextMenu);
-        s.NotifyPlacement = Display("notifyPlacement", f.NotifyPlacement) == "topRight" ? "topRight" : "dock";
+        string placement = Display("notifyPlacement", f.NotifyPlacement);
+        s.NotifyPlacement = NotifyCorners.Contains(placement) ? placement : "dock";
         s.TextColor = o?["textColor"] is JsonValue tc && tc.TryGetValue(out string? tcs) && tcs != null
             ? (tcs is "light" or "dark" ? tcs : "auto")
             : f.TextColor;
@@ -362,7 +367,7 @@ internal sealed class BarSettings
         Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && HoverRise == o.HoverRise && RiseNear == o.RiseNear &&
         MagnifyNear == o.MagnifyNear && NearEnter == o.NearEnter && NearLeave == o.NearLeave && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
         ShowClockSeconds == o.ShowClockSeconds &&
-        ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus && StartCentered == o.StartCentered && StartSize == o.StartSize && StartIcon == o.StartIcon &&
+        ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus && StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
         ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu &&

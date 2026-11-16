@@ -43,6 +43,7 @@ constexpr float kBarRoom = 90;         // the bar floats over the bottom of the 
 constexpr int kMaxEntries = 6;
 constexpr UINT_PTR kWatchTimer = 0x5C01, kDownTimer = 0x5C02, kRaiseTimer = 0x5C03, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
 constexpr UINT kWatchMs = 30, kRaiseMs = 220, kDownMs = 700;
+constexpr ULONGLONG kDesktopMs = 250; // the desktop in front this long: it was clicked
 constexpr UINT WM_STAGE_PICTURE = WM_APP + 0x5C; // a window's picture was taken
 // The pointer at the screen's edge for kEdgeMs brings the strip out; away from it for kPeekLeaveMs
 // sends it back. Whether a window covers the strip's place is looked at every kCoverMs.
@@ -435,8 +436,11 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, c
                 continue;
             bool any = false;
             // Least recent first: the most recent window gets the latest number and shows in front.
+            // A window filling the screen (a game, a video) is left alone: minimized, a full-screen
+            // game comes back to its screen mode first, and flashes up before it goes.
             for (auto h = t.windows.rbegin(); h != t.windows.rend(); ++h)
-                if (!parked_.contains(*h) && IsWindowVisible(*h) && !IsIconic(*h) && OnMonitor(*h, monitor_) && !Transient(*h)) {
+                if (!parked_.contains(*h) && IsWindowVisible(*h) && !IsIconic(*h) && OnMonitor(*h, monitor_) && !Transient(*h) &&
+                    !FillsScreen(*h)) {
                     Park(*h, t.key);
                     any = true;
                 }
@@ -1378,7 +1382,15 @@ void StageManager::Watch()
     if (enabled_) {
         HWND fg = GetForegroundWindow();
         wchar_t cls[16] = {};
-        const bool desktop = fg && GetClassNameW(fg, cls, 16) && (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"));
+        const bool atDesktop = fg && GetClassNameW(fg, cls, 16) && (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"));
+        // A full-screen game losing the top, or changing its screen mode, drops to the desktop for
+        // a moment: only the desktop staying in front is a click on it.
+        const ULONGLONG at = GetTickCount64();
+        if (!atDesktop)
+            desktopSince_ = 0;
+        else if (!desktopSince_)
+            desktopSince_ = at;
+        const bool desktop = atDesktop && at - desktopSince_ >= kDesktopMs;
         // A window just minimized hands the foreground to the desktop: it goes to the strip first.
         if (desktop && !onDesktop_ && AdoptMinimized())
             Rebuild();

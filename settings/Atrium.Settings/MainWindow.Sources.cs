@@ -31,6 +31,7 @@ public abstract class AppRowVm : INotifyPropertyChanged
     public Visibility FallbackVisibility => _icon == null ? Visibility.Visible : Visibility.Collapsed;
     internal string IconSource { get; set; } = ""; // a parsing name for ShellIcons; empty: found from Programs, else the glyph
     internal string[] Programs { get; init; } = Array.Empty<string>(); // program file names to look for
+    internal string Folder { get; init; } = ""; // a game's folder: its icon is its program's
     internal bool Describe { get; init; } // the title is the program's description, once found
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -74,13 +75,14 @@ public sealed class ExcludedVm : AppRowVm
 {
     private readonly MainWindow _owner;
 
-    internal ExcludedVm(MainWindow owner, string title, string icon, string[] programs, IReadOnlyList<string> entries)
+    internal ExcludedVm(MainWindow owner, string title, string icon, string[] programs, IReadOnlyList<string> entries, bool named = false)
     {
         _owner = owner;
         Title = title;
         IconSource = icon;
         Programs = programs;
-        Describe = programs.Length > 0 || icon.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+        Folder = entries.Count == 1 && GameFinder.IsFolder(entries[0]) ? entries[0] : "";
+        Describe = !named && Folder.Length == 0 && (programs.Length > 0 || icon.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
         Entries = entries;
         RemoveName = Loc.F("Remove {0}", title);
     }
@@ -102,7 +104,7 @@ public sealed partial class MainWindow
 
     private void InitSources()
     {
-        _sources.Add(new SourceVm(this, "WeChat", "Reads WeChat's chat list; once its window has been opened, also while it sits in the tray. Muted chats are ignored.",
+        _sources.Add(new SourceVm(this, "WeChat", "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.",
             "\ue8bd", new[] { "Weixin.exe", "WeChat.exe" }, s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v));
         _sources.Add(new SourceVm(this, "QQ", "QQ's Windows notifications; when it flashes for a message without one, a card says there is a new message.",
             "\ue8bd", new[] { "QQ.exe" }, s => s.NotifyQQ, (s, v) => s.NotifyQQ = v));
@@ -150,7 +152,7 @@ public sealed partial class MainWindow
                 _excluded.Add(new ExcludedVm(this, Loc.T("Snipping Tool"), SnippingToolIcon, Array.Empty<string>(), snipping));
                 continue;
             }
-            bool program = entry.EndsWith(".exe", StringComparison.OrdinalIgnoreCase), path = entry.Contains('\\');
+            bool program = entry.EndsWith(".exe", StringComparison.OrdinalIgnoreCase), path = entry.Contains('\\') && !GameFinder.IsFolder(entry);
             _excluded.Add(new ExcludedVm(this, ExcludedTitle(entry), path ? entry : "", program && !path ? new[] { entry } : Array.Empty<string>(), new[] { entry }));
         }
         foreach (var vm in _excluded) _ = LoadRowIconAsync(vm);
@@ -201,6 +203,58 @@ public sealed partial class MainWindow
         Changed();
     }
 
+    // The installed games, listed for the user to choose which Stage Manager leaves alone.
+    private async void OnFindGames(object sender, RoutedEventArgs e)
+    {
+        var button = (Button)sender;
+        button.IsEnabled = false;
+        List<GameFinder.Game> found;
+        try { found = await Task.Run(GameFinder.Find); }
+        finally { button.IsEnabled = true; }
+        found.RemoveAll(g => _current.StageExcluded.Contains(g.Entry, StringComparer.OrdinalIgnoreCase));
+        var rows = new List<(CheckBox Box, GameFinder.Game Game)>();
+        var list = new StackPanel { Spacing = 2, MinWidth = 360 };
+        foreach (var game in found)
+        {
+            var image = new Image { Width = 28, Height = 28 };
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+            row.Children.Add(image);
+            row.Children.Add(new TextBlock { Text = game.Title, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+            var box = new CheckBox { IsChecked = true, Content = row, Padding = new Thickness(10, 4, 0, 4) };
+            list.Children.Add(box);
+            rows.Add((box, game));
+            if (game.Icon.Length > 0) _ = SetIconAsync(image, game.Icon);
+        }
+        var dialog = new ContentDialog
+        {
+            Style = (Style)Application.Current.Resources["AtriumDialogStyle"],
+            XamlRoot = Content.XamlRoot,
+            Title = Loc.T(found.Count > 0 ? "Games found" : "No games found"),
+            Content = found.Count > 0 ? new ScrollViewer { Content = list, MaxHeight = 420 } : null,
+            PrimaryButtonText = found.Count > 0 ? Loc.T("Exclude selected") : "",
+            CloseButtonText = Loc.T(found.Count > 0 ? "Cancel" : "OK"),
+            DefaultButton = found.Count > 0 ? ContentDialogButton.Primary : ContentDialogButton.Close,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        ExcludedVm? last = null;
+        foreach (var (box, game) in rows)
+        {
+            if (box.IsChecked != true || _current.StageExcluded.Contains(game.Entry, StringComparer.OrdinalIgnoreCase)) continue;
+            last = new ExcludedVm(this, game.Title, game.Icon, Array.Empty<string>(), new[] { game.Entry }, named: true);
+            _excluded.Add(last);
+            _ = LoadRowIconAsync(last);
+            SyncExcluded();
+        }
+        if (last == null) return;
+        ExcludedList.ScrollIntoView(last);
+        Changed();
+    }
+
+    private async Task SetIconAsync(Image image, string source)
+    {
+        if (await IconFor(source) is ImageSource icon) image.Source = icon;
+    }
+
     private void OnStageExcludedDefaults(object sender, RoutedEventArgs e)
     {
         _current.StageExcluded = new List<string>(BarSettings.StageExcludedDefaults);
@@ -211,7 +265,7 @@ public sealed partial class MainWindow
     // An entry's name until its program is found: the file name without .exe (a package prefix without its _).
     private static string ExcludedTitle(string entry)
     {
-        string name = entry.TrimEnd('_');
+        string name = entry.TrimEnd('_', '\\');
         int slash = name.LastIndexOfAny(new[] { '\\', '/' });
         if (slash >= 0) name = name[(slash + 1)..];
         return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
@@ -277,22 +331,27 @@ public sealed partial class MainWindow
         string source = vm.IconSource;
         if (source.Length == 0 && vm.Programs.Length > 0)
             source = vm.IconSource = await Task.Run(() => Program(vm.Programs));
+        if (source.Length == 0 && vm.Folder.Length > 0)
+            source = vm.IconSource = await Task.Run(() => GameFinder.MainProgram(vm.Folder));
         if (source.Length == 0) return;
         if (vm.Describe && source.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
             string description = await Task.Run(() => Description(source));
             if (description.Length > 0) vm.Title = description;
         }
-        if (!_rowIcons.TryGetValue(source, out var image))
-        {
-            var img = await ShellIcons.LoadAsync(source, 96);
-            if (img == null) return;
-            var bmp = new WriteableBitmap(img.Width, img.Height);
-            using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(img.Bgra, 0, img.Bgra.Length);
-            bmp.Invalidate();
-            _rowIcons[source] = image = bmp;
-        }
-        vm.Icon = image;
+        if (await IconFor(source) is ImageSource image)
+            vm.Icon = image;
+    }
+
+    private async Task<ImageSource?> IconFor(string source)
+    {
+        if (_rowIcons.TryGetValue(source, out var image)) return image;
+        var img = await ShellIcons.LoadAsync(source, 96);
+        if (img == null) return null;
+        var bmp = new WriteableBitmap(img.Width, img.Height);
+        using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(img.Bgra, 0, img.Bgra.Length);
+        bmp.Invalidate();
+        return _rowIcons[source] = bmp;
     }
 
     private readonly Dictionary<string, ImageSource> _rowIcons = new(StringComparer.OrdinalIgnoreCase);

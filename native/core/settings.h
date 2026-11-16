@@ -43,6 +43,7 @@ struct Settings {
     std::wstring startSize;
     std::wstring startIcon;
     bool startCentered = false;       // the start menu opens in the middle of the screen, not at the left
+    bool startWithBar = false;        // the Windows key brings an auto-hidden bar up with the start menu
     bool hoverRise = false;           // glass rises with the pointer's magnification wave
     // A pointer resting just above the bar is answered ahead of time: the glass rises
     // to it (with hoverRise) and the icons magnify — each on its own switch.
@@ -77,7 +78,7 @@ struct Settings {
     bool windowsContextMenu = true;
     // Notifications (Atrium's own cards above the bell).
     double notifyTimeout = 6;        // seconds a popup stays (3..30)
-    std::wstring notifyPlacement = L"dock"; // dock (default) | topRight (system primary)
+    std::wstring notifyPlacement = L"dock"; // dock (default) | topLeft | topRight | bottomLeft | bottomRight (the main screen's)
     bool notifyHideBody = false;     // privacy: no message text; cards excluded from screen capture
     bool notifyListener = true;      // Windows notifications as Atrium cards (UserNotificationListener)
     bool notifyFeishu = true;        // Feishu messages as Atrium cards (its own popup, read through UI Automation)
