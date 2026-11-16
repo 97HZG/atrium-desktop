@@ -27,6 +27,7 @@ atrium_shader(backdrop_edge.hlsl ps_5_0 PS g_BackdropEdgePS backdrop_edge_ps.h)
 add_executable(atrium_core WIN32
     main.cpp
     bar.cpp
+    near_hover.cpp
     log.cpp
     settings.cpp
     settings_server.cpp
@@ -72,6 +73,7 @@ add_executable(atrium_core WIN32
     shell/notification_listener.cpp
     shell/usb_volume.cpp
     render/bar_painter.cpp
+    render/hover_wave.cpp
     render/capture.cpp
     render/desktop_backdrop.cpp
     render/glass_renderer.cpp

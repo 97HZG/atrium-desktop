@@ -85,31 +85,9 @@ ID2D1Bitmap1* BarPainter::BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& i
     return b.get();
 }
 
-namespace {
-
-// Integral of the magnification wave (a raised cosine over [-1, 1]) from 0 to x.
-float WaveArea(float x)
-{
-    constexpr float pi = 3.14159265f;
-    if (x >= 1)
-        return 0.5f;
-    if (x <= -1)
-        return -0.5f;
-    return x / 2 + std::sin(pi * x) / (2 * pi);
-}
-
-} // namespace
-
-// Displayed position of base position u. The local scale is 1 + (mag-1) *
-// amount * wave((t - centre) / range); integrating it from the pointer keeps
-// the point under the pointer fixed, so the icon under the pointer in the base
-// layout is the one shown under it, and the neighbours spread out like a wave.
 float BarPainter::MapX(float u) const
 {
-    float k = (mag_ - 1) * amount_;
-    if (k <= 0)
-        return u;
-    return u + k * range_ * WaveArea((u - centre_) / range_);
+    return wave_.MapX(u);
 }
 
 bool BarPainter::Animate(const BarScene& scene, double nowMs)
@@ -144,19 +122,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     // Magnification: follows the pointer at once, grows and settles smoothly. A pointer
     // resting just above the bar is answered ahead of time too, each on its own switch:
     // the glass rises to it (riseNear, with hoverRise) and the icons magnify (magnifyNear).
-    bool hovering = scene.pointerX >= 0 && scene.dragKey.empty() && scene.magnify > 1.001f;
-    mag_ = std::max(1.f, scene.magnify);
-    range_ = std::max(1.f, scene.magnifyRange);
-    if (hovering)
-        centre_ = scene.pointerX;
-    else if (scene.nearX >= 0)
-        centre_ = scene.nearX;
-    float amount = Approach(amount_, hovering || scene.nearMagnify ? 1.f : 0.f, dt, 13);
-    moving |= amount != amount_;
-    amount_ = amount;
-    float rise = Approach(rise_, hovering || scene.nearRise ? 1.f : 0.f, dt, 13);
-    moving |= rise != rise_;
-    rise_ = rise;
+    moving |= wave_.Update(scene, dt);
 
     for (auto& [key, m] : motion_)
         m.inScene = false;
@@ -312,9 +278,9 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     // What the glass shows this frame: the stretched shape and the ripple.
     frame_.shape = D2D1::RectF(MapX(barL_), scene.bar.top + frame_.slideY, MapX(barR_), scene.bar.bottom + frame_.slideY);
     // Share the icons' wave and easing; its support widens with the stretched bar.
-    frame_.waveX = centre_;
-    frame_.waveWidth = range_ * (1 + (mag_ - 1) * rise_ / 2);
-    frame_.waveHeight = scene.magnifyLift * rise_;
+    frame_.waveX = wave_.Centre();
+    frame_.waveWidth = wave_.Width();
+    frame_.waveHeight = wave_.Height(scene.magnifyLift);
     frame_.rippleA = 0;
     if (scene.rippleMs > 0) {
         constexpr double kRippleMs = 720;
@@ -478,7 +444,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
 {
     const float s = scene.scale;
     const Motion& m = motion_[it.key];
-    const bool magnifying = mag_ > 1.001f;
+    const bool magnifying = scene.magnify > 1.001f;
     // Base position: everything of the item slides with its plate (reordering,
     // drag and drop). Displayed position: the base one under the magnification.
     float dx = m.placed ? m.x - (it.plate.left + it.plate.right) / 2 : 0;
@@ -487,7 +453,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float size = icon.right - icon.left;
     float bx = (icon.left + icon.right) / 2, bottom = icon.bottom;
     float pw = std::max(1.f, plate.right - plate.left);
-    float grow = (MapX(bx + pw / 2) - MapX(bx - pw / 2)) / pw; // local magnification
+    float grow = wave_.Scale(bx, pw); // local magnification
     float cx = MapX(bx);
     float hover = motion::EaseOut(m.hover), lift = motion::EaseOut(m.lift);
 

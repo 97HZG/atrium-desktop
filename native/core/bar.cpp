@@ -66,7 +66,6 @@ constexpr UINT_PTR kDisplayTimer = 6; // the shared Dock's cross-display gesture
 constexpr UINT_PTR kCoverTimer = 7;   // windows moved on this monitor: look at what covers it, once for a burst
 constexpr UINT_PTR kNearTimer = 8;    // the pointer coming down onto the bar (hoverRise)
 constexpr UINT kNearMs = 16;
-constexpr float kNearSideDip = 16;    // past the glass's ends, so the approach from the side counts too
 constexpr UINT kCoverMs = 50;
 constexpr UINT kPointerMs = 50;
 constexpr DWORD kLeaveMs = 500;       // a revealed bar goes down this long after the pointer left it
@@ -549,6 +548,9 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             BeginDrag(pt);
             return 0;
         }
+        // Remember brief visits; only the current cursor samples determine approach or retreat above it.
+        if (float(pt.y) >= scene_.bar.top)
+            near_.Update(scene_.bar, {float(pt.x), float(pt.y)}, scale_, settings_.nearEnter, settings_.nearLeave);
         if (!tracking_) {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, h, 0};
             tracking_ = TrackMouseEvent(&tme) != FALSE;
@@ -556,7 +558,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         std::wstring hover = HitTest(pt);
         bool magnify = scene_.magnify > 1.001f;
-        if (hover != scene_.hoverKey || (magnify && scene_.pointerX != float(pt.x))) {
+        if (hover != scene_.hoverKey || (magnify && (scene_.pointerX != float(pt.x) || scene_.pointerY != float(pt.y)))) {
             if (hover != scene_.hoverKey) {
                 scene_.hoverKey = hover;
                 // With a preview up, the next app's windows follow the pointer without the tooltip's delay.
@@ -566,6 +568,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
                     SetTimer(h, kTooltipTimer, quick ? kPreviewSwapMs : kTooltipDelayMs, nullptr);
             }
             scene_.pointerX = float(pt.x);
+            WatchNear(false); // current cursor Y and near flags belong to this same snapshot
             Publish();
         }
         return 0;
@@ -622,7 +625,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             SetRegion(false);
             scene_.hoverKey.clear();
             scene_.pressedKey.clear();
-            scene_.pointerX = -1;
+            scene_.pointerX = scene_.pointerY = -1;
             pressed_.clear();
             Publish();
         }
@@ -657,7 +660,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
                 tracking_ = false;
                 SetRegion(false);
                 scene_.hoverKey.clear();
-                scene_.pointerX = -1;
+                scene_.pointerX = scene_.pointerY = -1;
                 Publish();
             }
             return 0;
@@ -897,7 +900,7 @@ void Bar::WatchDisplays()
     scene_.tucked = false;
     HideTooltip();
     scene_.hoverKey.clear();
-    scene_.pointerX = -1;
+    scene_.pointerX = scene_.pointerY = -1;
     SetRegion(false);
     Relayout();
     UpdateCover();
@@ -1099,9 +1102,12 @@ void Bar::Relayout()
     scene.magnify = mag;
     scene.magnifyRange = range;
     scene.magnifyLift = st.hoverRise ? float(icon) * (mag - 1) : 0;
+    scene.earlyRise = st.hoverRise && st.riseNear;
+    scene.earlyMagnify = st.magnifyNear;
     // Keep the pointer and the ripple; only the geometry changes. The pointer
     // moves with the window if it was rebuilt at another x.
     scene.pointerX = scene_.pointerX < 0 ? -1 : scene_.pointerX + float(window_.left - x);
+    scene.pointerY = scene_.pointerX < 0 ? -1 : scene_.pointerY + float(window_.top - y);
     // The pointer just above the bar: the glass and/or the icons answer it (hoverRise,
     // riseNear, magnifyNear).
     scene.nearX = nearX_ < 0 ? -1 : nearX_ + float(window_.left - x);
@@ -1489,39 +1495,21 @@ void Bar::WatchPointer()
 
 // The pointer just above a visible bar: the hover wave answers it before the pointer
 // arrives — the glass rises to it (hoverRise and riseNear) and/or the icons magnify
-// (magnifyNear), each on its own. On the bar itself the mouse moves drive the wave and
-// this leaves it alone.
-void Bar::WatchNear()
+// (magnifyNear), each on its own. Moves and timer ticks use the same current cursor
+// sample, so its Y and near flags reach the render thread together.
+void Bar::WatchNear(bool publish)
 {
-    const float s = scale_;
-    const D2D1_RECT_F g = scene_.bar;
-    const float side = kNearSideDip * s;
-    // The distances are settings (nearEnter / nearLeave, DIP); the hold is never closer
-    // than the start, so a pointer resting on the edge does not flicker in and out.
-    const float enter = std::max(2.f, float(settings_.nearEnter)), leave = std::max(enter, float(settings_.nearLeave));
-    const float reach = (nearOn_ ? leave : enter) * s;
-    const bool wantRise = settings_.hoverRise && settings_.riseNear;
-    const bool wantMagnify = settings_.magnifyNear;
-    float leadX = -1;
-    if (visible_ && !tucked_ && !slidOut_ && settings_.magnify > 1.001f && (wantRise || wantMagnify)) {
-        POINT p{};
-        GetCursorPos(&p);
-        ScreenToClient(input_, &p);
-        const float x = float(p.x), y = float(p.y);
-        if (y < g.top && y >= g.top - reach && x >= g.left - side && x <= g.right + side)
-            leadX = std::clamp(x, g.left, g.right);
-    }
-    nearOn_ = leadX >= 0;
-    const bool rise = nearOn_ && wantRise, magnify = nearOn_ && wantMagnify;
-    if (std::fabs(leadX - nearX_) < 1.f && rise == nearRise_ && magnify == nearMagnify_)
+    const bool available = visible_ && !tucked_ && !slidOut_;
+    const bool watching = available && scene_.magnify > 1.001f && (scene_.earlyRise || scene_.earlyMagnify);
+    POINT p{};
+    if ((watching || scene_.pointerX >= 0) && (!GetCursorPos(&p) || !ScreenToClient(input_, &p)))
         return;
-    nearX_ = leadX;
-    nearRise_ = rise;
-    nearMagnify_ = magnify;
-    scene_.nearX = nearX_;
-    scene_.nearRise = nearRise_;
-    scene_.nearMagnify = nearMagnify_;
-    Publish();
+    const bool changed = near_.Sample(scene_, {float(p.x), float(p.y)}, settings_.nearEnter, settings_.nearLeave, available);
+    nearX_ = scene_.nearX;
+    nearRise_ = scene_.nearRise;
+    nearMagnify_ = scene_.nearMagnify;
+    if (changed && publish)
+        Publish();
 }
 
 // Watched while the bar is on screen and something answers the pointer above it; a tick
@@ -1533,9 +1521,10 @@ void Bar::UpdateNearWatch()
         SetTimer(input_, kNearTimer, kNearMs, nullptr);
     else {
         KillTimer(input_, kNearTimer);
+        near_.Reset();
         if (nearX_ >= 0 || nearRise_ || nearMagnify_) {
             nearX_ = -1;
-            nearRise_ = nearMagnify_ = nearOn_ = false;
+            nearRise_ = nearMagnify_ = false;
             scene_.nearX = -1;
             scene_.nearRise = scene_.nearMagnify = false;
             Publish();

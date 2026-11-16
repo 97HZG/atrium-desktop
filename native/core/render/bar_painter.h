@@ -8,6 +8,7 @@
 #include "../shell/system_status.h"
 #include "../shell/task_model.h"
 #include "glass_panel.h"
+#include "hover_wave.h"
 
 #include <d2d1_3.h>
 #include <dwrite_3.h>
@@ -60,7 +61,9 @@ struct BarScene {
     float magnify = 1;         // 1 = off
     float magnifyRange = 1;
     float magnifyLift = 0;     // glass rise at full magnification, px
-    float pointerX = -1;       // window px; < 0 = the pointer is not on the bar
+    float pointerX = -1;       // window px; < 0 = the pointer is not in the input region
+    float pointerY = -1;
+    bool earlyRise = false, earlyMagnify = false; // above the glass, these channels obey the early-response state
     // The pointer just above the bar (settings riseNear and magnifyNear): where it is
     // along the bar, whether the glass rises to it and whether the icons magnify.
     float nearX = -1;          // window px; < 0 = not above the bar
@@ -158,11 +161,7 @@ private:
     // Displayed bar edges, separator and clock centre: they slide when the bar's width changes.
     float barL_ = 0, barR_ = 0, sepX_ = -1, clockX_ = 0;
     std::map<std::wstring, SceneItem> lastApps_; // the apps of the previous frame (for their exit)
-    // Magnification state: strength 0..1 (eases in and out), wave centre and
-    // its parameters of the current frame.
-    float amount_ = 0, centre_ = 0, mag_ = 1, range_ = 1;
-    // The glass's own rise (hoverRise): it also answers a pointer just above the bar.
-    float rise_ = 0;
+    HoverWave wave_;
     // The status ring: its fill springs to the battery, the volume or the
     // brightness. A changed level shows for a while (the latest change wins);
     // `volumeMix` and `brightMix` (0..1) fade the speaker and the sun in.
