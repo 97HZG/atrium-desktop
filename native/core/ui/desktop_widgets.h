@@ -9,6 +9,7 @@
 // %LOCALAPPDATA%\Atrium\widgets.json.
 #pragma once
 
+#include "bar_edge.h"
 #include "ui/glass_menu.h"
 #include "ui/widget_faces.h"
 
@@ -29,6 +30,7 @@ public:
     void SetEnabled(bool on);
     void SetStatus(const SystemStatus& status);
     void SetOnRight(bool onRight);
+    void SetBarEdge(BarEdge edge);
     // The bar's monitor: the widgets live in its work area, where its capture gives them glass.
     void SetMonitor(HMONITOR monitor, bool refresh = false);
     void SetMaterial(WidgetMaterial material);
@@ -100,6 +102,7 @@ private:
     HWINEVENTHOOK hook_ = nullptr, showHook_ = nullptr, uncloakHook_ = nullptr;
     bool enabled_ = false;
     bool onRight_ = false;
+    BarEdge barEdge_ = BarEdge::Bottom;
     HMONITOR monitor_ = nullptr;
     std::vector<std::unique_ptr<Widget>> widgets_;
     // Saved widgets this screen has no room for (JSON): kept in the layout

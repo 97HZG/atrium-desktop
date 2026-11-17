@@ -1,5 +1,6 @@
 #include "ui/control_center.h"
 
+#include "bar_edge.h"
 #include "localization.h"
 
 #include "clock.h"
@@ -143,7 +144,7 @@ void ControlCenter::Place()
     if (surface_.Visible())
         surface_.Move(r);
     else
-        surface_.Show(r, true, POINT{(anchor_.left + anchor_.right) / 2, r.bottom});
+        surface_.Show(r, true, PopupOrigin(bar_, r, anchor_));
 }
 
 void ControlCenter::Open(RECT anchor, RECT bar)
@@ -162,10 +163,7 @@ void ControlCenter::Open(RECT anchor, RECT bar)
     pageDir_ = 0;
     shownH_ = fromH_ = toH_ = MainHeight();
     heightMs_ = 0;
-    if (regionTop_ != -1) {
-        SetWindowRgn(surface_.Hwnd(), nullptr, FALSE);
-        regionTop_ = -1;
-    }
+    surface_.SetRegion({});
     brightRead_ = false; // changed meanwhile with the keyboard or in Settings
     if (onChanged)
         onChanged();
@@ -385,7 +383,7 @@ void ControlCenter::Paint(Canvas& c)
     if (he < 1 || e < 1)
         c.Continue();
     const bool morph = e < 1 && fromPage_ != page_ && (fromPage_ == Page::Main || page_ == Page::Main);
-    const D2D1_RECT_F card = D2D1::RectF(0, winH - shownH_, kW, winH);
+    const D2D1_RECT_F card = EdgeOf(bar_) == BarEdge::Top ? D2D1::RectF(0, 0, kW, shownH_) : D2D1::RectF(0, winH - shownH_, kW, winH);
     cardTop_ = card.top;
 
     std::vector<ShapeDip> shapes;
@@ -434,15 +432,8 @@ void ControlCenter::Paint(Canvas& c)
     c.Unclip();
     surface_.SetShapes(shapes, he < 1 || e < 1);
 
-    // At rest, the window ends at the glass's top: clicks above it reach what is under it.
-    const int top = he >= 1 && e >= 1 ? int(std::lround(card.top * surface_.Scale())) : 0;
-    RECT wr{};
-    if (top != regionTop_ && GetWindowRect(surface_.Hwnd(), &wr)) {
-        regionTop_ = top;
-        HRGN rgn = CreateRectRgn(0, top, wr.right - wr.left, wr.bottom - wr.top);
-        if (!SetWindowRgn(surface_.Hwnd(), rgn, FALSE))
-            DeleteObject(rgn);
-    }
+    // At rest, clicks outside the glass reach what is under it.
+    surface_.SetRegion(he >= 1 && e >= 1 ? card : D2D1_RECT_F{});
 }
 
 void ControlCenter::Switch(Canvas& c, const Theme& t, D2D1_RECT_F r, bool on, float hv)
@@ -1377,8 +1368,8 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         surface_.Invalidate();
         return true;
     case WM_LBUTTONDOWN:
-        if (float(pt.y) / surface_.Scale() < cardTop_) {
-            Close(); // above the glass (while it changes size): as a click outside
+        if (const float y = float(pt.y) / surface_.Scale(); y < cardTop_ || y >= cardTop_ + shownH_) {
+            Close(); // outside the glass (while it changes size): as a click outside
             return true;
         }
         pressed_ = HitAt(pt);

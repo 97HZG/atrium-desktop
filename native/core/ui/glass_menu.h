@@ -24,10 +24,9 @@ struct MenuEntry {
     IconImage icon;
 };
 
-// Where the menu goes relative to the point it opens at (screen px): below
-// and right of it (a right click on a widget or in a panel), above it (on the
-// bar), or centred above it (above an entry of the bar). It stays on the work area.
-enum class MenuPlace { Below, Above, AboveCentered };
+// Where the menu goes relative to the point it opens at (screen px): below,
+// above, right or left of it, or centred along the bar's axis. It stays on the work area.
+enum class MenuPlace { Below, BelowCentered, Above, AboveCentered, Right, RightCentered, Left, LeftCentered };
 
 class GlassMenu {
 public:

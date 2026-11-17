@@ -65,6 +65,7 @@ struct Settings {
     // When the bar steps out of the way: never | fullscreen (a maximized or full-screen app is in
     // front) | always (it waits below the screen's bottom edge). The pointer there brings it up.
     std::wstring autoHide = L"fullscreen";
+    std::wstring barEdge = L"bottom"; // bottom | top | left | right
     std::wstring statusStyle = L"ring"; // the status entry: ring (a ring round the Wi-Fi fan) | icons (network, volume, battery)
     // One Dock, summoned at another display's bottom edge, as on macOS.
     std::wstring dockDisplayMode = L"primary"; // primary (as before several displays were known) | follow | fixed | all

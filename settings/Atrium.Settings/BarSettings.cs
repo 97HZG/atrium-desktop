@@ -62,6 +62,7 @@ internal sealed class BarSettings
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public string Language { get; set; } = "auto"; // auto (follow Windows) | a locale tag: en, zh-Hans, ...
     public string AutoHide { get; set; } = "fullscreen"; // never | fullscreen (a maximized or full-screen app in front) | always
+    public string BarEdge { get; set; } = "bottom"; // bottom | top | left | right
     public string StatusStyle { get; set; } = "ring"; // ring | icons (network, volume, battery as on the Windows taskbar)
     public string DockDisplayMode { get; set; } = "primary"; // primary | follow | fixed | all
     public double DockDisplayDelay { get; set; } = 450; // milliseconds at another display's bottom edge
@@ -180,6 +181,7 @@ internal sealed class BarSettings
             ["textColor"] = TextColor,
             ["language"] = Language,
             ["autoHide"] = AutoHide,
+            ["barEdge"] = BarEdge,
             ["statusStyle"] = StatusStyle,
             ["dockDisplayMode"] = DockDisplayMode,
             ["dockDisplayDelay"] = DockDisplayDelay,
@@ -338,6 +340,9 @@ internal sealed class BarSettings
         s.AutoHide = o?["autoHide"] is JsonValue ah && ah.TryGetValue(out string? ahs) && ahs != null
             ? (ahs is "never" or "always" ? ahs : "fullscreen")
             : f.AutoHide;
+        s.BarEdge = o?["barEdge"] is JsonValue be && be.TryGetValue(out string? bes) && bes != null
+            ? (bes is "top" or "left" or "right" ? bes : "bottom")
+            : f.BarEdge;
         string language = Display("language", f.Language);
         bool validLanguage = !string.IsNullOrWhiteSpace(language) && language.Length <= 32 &&
                              language.All(ch => char.IsLetterOrDigit(ch) || ch == '-');
@@ -369,7 +374,7 @@ internal sealed class BarSettings
         ShowClockSeconds == o.ShowClockSeconds &&
         ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus && StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
-        ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
+        ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu &&
         NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk && AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&

@@ -119,8 +119,7 @@ private:
     // the window keeps its size, so nothing jumps while it does.
     float shownH_ = 0, fromH_ = 0, toH_ = 0;
     double heightMs_ = 0;
-    float cardTop_ = 0;     // DIP from the window's top: where the glass begins; the content hangs from it
-    int regionTop_ = -1;    // the window region's top (px): clicks above the glass go to what is under it
+    float cardTop_ = 0; // DIP from the window's top: where the glass begins; the content hangs from it
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_, dragging_;
     bool tracking_ = false;

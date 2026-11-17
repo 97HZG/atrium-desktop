@@ -2,6 +2,7 @@
 #pragma once
 
 #include <windows.h>
+#include "bar_edge.h"
 #include "task_model.h"
 
 #include <string>
@@ -28,7 +29,7 @@ std::optional<bool> WindowCoverOnMonitor(HMONITOR windowMonitor, const RECT& fra
 // when no point is left uncovered, seams of up to `slack` pixels allowed.
 bool IsTile(const RECT& frame, const RECT& work, int slack);
 bool TilesFill(const std::vector<RECT>& tiles, const RECT& work, int slack);
-bool AtDisplayBottom(POINT pointer, const RECT& bounds); // bottom edge, strictly inside this display
+bool AtDisplayEdge(BarEdge edge, POINT pointer, const RECT& bounds); // 2 px strip on `edge`, strictly inside this display
 // The app in front on `monitor` fills the whole screen (a game, a video, F11), not just its work
 // area, or a game holds the screen exclusively: as with Windows' taskbar, the pointer at the
 // screen's edges brings nothing up over it (a full-screen game losing the top drops to the desktop).

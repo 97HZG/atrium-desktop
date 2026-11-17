@@ -853,6 +853,7 @@ public sealed partial class MainWindow : Window
         RemoteVisibleSwitch.IsOn = _current.RemoteVisible;
         (_current.StatusStyle == "icons" ? StatusIcons : StatusRing).IsChecked = true;
         (_current.AutoHide switch { "never" => HideNever, "always" => HideAlways, _ => HideFullscreen }).IsChecked = true;
+        (_current.BarEdge switch { "top" => EdgeTop, "left" => EdgeLeft, "right" => EdgeRight, _ => EdgeBottom }).IsChecked = true;
         StartupSwitch.IsOn = _current.StartOnLogin;
         string currentLanguage = _current.Language == "zh" ? "zh-Hans" : _current.Language;
         LanguagePicker.SelectedIndex = 0;
@@ -1218,6 +1219,12 @@ public sealed partial class MainWindow : Window
         Changed();
     }
 
+    private void OnBarEdgeChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || sender is not RadioButton { Tag: string tag }) return;
+        _current.BarEdge = tag;
+        Changed();
+    }
 
     private void OnTextColorChecked(object sender, RoutedEventArgs e)
     {

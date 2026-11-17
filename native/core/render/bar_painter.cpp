@@ -46,6 +46,16 @@ float ApproachPx(float v, float target, double dtMs, float rate)
     return std::fabs(target - v) < 0.25f ? target : v;
 }
 
+EdgeFrame FrameFor(const BarScene& scene)
+{
+    return {scene.edge, Vertical(scene.edge) ? D2D1::RectF(0, 0, scene.windowH, scene.windowW) : D2D1::RectF(0, 0, scene.windowW, scene.windowH)};
+}
+
+D2D1_POINT_2F VectorToArea(const EdgeFrame& frame, float du, float dv)
+{
+    const auto m = frame.FromAreaMatrix();
+    return {du * m._11 + dv * m._12, du * m._21 + dv * m._22};
+}
 
 } // namespace
 
@@ -101,7 +111,8 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     // A new window geometry: items jump to their places instead of sliding
     // across from coordinates of the old window. (The window keeps its width
     // when apps come and go; then the bar's edges and the items slide.)
-    bool snap = scene.windowW != lastWindowW_ || scene.bar.top != lastTop_ || scene.bar.bottom != lastBottom_;
+    bool snap = scene.edge != lastEdge_ || scene.windowW != lastWindowW_ || scene.bar.top != lastTop_ || scene.bar.bottom != lastBottom_;
+    lastEdge_ = scene.edge;
     lastWindowW_ = scene.windowW;
     lastTop_ = scene.bar.top;
     lastBottom_ = scene.bar.bottom;
@@ -324,6 +335,7 @@ bool BarPainter::UpdateDotInk(const BarScene& scene, const Readback& backdrop, c
     float mix = float(1 - settings.transparency);
     float tint = (0.2126f * float((settings.tint >> 16) & 255) + 0.7152f * float((settings.tint >> 8) & 255) +
                   0.0722f * float(settings.tint & 255)) / 255.f;
+    const EdgeFrame frame = FrameFor(scene);
     bool moving = false;
     for (const auto& item : scene.items) {
         auto& m = motion_[item.key];
@@ -331,8 +343,8 @@ bool BarPainter::UpdateDotInk(const BarScene& scene, const Readback& backdrop, c
             continue;
         if (!backdrop.luma.empty()) {
             auto dot = RunningDot(scene, item, m);
-            float x = dot.point.x + GlassRenderer::kPad;
-            float y = dot.point.y + std::round(frame_.slideY) + GlassRenderer::kPad;
+            D2D1_POINT_2F p = frame.ToArea(D2D1::Point2F(dot.point.x, dot.point.y + std::round(frame_.slideY)));
+            float x = p.x + GlassRenderer::kPad, y = p.y + GlassRenderer::kPad;
             float luma = backdrop.RegionLuma(x - dot.radiusX, y - dot.radiusY, x + dot.radiusX, y + dot.radiusY) * (1 - mix) + tint * mix;
             if (!m.darkDot && luma > 0.50f)
                 m.darkDot = true;
@@ -364,15 +376,16 @@ void BarPainter::Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, 
         }
         layerKey_.clear();
     }
-    if (animating || contentKey != layerKey_) {
+    if (animating || contentKey != layerKey_ || scene.edge != layerEdge_) {
         d2d->SetTarget(layer_.get());
         d2d->Clear(D2D1::ColorF(0, 0, 0, 0));
         DrawContent(d2d, scene, ink, time, date);
         d2d->SetTarget(target.get());
         layerKey_ = animating ? std::wstring() : contentKey;
+        layerEdge_ = scene.edge;
     }
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());
-    const D2D1_POINT_2F at = D2D1::Point2F(0, std::round(frame_.slideY));
+    const D2D1_POINT_2F at = VectorToArea(FrameFor(scene), 0, std::round(frame_.slideY));
     d2d->DrawImage(layer_.get(), &at, nullptr, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_SOURCE_OVER);
 }
 
@@ -414,12 +427,13 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
     for (auto it = bitmaps_.begin(); it != bitmaps_.end();)
         it = std::find(usedBitmaps_.begin(), usedBitmaps_.end(), it->first) != usedBitmaps_.end() ? std::next(it) : bitmaps_.erase(it);
 
+    const EdgeFrame frame = FrameFor(scene);
     if (sepX_ >= 0) {
         D2D1_COLOR_F c = inkFor(darkText);
         c.a = 0.30f + (0.18f - 0.30f) * darkText;
         brush->SetColor(c);
         float h = (scene.bar.bottom - scene.bar.top) * 0.46f, mid = (scene.bar.top + scene.bar.bottom) / 2, x = MapX(sepX_);
-        d2d->FillRectangle(D2D1::RectF(x - 0.5f * s, mid - h / 2, x + 0.5f * s, mid + h / 2), brush.get());
+        d2d->FillRectangle(frame.ToArea(D2D1::RectF(x - 0.5f * s, mid - h / 2, x + 0.5f * s, mid + h / 2)), brush.get());
     }
 
     if (scene.clock.right > scene.clock.left) {
@@ -427,27 +441,37 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
         ink = inkFor(darkText);
         // The clock does not grow; it moves with the stretched bar.
         float shift = MapX(clockX_) - (scene.clock.left + scene.clock.right) / 2;
-        d2d->SetTransform(D2D1::Matrix3x2F::Translation(shift, 0));
+        const D2D1_RECT_F clock = frame.ToArea(scene.clock);
+        const D2D1_POINT_2F clockShift = VectorToArea(frame, shift, 0);
+        d2d->SetTransform(D2D1::Matrix3x2F::Translation(clockShift.x, clockShift.y));
         if (m.hover > 0.001f) {
             D2D1_COLOR_F c = washFor(darkText);
             c.a *= motion::EaseOut(m.hover);
             brush->SetColor(c);
             float r = scene.plateRadius;
-            FillContinuousRect(d2d, scene.clock, r, brush.get());
+            FillContinuousRect(d2d, clock, r, brush.get());
         }
-        float lineT = scene.timePx * 1.22f, lineD = scene.datePx * 1.25f;
-        float top = (scene.clock.top + scene.clock.bottom) / 2 - (lineT + lineD) / 2;
+        float timePx = scene.timePx, datePx = scene.datePx;
+        if (Vertical(scene.edge)) {
+            const float slot = clock.right - clock.left;
+            if (float w = MeasureUiText(dwrite_.get(), time, timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD); w > slot && slot > 0)
+                timePx *= slot / w;
+            if (float w = MeasureUiText(dwrite_.get(), date, datePx, DWRITE_FONT_WEIGHT_NORMAL); w > slot && slot > 0)
+                datePx *= slot / w;
+        }
+        float lineT = timePx * 1.22f, lineD = datePx * 1.25f;
+        float top = (clock.top + clock.bottom) / 2 - (lineT + lineD) / 2;
         auto text = [&](const std::wstring& str, IDWriteTextFormat* f, float y0, float y1) {
             if (!f)
                 return;
             float o = std::max(1.0f, s * 0.6f);
             brush->SetColor(halo);
-            DrawUiText(d2d, dwrite_.get(), str, f, D2D1::RectF(scene.clock.left, y0 + o, scene.clock.right, y1 + o), brush.get());
+            DrawUiText(d2d, dwrite_.get(), str, f, D2D1::RectF(clock.left, y0 + o, clock.right, y1 + o), brush.get());
             brush->SetColor(ink);
-            DrawUiText(d2d, dwrite_.get(), str, f, D2D1::RectF(scene.clock.left, y0, scene.clock.right, y1), brush.get());
+            DrawUiText(d2d, dwrite_.get(), str, f, D2D1::RectF(clock.left, y0, clock.right, y1), brush.get());
         };
-        text(time, Format(scene.timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD), top, top + lineT);
-        text(date, Format(scene.datePx, DWRITE_FONT_WEIGHT_NORMAL), top + lineT, top + lineT + lineD);
+        text(time, Format(timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD), top, top + lineT);
+        text(date, Format(datePx, DWRITE_FONT_WEIGHT_NORMAL), top + lineT, top + lineT + lineD);
         d2d->SetTransform(D2D1::Matrix3x2F::Identity());
     }
 }
@@ -469,6 +493,10 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float grow = wave_.Scale(bx, pw); // local magnification
     float cx = MapX(bx);
     float hover = motion::EaseOut(m.hover), lift = motion::EaseOut(m.lift);
+    const EdgeFrame frame = FrameFor(scene);
+    const D2D1_RECT_F plateArea = frame.ToArea(plate), iconArea = frame.ToArea(icon);
+    const D2D1_POINT_2F plateAnchor = frame.ToArea(D2D1::Point2F(bx, plate.bottom));
+    const D2D1_POINT_2F plateShift = VectorToArea(frame, cx - bx, 0);
 
     // An app asking for attention (a window flashing: a new message, a finished task): its plate
     // lit white, pulsing softly at first, then steady until the app comes to the front. Under the
@@ -480,8 +508,8 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         // Icons the magnification wave grows would cover it as well: it gives way to them.
         const float clear = magnifying ? std::clamp(1.f - (grow - 1.f) * 8.f, 0.f, 1.f) : 1.f;
         brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, (0.34f + 0.22f * pulse) * m.alert * m.appear * clear));
-        d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, D2D1::Point2F(bx, plate.bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, 0));
-        FillContinuousRect(d2d, plate, scene.plateRadius, brush);
+        d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, plateAnchor) * D2D1::Matrix3x2F::Translation(plateShift.x, plateShift.y));
+        FillContinuousRect(d2d, plateArea, scene.plateRadius, brush);
     }
 
     // 底板仅响应悬停（关闭放大时）和拖动，按下仅缩放图标。
@@ -492,8 +520,8 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         c.a *= std::min(plateA, 1.6f);
         brush->SetColor(c);
         float r = scene.plateRadius;
-        d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, D2D1::Point2F(bx, plate.bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, 0));
-        FillContinuousRect(d2d, plate, r, brush);
+        d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, plateAnchor) * D2D1::Matrix3x2F::Translation(plateShift.x, plateShift.y));
+        FillContinuousRect(d2d, plateArea, r, brush);
     }
 
     // Icon: grows from its bottom edge with the wave, hops when launching,
@@ -501,13 +529,15 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float k = grow * (magnifying ? 1.f : 1 + 0.06f * hover) * (1 + 0.08f * lift) * (1 - 0.08f * m.press) * (0.85f + 0.15f * m.appear) *
               (m.leaving ? 0.45f + 0.55f * m.appear : 1.f);
     float up = m.hop * 0.32f * size + (magnifying ? 0.f : 1.5f * s * hover) + 2.0f * s * lift;
-    d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(bx, bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, -up));
+    const D2D1_POINT_2F iconAnchor = frame.ToArea(D2D1::Point2F(bx, bottom));
+    const D2D1_POINT_2F iconShift = VectorToArea(frame, cx - bx, -up);
+    d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, iconAnchor) * D2D1::Matrix3x2F::Translation(iconShift.x, iconShift.y));
     if (it.key == L"#status") {
         bool darkInk = ink.r < 0.5f;
         if (scene.statusIcons)
-            DrawStatusIcons(d2d, scene.status, icon, brush, ink, darkInk);
+            DrawStatusIcons(d2d, scene.status, iconArea, brush, ink, darkInk);
         else
-            DrawStatus(d2d, scene.status, icon, brush, ink, darkInk);
+            DrawStatus(d2d, scene.status, iconArea, brush, ink, darkInk);
         d2d->SetTransform(D2D1::Matrix3x2F::Identity());
         return;
     }
@@ -517,17 +547,17 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         c.a = ((ink.r < 0.5f ? 0.18f : 0.30f) + 0.35f * hover) * m.appear;
         brush->SetColor(c);
         const float h = (scene.bar.bottom - scene.bar.top) * 0.46f, mid = (scene.bar.top + scene.bar.bottom) / 2, x = (icon.left + icon.right) / 2;
-        d2d->SetTransform(D2D1::Matrix3x2F::Translation(cx - bx, 0));
-        d2d->FillRectangle(D2D1::RectF(x - 0.5f * s, mid - h / 2, x + 0.5f * s, mid + h / 2), brush);
+        d2d->SetTransform(D2D1::Matrix3x2F::Translation(plateShift.x, plateShift.y));
+        d2d->FillRectangle(frame.ToArea(D2D1::RectF(x - 0.5f * s, mid - h / 2, x + 0.5f * s, mid + h / 2)), brush);
         d2d->SetTransform(D2D1::Matrix3x2F::Identity());
         return;
     }
     if (it.key == L"#start") {
-        DrawLogo(d2d, icon, m.appear);
+        DrawLogo(d2d, iconArea, m.appear);
     } else if (!it.glyph.empty()) {
         if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
             brush->SetColor(ink);
-            d2d->DrawText(it.glyph.c_str(), UINT32(it.glyph.size()), f, icon, brush);
+            d2d->DrawText(it.glyph.c_str(), UINT32(it.glyph.size()), f, iconArea, brush);
         }
     } else if (ID2D1Bitmap1* bmp = BitmapFor(d2d, it)) {
         usedBitmaps_.push_back(it.imageId);
@@ -538,21 +568,21 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         float sx = size / float(px.width), sy = size / float(px.height);
         D2D1_MATRIX_3X2_F t;
         d2d->GetTransform(&t);
-        d2d->SetTransform(D2D1::Matrix3x2F::Scale(sx, sy) * D2D1::Matrix3x2F::Translation(icon.left, icon.top + (1.2f + 1.5f * lift) * s) * t);
+        d2d->SetTransform(D2D1::Matrix3x2F::Scale(sx, sy) * D2D1::Matrix3x2F::Translation(iconArea.left, iconArea.top + (1.2f + 1.5f * lift) * s) * t);
         d2d->DrawImage(shadow_.get(), D2D1_INTERPOLATION_MODE_LINEAR);
         d2d->SetTransform(t);
-        d2d->DrawBitmap(bmp, icon, m.appear, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
+        d2d->DrawBitmap(bmp, iconArea, m.appear, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
     } else {
         // Placeholder while the icon loads: a quiet rounded square.
         D2D1_COLOR_F c = wash;
         c.a *= 1.4f * m.appear;
         brush->SetColor(c);
-        FillContinuousRect(d2d, icon, size * 0.22f, brush);
+        FillContinuousRect(d2d, iconArea, size * 0.22f, brush);
     }
     // Count badge (unread notifications): a small accent disc on the icon's corner.
     if (it.badge > 0) {
         float d = std::max(9.f * s, size * 0.46f);
-        float bxr = icon.right - d * 0.35f, by = icon.top + d * 0.15f;
+        float bxr = iconArea.right - d * 0.35f, by = iconArea.top + d * 0.15f;
         brush->SetColor(D2D1::ColorF(0.04f, 0.52f, 1.0f, 1.0f));
         d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bxr, by), d / 2, d / 2), brush);
         std::wstring n = it.badge > 9 ? L"9+" : std::to_wstring(it.badge);
@@ -573,7 +603,9 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
             c.a *= 0.45f;
         c.a *= (1 - lift) * m.appear * m.dot;
         brush->SetColor(c);
-        d2d->FillEllipse(RunningDot(scene, it, m), brush);
+        auto dot = RunningDot(scene, it, m);
+        dot.point = frame.ToArea(dot.point);
+        d2d->FillEllipse(dot, brush);
     }
 }
 
@@ -716,7 +748,8 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
 void BarPainter::DrawStatusIcons(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
                                  bool darkInk)
 {
-    const float h = r.bottom - r.top, cy = (r.top + r.bottom) / 2;
+    const bool vertical = r.bottom - r.top > r.right - r.left;
+    const float h = vertical ? r.right - r.left : r.bottom - r.top, cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
     auto fade = [](D2D1_COLOR_F c, float a) {
         c.a *= a;
         return c;
@@ -726,24 +759,29 @@ void BarPainter::DrawStatusIcons(ID2D1DeviceContext2* d2d, const SystemStatus& s
     ID2D1StrokeStyle* round = RoundStroke(d2d);
     const float stroke = std::max(1.f, h * 0.075f);
     // Widths of the three (in icon heights) and the room between them.
-    const float netW = 0.62f * h, speakerW = 0.60f * h, batteryW = 0.68f * h, gap = 0.18f * h;
-    float x = (r.left + r.right) / 2 - (netW + speakerW + (st.battery ? batteryW + gap : 0) + (st.audio ? 0 : -speakerW - gap) + gap) / 2;
+    const float netW = 0.62f * h, speakerW = 0.60f * h, batteryW = 0.68f * h, gap = 0.18f * h, stepY = 0.76f * h;
+    float x = cx - (netW + speakerW + (st.battery ? batteryW + gap : 0) + (st.audio ? 0 : -speakerW - gap) + gap) / 2;
+    float y = cy - float((st.audio ? 1 : 0) + (st.battery ? 1 : 0)) * stepY / 2;
 
     // The network: the Wi-Fi fan lit by the signal, the wired glyph, or a faint fan offline.
-    if (st.connected && !st.wifi) {
-        if (IDWriteTextFormat* f = Format(h * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
-            brush->SetColor(ink);
-            d2d->DrawText(L"\uE839", 1, f, D2D1::RectF(x - h, cy - h / 2, x + netW + h, cy + h / 2), brush);
+    {
+        const float nx = vertical ? cx - netW / 2 : x, ny = vertical ? y : cy;
+        if (st.connected && !st.wifi) {
+            if (IDWriteTextFormat* f = Format(h * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
+                brush->SetColor(ink);
+                d2d->DrawText(L"\uE839", 1, f, D2D1::RectF(nx - h, ny - h / 2, nx + netW + h, ny + h / 2), brush);
+            }
+        } else {
+            const int lit = !st.connected ? -1 : WifiSteps(st.signal);
+            DrawWifiFan(d2d, brush, nx + netW / 2, ny, h * 0.46f, lit, ink, fade(ink, lit < 0 ? 0.32f : 0.24f));
         }
-    } else {
-        const int lit = !st.connected ? -1 : WifiSteps(st.signal);
-        DrawWifiFan(d2d, brush, x + netW / 2, cy, h * 0.46f, lit, ink, fade(ink, lit < 0 ? 0.32f : 0.24f));
+        x += netW + gap;
+        y += stepY;
     }
-    x += netW + gap;
 
     // The speaker: a cone, and a wave for each third of the volume (the others faint); muted, a cross.
     if (st.audio) {
-        const float l = x, mid = cy;
+        const float l = vertical ? cx - speakerW / 2 : x, mid = vertical ? y : cy;
         winrt::com_ptr<ID2D1PathGeometry> cone;
         winrt::com_ptr<ID2D1GeometrySink> sink;
         if (SUCCEEDED(factory->CreatePathGeometry(cone.put())) && SUCCEEDED(cone->Open(sink.put()))) {
@@ -782,15 +820,17 @@ void BarPainter::DrawStatusIcons(ID2D1DeviceContext2* d2d, const SystemStatus& s
             }
         }
         x += speakerW + gap;
+        y += stepY;
     }
 
     // The battery: an outline with its level inside (red when low and not charging), a bolt cut
     // out of the level while charging.
     if (st.battery) {
+        const float bx0 = vertical ? cx - batteryW / 2 : x, mid = vertical ? y : cy;
         const float bw = 0.58f * h, bh = 0.36f * h, rad = 0.09f * h;
-        const D2D1_RECT_F body = D2D1::RectF(x + stroke / 2, cy - bh / 2, x + bw, cy + bh / 2);
+        const D2D1_RECT_F body = D2D1::RectF(bx0 + stroke / 2, mid - bh / 2, bx0 + bw, mid + bh / 2);
         brush->SetColor(fade(ink, 0.9f));
-        FillContinuousRect(d2d, D2D1::RectF(body.right + 0.03f * h, cy - 0.075f * h, body.right + 0.08f * h, cy + 0.075f * h), 0.02f * h, brush);
+        FillContinuousRect(d2d, D2D1::RectF(body.right + 0.03f * h, mid - 0.075f * h, body.right + 0.08f * h, mid + 0.075f * h), 0.02f * h, brush);
         d2d->DrawRoundedRectangle(D2D1::RoundedRect(body, rad, rad), brush, stroke);
         const float pad = stroke + 0.035f * h, level = std::clamp(float(st.batteryPercent) / 100.f, 0.f, 1.f);
         const D2D1_RECT_F inner = D2D1::RectF(body.left + pad, body.top + pad, body.right - pad, body.bottom - pad);
@@ -806,9 +846,9 @@ void BarPainter::DrawStatusIcons(ID2D1DeviceContext2* d2d, const SystemStatus& s
             if (SUCCEEDED(factory->CreatePathGeometry(bolt.put())) && SUCCEEDED(bolt->Open(s3.put()))) {
                 const float bx = (body.left + body.right) / 2, k = bh * 0.62f;
                 const D2D1_POINT_2F pts[] = {{0.18f, -0.5f}, {-0.4f, 0.08f}, {-0.02f, 0.08f}, {-0.18f, 0.5f}, {0.4f, -0.08f}, {0.02f, -0.08f}};
-                s3->BeginFigure(D2D1::Point2F(bx + pts[0].x * k, cy + pts[0].y * k * 1.5f), D2D1_FIGURE_BEGIN_FILLED);
+                s3->BeginFigure(D2D1::Point2F(bx + pts[0].x * k, mid + pts[0].y * k * 1.5f), D2D1_FIGURE_BEGIN_FILLED);
                 for (int i = 1; i < 6; ++i)
-                    s3->AddLine(D2D1::Point2F(bx + pts[i].x * k, cy + pts[i].y * k * 1.5f));
+                    s3->AddLine(D2D1::Point2F(bx + pts[i].x * k, mid + pts[i].y * k * 1.5f));
                 s3->EndFigure(D2D1_FIGURE_END_CLOSED);
                 s3->Close();
             } else {

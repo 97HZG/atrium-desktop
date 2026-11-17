@@ -3,6 +3,7 @@
 // unless the user hides it (setting hideTaskbar, shell/system_chrome.h; D37).
 
 #include "bar.h"
+#include "bar_edge.h"
 #include "render/capture.h"
 #include "clock.h"
 #include "localization.h"
@@ -360,6 +361,16 @@ void SetStageManager(bool on)
     });
 }
 
+MenuPlace BarMenuPlace(bool centered)
+{
+    switch (EdgeOf(ActiveBar().BarRect())) {
+    case BarEdge::Top: return centered ? MenuPlace::BelowCentered : MenuPlace::Below;
+    case BarEdge::Left: return centered ? MenuPlace::RightCentered : MenuPlace::Right;
+    case BarEdge::Right: return centered ? MenuPlace::LeftCentered : MenuPlace::Left;
+    default: return centered ? MenuPlace::AboveCentered : MenuPlace::Above;
+    }
+}
+
 void ShowMenu(POINT pt)
 {
     std::vector<MenuEntry> entries = {{Tr(L"Appearance Settings…"), kCmdSettings}, {}, {Tr(L"Show Desktop"), kCmdDesktop}, {Tr(L"Task Manager"), kCmdTaskManager}};
@@ -372,7 +383,7 @@ void ShowMenu(POINT pt)
     entries.push_back({Tr(L"Stage Manager"), kCmdStage, g_app.stage->Enabled()});
     entries.push_back({});
     entries.push_back({Tr(L"Quit Atrium"), kCmdExit});
-    g_app.menu->Open(std::move(entries), pt, MenuPlace::Above, [](int cmd) {
+    g_app.menu->Open(std::move(entries), pt, BarMenuPlace(false), [](int cmd) {
         switch (cmd) {
         case kCmdSettings:
             OpenSettings();
@@ -890,7 +901,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     int pinIndex = it->pinIndex;
     auto windows = it->windows;
     std::wstring name = it->name;
-    g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex, windows, name, pt, appPath, listed](int cmd) {
+    g_app.menu->Open(std::move(entries), pt, BarMenuPlace(true), [key, location, pinIndex, windows, name, pt, appPath, listed](int cmd) {
         switch (cmd) {
         case kCmdNewWindow:
             g_app.tasks->Launch(key);
@@ -928,7 +939,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                                               {L"", 0},
                                               {Tr(L"Force close"), kCmdTerminateConfirm},
                                               {Tr(L"Cancel"), 0}};
-            g_app.menu->Open(std::move(confirm), pt, MenuPlace::AboveCentered, [key](int answer) {
+            g_app.menu->Open(std::move(confirm), pt, BarMenuPlace(true), [key](int answer) {
                 if (answer == kCmdTerminateConfirm)
                     g_app.tasks->Terminate(key);
             });
@@ -990,7 +1001,7 @@ void ShowOverflow(const std::vector<std::wstring>& keys, RECT anchor)
             name += it->windows.size() > 1 ? L"  \u00B7 " + std::to_wstring(it->windows.size()) : L"  \u00B7";
         entries.push_back({name, int(1000 + i), false, false, false, g_app.tasks->Icon(keys[i], px)});
     }
-    g_app.menu->Open(std::move(entries), POINT{(anchor.left + anchor.right) / 2, anchor.top}, MenuPlace::AboveCentered, [keys](int cmd) {
+    g_app.menu->Open(std::move(entries), PopupAnchor(ActiveBar().BarRect(), anchor), BarMenuPlace(true), [keys](int cmd) {
         if (cmd >= 1000 && cmd < 1000 + int(keys.size()))
             g_app.tasks->Activate(keys[size_t(cmd - 1000)], ActiveBar().TaskMonitor());
     });
@@ -1088,8 +1099,8 @@ void ConfigureBar(Bar& bar)
     bar.canOpenFiles = [](const std::wstring& key) { return g_app.tasks->CanOpenFiles(key); };
     bar.onDropFiles = [](const std::wstring& key, const std::vector<std::wstring>& files) { g_app.tasks->OpenFiles(key, files); };
     bar.onContextMenu = ShowMenu;
-    bar.onPreview = [](const std::wstring& key, const std::vector<HWND>& windows, POINT anchor) {
-        g_app.preview->Show(key, windows, anchor, g_app.tasks->Icon(key, 64));
+    bar.onPreview = [&bar](const std::wstring& key, const std::vector<HWND>& windows, POINT anchor) {
+        g_app.preview->Show(key, windows, anchor, bar.BarRect(), g_app.tasks->Icon(key, 64));
     };
     bar.onPreviewLeave = [&bar] { if (g_app.activeBar == &bar) g_app.preview->Leave(); };
     bar.onPreviewClose = [&bar] { if (g_app.activeBar == &bar) g_app.preview->Close(); };
@@ -1170,6 +1181,9 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
         bar.SetItems(items);
         bar.SetVisible(settings.bar);
     });
+    const BarEdge edge = ParseBarEdge(settings.barEdge);
+    g_app.widgets->SetBarEdge(edge);
+    g_app.stage->SetBarEdge(edge);
     g_app.notes->PanelsChanged();
 }
 

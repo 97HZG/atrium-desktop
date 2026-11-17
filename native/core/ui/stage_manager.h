@@ -19,6 +19,7 @@
 // that edge. Auto-hidden, it only comes out that way.
 #pragma once
 
+#include "bar_edge.h"
 #include "motion.h"
 #include "shell/task_model.h"
 #include "ui/stage_scroll.h"
@@ -52,6 +53,7 @@ public:
     bool Excluded(const std::wstring& app) const { return StageAppExcluded(excluded_, app); }
     void OpenInCurrentGroup(const std::wstring& app);
     void SetOnRight(bool onRight);
+    void SetBarEdge(BarEdge edge);
     void SetAutoHide(bool autoHide);
     // A window minimized on the stage goes to the strip (setting stageMinimize), on a card of its own.
     void SetMinimizeToStrip(bool on);
@@ -161,6 +163,7 @@ private:
     WindowSnapshots snapshots_;
     winrt::com_ptr<IVirtualDesktopManager> desktops_; // the strip shows the current virtual desktop's windows
     bool enabled_ = false, onRight_ = false, autoHide_ = false, minimizeToStrip_ = false;
+    BarEdge barEdge_ = BarEdge::Bottom;
     std::unordered_map<HWND, RECT> up_; // the stage's windows up on this screen at the last look, and where (px)
     HWINEVENTHOOK minimizeHook_ = nullptr;
     HWND front_ = nullptr;    // the stage's window in front at the last look

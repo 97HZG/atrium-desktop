@@ -30,6 +30,9 @@ cbuffer GlassParams : register(b0)
     float  Pad1;
     float4 Tail;        // Dock label pointer: tip x, base half width, height below Shape.w, overlap inside the body
     float4 Wave;        // Dock hover: centre x, support half width, upward height, unused (px)
+    float4 FromArea;    // EdgeFrame::FromAreaMatrix: _11, _12, _21, _22
+    float2 FromAreaOffset; // _31, _32
+    float2 Pad2;
 };
 
 Texture2D Bg : register(t0);
@@ -138,8 +141,20 @@ float sdTail(float2 px)
     return inside ? -distance : distance;
 }
 
+float2 fromArea(float2 px)
+{
+    return px.x * FromArea.xy + px.y * FromArea.zw + FromAreaOffset;
+}
+
+float2 toArea(float2 p)
+{
+    p -= FromAreaOffset;
+    return float2(p.x * FromArea.x + p.y * FromArea.y, p.x * FromArea.z + p.y * FromArea.w);
+}
+
 float ShapeDistance(float2 px, bool edge, bool basic)
 {
+    px = fromArea(px);
     // A C3 bump stretches the glass upwards while keeping its bottom fixed.
     if (!basic && Wave.z > 0) {
         float x = (px.x - Wave.x) / max(Wave.y, 1);
@@ -239,7 +254,7 @@ float4 PSImpl(VSOut i, bool basic)
     // was pressed, as if the glass gave way under the finger and sprang back.
     float ring = 0;
     if (Ripple.w > 0) {
-        float2 dv = px - Ripple.xy;
+        float2 dv = px - toArea(Ripple.xy);
         float dl = length(dv);
         float w = max(Ripple.z * 0.30, 6);
         float x = (dl - Ripple.z) / w;
@@ -272,7 +287,9 @@ float4 PSImpl(VSOut i, bool basic)
     float glow = saturate(1 - depth / (Edge * 1.6));
     col += Highlight * rimLine * (0.22 + 0.78 * lit + 0.35 * back);
     col += Highlight * glow * glow * lit * 0.16;
-    float sheen = saturate(1 - (px.y - Shape.y) / max(Shape.w - Shape.y, 1));
+    float2 shapeA = toArea(Shape.xy), shapeB = toArea(Shape.zw);
+    float shapeTop = min(shapeA.y, shapeB.y), shapeBottom = max(shapeA.y, shapeB.y);
+    float sheen = saturate(1 - (px.y - shapeTop) / max(shapeBottom - shapeTop, 1));
     col += Highlight * 0.045 * sheen * sheen;
 
     // Depth: a very light shade in the band where the lens bends the most.
@@ -289,7 +306,7 @@ float4 PSBasic(VSOut i) : SV_Target
 {
     // Keep the original arithmetic near the rim. The specialized distance
     // path can round a sampled channel by one 8-bit level at the boundary.
-    float2 px = i.uv * Size;
+    float2 px = fromArea(i.uv * Size);
     float boundary = min(min(px.x - Shape.x, Shape.z - px.x), min(px.y - Shape.y, Shape.w - px.y));
     if (boundary <= max(Edge, 2))
         return PSImpl(i, false);

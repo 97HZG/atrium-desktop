@@ -370,12 +370,30 @@ void DesktopWidgets::SetOnRight(bool onRight)
             Place(*w, true);
 }
 
+void DesktopWidgets::SetBarEdge(BarEdge edge)
+{
+    if (edge == barEdge_)
+        return;
+    barEdge_ = edge;
+    if (enabled_)
+        for (auto& w : widgets_)
+            Place(*w, true);
+}
+
 RECT DesktopWidgets::WorkArea() const
 {
     MONITORINFO mi{sizeof(mi)};
     HMONITOR m = monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
     GetMonitorInfoW(m, &mi);
-    return mi.rcWork;
+    RECT wa = mi.rcWork;
+    const LONG room = LONG(std::lround(90 * PopupScale(wa)));
+    switch (barEdge_) {
+    case BarEdge::Top: wa.top = std::min(wa.bottom, wa.top + room); break;
+    case BarEdge::Left: wa.left = std::min(wa.right, wa.left + room); break;
+    case BarEdge::Right: wa.right = std::max(wa.left, wa.right - room); break;
+    default: wa.bottom = std::max(wa.top, wa.bottom - room); break;
+    }
+    return wa;
 }
 
 float DesktopWidgets::Scale() const { return PopupScale(WorkArea()); }
@@ -389,8 +407,7 @@ int DesktopWidgets::Cols() const
 int DesktopWidgets::Rows() const
 {
     RECT wa = WorkArea();
-    // The bar floats over the bottom of the work area: leave it a row's worth of room.
-    return std::max(1, int((float(wa.bottom - wa.top) / Scale() - 2 * kMargin - 90 + kWidgetGap) / (kWidgetCell + kWidgetGap)));
+    return std::max(1, int((float(wa.bottom - wa.top) / Scale() - 2 * kMargin + kWidgetGap) / (kWidgetCell + kWidgetGap)));
 }
 
 // Each half of the grid hugs its own edge (D44): a widget whose middle is left of the grid's

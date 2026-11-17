@@ -18,6 +18,12 @@ target_include_directories(app_processes_tests PRIVATE ../core)
 target_compile_definitions(app_processes_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_test(NAME app_processes COMMAND app_processes_tests)
 
+add_executable(bar_edge_tests bar_edge.cpp)
+target_include_directories(bar_edge_tests PRIVATE ../core)
+target_compile_definitions(bar_edge_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(bar_edge_tests PRIVATE user32)
+add_test(NAME bar_edge COMMAND bar_edge_tests)
+
 add_executable(near_hover_tests near_hover.cpp)
 target_include_directories(near_hover_tests PRIVATE ../core)
 target_compile_definitions(near_hover_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

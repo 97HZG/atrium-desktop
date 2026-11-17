@@ -77,6 +77,7 @@ public:
     RECT EntryRect(const std::wstring& key) const;
     // Screen rectangle of the glass shape.
     RECT BarRect() const;
+    BarEdge Edge() const { return edge_; }
     // The window that had the foreground before a click on the logo activated the bar.
     HWND PreviousForeground() const { return previousForeground_; }
     // Glass layers of popup windows (GlassHost).
@@ -149,6 +150,8 @@ private:
     static LRESULT CALLBACK InputProc(HWND, UINT, WPARAM, LPARAM);
     LRESULT OnInput(HWND h, UINT m, WPARAM w, LPARAM l);
     void Bounce(const std::wstring& key);
+    POINT LayoutPoint(POINT client) const;
+    RECT EdgeZone() const;
     std::wstring HitTest(POINT client) const;
     // Copies scene state to the render thread; `bar` false: only the popups'
     // glass changed (the bar is not drawn again for it).
@@ -184,9 +187,11 @@ private:
     HWND input_ = nullptr;
     void UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve);
     bool appBar_ = false;          // registered as an app bar (always shown: the screen strip is the bar's)
-    int appBarReserved_ = 0;       // px kept at the bottom of appBarMonitor_
+    int appBarReserved_ = 0;       // px kept on appBarEdge_ of appBarMonitor_
     HMONITOR appBarMonitor_ = nullptr;
+    BarEdge appBarEdge_ = BarEdge::Bottom;
     RECT appBarRect_{};
+    BarEdge edge_ = BarEdge::Bottom;
     std::unique_ptr<Surface> tooltip_;
     std::wstring tooltipText_;
     D2D1_SIZE_F tooltipSize_{};
@@ -222,7 +227,7 @@ private:
     bool trayHeldUp_ = false;  // the system taskbar is up without the user (logged once)
     HWND previousForeground_ = nullptr;
     RECT applied_{};      // last window rect given to SetWindowPos
-    int appliedRgn_[6]{}; // bar width, height, radius, insets and extension of the last region
+    int appliedRgn_[7]{}; // bar width, height, radius, insets, extension and edge of the last region
     // Room around the shape inside the windows (px): sides (shadow plus the
     // magnified bar's stretch), top (shadow plus magnified icons), bottom.
     int insetX_ = 0, insetTop_ = 0, inset_ = 0;

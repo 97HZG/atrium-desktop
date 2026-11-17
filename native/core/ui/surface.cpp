@@ -1,5 +1,6 @@
 #include "ui/surface.h"
 
+#include "bar_edge.h"
 #include "clock.h"
 #include "render/capture.h"
 #include "render/continuous_corners.h"
@@ -43,10 +44,53 @@ RECT PopupRect(RECT bar, D2D1_SIZE_F sizeDip, PopupAlign align)
     const RECT& wa = mi.rcWork;
     float s = PopupScale(bar);
     int w = int(std::lround(sizeDip.width * s)), h = int(std::lround(sizeDip.height * s)), gap = int(std::lround(kPopupGapDip * s));
-    int bottom = int(bar.top) - gap;
+    const BarEdge edge = EdgeOf(bar);
+    if (Vertical(edge)) {
+        int top = int(wa.top + wa.bottom - h) / 2;
+        if (align == PopupAlign::Left)
+            top = int(bar.top);
+        else if (align == PopupAlign::Right)
+            top = int(bar.bottom) - h;
+        top = std::max(int(wa.top) + gap, std::min(top, int(wa.bottom) - gap - h));
+        int bottom = std::min(int(wa.bottom) - gap, top + h);
+        if (edge == BarEdge::Left) {
+            int left = std::max(int(wa.left) + gap, int(bar.right) + gap);
+            return RECT{left, top, std::min(int(wa.right) - gap, left + w), bottom};
+        }
+        int right = std::min(int(wa.right) - gap, int(bar.left) - gap);
+        return RECT{std::max(int(wa.left) + gap, right - w), top, right, bottom};
+    }
     int left = align == PopupAlign::Left ? int(bar.left) : align == PopupAlign::Right ? int(bar.right) - w : int(wa.left + wa.right - w) / 2;
     left = std::max(int(wa.left) + gap, std::min(left, int(wa.right) - gap - w));
-    return RECT{left, std::max(int(wa.top) + gap, bottom - h), left + w, bottom};
+    int right = std::min(int(wa.right) - gap, left + w);
+    if (edge == BarEdge::Top) {
+        int top = std::max(int(wa.top) + gap, int(bar.bottom) + gap);
+        return RECT{left, top, right, std::min(int(wa.bottom) - gap, top + h)};
+    }
+    int bottom = std::min(int(wa.bottom) - gap, int(bar.top) - gap);
+    return RECT{left, std::max(int(wa.top) + gap, bottom - h), right, bottom};
+}
+
+POINT PopupAnchor(RECT bar, RECT rect)
+{
+    switch (EdgeOf(bar)) {
+    case BarEdge::Top: return {(rect.left + rect.right) / 2, rect.bottom};
+    case BarEdge::Left: return {rect.right, (rect.top + rect.bottom) / 2};
+    case BarEdge::Right: return {rect.left, (rect.top + rect.bottom) / 2};
+    default: return {(rect.left + rect.right) / 2, rect.top};
+    }
+}
+
+POINT PopupOrigin(RECT bar, RECT popup, RECT anchor)
+{
+    const BarEdge edge = EdgeOf(bar);
+    const POINT a = PopupAnchor(bar, anchor);
+    if (Vertical(edge)) {
+        const LONG y = anchor.bottom > anchor.top ? a.y : popup.top + (popup.bottom - popup.top) / 6;
+        return {edge == BarEdge::Left ? popup.left : popup.right, y};
+    }
+    const LONG x = anchor.right > anchor.left ? a.x : popup.left + (popup.right - popup.left) / 6;
+    return {x, edge == BarEdge::Top ? popup.top : popup.bottom};
 }
 
 namespace {

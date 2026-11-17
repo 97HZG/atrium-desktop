@@ -233,7 +233,7 @@ void TrayPanel::Place()
     if (surface_.Visible())
         surface_.Move(r); // pops out of its entry on the bar
     else
-        surface_.Show(r, true, POINT{(anchor_.left + anchor_.right) / 2, r.bottom});
+        surface_.Show(r, true, PopupOrigin(bar_, r, anchor_));
 }
 
 void TrayPanel::Open(RECT anchor, RECT bar, HWND previous)

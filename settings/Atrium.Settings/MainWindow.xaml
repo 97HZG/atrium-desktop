@@ -733,6 +733,15 @@
                                             <RadioButton x:Name="HideAlways" GroupName="autohide" Content="Always hidden" Tag="always" Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
                                         </local:SegmentTrack>
                                 </StackPanel>
+                                <StackPanel Style="{StaticResource FlatRowStyle}">
+                                    <TextBlock Text="Position" Style="{StaticResource RowTitleStyle}" />
+                                    <local:SegmentTrack>
+                                            <RadioButton x:Name="EdgeBottom" GroupName="baredge" Content="Bottom" Tag="bottom" Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
+                                            <RadioButton x:Name="EdgeTop" GroupName="baredge" Content="Top" Tag="top" Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
+                                            <RadioButton x:Name="EdgeLeft" GroupName="baredge" Content="Left side" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
+                                            <RadioButton x:Name="EdgeRight" GroupName="baredge" Content="Right side" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
+                                        </local:SegmentTrack>
+                                </StackPanel>
                             </StackPanel>
                             <StackPanel x:Name="DockLayout">
                                 <Grid>

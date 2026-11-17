@@ -59,6 +59,8 @@ void Settings::Clamp()
         textColor = L"auto";
     if (autoHide != L"never" && autoHide != L"always")
         autoHide = L"fullscreen";
+    if (barEdge != L"top" && barEdge != L"left" && barEdge != L"right")
+        barEdge = L"bottom";
     if (statusStyle != L"icons")
         statusStyle = L"ring";
     if (startSize != L"small" && startSize != L"medium" && startSize != L"large" && startSize != L"xlarge")
@@ -121,6 +123,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"language", json::JsonValue::CreateStringValue(language));
     o.SetNamedValue(L"textColor", json::JsonValue::CreateStringValue(textColor));
     o.SetNamedValue(L"autoHide", json::JsonValue::CreateStringValue(autoHide));
+    o.SetNamedValue(L"barEdge", json::JsonValue::CreateStringValue(barEdge));
     o.SetNamedValue(L"statusStyle", json::JsonValue::CreateStringValue(statusStyle));
     o.SetNamedValue(L"dockDisplayMode", json::JsonValue::CreateStringValue(dockDisplayMode));
     num(L"dockDisplayDelay", dockDisplayDelay);
@@ -283,6 +286,8 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
         s.textColor = std::wstring(o.GetNamedString(L"textColor"));
     if (o.HasKey(L"autoHide") && o.GetNamedValue(L"autoHide").ValueType() == json::JsonValueType::String)
         s.autoHide = std::wstring(o.GetNamedString(L"autoHide"));
+    if (o.HasKey(L"barEdge") && o.GetNamedValue(L"barEdge").ValueType() == json::JsonValueType::String)
+        s.barEdge = std::wstring(o.GetNamedString(L"barEdge"));
     if (o.HasKey(L"statusStyle") && o.GetNamedValue(L"statusStyle").ValueType() == json::JsonValueType::String)
         s.statusStyle = std::wstring(o.GetNamedString(L"statusStyle"));
     auto display = [&](const wchar_t* key, std::wstring& value) {

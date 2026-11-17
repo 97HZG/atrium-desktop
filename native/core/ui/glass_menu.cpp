@@ -71,15 +71,29 @@ void GlassMenu::Open(std::vector<MenuEntry> entries, POINT at, MenuPlace place, 
     // Taller than the work area (a long overflow list): it scrolls.
     LONG w = LONG(std::lround(size.width * s)), gap = LONG(std::lround(4 * s));
     LONG h = std::min(LONG(std::lround(size.height * s)), LONG(work.bottom - work.top) - 2 * gap);
-    LONG x = place == MenuPlace::AboveCentered ? at.x - w / 2 : at.x;
-    LONG y = place == MenuPlace::Below ? at.y + gap : at.y - gap - h;
-    if (place == MenuPlace::Below && y + h > work.bottom)
-        y = at.y - gap - h; // no room below: above the point
-    if (place != MenuPlace::Below && y < work.top)
-        y = at.y + gap;
-    if (x + w > work.right)
-        x = place == MenuPlace::AboveCentered ? work.right - w : at.x - w;
-    x = std::max(x, work.left);
+    LONG x = 0, y = 0;
+    if (place == MenuPlace::Right || place == MenuPlace::RightCentered || place == MenuPlace::Left || place == MenuPlace::LeftCentered) {
+        const bool right = place == MenuPlace::Right || place == MenuPlace::RightCentered;
+        const bool centered = place == MenuPlace::RightCentered || place == MenuPlace::LeftCentered;
+        x = right ? at.x + gap : at.x - gap - w;
+        if (right && x + w > work.right)
+            x = at.x - gap - w;
+        if (!right && x < work.left)
+            x = at.x + gap;
+        y = centered ? at.y - h / 2 : at.y;
+    } else {
+        const bool below = place == MenuPlace::Below || place == MenuPlace::BelowCentered;
+        const bool centered = place == MenuPlace::AboveCentered || place == MenuPlace::BelowCentered;
+        x = centered ? at.x - w / 2 : at.x;
+        y = below ? at.y + gap : at.y - gap - h;
+        if (below && y + h > work.bottom)
+            y = at.y - gap - h; // no room below: above the point
+        if (!below && y < work.top)
+            y = at.y + gap;
+        if (x + w > work.right)
+            x = centered ? work.right - w : at.x - w;
+    }
+    x = std::clamp(x, work.left, std::max(work.left, work.right - w));
     y = std::clamp(y, work.top, std::max(work.top, work.bottom - h));
     surface_.Show(RECT{x, y, x + w, y + h}, true, at);
     Log(L"menu: opened (%zu rows)", entries_.size());

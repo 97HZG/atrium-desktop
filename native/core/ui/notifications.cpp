@@ -419,10 +419,28 @@ void Notifications::Layout(Mode mode)
         const HMONITOR main = MonitorFromPoint(POINT{}, MONITOR_DEFAULTTOPRIMARY);
         GetMonitorInfoW(main, &primary);
         RECT work = primary.rcWork;
-        // A bottom corner stands on the bar's top where the bar is on this screen (Windows' taskbar
-        // hidden, the work area reaches the screen's bottom, under the bar).
-        if (RECT bar = barRect ? barRect() : RECT{}; bottom_ && !IsRectEmpty(&bar) && MonitorFromRect(&bar, MONITOR_DEFAULTTONULL) == main)
-            work.bottom = std::max(work.top + 1, std::min(work.bottom, bar.top));
+        // A corner on the bar's edge stands clear of the bar where it is on this screen (Windows'
+        // taskbar hidden, the work area reaches the screen's edge, under the bar).
+        if (RECT bar = barRect ? barRect() : RECT{}; !IsRectEmpty(&bar) && MonitorFromRect(&bar, MONITOR_DEFAULTTONULL) == main) {
+            switch (EdgeOf(bar)) {
+            case BarEdge::Top:
+                if (!bottom_)
+                    work.top = std::min(work.bottom - 1, std::max(work.top, bar.bottom));
+                break;
+            case BarEdge::Left:
+                if (left_)
+                    work.left = std::min(work.right - 1, std::max(work.left, bar.right));
+                break;
+            case BarEdge::Right:
+                if (!left_)
+                    work.right = std::max(work.left + 1, std::min(work.right, bar.left));
+                break;
+            case BarEdge::Bottom:
+                if (bottom_)
+                    work.bottom = std::max(work.top + 1, std::min(work.bottom, bar.top));
+                break;
+            }
+        }
         const float scale = PopupScale(work);
         const auto layout = notification::CornerLayout(work, scale, kW, CardHeight(), kGap, kPopupGapDip,
             shown.size(), mode == Mode::Center ? kPill + kGap : 0, left_, bottom_);
@@ -452,19 +470,19 @@ void Notifications::Layout(Mode mode)
         }
         return;
     }
-    v.contentTop = 0;
     RECT bell = bellRect ? bellRect() : RECT{};
     RECT bar = barRect ? barRect() : bell;
+    barEdge_ = EdgeOf(bar);
+    const bool fromTop = barEdge_ == BarEdge::Top;
     float s = PopupScale(bar);
     HMONITOR mon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(mon, &mi);
     const RECT& wa = mi.rcWork;
 
-    // The cards stand on the bar: the newest at the bottom, older ones above
-    // it (peeking out over its top edge in the stack, in a column when
-    // expanded), so the list unfolds upwards. The list's controls are a
-    // capsule below the cards.
+    // The cards stand on the bar's side: the newest nearest it, older ones further in
+    // (peeking out in the stack, in a column when expanded), and the centre's controls
+    // in a capsule next to the bar.
     const size_t n = shown.size();
     const float card = CardHeight();
     float content = 0;
@@ -473,22 +491,33 @@ void Notifications::Layout(Mode mode)
     else if (n)
         content = float(n) * card + float(n - 1) * kGap;
     // The window keeps one size while it is open (the tallest stack, or all
-    // the room above the bar for the list), so cards that come, go or move
+    // the room the bar leaves for the list), so cards that come, go or move
     // never resize it: a resize is slow and makes the glass and the text
-    // jump. The cards stand at its bottom; at rest, the window's region
-    // starts at the top card, so clicks above it reach what is under it.
+    // jump. At rest, the window's region ends at the outer card, so clicks
+    // beyond it reach what is under it.
     float pill = mode == Mode::Center ? kPill + kGap : 0;
+    v.contentTop = fromTop ? pill : 0;
     int gap = int(std::lround(kPopupGapDip * s)), margin = int(std::lround(8 * s));
-    int bottom = bar.top - gap;
-    float maxContent = float(bottom - wa.top - margin) / s - pill;
+    int minH = int(std::lround((card + pill) * s));
+    int anchorY = int(bar.top) - gap;
+    if (fromTop)
+        anchorY = int(bar.bottom) + gap;
+    else if (Vertical(barEdge_))
+        anchorY = std::clamp(int(bar.bottom), int(wa.top) + margin + minH, int(wa.bottom) - margin);
+    float maxContent = float(fromTop ? wa.bottom - margin - anchorY : anchorY - wa.top - margin) / s - pill;
     v.contentH = content;
     v.viewH = mode == Mode::Popup ? std::min(card + 2 * kPeek + kStackLift, std::max(card, maxContent)) : std::max(card, maxContent);
     v.scrollTarget = std::clamp(v.scrollTarget, 0.f, std::max(0.f, v.contentH - v.viewH));
     v.scroll = std::clamp(v.scroll, 0.f, std::max(0.f, v.contentH - v.viewH));
     int w = int(std::lround(kW * s)), h = int(std::lround((v.viewH + pill) * s));
-    // Right edge on the bar's right edge (D32), inside the work area.
-    int right = std::clamp(int(bar.right), int(wa.left) + margin + w, int(wa.right) - margin);
-    RECT r{right - w, std::max(int(wa.top) + margin, bottom - h), right, bottom};
+    int left = std::clamp(int(bar.right), int(wa.left) + margin + w, int(wa.right) - margin) - w;
+    if (barEdge_ == BarEdge::Left)
+        left = std::min(int(wa.right) - margin - w, int(bar.right) + gap);
+    else if (barEdge_ == BarEdge::Right)
+        left = std::max(int(wa.left) + margin, int(bar.left) - gap - w);
+    int top = fromTop ? anchorY : std::max(int(wa.top) + margin, anchorY - h);
+    int bottom = fromTop ? std::min(int(wa.bottom) - margin, anchorY + h) : anchorY;
+    RECT r{left, top, left + w, bottom};
     if (!v.surface->Visible()) {
         v.cards.clear(); // the cards arrive afresh
         v.lastPaint = 0;
@@ -514,11 +543,15 @@ void Notifications::Layout(Mode mode)
             v.regionBottom = -1;
         }
         // Pops out of the bell (unless the stack turns into the list in place).
-        v.surface->Show(r, mode == Mode::Center, POINT{(bell.left + bell.right) / 2, bottom}, !handoff);
+        v.surface->Show(r, mode == Mode::Center, PopupOrigin(bar, r, bell), !handoff);
     } else {
         // The window's top moves when the list grows or shrinks: the cards
         // keep their place on screen and glide from there.
         RECT old = v.surface->Rect();
+        if (!EqualRect(&old, &r)) {
+            SetWindowRgn(v.surface->Hwnd(), nullptr, FALSE);
+            v.regionTop = v.regionBottom = -1;
+        }
         float dy = float(old.top - r.top) / s;
         if (dy != 0)
             for (auto& [id, a] : v.cards)
@@ -705,6 +738,8 @@ void Notifications::Paint(Mode mode, Canvas& c)
     const float listH = v.viewH, listTop = v.contentTop, listBottom = listTop + listH;
 
     const bool column = corner_;
+    const bool dockTop = !column && barEdge_ == BarEdge::Top;
+    const bool fromTop = (column && !bottom_) || dockTop;
     const bool stack = !column && (mode == Mode::Popup || (!expanded_ && shown.size() > 1));
     bool moving = Glide(v.scroll, v.scrollTarget, dt, 18, 0.2f); // anything moving: the region waits
     if (stack) {
@@ -741,13 +776,13 @@ void Notifications::Paint(Mode mode, Canvas& c)
             float rel = float(i) - v.stackPos;
             if (rel >= 0) {
                 float k = std::min(rel, 2.f);
-                ty = listH - card - kPeek * k;
+                ty = dockTop ? listTop + kPeek * k : listH - card - kPeek * k;
                 tinset = 12.f * k;
                 talpha = std::clamp(3.f - rel, 0.f, 1.f);
                 tcontent = motion::EaseOut(std::clamp(1.f - rel * 1.6f, 0.f, 1.f)); // the text comes in the later part
             } else {
                 float u = std::min(-rel, 1.f);
-                ty = listH - card - (2 * kPeek + kStackLift) * u;
+                ty = dockTop ? listTop + (2 * kPeek + kStackLift) * u : listH - card - (2 * kPeek + kStackLift) * u;
                 tinset = 28.f * u;
                 talpha = (1 - u) * (1 - u);
                 tcontent = 1 - motion::EaseOut(std::clamp(u * 2.f, 0.f, 1.f)); // its text goes first: two texts never show strongly at once
@@ -756,7 +791,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
             ty = listTop + listH - card - float(i) * (card + kGap) + v.scroll; // the newest at the bottom corner
             tinset = 0;
             talpha = 1;
-        } else if (column) {
+        } else if (fromTop) {
             ty = listTop + notification::CardTop(i, card, kGap, v.scroll);
             tinset = 0;
             talpha = 1;
@@ -768,7 +803,10 @@ void Notifications::Paint(Mode mode, Canvas& c)
         const bool others = !v.cards.empty();
         CardAnim& a = v.cards[n.id];
         if (!a.placed) {
-            a = {column ? ty : ty + 18, tinset, 0, 1, true};
+            float startY = ty;
+            if (!column)
+                startY += dockTop ? -18.f : 18.f;
+            a = {startY, tinset, 0, 1, true};
             a.x = column ? (left_ ? -w : w) : 0; // a new corner card comes in from the screen's edge; the others glide aside
             // ... after they have: coming in at once, it would pass over the one still leaving its place.
             if (column && others)
@@ -858,14 +896,13 @@ void Notifications::Paint(Mode mode, Canvas& c)
     c.Unclip();
     if (stack && !shown.empty()) {
         // One card: clicking it runs its action. Several: clicking expands the list.
-        D2D1_RECT_F all = D2D1::RectF(0, 0, w, listH);
+        D2D1_RECT_F all = D2D1::RectF(0, listTop, w, listBottom);
         v.hits.push_back({all, shown.size() > 1 ? L"stack" : L"card:0"});
     }
 
     if (mode == Mode::Center) {
-        // A top corner's controls stay above the cards so scrolling never hides them; at the bottom
-        // (a bottom corner, over the bar) they are below them.
-        const float pillTop = column && !bottom_ ? 0 : listTop + listH + kGap;
+        // Controls stay on the bar's or corner's side so scrolling never hides them.
+        const float pillTop = fromTop ? 0 : listTop + listH + kGap;
         D2D1_RECT_F pill = D2D1::RectF(0, pillTop, w, pillTop + kPill);
         top = std::min(top, pill.top);
         bottom = std::max(bottom, pill.bottom);
@@ -898,14 +935,13 @@ void Notifications::Paint(Mode mode, Canvas& c)
     // At rest the window starts at the top of what it shows (the shadow's
     // room above included); while anything moves it is whole.
     // A top corner's column is cut below its last card instead.
-    const bool fromTop = column && !bottom_;
     int regionTop = fromTop || moving ? -1 : int(std::lround(top * c.scale));
     if (regionTop == 0)
         regionTop = -1;
     RECT wr{};
     if (GetWindowRect(v.surface->Hwnd(), &wr)) {
         const int inset = ((wr.right - wr.left) - (rr.right - rr.left)) / 2;
-        const int regionBottom = fromTop ? std::min(int(wr.bottom - wr.top), int(std::ceil(bottom * c.scale)) + 2 * inset) : -1;
+        const int regionBottom = fromTop && !(dockTop && moving) ? std::min(int(wr.bottom - wr.top), int(std::ceil(bottom * c.scale)) + 2 * inset) : -1;
         if (regionTop != v.regionTop || regionBottom != v.regionBottom) {
             HRGN rgn = regionTop > 0 || regionBottom >= 0 ? CreateRectRgn(0, std::max(0, regionTop), wr.right - wr.left,
                 regionBottom >= 0 ? regionBottom : wr.bottom - wr.top) : nullptr;
@@ -1063,7 +1099,8 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
             PushStack(v, shownCount, delta);
             return true;
         }
-        v.scrollTarget += float(delta) / WHEEL_DELTA * (corner_ && !bottom_ ? -80 : 80);
+        const bool fromTop = corner_ ? !bottom_ : barEdge_ == BarEdge::Top;
+        v.scrollTarget += float(delta) / WHEEL_DELTA * (fromTop ? -80 : 80);
         v.scrollTarget = std::clamp(v.scrollTarget, 0.f, std::max(0.f, v.contentH - v.viewH));
         v.surface->Invalidate();
         return true;

@@ -7,6 +7,7 @@
 // through UserNotificationListener.
 #pragma once
 
+#include "bar_edge.h"
 #include "ui/surface.h"
 
 #include <windows.h>
@@ -136,6 +137,7 @@ private:
     double timeout_ = 6;
     bool hideBody_ = false;
     bool corner_ = false, left_ = false, bottom_ = false; // notifyPlacement: a corner of the main screen
+    BarEdge barEdge_ = BarEdge::Bottom;
     ULONGLONG centerClosed_ = 0;
     float radius_ = 20;
     std::map<uint64_t, double> leaving_; // closing cards: ClockMs() when closed

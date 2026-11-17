@@ -3,8 +3,11 @@
 // bounces, running dots, a separator and the clock. The base geometry arrives
 // precomputed in BarScene (window pixels); magnification only displaces and
 // scales it, so hit testing on the base layout stays exact (D25).
+// On any edge the scene is laid out as at the bottom (BarEdge): EdgeFrame{edge, window}
+// places each finished rect on the real window, upright.
 #pragma once
 
+#include "../bar_edge.h"
 #include "../shell/system_status.h"
 #include "../shell/task_model.h"
 #include "glass_panel.h"
@@ -40,9 +43,10 @@ struct SceneItem {
 };
 
 struct BarScene {
+    BarEdge edge = BarEdge::Bottom; // rects and points below are in the layout space of the bottom edge
     D2D1_RECT_F bar{};         // the glass shape inside the window (its width eases to this, D27)
     float windowW = 0;         // the window's width: a new one means new coordinates (nothing slides)
-    float windowH = 0;
+    float windowH = 0;         // windowW x windowH: the layout space; on a side edge the window is windowH wide
     bool tucked = false;       // auto-hide: the bar slides down off the screen
     float scale = 1;
     std::vector<SceneItem> items;  // apps only (drag and drop works on these)
@@ -161,6 +165,7 @@ private:
     std::vector<uint64_t> usedBitmaps_; // scratch storage for one DrawContent
     std::map<std::tuple<int, int, std::wstring>, winrt::com_ptr<IDWriteTextFormat>> formats_;
     double lastMs_ = 0;
+    BarEdge lastEdge_ = BarEdge::Bottom, layerEdge_ = BarEdge::Bottom;
     float lastWindowW_ = 0, lastTop_ = 0, lastBottom_ = 0;
     // Displayed bar edges, separator and clock centre: they slide when the bar's width changes.
     float barL_ = 0, barR_ = 0, sepX_ = -1, clockX_ = 0;

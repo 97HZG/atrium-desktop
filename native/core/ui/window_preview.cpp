@@ -109,13 +109,14 @@ void WindowPreview::SetWindows(const std::vector<HWND>& windows)
     }
 }
 
-void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, const IconImage& icon)
+void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, RECT bar, const IconImage& icon)
 {
     KillTimer(surface_.Hwnd(), kLeaveTimer);
     const bool visible = surface_.Visible();
     const bool same = visible && key == key_;
     key_ = key;
     anchor_ = anchor;
+    edge_ = EdgeOf(bar);
     icon_ = icon;
     SetWindows(windows);
     if (cards_.empty())
@@ -146,22 +147,38 @@ void WindowPreview::Refresh(const std::vector<TaskItem>& items)
         Place();
 }
 
-void WindowPreview::Layout(float scale, float maxWidthDip)
+void WindowPreview::Layout(float scale, float maxSpanDip, bool vertical)
 {
     (void)scale;
-    // Each picture keeps its window's proportions at one height; a long row shrinks to fit the screen.
+    // Each picture keeps its window's proportions at one height; a long strip shrinks to fit the screen.
     float imageH = kImageH;
     auto widthOf = [&](const Card& c, float h) {
         float w = float(std::max<LONG>(1, c.sourceRect.right - c.sourceRect.left)), hh = float(std::max<LONG>(1, c.sourceRect.bottom - c.sourceRect.top));
         return std::clamp(h * w / hh, kMinImageW * h / kImageH, kMaxImageW * h / kImageH);
     };
+    if (vertical) {
+        auto total = [&](float h) { return 2 * kPad + float(cards_.size()) * (2 * kCardPad + kTitleH + h) + float(cards_.size() - 1) * kGap; };
+        while (imageH > 48 && total(imageH) > maxSpanDip)
+            imageH -= 4;
+        float cardW = 0, cardH = 2 * kCardPad + kTitleH + imageH, y = kPad;
+        for (const Card& c : cards_)
+            cardW = std::max(cardW, widthOf(c, imageH) + 2 * kCardPad);
+        for (Card& c : cards_) {
+            c.rect = D2D1::RectF(kPad, y, kPad + cardW, y + cardH);
+            c.image = D2D1::RectF(c.rect.left + kCardPad, c.rect.top + kCardPad + kTitleH, c.rect.right - kCardPad, c.rect.bottom - kCardPad);
+            c.close = D2D1::RectF(c.rect.right - kCardPad - 24, c.rect.top + kCardPad + 1, c.rect.right - kCardPad, c.rect.top + kCardPad + 25);
+            y += cardH + kGap;
+        }
+        size_ = D2D1::SizeF(cardW + 2 * kPad, y - kGap + kPad);
+        return;
+    }
     auto total = [&](float h) {
         float sum = 2 * kPad + float(cards_.size() - 1) * kGap;
         for (const Card& c : cards_)
             sum += widthOf(c, h) + 2 * kCardPad;
         return sum;
     };
-    while (imageH > 48 && total(imageH) > maxWidthDip)
+    while (imageH > 48 && total(imageH) > maxSpanDip)
         imageH -= 4;
     float x = kPad;
     for (Card& c : cards_) {
@@ -181,11 +198,18 @@ void WindowPreview::Place()
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(MonitorFromPoint(anchor_, MONITOR_DEFAULTTONEAREST), &mi);
     const RECT& work = mi.rcWork;
-    Layout(s, float(work.right - work.left) / s - 24);
+    const bool vertical = Vertical(edge_);
+    Layout(s, float(vertical ? work.bottom - work.top : work.right - work.left) / s - 24, vertical);
     LONG w = LONG(std::lround(size_.width * s)), h = LONG(std::lround(size_.height * s));
     LONG gap = LONG(std::lround(kPopupGapDip * s));
     LONG x = std::clamp<LONG>(anchor_.x - w / 2, work.left + gap, std::max<LONG>(work.left + gap, work.right - gap - w));
-    LONG y = std::max<LONG>(work.top, anchor_.y - gap - h);
+    LONG y = std::clamp<LONG>(anchor_.y - h / 2, work.top + gap, std::max<LONG>(work.top + gap, work.bottom - gap - h));
+    switch (edge_) {
+    case BarEdge::Top: y = std::min<LONG>(std::max<LONG>(work.top, work.bottom - h), anchor_.y + gap); break;
+    case BarEdge::Left: x = std::min<LONG>(std::max<LONG>(work.left, work.right - w), anchor_.x + gap); break;
+    case BarEdge::Right: x = std::max<LONG>(work.left, anchor_.x - gap - w); break;
+    case BarEdge::Bottom: y = std::max<LONG>(work.top, anchor_.y - gap - h); break;
+    }
     RECT r{x, y, x + w, y + h};
     if (surface_.Visible())
         surface_.Move(r);

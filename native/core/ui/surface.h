@@ -63,14 +63,15 @@ struct ShapeDip {
 
 class Surface;
 
-// Where every popup goes (D32): kPopupGapDip above the bar's glass; the start
-// menu's left edge on the bar's left edge (or centred on the screen: startCentered),
-// the right group's panels (tray, control centre, calendar, notifications) with their
-// right edge on the bar's right edge; inside the work area. `bar` and the result are screen px.
+// Where every popup goes (D32): kPopupGapDip inside the bar's glass on whichever
+// edge it sits on; Left aligns with the bar's start (left, or top on a side edge),
+// Right with its end, Center with the work area's middle; inside the work area.
 constexpr float kPopupGapDip = 12;
 enum class PopupAlign { Left, Right, Center };
 float PopupScale(RECT bar); // px per DIP on the bar's monitor
 RECT PopupRect(RECT bar, D2D1_SIZE_F sizeDip, PopupAlign align);
+POINT PopupAnchor(RECT bar, RECT rect);
+POINT PopupOrigin(RECT bar, RECT popup, RECT anchor);
 
 // Drawing helpers bound to one surface's device context.
 class Canvas {

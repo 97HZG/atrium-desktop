@@ -1,5 +1,6 @@
 #include "ui/calendar_panel.h"
 
+#include "bar_edge.h"
 #include "localization.h"
 #include "clock.h"
 #include "log.h"
@@ -82,7 +83,7 @@ void CalendarPanel::Place()
     if (surface_.Visible())
         surface_.Move(r); // pops out of its entry on the bar
     else
-        surface_.Show(r, true, POINT{(anchor_.left + anchor_.right) / 2, r.bottom});
+        surface_.Show(r, true, PopupOrigin(bar_, r, anchor_));
 }
 
 void CalendarPanel::Open(RECT anchor, RECT bar)
@@ -122,8 +123,9 @@ void CalendarPanel::Paint(Canvas& c)
     const Theme& t = c.theme;
     hits_.clear();
     const D2D1_SIZE_F size = Size();
-    D2D1_RECT_F card = D2D1::RectF(0, 0, kW, size.height - kGap - barH_);
-    D2D1_RECT_F cap = D2D1::RectF(0, card.bottom + kGap, kW, size.height);
+    const bool fromTop = EdgeOf(bar_) == BarEdge::Top;
+    D2D1_RECT_F cap = fromTop ? D2D1::RectF(0, 0, kW, barH_) : D2D1::RectF(0, size.height - barH_, kW, size.height);
+    D2D1_RECT_F card = fromTop ? D2D1::RectF(0, barH_ + kGap, kW, size.height) : D2D1::RectF(0, 0, kW, size.height - kGap - barH_);
     std::vector<ShapeDip> shapes{{card, radius_}, {cap, barH_ / 2}};
     if (c.panel)
         for (const ShapeDip& sh : shapes)
@@ -142,7 +144,7 @@ void CalendarPanel::PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card)
     // The month and its buttons.
     std::wstring title = LanguageIsEnglish() ? std::wstring(kMonthsEn[std::clamp(month_, 1, 12) - 1]) + L" " + std::to_wstring(year_)
                                              : std::to_wstring(year_) + L"年" + std::to_wstring(month_) + L"月";
-    c.Text(title, D2D1::RectF(kPad + 6, 0, w / 2 + 20, kMonthH), 16, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(title, D2D1::RectF(kPad + 6, card.top, w / 2 + 20, card.top + kMonthH), 16, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     auto button = [&](const std::wstring& id, D2D1_RECT_F b, const std::wstring& glyph, const std::wstring& label) {
         float hv = Hover(c, id, hover_ == id);
         if (hv > 0.001f || pressed_ == id)
@@ -153,7 +155,7 @@ void CalendarPanel::PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card)
             c.Text(label, b, 12.5f, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
         hits_.push_back({b, id});
     };
-    float by = kMonthH / 2;
+    float by = card.top + kMonthH / 2;
     D2D1_RECT_F next = D2D1::RectF(w - kPad - 34, by - 17, w - kPad, by + 17);
     D2D1_RECT_F prev = D2D1::RectF(next.left - 38, by - 17, next.left - 4, by + 17);
     button(L"prev", prev, L"\uE76B", L"");
@@ -167,7 +169,7 @@ void CalendarPanel::PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card)
     }
 
     // Weekday names, then six weeks; the month slides in from the side it came from.
-    const float cellW = (w - 2 * kPad) / 7, top = kMonthH;
+    const float cellW = (w - 2 * kPad) / 7, top = card.top + kMonthH;
     for (int i = 0; i < 7; ++i) {
         int wd = (firstWeekday_ + i) % 7;
         c.Text(WeekHeader(wd), D2D1::RectF(kPad + float(i) * cellW, top, kPad + float(i + 1) * cellW, top + kWeekH), 12,

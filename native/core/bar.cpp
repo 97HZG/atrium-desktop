@@ -344,7 +344,8 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display) : debug
     tooltip_->paint = [this](Canvas& c) {
         auto bounds = D2D1::RectF(0, 0, tooltipSize_.width, tooltipSize_.height);
         if (c.panel)
-            c.Callout(bounds, std::min(16.f, tooltipSize_.height / 2), tooltipTailX_, kTooltipTailHalfW, kTooltipTailH, kTooltipTailInset, c.theme.panel);
+            c.Callout(bounds, std::min(16.f, tooltipSize_.height / 2), tooltipTailX_, kTooltipTailHalfW, edge_ == BarEdge::Bottom ? kTooltipTailH : 0,
+                      kTooltipTailInset, c.theme.panel);
         c.Text(tooltipText_, D2D1::RectF(kTooltipPadX, kTooltipPadY, bounds.right - kTooltipPadX, bounds.bottom - kTooltipPadY),
                kTooltipFont, c.theme.text, DWRITE_FONT_WEIGHT_MEDIUM, 1);
     };
@@ -454,6 +455,19 @@ LRESULT CALLBACK Bar::InputProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return self ? self->OnInput(h, m, w, l) : DefWindowProcW(h, m, w, l);
 }
 
+POINT Bar::LayoutPoint(POINT client) const
+{
+    RECT cr{};
+    GetClientRect(input_, &cr);
+    return EdgeFrame{edge_, cr}.FromArea(client);
+}
+
+RECT Bar::EdgeZone() const
+{
+    const EdgeFrame f{edge_, window_};
+    return f.ToArea(RECT{LONG(scene_.bar.left), 0, LONG(scene_.bar.right), std::max<LONG>(0, f.FromArea(monitor_).bottom)});
+}
+
 std::wstring Bar::HitTest(POINT pt) const
 {
     for (const auto& hit : hits_)
@@ -462,8 +476,8 @@ std::wstring Bar::HitTest(POINT pt) const
     return {};
 }
 
-// The bar's strip of the screen while it is always shown (`reserve` px at the bottom of
-// `monitor`); 0 gives it back. Windows keeps the work area: maximized windows end above the bar.
+// The bar's strip of the screen while it is always shown (`reserve` px on `edge_` of
+// `monitor`); 0 gives it back. Windows keeps the work area: maximized windows end before the bar.
 void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
 {
     APPBARDATA abd{sizeof(abd)};
@@ -486,23 +500,28 @@ void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
         appBar_ = true;
         appBarRect_ = RECT{};
     }
-    const RECT want{bounds.left, bounds.bottom - reserve, bounds.right, bounds.bottom};
-    if (appBarMonitor_ == monitor && appBarReserved_ == reserve && EqualRect(&appBarRect_, &want))
+    const EdgeFrame frame{edge_, bounds};
+    const RECT want = frame.ToArea(RECT{0, LONG(frame.Across()) - reserve, LONG(frame.Along()), LONG(frame.Across())});
+    if (appBarMonitor_ == monitor && appBarEdge_ == edge_ && appBarReserved_ == reserve && EqualRect(&appBarRect_, &want))
         return;
-    abd.uEdge = ABE_BOTTOM;
+    constexpr UINT kAppBarEdge[] = {ABE_BOTTOM, ABE_TOP, ABE_LEFT, ABE_RIGHT}; // in BarEdge's order
+    abd.uEdge = kAppBarEdge[int(edge_)];
     abd.rc = want;
-    AppBarMessage(ABM_QUERYPOS, abd); // below another app bar (the system taskbar, if shown): above it
-    abd.rc.top = abd.rc.bottom - reserve;
+    AppBarMessage(ABM_QUERYPOS, abd); // inside another app bar (the system taskbar, if shown) on the same edge
+    RECT rc = frame.FromArea(abd.rc);
+    rc.top = rc.bottom - reserve;
+    abd.rc = frame.ToArea(rc);
     AppBarMessage(ABM_SETPOS, abd);
     appBarRect_ = want;
     appBarReserved_ = reserve;
     appBarMonitor_ = monitor;
-    Log(L"bar: keeps %d px of the screen's bottom (always shown)", reserve);
+    appBarEdge_ = edge_;
+    Log(L"bar: keeps %d px of the screen's %s edge (always shown)", reserve, settings_.barEdge.c_str());
 }
 
 LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
 {
-    POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+    POINT pt = LayoutPoint({GET_X_LPARAM(l), GET_Y_LPARAM(l)});
     static const UINT appBarNotice = RegisterWindowMessageW(L"Atrium.AppBar");
     if (m == appBarNotice && appBarNotice) {
         if (w == ABN_POSCHANGED) { // another app bar or the taskbar moved: claim the strip again
@@ -524,6 +543,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         POINT cur;
         GetCursorPos(&cur);
         ScreenToClient(h, &cur);
+        cur = LayoutPoint(cur);
         if ((HitTest(cur) == kStartKey || HitTest(cur) == kNotifyKey) && HIWORD(l) == WM_LBUTTONDOWN) {
             previousForeground_ = GetForegroundWindow();
             if (previousForeground_ == input_ || previousForeground_ == visual_)
@@ -718,7 +738,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
         ScreenToClient(h, &p);
         int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
-        if (notches && HitTest(p) == kStatusKey && onStatusWheel)
+        if (notches && HitTest(LayoutPoint(p)) == kStatusKey && onStatusWheel)
             onStatusWheel(notches);
         return 0;
     }
@@ -727,14 +747,10 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         if (dragging_)
             return 0;
         std::wstring key = HitTest(pt);
-        POINT screen = pt;
-        ClientToScreen(h, &screen);
-        // Menus open above the bar (and above icons the pointer magnified), without the tooltip.
+        // Menus open on the inner side of the bar (beyond icons the pointer magnified), without the tooltip.
         HideTooltip();
         KillTimer(h, kTooltipTimer);
-        RECT wr;
-        GetWindowRect(h, &wr);
-        screen.y = wr.top;
+        POINT screen = EdgeFrame{edge_, window_}.ToArea(POINT{pt.x, 0});
         if (!key.empty() && !IsEntry(key) && onItemMenu)
             onItemMenu(key, screen);
         else if (onContextMenu)
@@ -813,8 +829,8 @@ void Bar::EndDrag(bool commit)
 std::wstring Bar::FileDragOver(POINT screen)
 {
     onInteract();
-    POINT pt{screen.x - window_.left, screen.y - window_.top};
-    std::wstring key = HitTest(pt);
+    ScreenToClient(input_, &screen);
+    std::wstring key = HitTest(LayoutPoint(screen));
     if (IsEntry(key))
         key.clear();
     if (key != fileHoverKey_) {
@@ -890,8 +906,8 @@ void Bar::WatchDisplays()
     GetCursorPos(&point);
     HMONITOR monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONULL);
     auto target = std::find_if(displays_.begin(), displays_.end(), [&](const DisplayInfo& d) { return d.monitor == monitor; });
-    // The pointer must stay at the actual bottom edge; screen crossings do not summon the Dock.
-    if (target == displays_.end() || monitor == hmonitor_ || !AtDisplayBottom(point, target->bounds)) {
+    // The pointer must stay at the actual edge; screen crossings do not summon the Dock.
+    if (target == displays_.end() || monitor == hmonitor_ || !AtDisplayEdge(edge_, point, target->bounds)) {
         summonMonitor_ = nullptr;
         return;
     }
@@ -965,9 +981,28 @@ void Bar::Relayout()
     UINT dpiX = 96, dpiY = 96;
     GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
     const float s = float(dpiX) / 96.f;
-    const bool monitorChanged = hmonitor_ && (hmonitor_ != mon || !EqualRect(&monitor_, &mi.rcMonitor) || scale_ != s);
-    const RECT& wa = mi.rcWork;
     const Settings& st = settings_;
+    const BarEdge edge = ParseBarEdge(st.barEdge);
+    const bool edgeChanged = hmonitor_ && edge != edge_;
+    const bool monitorChanged = hmonitor_ && (hmonitor_ != mon || !EqualRect(&monitor_, &mi.rcMonitor) || scale_ != s || edgeChanged);
+    if (edgeChanged) {
+        if (dragging_) {
+            dragging_ = false;
+            dragKey_.clear();
+        }
+        HideTooltip();
+        near_.Reset();
+        nearX_ = -1;
+        nearRise_ = nearMagnify_ = false;
+        scene_.hoverKey.clear();
+        scene_.pressedKey.clear();
+        scene_.pointerX = scene_.pointerY = -1;
+        scene_.rippleMs = 0;
+        pressed_.clear();
+        pressedLeft_ = tracking_ = regionExtended_ = false;
+    }
+    edge_ = edge;
+    const EdgeFrame wa{edge_, mi.rcWork};
     // Resolve per-display visibility without changing the user's individual switches.
     const bool showRight = !st.taskbarRightPrimaryOnly || primary;
     const bool showClock = showRight && st.showClock;
@@ -988,15 +1023,18 @@ void Bar::Relayout()
     const int sepGap = Px(8, s);
     const float mag = float(std::clamp(st.magnify, 1.0, 2.0));
 
-    // Clock block sized for its widest possible text.
+    // Clock block sized for its widest possible text, or its two stacked lines on a side edge.
     float timePx = float(barH) * 0.25f, datePx = float(barH) * 0.19f;
     int clockW = 0;
     if (showClock) {
-        std::wstring time, date;
-        ClockStrings(time, date, st.showClockSeconds);
-        float w = std::max(MeasureUiText(dwrite_.get(), WidestDigits(time), timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD),
-                           MeasureUiText(dwrite_.get(), WidestDigits(date), datePx, DWRITE_FONT_WEIGHT_NORMAL));
-        clockW = int(std::ceil(w)) + Px(22, s);
+        float span = timePx * 1.22f + datePx * 1.25f;
+        if (!Vertical(edge_)) {
+            std::wstring time, date;
+            ClockStrings(time, date, st.showClockSeconds);
+            span = std::max(MeasureUiText(dwrite_.get(), WidestDigits(time), timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD),
+                            MeasureUiText(dwrite_.get(), WidestDigits(date), datePx, DWRITE_FONT_WEIGHT_NORMAL));
+        }
+        clockW = int(std::ceil(span)) + Px(22, s);
     }
 
     // Left to right: [logo] [apps ... (overflow)] | [tray] [status] [clock] [bell].
@@ -1023,7 +1061,7 @@ void Bar::Relayout()
     };
     // The magnified bar stretches by up to (mag - 1) * range on top of its width.
     auto stretchFor = [&](int p, int g) { return mag > 1.001f ? int(std::ceil((mag - 1) * float(p + g) * 2.3f)) : 0; };
-    const int screenW = int(wa.right - wa.left) - 2 * inset;
+    const int screenW = int(wa.Along()) - 2 * inset;
     const int maxW = std::max(barH * 2, std::min(Px(st.width, s), screenW - stretchFor(plate, gap)));
     // Too many apps: tighten the gaps, then the plates; what still does not fit
     // goes behind the overflow entry (never silently dropped).
@@ -1066,12 +1104,13 @@ void Bar::Relayout()
     const int insetTop = std::max(inset + glassRise, rise);
 
     const int winW = roomW + 2 * side, winH = barH + insetTop + inset;
-    const int x = wa.left + (wa.right - wa.left - winW) / 2;
+    const int x = (int(wa.Along()) - winW) / 2;
     // "Always shown": the bar keeps its strip of the screen as an app bar (as the system taskbar
-    // does), so maximized windows end above it (#40). Its own strip is not part of where it sits.
+    // does), so maximized windows end before it (#40). Its own strip is not part of where it sits.
     const int reserve = visible_ && st.bar && st.autoHide == L"never" ? Px(st.margin, s) + barH : 0;
-    const int baseBottom = int(wa.bottom) + (appBar_ && appBarMonitor_ == mon ? appBarReserved_ : 0);
-    const int y = baseBottom - Px(st.margin, s) - barH - insetTop;
+    const int base = int(wa.Across()) + (appBar_ && appBarMonitor_ == mon && appBarEdge_ == edge_ ? appBarReserved_ : 0);
+    const int y = base - Px(st.margin, s) - barH - insetTop;
+    const RECT win = wa.ToArea(RECT{x, y, x + winW, y + winH});
 
     // Display order: during a drag the dragged app leaves its slot and the
     // others close up around the insertion point.
@@ -1098,8 +1137,11 @@ void Bar::Relayout()
     for (auto it = bounces_.begin(); it != bounces_.end();)
         it = now - it->second > 480 ? bounces_.erase(it) : std::next(it);
 
-    // Scene in window coordinates.
+    // Scene in layout coordinates.
+    const D2D1_POINT_2F shift =
+        hmonitor_ && !edgeChanged ? EdgeFrame{edge_, win}.FromArea(EdgeFrame{edge_, window_}.ToArea(D2D1_POINT_2F{0, 0})) : D2D1_POINT_2F{};
     BarScene scene;
+    scene.edge = edge_;
     scene.scale = s;
     scene.bar = D2D1::RectF(float(insetX), float(insetTop), float(insetX + barW), float(insetTop + barH));
     scene.windowW = float(winW);
@@ -1115,18 +1157,18 @@ void Bar::Relayout()
     scene.earlyRise = st.hoverRise && st.riseNear;
     scene.earlyMagnify = st.magnifyNear;
     // Keep the pointer and the ripple; only the geometry changes. The pointer
-    // moves with the window if it was rebuilt at another x.
-    scene.pointerX = scene_.pointerX < 0 ? -1 : scene_.pointerX + float(window_.left - x);
-    scene.pointerY = scene_.pointerX < 0 ? -1 : scene_.pointerY + float(window_.top - y);
+    // moves with the window if it was rebuilt at another place.
+    scene.pointerX = scene_.pointerX < 0 ? -1 : scene_.pointerX + shift.x;
+    scene.pointerY = scene_.pointerX < 0 ? -1 : scene_.pointerY + shift.y;
     // The pointer just above the bar: the glass and/or the icons answer it (hoverRise,
     // riseNear, magnifyNear).
-    scene.nearX = nearX_ < 0 ? -1 : nearX_ + float(window_.left - x);
+    scene.nearX = nearX_ < 0 ? -1 : nearX_ + shift.x;
     scene.nearRise = nearRise_;
     scene.nearMagnify = nearMagnify_;
     scene.alertLight = st.attentionLight;
     scene.alertBounce = st.attentionBounce;
-    scene.rippleX = scene_.rippleX + float(window_.left - x);
-    scene.rippleY = scene_.rippleY + float(window_.top - y);
+    scene.rippleX = scene_.rippleX + shift.x;
+    scene.rippleY = scene_.rippleY + shift.y;
     scene.rippleMs = scene_.rippleMs;
     hits_.clear();
     // Hit cells reach up to the window's top: magnified icons rise above the
@@ -1257,11 +1299,12 @@ void Bar::Relayout()
 
     // The window only changes when the bar's size does (not on every drag move).
     const bool shown = visible_ && !slidOut_;
-    RECT win{x, y, x + winW, y + winH};
     if (!dragging_ || !EqualRect(&win, &applied_) || shown != appliedVisible_) {
-        SetWindowPos(visual_, HWND_TOPMOST, x, y, winW, winH, SWP_NOACTIVATE | (shown ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        SetWindowPos(visual_, HWND_TOPMOST, win.left, win.top, win.right - win.left, win.bottom - win.top,
+                     SWP_NOACTIVATE | (shown ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
         // Input window right below the visual one, region = the rounded shape.
-        SetWindowPos(input_, visual_, x, y, winW, winH, SWP_NOACTIVATE | (shown ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        SetWindowPos(input_, visual_, win.left, win.top, win.right - win.left, win.bottom - win.top,
+                     SWP_NOACTIVATE | (shown ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
         applied_ = win;
         appliedVisible_ = shown;
     }
@@ -1289,13 +1332,18 @@ void Bar::SetRegion(bool extended)
     const int barW = int(scene_.bar.right - scene_.bar.left), barH = int(scene_.bar.bottom - scene_.bar.top);
     const int ext = extended ? rise_ : 0;
     if (appliedRgn_[0] == barW && appliedRgn_[1] == barH && appliedRgn_[2] == radius_ && appliedRgn_[3] == insetX_ && appliedRgn_[4] == insetTop_ &&
-        appliedRgn_[5] == ext)
+        appliedRgn_[5] == ext && appliedRgn_[6] == int(edge_))
         return;
-    HRGN rgn = ContinuousRegion(RECT{insetX_, insetTop_, insetX_ + barW + 1, insetTop_ + barH + 1}, radius_);
+    RECT cr{};
+    GetClientRect(input_, &cr);
+    const EdgeFrame frame{edge_, cr};
+    const RECT shape = frame.ToArea(RECT{insetX_, insetTop_, insetX_ + barW, insetTop_ + barH});
+    HRGN rgn = ContinuousRegion(RECT{shape.left, shape.top, shape.right + 1, shape.bottom + 1}, radius_);
     if (ext > 0) {
-        // While the pointer is on the bar, the room above it belongs to the
-        // raised glass and icons (clicks go to the icon below the pointer).
-        HRGN top = CreateRectRgn(insetX_ + radius_ / 2, insetTop_ - ext, insetX_ + barW - radius_ / 2, insetTop_ + radius_);
+        // While the pointer is on the bar, the room on its inner side belongs to the
+        // raised glass and icons (clicks go to the icon under the pointer).
+        const RECT inner = frame.ToArea(RECT{insetX_ + radius_ / 2, insetTop_ - ext, insetX_ + barW - radius_ / 2, insetTop_ + radius_});
+        HRGN top = CreateRectRgn(inner.left, inner.top, inner.right, inner.bottom);
         CombineRgn(rgn, rgn, top, RGN_OR);
         DeleteObject(top);
     }
@@ -1306,6 +1354,7 @@ void Bar::SetRegion(bool extended)
     appliedRgn_[3] = insetX_;
     appliedRgn_[4] = insetTop_;
     appliedRgn_[5] = ext;
+    appliedRgn_[6] = int(edge_);
 }
 
 void Bar::ActivateIndex(int index)
@@ -1433,7 +1482,7 @@ void Bar::UpdateCover()
     // Maximizing with the pointer on the bar keeps it up until the pointer leaves.
     POINT p{};
     GetCursorPos(&p);
-    RECT bar = BarRect(), zone{bar.left, window_.top, bar.right, monitor_.bottom};
+    RECT zone = EdgeZone();
     revealed_ = covered && !slidOut_ && PtInRect(&zone, p) && !FullScreenInFront(hmonitor_);
     leftAt_ = 0;
     if (mode == L"fullscreen")
@@ -1489,17 +1538,16 @@ void Bar::WatchPointer()
     }
     POINT p{};
     GetCursorPos(&p);
-    RECT bar = BarRect();
+    RECT zone = EdgeZone();
     if (!revealed_) {
-        // The bottom edge of the screen, below the bar.
-        if (AtDisplayBottom(p, monitor_) && p.x >= bar.left && p.x < bar.right && !FullScreenInFront(hmonitor_)) {
+        // The screen's edge, along the bar.
+        if (AtDisplayEdge(edge_, p, monitor_) && PtInRect(&zone, p) && !FullScreenInFront(hmonitor_)) {
             revealed_ = true;
             leftAt_ = 0;
             UpdateAutoHide();
         }
         return;
     }
-    RECT zone{bar.left, window_.top, bar.right, monitor_.bottom};
     if (PtInRect(&zone, p) || dragging_ || (keepShown && keepShown())) {
         leftAt_ = 0;
         return;
@@ -1525,6 +1573,7 @@ void Bar::WatchNear(bool publish)
     POINT p{};
     if ((watching || scene_.pointerX >= 0) && (!GetCursorPos(&p) || !ScreenToClient(input_, &p)))
         return;
+    p = LayoutPoint(p);
     const bool changed = near_.Sample(scene_, {float(p.x), float(p.y)}, settings_.nearEnter, settings_.nearLeave, available);
     nearX_ = scene_.nearX;
     nearRise_ = scene_.nearRise;
@@ -1574,7 +1623,7 @@ void Bar::GuardStacking(const wchar_t* why)
     RECT bar = BarRect(), r{}, overlap{}, trayRect{};
     HWND tray = ShellTaskbar();
     bool trayOver = tray && IsWindowVisible(tray) && GetWindowRect(tray, &trayRect) && IntersectRect(&overlap, &trayRect, &bar) &&
-                    overlap.bottom - overlap.top > 2;
+                    overlap.right - overlap.left > 2 && overlap.bottom - overlap.top > 2;
     bool usingTray = false;
     POINT cur{};
     wchar_t fgCls[64] = {};
@@ -1582,9 +1631,8 @@ void Bar::GuardStacking(const wchar_t* why)
         GetCursorPos(&cur);
         HWND fg = GetForegroundWindow();
         GetClassNameW(fg, fgCls, 64);
-        // The pointer counts on the system taskbar outside the bar (the screen's
-        // bottom edge reveals it): over the bar it is meant for the bar.
-        RECT ours{bar.left, window_.top, bar.right, monitor_.bottom}; // down to the edge that brings an auto-hidden bar up
+        // The pointer counts on the system taskbar outside the bar: over the bar it is meant for the bar.
+        RECT ours = EdgeZone();
         usingTray = (PtInRect(&trayRect, cur) && !PtInRect(&ours, cur)) || fg == tray || wcscmp(fgCls, L"TopLevelWindowForOverflowXamlIsland") == 0 ||
                     wcscmp(fgCls, L"Shell_TrayWnd") == 0;
     }
@@ -1683,28 +1731,24 @@ void Bar::SetUnread(int count)
 
 RECT Bar::EntryRect(const std::wstring& key) const
 {
-    auto rect = [&](const SceneItem& it) {
-        return RECT{window_.left + LONG(it.plate.left), window_.top + LONG(it.plate.top), window_.left + LONG(it.plate.right),
-                    window_.top + LONG(it.plate.bottom)};
-    };
+    const EdgeFrame frame{edge_, window_};
+    auto rect = [&](const D2D1_RECT_F& r) { return frame.ToArea(RECT{LONG(r.left), LONG(r.top), LONG(r.right), LONG(r.bottom)}); };
     for (const auto& it : scene_.extras)
         if (it.key == key)
-            return rect(it);
+            return rect(it.plate);
     for (const auto& it : scene_.items)
         if (it.key == key)
-            return rect(it);
+            return rect(it.plate);
     if (key == kClockKey)
-        return RECT{window_.left + LONG(scene_.clock.left), window_.top + LONG(scene_.clock.top), window_.left + LONG(scene_.clock.right),
-                    window_.top + LONG(scene_.clock.bottom)};
+        return rect(scene_.clock);
     // Toasts still have an anchor when their taskbar entry is hidden.
-    const RECT bar = BarRect();
-    return RECT{bar.right - (bar.bottom - bar.top), bar.top, bar.right, bar.bottom};
+    const LONG h = LONG(scene_.bar.bottom - scene_.bar.top);
+    return frame.ToArea(RECT{LONG(scene_.bar.right) - h, LONG(scene_.bar.top), LONG(scene_.bar.right), LONG(scene_.bar.bottom)});
 }
 
 RECT Bar::BarRect() const
 {
-    return RECT{window_.left + LONG(scene_.bar.left), window_.top + LONG(scene_.bar.top), window_.left + LONG(scene_.bar.right),
-                window_.top + LONG(scene_.bar.bottom)};
+    return EdgeFrame{edge_, window_}.ToArea(RECT{LONG(scene_.bar.left), LONG(scene_.bar.top), LONG(scene_.bar.right), LONG(scene_.bar.bottom)});
 }
 
 std::wstring Bar::TooltipText(const std::wstring& key) const
@@ -1750,15 +1794,16 @@ void Bar::ShowTooltip()
 {
     const std::wstring& key = scene_.hoverKey;
     auto hit = std::find_if(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == key; });
+    const int rise = scene_.magnify > 1.001f ? rise_ : 0;
+    const POINT tip =
+        hit != hits_.end() ? EdgeFrame{edge_, window_}.ToArea(POINT{(hit->rect.left + hit->rect.right) / 2, int(scene_.bar.top) - rise}) : POINT{};
     // An app with windows: its windows, previewed, instead of the tooltip (as the Windows taskbar).
     if (onPreview && hit != hits_.end() && !IsEntry(key)) {
         auto item = std::find_if(items_.begin(), items_.end(), [&](const TaskItem& t) { return t.key == key; });
         if (item != items_.end() && !item->windows.empty()) {
             tooltip_->Hide(false);
-            int rise = scene_.magnify > 1.001f ? rise_ : 0;
-            POINT anchor{window_.left + (hit->rect.left + hit->rect.right) / 2, window_.top + int(scene_.bar.top) - rise};
             previewShown_ = true;
-            onPreview(key, item->windows, anchor);
+            onPreview(key, item->windows, tip);
             return;
         }
     }
@@ -1791,25 +1836,44 @@ void Bar::ShowTooltip()
     tooltipSize_ = D2D1::SizeF(std::min(maxTextW, std::ceil(metrics.widthIncludingTrailingWhitespace / scale_)) + 2 * kTooltipPadX,
                               std::max(kTooltipMinH, std::ceil(metrics.height / scale_) + 2 * kTooltipPadY));
     int w = Px(tooltipSize_.width, scale_), h = Px(tooltipSize_.height, scale_);
-    int cx = window_.left + (hit->rect.left + hit->rect.right) / 2;
-    // Above the magnified icons when they grow.
-    int rise = scene_.magnify > 1.001f ? rise_ : 0;
-    int top = std::max(int(mi.rcWork.top) + margin, int(window_.top) + int(scene_.bar.top) - rise - h - margin);
-    int left = std::clamp(cx - w / 2, int(mi.rcWork.left) + margin, int(mi.rcWork.right) - margin - w);
-    RECT rect{left, top, left + w, top + h + Px(kTooltipTailH, scale_)};
-    tooltipTailX_ = std::clamp(float(cx - left) / scale_, 0.f, tooltipSize_.width);
-    tooltip_->SetRadius(std::min(16.f, tooltipSize_.height / 2));
-    ShapeDip label{D2D1::RectF(0, 0, tooltipSize_.width, tooltipSize_.height), std::min(16.f, tooltipSize_.height / 2)};
-    label.tailX = tooltipTailX_;
-    label.tailHalfWidth = kTooltipTailHalfW;
-    label.tailHeight = kTooltipTailH;
-    label.tailInset = kTooltipTailInset;
-    tooltip_->SetShapes({label});
+    int minX = int(mi.rcWork.left) + margin, maxX = std::max(minX, int(mi.rcWork.right) - margin - w);
+    int minY = int(mi.rcWork.top) + margin, maxY = std::max(minY, int(mi.rcWork.bottom) - margin - h);
+    int left = std::clamp(int(tip.x) - w / 2, minX, maxX), top = std::clamp(int(tip.y) - h / 2, minY, maxY);
+    if (edge_ == BarEdge::Bottom)
+        top = std::max(minY, int(tip.y) - h - margin);
+    else if (edge_ == BarEdge::Top)
+        top = std::min(maxY, int(tip.y) + margin);
+    else if (edge_ == BarEdge::Left)
+        left = std::min(maxX, int(tip.x) + margin);
+    else
+        left = std::max(minX, int(tip.x) - w - margin);
+    const bool tail = edge_ == BarEdge::Bottom;
+    RECT rect{left, top, left + w, top + h + (tail ? Px(kTooltipTailH, scale_) : 0)};
+    const float radius = std::min(16.f, tooltipSize_.height / 2);
+    tooltip_->SetRadius(radius);
+    if (tail) {
+        tooltipTailX_ = std::clamp(float(tip.x - left) / scale_, 0.f, tooltipSize_.width);
+        ShapeDip label{D2D1::RectF(0, 0, tooltipSize_.width, tooltipSize_.height), radius};
+        label.tailX = tooltipTailX_;
+        label.tailHalfWidth = kTooltipTailHalfW;
+        label.tailHeight = kTooltipTailH;
+        label.tailInset = kTooltipTailInset;
+        tooltip_->SetShapes({label});
+    } else {
+        tooltip_->SetShapes({});
+    }
+    POINT anchor{tip.x, rect.bottom}; // it grows out of the side facing the icon
+    switch (edge_) {
+    case BarEdge::Top: anchor.y = rect.top; break;
+    case BarEdge::Left: anchor = {rect.left, tip.y}; break;
+    case BarEdge::Right: anchor = {rect.right, tip.y}; break;
+    case BarEdge::Bottom: break;
+    }
     if (tooltip_->Visible()) {
         tooltip_->Move(rect);
         tooltip_->Invalidate();
     } else {
-        tooltip_->Show(rect, false, POINT{cx, rect.bottom});
+        tooltip_->Show(rect, false, anchor);
     }
 }
 
@@ -1885,26 +1949,29 @@ void Bar::RenderThread()
 
 namespace {
 
-// Whether the screen just above `bar` (screen px), as GDI reads it, has any light in it: the
+// Whether the screen on the inner side of `bar` (screen px), as GDI reads it, has any light in it: the
 // capture's picture of the same place coming all black then means the capture is what is black
 // (duplication after a sleep on some drivers, a video in an overlay plane), not the desktop.
-bool ScreenLitAbove(RECT bar)
+bool ScreenLitAbove(BarEdge edge, RECT bar)
 {
     constexpr int kW = 32, kH = 4;
-    const int h = std::max(8L, std::min(64L, bar.bottom - bar.top));
+    const EdgeFrame frame{edge, bar};
+    const LONG d = std::max(8L, std::min(64L, LONG(frame.Across())));
+    const RECT sample = frame.ToArea(RECT{0, -d, LONG(frame.Along()), 0});
+    const int w = Vertical(edge) ? kH : kW, h = Vertical(edge) ? kW : kH;
     bool lit = false;
     HDC screen = GetDC(nullptr);
     HDC mem = CreateCompatibleDC(screen);
     BITMAPINFO bi{};
-    bi.bmiHeader = {sizeof(BITMAPINFOHEADER), kW, -kH, 1, 32, BI_RGB};
+    bi.bmiHeader = {sizeof(BITMAPINFOHEADER), w, -h, 1, 32, BI_RGB};
     void* bits = nullptr;
     if (HBITMAP dib = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0)) {
         HGDIOBJ old = SelectObject(mem, dib);
         SetStretchBltMode(mem, HALFTONE);
-        if (StretchBlt(mem, 0, 0, kW, kH, screen, bar.left, bar.top - h, bar.right - bar.left, h, SRCCOPY)) {
+        if (StretchBlt(mem, 0, 0, w, h, screen, sample.left, sample.top, sample.right - sample.left, sample.bottom - sample.top, SRCCOPY)) {
             GdiFlush();
             const auto* px = static_cast<const uint8_t*>(bits);
-            for (int i = 0; i < kW * kH && !lit; ++i)
+            for (int i = 0; i < w * h && !lit; ++i)
                 lit = px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2] > 24;
         }
         SelectObject(mem, old);
@@ -2531,7 +2598,7 @@ bool Bar::RenderSession()
                 blackSince = ClockMs();
             } else if (ClockMs() - blackSince > 1500) {
                 blackSince = -1;
-                if (ScreenLitAbove(snap.window)) {
+                if (ScreenLitAbove(snap.scene.edge, snap.window)) {
                     blackRestartMs_ = ClockMs();
                     if (++blackRestarts_ >= 2) {
                         blackRestarts_ = 0;
@@ -2564,9 +2631,12 @@ bool Bar::RenderSession()
             float tm = float(1.0 - snap.settings.transparency);
             uint32_t tint = snap.settings.tint;
             float tintLuma = (0.2126f * float((tint >> 16) & 0xFF) + 0.7152f * float((tint >> 8) & 0xFF) + 0.0722f * float(tint & 0xFF)) / 255.f;
+            const EdgeFrame edgeFrame{snap.scene.edge,
+                                      D2D1::RectF(0, 0, float(snap.window.right - snap.window.left), float(snap.window.bottom - snap.window.top))};
             auto decide = [&](bool& dark, D2D1_RECT_F r) {
                 if (r.right <= r.left)
                     return;
+                r = edgeFrame.ToArea(r);
                 const float pad = float(GlassRenderer::kPad);
                 float lum = rb->RegionLuma(r.left + pad, r.top + pad, r.right + pad, r.bottom + pad) * (1 - tm) + tintLuma * tm;
                 if (!dark && lum > kDarkInkAbove)
@@ -2610,7 +2680,7 @@ bool Bar::RenderSession()
         barOwed = false;
         GlassParams params = ParamsFor(snap.settings, snap.scale);
         const BarFrame& bf = painter.Frame();
-        params.radius = std::min(params.radius, (bf.shape.bottom - bf.shape.top) / 2);
+        params.radius = std::min(params.radius, std::min(bf.shape.right - bf.shape.left, bf.shape.bottom - bf.shape.top) / 2);
         params.shapeL = bf.shape.left;
         params.shapeT = bf.shape.top;
         params.shapeR = bf.shape.right;
@@ -2622,6 +2692,9 @@ bool Bar::RenderSession()
         params.waveX = bf.waveX;
         params.waveWidth = bf.waveWidth;
         params.waveHeight = bf.waveHeight;
+        params.fromArea =
+            EdgeFrame{snap.scene.edge, D2D1::RectF(0, 0, float(snap.window.right - snap.window.left), float(snap.window.bottom - snap.window.top))}
+                .FromAreaMatrix();
         bool ok = renderer.Present(params,
                                    [&](ID2D1DeviceContext2* d2d) {
                                        painter.Draw(d2d, snap.scene, inks, time, date,

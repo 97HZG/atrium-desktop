@@ -1,5 +1,6 @@
 #include "ui/start_menu.h"
 
+#include "bar_edge.h"
 #include "localization.h"
 
 #include "clock.h"
@@ -178,11 +179,22 @@ D2D1_SIZE_F StartMenu::SizeFor(int grid, int icons) const
 // panel inside it springs to the size chosen (PanelSize).
 D2D1_SIZE_F StartMenu::Size() const { return SizeFor(room_, layout_.icon); }
 D2D1_SIZE_F StartMenu::PanelSize() const { return SizeFor(grid_, layout_.icon); }
-float StartMenu::OffsetY() const { return float(surface_.Rect().bottom - surface_.Rect().top) / surface_.Scale() - H(); }
+float StartMenu::OffsetY() const
+{
+    const BarEdge edge = EdgeOf(bar_);
+    const float winH = float(surface_.Rect().bottom - surface_.Rect().top) / surface_.Scale();
+    if (edge == BarEdge::Bottom)
+        return winH - H();
+    return Vertical(edge) && centered_ ? std::max(0.f, (winH - H()) / 2) : 0.f;
+}
 LONG StartMenu::OffsetPx() const { return std::lround(OffsetY() * surface_.Scale()); }
 float StartMenu::OffsetX() const
 {
-    return centered_ ? std::max(0.f, (float(surface_.Rect().right - surface_.Rect().left) / surface_.Scale() - W()) / 2) : 0.f;
+    const BarEdge edge = EdgeOf(bar_);
+    const float winW = float(surface_.Rect().right - surface_.Rect().left) / surface_.Scale();
+    if (edge == BarEdge::Right)
+        return winW - W();
+    return !Vertical(edge) && centered_ ? std::max(0.f, (winW - W()) / 2) : 0.f;
 }
 LONG StartMenu::OffsetXPx() const { return std::lround(OffsetX() * surface_.Scale()); }
 
@@ -425,10 +437,7 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     RECT r = PopupRect(bar_, Size(), Align());
     Restage();
     // Pops out of the logo.
-    POINT anchor{(logo.left + logo.right) / 2, r.bottom};
-    if (logo.right <= logo.left)
-        anchor.x = r.left + (r.right - r.left) / 6;
-    surface_.Show(r, true, anchor);
+    surface_.Show(r, true, PopupOrigin(bar_, r, logo));
     SetTimer(surface_.Hwnd(), kStatusTimer, 2000, nullptr);
     Log(L"start: opened (%zu apps, %zu tiles, %s)", apps_.size(), tiles_.size(), catalog_.Loaded() ? L"catalog ready" : L"catalog loading");
 }
@@ -917,11 +926,20 @@ void StartMenu::Paint(Canvas& c)
     }
     // Only the menu's pieces are on screen and take clicks (with room for the frame still on its way).
     {
+        const BarEdge edge = EdgeOf(bar_);
+        const float winW = float(surface_.Rect().right - surface_.Rect().left) / surface_.Scale();
         const float winH = float(surface_.Rect().bottom - surface_.Rect().top) / surface_.Scale(), slack = resizing ? 8.f : 0.f;
         const float rw = std::max(W(), target.width) + slack, rh = std::max(H(), target.height) + slack;
-        const float winW = float(surface_.Rect().right - surface_.Rect().left) / surface_.Scale();
-        const float left = centered_ ? std::max(0.f, (winW - rw) / 2) : 0.f;
-        surface_.SetRegion(D2D1::RectF(left, std::max(0.f, winH - rh), left + rw, winH));
+        float left = 0.f, top = 0.f;
+        if (edge == BarEdge::Right)
+            left = std::max(0.f, winW - rw);
+        else if (!Vertical(edge) && centered_)
+            left = std::max(0.f, (winW - rw) / 2);
+        if (edge == BarEdge::Bottom)
+            top = std::max(0.f, winH - rh);
+        else if (Vertical(edge) && centered_)
+            top = std::max(0.f, (winH - rh) / 2);
+        surface_.SetRegion(D2D1::RectF(left, top, std::min(winW, left + rw), std::min(winH, top + rh)));
     }
     const float offX = OffsetX(), offY = OffsetY();
     c.BeginGroup(1, 1, 0, 0, offX, offY);
@@ -1496,11 +1514,20 @@ void StartMenu::PaintGrip(Canvas& c, const Theme& t)
     const D2D1_RECT_F m = MainRect();
     const float inMenu = Hover(c, L"#menu", tracking_ || sizing_), on = Hover(c, L"resize", hover_ == L"resize" || sizing_);
     const float a = std::max(0.4f * inMenu, on);
-    hits_.push_back({D2D1::RectF(m.right - kGrip, 0, m.right, kGrip), L"resize"});
+    const BarEdge edge = EdgeOf(bar_);
+    const bool left = edge == BarEdge::Right, bottom = edge != BarEdge::Bottom;
+    hits_.push_back(
+        {D2D1::RectF(left ? m.left : m.right - kGrip, bottom ? m.bottom - kGrip : m.top, left ? m.left + kGrip : m.right, bottom ? m.bottom : m.top + kGrip),
+         L"resize"});
     if (a <= 0.01f)
         return;
     const float r = std::max(radius_, 18.f);
-    c.Arc(m.right - r, r, r - 6, -80.f, -10.f, Alpha(t.subtext, a), 3.5f);
+    float a0 = -80.f;
+    if (left)
+        a0 = 100.f;
+    else if (bottom)
+        a0 = 10.f;
+    c.Arc(left ? m.left + r : m.right - r, bottom ? m.bottom - r : m.top + r, r - 6, a0, a0 + 70.f, Alpha(t.subtext, a), 3.5f);
 }
 
 // The capsule: the account on the left; network, volume, battery (unless turned
@@ -1963,8 +1990,11 @@ void StartMenu::Resize(POINT screen)
     // The size nearest to where the corner is pulled (of those the screen has room for).
     const float s = surface_.Scale();
     const D2D1_SIZE_F from = SizeFor(sizeStart_, layout_.icon);
+    const BarEdge edge = EdgeOf(bar_);
+    const float dx = float(edge == BarEdge::Right ? sizeFrom_.x - screen.x : screen.x - sizeFrom_.x) / s;
+    const float dy = float(edge == BarEdge::Bottom ? sizeFrom_.y - screen.y : screen.y - sizeFrom_.y) / s;
     // Centred, the corner moves half as far as the menu grows.
-    const float w = from.width + (centered_ ? 2.f : 1.f) * float(screen.x - sizeFrom_.x) / s, h = from.height + float(sizeFrom_.y - screen.y) / s;
+    const float w = from.width + (!Vertical(edge) && centered_ ? 2.f : 1.f) * dx, h = from.height + (Vertical(edge) && centered_ ? 2.f : 1.f) * dy;
     int best = grid_;
     float nearest = 1e9f;
     for (int grid = 0; grid <= room_; ++grid) {
@@ -2389,7 +2419,8 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return false;
     case WM_SETCURSOR:
         if (LOWORD(l) == HTCLIENT && (sizing_ || hover_ == L"resize")) {
-            SetCursor(LoadCursorW(nullptr, IDC_SIZENESW));
+            const BarEdge edge = EdgeOf(bar_);
+            SetCursor(LoadCursorW(nullptr, (edge == BarEdge::Right) == (edge != BarEdge::Bottom) ? IDC_SIZENESW : IDC_SIZENWSE));
             result = TRUE;
             return true;
         }

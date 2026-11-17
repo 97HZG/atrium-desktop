@@ -87,9 +87,16 @@ bool TilesFill(const std::vector<RECT>& tiles, const RECT& work, int slack)
     return true;
 }
 
-bool AtDisplayBottom(POINT pointer, const RECT& bounds)
+bool AtDisplayEdge(BarEdge edge, POINT pointer, const RECT& bounds)
 {
-    return PtInRect(&bounds, pointer) && pointer.y >= bounds.bottom - 2;
+    if (!PtInRect(&bounds, pointer))
+        return false;
+    switch (edge) {
+    case BarEdge::Top: return pointer.y < bounds.top + 2;
+    case BarEdge::Left: return pointer.x < bounds.left + 2;
+    case BarEdge::Right: return pointer.x >= bounds.right - 2;
+    default: return pointer.y >= bounds.bottom - 2;
+    }
 }
 
 bool FullScreenInFront(HMONITOR monitor)

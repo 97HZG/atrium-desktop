@@ -5,6 +5,7 @@
 // a moment after the pointer has left both.
 #pragma once
 
+#include "bar_edge.h"
 #include "motion.h"
 #include "ui/surface.h"
 
@@ -24,9 +25,9 @@ public:
     WindowPreview(const WindowPreview&) = delete;
     WindowPreview& operator=(const WindowPreview&) = delete;
 
-    // Shows (or updates) the windows of app `key` centred above `anchor` (screen px: the icon's
-    // centre, the top of what the bar draws); `icon` stands in when DWM has no thumbnail.
-    void Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, const IconImage& icon);
+    // The windows of app `key` on the inner side of `anchor` (screen px), using
+    // `icon` when DWM has no thumbnail.
+    void Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, RECT bar, const IconImage& icon);
     // Window changes still reach the open preview after the pointer leaves
     // the taskbar for a card. This does not restart its leave/fade timers.
     void Refresh(const std::vector<TaskItem>& items);
@@ -54,8 +55,8 @@ private:
 
     void Paint(Canvas& c);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
-    void Layout(float scale, float maxWidthDip);
-    void Place();          // the surface's rectangle for the cards, above the anchor
+    void Layout(float scale, float maxSpanDip, bool vertical);
+    void Place();          // the surface's rectangle for the cards, inside the anchor
     void UpdateThumbs();   // DWM: where the pictures go, how visible
     void DropThumbs();
     void SetWindows(const std::vector<HWND>& windows);
@@ -66,6 +67,7 @@ private:
     std::vector<Card> cards_;
     IconImage icon_;
     POINT anchor_{};
+    BarEdge edge_ = BarEdge::Bottom;
     D2D1_SIZE_F size_{};   // DIP
     int hover_ = -1, pressed_ = -1;
     bool overClose_ = false;

@@ -892,6 +892,9 @@
   "Games found": "找到的游戏",
   "No games found": "没有找到游戏",
   "Exclude selected": "排除选中的游戏",
-  "OK": "好"
+  "OK": "好",
+  "Bottom": "底部",
+  "Top": "顶部",
+  "Position": "位置"
  }
 }

@@ -300,6 +300,15 @@ void StageManager::SetOnRight(bool onRight)
     Rebuild();
 }
 
+void StageManager::SetBarEdge(BarEdge edge)
+{
+    if (edge == barEdge_)
+        return;
+    barEdge_ = edge;
+    coveredAt_ = 0;
+    Rebuild();
+}
+
 void StageManager::SetAutoHide(bool autoHide)
 {
     if (autoHide == autoHide_)
@@ -1133,7 +1142,7 @@ RECT StageManager::WorkArea() const
 int StageManager::Capacity() const
 {
     RECT wa = WorkArea();
-    float avail = float(wa.bottom - wa.top) / PopupScale(wa) - 2 * kVPad - kBarRoom;
+    float avail = float(wa.bottom - wa.top) / PopupScale(wa) - 2 * kVPad - (Vertical(barEdge_) ? 0 : kBarRoom);
     return std::clamp(int((avail + kSlotGap) / kSlot), 1, kMaxEntries);
 }
 
@@ -1256,8 +1265,12 @@ void StageManager::Layout()
     }
     const LONG w = LONG(std::lround(size_.width * s)), h = LONG(std::lround(size_.height * s));
     const LONG room = LONG(std::lround(kBarRoom * s));
-    LONG x = onRight_ ? wa.right - w : wa.left;
-    LONG y = wa.top + std::max<LONG>(0, (wa.bottom - wa.top - room - h) / 2);
+    const LONG x0 = wa.left + (!onRight_ && barEdge_ == BarEdge::Left ? room : 0);
+    const LONG x1 = wa.right - (onRight_ && barEdge_ == BarEdge::Right ? room : 0);
+    const LONG y0 = wa.top + (barEdge_ == BarEdge::Top ? room : 0);
+    const LONG y1 = wa.bottom - (barEdge_ == BarEdge::Bottom ? room : 0);
+    LONG x = onRight_ ? x1 - w : x0;
+    LONG y = y0 + std::max<LONG>(0, (y1 - y0 - h) / 2);
     rect_ = RECT{x, y, x + w, y + h};
 }
 

@@ -187,10 +187,25 @@ void CheckFullscreenCoverage()
     Require(TilesFill({left, {960, 0, 1920, 540}, {960, 540, 1920, 1080}}, screen, 8), "a half and two quarters fill the screen");
     Require(TilesFill({{-2560, -200, -1280, 1240}, {-1280, -200, 0, 1240}}, leftScreen, 8), "tiles support negative display coordinates");
 
-    Require(AtDisplayBottom({960, 1079}, screen) && AtDisplayBottom({960, 1078}, screen), "the local bottom edge can still reveal the bar");
-    Require(!AtDisplayBottom({960, 1080}, screen) && !AtDisplayBottom({960, 1600}, screen), "a lower display must not repeatedly reveal the upper display's bar");
-    Require(!AtDisplayBottom({1920, 1079}, screen) && !AtDisplayBottom({960, 1077}, screen), "another display or a point above the edge does not reveal the bar");
-    Require(AtDisplayBottom({-1280, 1239}, leftScreen), "edge reveal supports negative display coordinates");
+    Require(AtDisplayEdge(BarEdge::Bottom, {960, 1079}, screen) && AtDisplayEdge(BarEdge::Bottom, {960, 1078}, screen),
+            "the local bottom edge can still reveal the bar");
+    Require(!AtDisplayEdge(BarEdge::Bottom, {960, 1080}, screen) && !AtDisplayEdge(BarEdge::Bottom, {960, 1600}, screen),
+            "a lower display must not repeatedly reveal the upper display's bar");
+    Require(!AtDisplayEdge(BarEdge::Bottom, {1920, 1079}, screen) && !AtDisplayEdge(BarEdge::Bottom, {960, 1077}, screen),
+            "another display or a point above the edge does not reveal the bar");
+    Require(AtDisplayEdge(BarEdge::Top, {960, 0}, screen) && AtDisplayEdge(BarEdge::Top, {960, 1}, screen) && !AtDisplayEdge(BarEdge::Top, {960, 2}, screen) &&
+                !AtDisplayEdge(BarEdge::Top, {960, -1}, screen),
+            "top edge reveal covers only its two-pixel strip inside the display");
+    Require(AtDisplayEdge(BarEdge::Left, {0, 540}, screen) && AtDisplayEdge(BarEdge::Left, {1, 540}, screen) &&
+                !AtDisplayEdge(BarEdge::Left, {2, 540}, screen) && !AtDisplayEdge(BarEdge::Left, {-1, 540}, screen),
+            "left edge reveal covers only its two-pixel strip inside the display");
+    Require(AtDisplayEdge(BarEdge::Right, {1919, 540}, screen) && AtDisplayEdge(BarEdge::Right, {1918, 540}, screen) &&
+                !AtDisplayEdge(BarEdge::Right, {1917, 540}, screen) && !AtDisplayEdge(BarEdge::Right, {1920, 540}, screen),
+            "right edge reveal covers only its two-pixel strip inside the display");
+    Require(AtDisplayEdge(BarEdge::Bottom, {-1280, 1239}, leftScreen) && AtDisplayEdge(BarEdge::Left, {-2560, 500}, leftScreen) &&
+                AtDisplayEdge(BarEdge::Right, {-1, 500}, leftScreen) && !AtDisplayEdge(BarEdge::Right, {0, 500}, leftScreen) &&
+                AtDisplayEdge(BarEdge::Top, {-1280, -200}, leftScreen),
+            "edge reveal supports negative display coordinates without spilling onto neighbours");
 }
 
 void CheckNotificationLayout()
@@ -210,10 +225,10 @@ void CheckNotificationLayout()
     const RECT negative{-2560, -200, 0, 1200};
     auto scaled = notification::TopRightLayout(negative, 1.5f, 384, 112, 10, 12, 2);
     Require(scaled.rect.right == -18 && scaled.rect.top == -182 && scaled.rect.right - scaled.rect.left == 576, "top-right placement supports negative coordinates and monitor DPI");
-    const RECT small{0, 40, 320, 220};
-    auto narrow = notification::TopRightLayout(small, 2, 384, 112, 10, 12, 3);
-    Require(narrow.rect.left >= small.left && narrow.rect.top >= small.top && narrow.rect.right <= small.right && narrow.rect.bottom <= small.bottom,
-        "small or highly scaled work areas clamp the notification viewport");
+    const RECT tiny{0, 40, 320, 220};
+    auto narrow = notification::TopRightLayout(tiny, 2, 384, 112, 10, 12, 3);
+    Require(narrow.rect.left >= tiny.left && narrow.rect.top >= tiny.top && narrow.rect.right <= tiny.right && narrow.rect.bottom <= tiny.bottom,
+            "tiny or highly scaled work areas clamp the notification viewport");
 
     const float controls = 44 + 10; // existing centre capsule and card gap
     auto centre = notification::TopRightLayout(work, 1, 384, 112, 10, 12, 5, controls);

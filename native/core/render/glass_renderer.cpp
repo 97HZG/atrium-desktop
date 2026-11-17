@@ -494,6 +494,16 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
             r = std::max(r, p.parts[i][2]);
             b = std::max(b, p.parts[i][3]);
         }
+        auto toArea = [&](float u, float v) {
+            u -= p.fromArea._31;
+            v -= p.fromArea._32;
+            return D2D1::Point2F(u * p.fromArea._11 + v * p.fromArea._12, u * p.fromArea._21 + v * p.fromArea._22);
+        };
+        const auto a = toArea(l, t), c = toArea(r, b);
+        l = std::min(a.x, c.x);
+        t = std::min(a.y, c.y);
+        r = std::max(a.x, c.x);
+        b = std::max(a.y, c.y);
         const float m = 2 * std::max(p.inset, 1.f) + 2; // the shadow has faded out by then
         D3D11_RECT sc{LONG(std::max(0.f, std::floor(l - m))), LONG(std::max(0.f, std::floor(t - m))), LONG(std::min(float(w_), std::ceil(r + m))),
                       LONG(std::min(float(h_), std::ceil(b + m)))};

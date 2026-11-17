@@ -18,7 +18,7 @@
 
 namespace atrium {
 
-// Mirrors cbuffer GlassParams in shaders/glass.hlsl (368 bytes). Lengths in px.
+// Mirrors cbuffer GlassParams in shaders/glass.hlsl (400 bytes). Lengths in px.
 struct GlassParams {
     float sizeX, sizeY, roiOriginX, roiOriginY;
     float roiSizeX, roiSizeY, radius, edge;
@@ -36,8 +36,10 @@ struct GlassParams {
     float partCount, melt, partMix, pad1; // partMix: 0 the parts, 1 the rectangle above (Shape, Radius)
     float tailX, tailHalfWidth, tailHeight, tailInset; // optional Dock label pointer
     float waveX, waveWidth, waveHeight, wavePad; // optional upward Dock hover wave
+    D2D1_MATRIX_3X2_F fromArea{1, 0, 0, 1, 0, 0}; // window px to layout px (EdgeFrame::FromAreaMatrix)
+    float fromAreaPad[2]{};
 };
-static_assert(sizeof(GlassParams) == 368);
+static_assert(sizeof(GlassParams) == 400);
 constexpr int kMaxGlassParts = 6;
 
 // Scale and fade of a composition visual, run by DWM so it stays smooth
