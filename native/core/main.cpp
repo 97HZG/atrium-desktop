@@ -1202,7 +1202,13 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     switch (m) {
     case WM_UPDATE_READY:
-        if (g_app.updates && g_app.notes) g_app.updates->NotifyPrepared(*g_app.notes);
+        if (g_app.updates && g_app.notes)
+            g_app.updates->NotifyPrepared([](std::optional<Notice> card, bool silent) {
+                if (card)
+                    g_app.notes->Post(std::move(*card), silent);
+                else
+                    g_app.notes->ClearPreparedUpdate();
+            });
         return 0;
     case WM_TRAY:
         switch (LOWORD(l)) {

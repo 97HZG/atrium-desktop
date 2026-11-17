@@ -9,7 +9,7 @@
 // app's banners off in Windows (keeping it in the notification centre).
 #pragma once
 
-#include "ui/notifications.h"
+#include "notice.h"
 
 #include <windows.h>
 

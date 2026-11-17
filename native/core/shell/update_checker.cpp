@@ -3,7 +3,7 @@
 #include "localization.h"
 #include "log.h"
 #include "settings.h"
-#include "ui/notifications.h"
+#include "notice.h"
 
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.h>
@@ -202,15 +202,21 @@ void UpdateChecker::Run()
     winrt::uninit_apartment();
 }
 
-void UpdateChecker::NotifyPrepared(Notifications& notifications)
+void UpdateChecker::NotifyPrepared(const std::function<void(std::optional<Notice> card, bool silent)>& show)
 {
     try {
         const auto text = ReadTextFile(cache_ + L"\\ready.json");
-        if (text.empty()) { notifications.ClearPreparedUpdate(); return; }
+        if (text.empty()) {
+            show(std::nullopt, false);
+            return;
+        }
         auto ready = json::JsonObject::Parse(text);
         auto version = ParseVersion(ready.GetNamedString(L"Version").c_str());
         const std::wstring tag = ready.GetNamedString(L"Tag").c_str();
-        if (!version || *version <= CurrentVersion()) { notifications.ClearPreparedUpdate(); return; }
+        if (!version || *version <= CurrentVersion()) {
+            show(std::nullopt, false);
+            return;
+        }
         const bool silent = ReadTextFile(cache_ + L"\\ready-notified.txt") == tag;
         Notice notice;
         notice.source = L"atrium-update";
@@ -219,7 +225,7 @@ void UpdateChecker::NotifyPrepared(Notifications& notifications)
         notice.title = Tr(L"Update ready");
         notice.body = TrFormat(L"%s has been downloaded. Restart from About to install it.", tag.c_str());
         notice.action = L"settings:updates";
-        notifications.Post(std::move(notice), silent);
+        show(std::move(notice), silent);
         // This runs synchronously on the UI thread: the card is now accepted,
         // rather than merely having a message queued for a possibly dying UI.
         if (!silent && !WriteTextFile(cache_ + L"\\ready-notified.txt", tag)) Log(L"update: could not save the banner acknowledgement");

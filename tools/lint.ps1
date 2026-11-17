@@ -22,16 +22,8 @@ $errors = [System.Collections.Generic.List[string]]::new()
 $Paths = @($Paths | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 
 # Who may include whom. Root headers are either foundation (anyone) or composition (root only).
-$foundation = 'bar_edge.h', 'clock.h', 'localization.h', 'localization_format.h', 'log.h', 'motion.h', 'resource.h', 'settings.h'
+$foundation = 'bar_edge.h', 'clock.h', 'icon_image.h', 'localization.h', 'localization_format.h', 'log.h', 'motion.h', 'notice.h', 'resource.h', 'settings.h', 'status.h'
 $layers = @{ render = @(); shell = @(); ui = @('render', 'shell') }
-$layerExceptions = @(
-    'render/bar_painter.h -> shell/system_status.h'
-    'render/bar_painter.h -> shell/task_model.h'
-    'shell/feishu_source.h -> ui/notifications.h'
-    'shell/notification_listener.h -> ui/notifications.h'
-    'shell/update_checker.cpp -> ui/notifications.h'
-    'shell/wechat_source.h -> ui/notifications.h'
-)
 
 $banned = [ordered]@{
     'null-macro'      = @('\bNULL\b', 'use nullptr')
@@ -74,7 +66,7 @@ foreach ($file in $files) {
             $to = Rel $target
             $toLayer = Layer $to
             $allowed = if ($toLayer) { $toLayer -eq $from -or $layers[$from] -contains $toLayer } else { $foundation -contains $to }
-            if (-not $allowed -and $layerExceptions -notcontains "$rel -> $to") {
+            if (-not $allowed) {
                 $errors.Add("native/core/${rel}:$($i + 1): layer: $from/ may not include $to")
             }
         }
@@ -102,10 +94,6 @@ foreach ($key in $counts.Keys) {
 }
 foreach ($key in $baseline.Keys) {
     if (-not $counts.Contains($key) -or $counts[$key] -lt $baseline[$key]) { $errors.Add("lint: $key is below its baseline; run ./tools/lint.ps1 -UpdateBaseline") }
-}
-foreach ($key in $layerExceptions) {
-    $rel, $to = $key -split ' -> '
-    if (-not (Select-String -Quiet -SimpleMatch "/$(Split-Path -Leaf $to)`"" (Join-Path $core $rel))) { $errors.Add("lint: stale layer exception '$key'; remove it") }
 }
 
 if ($Base) {

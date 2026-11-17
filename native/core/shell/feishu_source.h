@@ -8,7 +8,7 @@
 // Nothing in Feishu is changed; its popup stays as it is.
 #pragma once
 
-#include "ui/notifications.h"
+#include "notice.h"
 
 #include <windows.h>
 

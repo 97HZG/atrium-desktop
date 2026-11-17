@@ -13,7 +13,7 @@
 // ever shown, WeChat's flash for a message brings a plain card (shell/messengers.h).
 #pragma once
 
-#include "ui/notifications.h"
+#include "notice.h"
 
 #include <windows.h>
 

@@ -8,8 +8,8 @@
 #pragma once
 
 #include "../bar_edge.h"
-#include "../shell/system_status.h"
-#include "../shell/task_model.h"
+#include "../icon_image.h"
+#include "../status.h"
 #include "glass_panel.h"
 #include "hover_wave.h"
 

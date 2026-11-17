@@ -3,6 +3,8 @@
 // loop); the bar reads immutable snapshots.
 #pragma once
 
+#include "icon_image.h"
+
 #include <windows.h>
 
 #include <cstdint>
@@ -24,14 +26,6 @@ struct PinnedApp {
     std::optional<bool> multipleWindows; // absent: browsers and Explorer allow new windows; others reuse
     bool AllowsMultipleWindows() const;
     bool operator==(const PinnedApp&) const = default;
-};
-
-// Premultiplied BGRA, top-down, width * height * 4 bytes.
-struct IconImage {
-    int width = 0;
-    int height = 0;
-    std::vector<uint8_t> bgra;
-    bool empty() const { return bgra.empty(); }
 };
 
 struct TaskItem {
