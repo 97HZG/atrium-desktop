@@ -288,7 +288,7 @@ public sealed partial class MainWindow
             Line(x, L.BarY, x, barBottom); Line(x - 4, L.BarY, x + 4, L.BarY); Line(x - 4, barBottom, x + 4, barBottom);
             Chip($"{Math.Round(_current.Height)} px", x - 30, L.BarY + L.BarH / 2 - 10);
         }
-        else if (_engaged == Loc.T("Bottom spacing"))
+        else if (_engaged == Loc.T("Edge spacing"))
         {
             double x = L.BarX + L.BarW * 0.5;
             Line(x, barBottom, x, _heroH); Line(x - 4, barBottom, x + 4, barBottom); Line(x - 4, _heroH - 1, x + 4, _heroH - 1);

@@ -47,7 +47,7 @@ public sealed partial class MainWindow
         _readout[2].Value.Text = s.AutoWidth ? Loc.T("Auto") : $"{s.Width:0} px";
         _readout[2].Note.Text = s.AutoWidth ? Loc.F("Up to {0:0} px", s.Width) : Loc.T("Fixed width");
         _readout[3].Value.Text = capsule ? Loc.T("Capsule") : r < 1 ? Loc.T("Square") : Loc.T("Rounded rectangle");
-        _readout[3].Note.Text = Loc.F("{0:0} px from the bottom", s.Margin);
+        _readout[3].Note.Text = Loc.F("{0:0} px from the screen edge", s.Margin);
     }
 
     // Notification previews follow the selected live layout and its existing motion curves.

@@ -54,7 +54,7 @@ public sealed partial class MainWindow : Window
             s => s.IconSize, (s, v) => s.IconSize = v, false),
         new("width", Loc.T("Maximum width"), 300, 2400, 10, "px",
             s => s.Width, (s, v) => s.Width = v, false),
-        new("dock", Loc.T("Bottom spacing"), 0, 200, 1, "px",
+        new("dock", Loc.T("Edge spacing"), 0, 200, 1, "px",
             s => s.Margin, (s, v) => s.Margin = v, false),
         new("dock", Loc.T("Hover magnification"), 100, 200, 5, "%",
             s => s.Magnify * 100, (s, v) => s.Magnify = v / 100, false),
