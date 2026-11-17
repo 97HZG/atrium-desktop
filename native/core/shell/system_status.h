@@ -55,7 +55,8 @@ bool ToggleMute();
 // changed: it follows the current one. Call on an STA/MTA thread with COM.
 void WatchVolume(HWND hwnd, UINT msg);
 
-enum class PowerAction { Sleep, Restart, Shutdown };
+enum class PowerAction { Sleep, Hibernate, Restart, Shutdown };
+bool CanHibernate();
 bool RunPowerAction(PowerAction action);
 
 } // namespace atrium

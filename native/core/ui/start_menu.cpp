@@ -338,7 +338,7 @@ D2D1_RECT_F StartMenu::PowerRect() const
     // Right-aligned with the power button, the last in the capsule.
     D2D1_RECT_F shelf = ShelfRect();
     float right = std::min(shelf.right - (barH_ - ButtonSize()) / 2 + 6, W());
-    float bottom = shelf.top - 8, h = 4 * kPowerRowH + 2 * kPowerPad;
+    float bottom = shelf.top - 8, h = float(power_.size()) * kPowerRowH + 2 * kPowerPad;
     return D2D1::RectF(right - kPowerW, bottom - h, right, bottom);
 }
 
@@ -414,6 +414,12 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     hover_.clear();
     pressed_.clear();
     powerOpen_ = false;
+    power_ = {{L"\uE708", Tr(L"Sleep"), PowerAction::Sleep},
+              {L"\uE72C", Tr(L"Restart"), PowerAction::Restart},
+              {L"\uE7E8", Tr(L"Shut down"), PowerAction::Shutdown},
+              {L"\uE72E", Tr(L"Lock"), std::nullopt}};
+    if (CanHibernate())
+        power_.insert(power_.begin() + 1, {L"\uE823", Tr(L"Hibernate"), PowerAction::Hibernate});
     folder_ = -1;
     folderClosing_ = naming_ = false;
     drag_ = {};
@@ -1603,17 +1609,15 @@ void StartMenu::PaintPower(Canvas& c, const Theme& t)
     if (e < 1)
         c.Continue();
     c.BeginGroup(motion::EaseOut(e * 1.3f), 0.92f + 0.08f * motion::EaseOutBack(e, 1.5f), card.right - 22, card.bottom);
-    static const wchar_t* const kGlyphs[] = {L"\uE708", L"\uE72C", L"\uE7E8", L"\uE72E"};
-    const wchar_t* const kNames[] = {Tr(L"Sleep"), Tr(L"Restart"), Tr(L"Shut down"), Tr(L"Lock")};
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < int(power_.size()); ++i) {
         D2D1_RECT_F row = D2D1::RectF(card.left + 8, card.top + kPowerPad + kPowerRowH * float(i), card.right - 8,
                                       card.top + kPowerPad + kPowerRowH * float(i + 1));
         std::wstring id = L"pw:" + std::to_wstring(i);
         float hv = Hover(c, id, hover_ == id || powerSel_ == i);
         if (hv > 0)
             c.Fill(row, 14, powerSel_ == i && hover_ != id ? Alpha(t.accent, 0.24f * hv) : Alpha(t.hover, hv));
-        c.Glyph(kGlyphs[i], D2D1::RectF(row.left + 6, row.top, row.left + 38, row.bottom), 15, t.text);
-        c.Text(kNames[i], D2D1::RectF(row.left + 44, row.top, row.right - 8, row.bottom), 14, t.text);
+        c.Glyph(power_[size_t(i)].glyph, D2D1::RectF(row.left + 6, row.top, row.left + 38, row.bottom), 15, t.text);
+        c.Text(power_[size_t(i)].name, D2D1::RectF(row.left + 44, row.top, row.right - 8, row.bottom), 14, t.text);
         hits_.push_back({row, id});
     }
     c.EndGroup();
@@ -2038,15 +2042,15 @@ void StartMenu::Launch(const CatalogApp& app)
 
 void StartMenu::RunPower(int index)
 {
-    if (index < 0 || index > 3)
+    if (index < 0 || index >= int(power_.size()))
         return;
     Close(true);
-    if (index == 3) { // Windows' own lock
+    if (!power_[size_t(index)].action) { // Windows' own lock
         if (onSystem)
             onSystem(L"lock");
         return;
     }
-    RunPowerAction(index == 0 ? PowerAction::Sleep : index == 1 ? PowerAction::Restart : PowerAction::Shutdown);
+    RunPowerAction(*power_[size_t(index)].action);
 }
 
 void StartMenu::Activate(const std::wstring& id)
@@ -2105,7 +2109,7 @@ void StartMenu::Activate(const std::wstring& id)
         powerMs_ = ClockMs();
         surface_.Invalidate();
     } else if (Starts(id, L"pw:")) {
-        RunPower(id[3] - L'0');
+        RunPower(Index(id, 3));
     } else if (id == L"search") {
         // The field already has the keyboard.
     } else if (!id.empty() && onSystem) {
@@ -2597,7 +2601,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         if (naming_)
             return w == VK_LEFT || w == VK_RIGHT || w == VK_UP || w == VK_DOWN; // the name is typed, not navigated
         if (powerOpen_ && (w == VK_UP || w == VK_DOWN)) {
-            powerSel_ = std::clamp(powerSel_ < 0 ? 0 : powerSel_ + (w == VK_DOWN ? 1 : -1), 0, 3);
+            powerSel_ = std::clamp(powerSel_ < 0 ? 0 : powerSel_ + (w == VK_DOWN ? 1 : -1), 0, int(power_.size()) - 1);
             surface_.Invalidate();
             return true;
         }

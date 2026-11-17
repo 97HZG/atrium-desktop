@@ -243,12 +243,20 @@ bool ToggleMute()
     return true;
 }
 
+bool CanHibernate()
+{
+    SYSTEM_POWER_CAPABILITIES c{};
+    return GetPwrCapabilities(&c) && c.SystemS4 && c.HiberFilePresent;
+}
+
 bool RunPowerAction(PowerAction action)
 {
-    const wchar_t* names[] = {L"sleep", L"restart", L"shutdown"};
+    const wchar_t* names[] = {L"sleep", L"hibernate", L"restart", L"shutdown"};
     Log(L"power: %s", names[int(action)]);
     if (action == PowerAction::Sleep)
         return SetSuspendState(FALSE, FALSE, FALSE) != FALSE;
+    if (action == PowerAction::Hibernate)
+        return SetSuspendState(TRUE, FALSE, FALSE) != FALSE;
     // Shutting down needs SeShutdownPrivilege enabled in the token (every
     // interactive user has it, disabled by default).
     HANDLE token = nullptr;

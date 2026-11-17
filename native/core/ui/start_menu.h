@@ -29,6 +29,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -92,6 +93,11 @@ private:
         wchar_t letter = 0; // a heading of the list (no app)
         int folder = -1;    // a folder: its tile
         CatalogApp app;
+    };
+    struct PowerRow {
+        const wchar_t* glyph;
+        const wchar_t* name;
+        std::optional<PowerAction> action; // empty: lock
     };
     // A tile carried by the pointer: from the grid, or out of the open folder.
     struct Drag {
@@ -279,6 +285,7 @@ private:
     std::wstring rippleId_;
     float rippleX_ = 0, rippleY_ = 0;
     double rippleMs_ = 0;
+    std::vector<PowerRow> power_;
     bool powerOpen_ = false;
     int powerSel_ = -1;
     double powerMs_ = 0;
