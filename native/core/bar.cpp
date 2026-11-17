@@ -1942,7 +1942,7 @@ bool Bar::RenderSession()
     std::unique_ptr<BackdropSource> capture;
     // Remote-control mode: the wallpaper, so that the screen's capture may show Atrium.
     const bool remote = RemoteVisible();
-    // The capture came all black twice in a row: the wallpaper for a while.
+    // The capture came all black twice in a row, through both capture APIs: the wallpaper for a while.
     const bool blackOut = !remote && GetTickCount64() < wallpaperUntil_;
     if (remote || blackOut) {
         capture = std::make_unique<WallpaperCapture>(gpu, snap.hmonitor, frame_);
@@ -2518,7 +2518,8 @@ bool Bar::RenderSession()
 
         // A taskbar gone black (reported by several users): what the capture shows around the bar
         // is all black for a while, yet the screen above the bar is not. The capture is started
-        // again; black again soon after, the glass shows the wallpaper for two minutes.
+        // again; black again soon after, Windows.Graphics.Capture instead (another capture path
+        // entirely); black there too, the wallpaper for a while.
         if (!remote && !blackOut && renderer.HasBackdrop()) {
             if (backdropBrightest > 0.01f) {
                 blackSince = -1;
@@ -2532,8 +2533,17 @@ bool Bar::RenderSession()
                     blackRestartMs_ = ClockMs();
                     if (++blackRestarts_ >= 2) {
                         blackRestarts_ = 0;
-                        wallpaperUntil_ = GetTickCount64() + 120000;
-                        Log(L"render: the capture stays black over a lit screen; the wallpaper for two minutes");
+                        if (duplicationFailed_) {
+                            wallpaperUntil_ = GetTickCount64() + 30000;
+                            Log(L"render: the capture stays black over a lit screen; the wallpaper for thirty seconds");
+                        } else {
+                            // Desktop Duplication keeps coming back black: try Windows.Graphics.Capture
+                            // before the wallpaper, so a capture that is black for any reason cannot
+                            // hide every window behind the wallpaper for minutes.
+                            duplicationFailed_ = true;
+                            duplicationRetryAt_ = GetTickCount64() + 30000;
+                            Log(L"render: the capture stays black over a lit screen; Windows.Graphics.Capture instead");
+                        }
                     } else {
                         Log(L"render: the capture is black over a lit screen; starting it again");
                     }
