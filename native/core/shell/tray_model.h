@@ -36,6 +36,7 @@ struct TrayIcon {
     bool fromRecord = false;
     std::wstring recordId; // stable Windows identity, also before the overflow UI exists
     std::wstring hostKey;  // an icon the tray host received (TrayHost); empty: read from Explorer
+    DWORD pid = 0;         // its window's process (hosted)
     bool appTooltip = false; // a version 4 app drawing its own tooltip (NIN_POPUPOPEN): no standard one
     bool flashing = false;   // its icon flashes (hosted): a message waiting
     size_t order = SIZE_MAX; // place in Windows' own order of the tray icons (UIOrderList), if known

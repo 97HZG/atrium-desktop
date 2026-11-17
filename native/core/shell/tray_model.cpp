@@ -1041,6 +1041,7 @@ std::vector<TrayIcon> TrayModel::Icons() const
         t.tip = h.tip;
         t.exe = h.exe;
         t.hostKey = h.key;
+        t.pid = h.pid;
         t.appTooltip = h.version >= 4 && !h.showTip;
         t.flashing = h.flashUntil > GetTickCount64();
         const std::wstring uidKey = L"uid:" + h.exe + L"|" + std::to_wstring(h.uid);

@@ -53,6 +53,7 @@ private:
     void ArmTip();  // the hovered icon's tooltip after the system's delay
     void ShowTip();
     void HideTip();
+    void LeaveHover();
 
     Surface surface_;
     TrayModel& model_;
@@ -60,8 +61,9 @@ private:
     std::vector<std::wstring> attention_;
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_;
-    HWND tip_ = nullptr;   // the standard tooltip, as the system tray shows it
-    std::wstring tipFor_;  // the hover id it is for
+    HWND tip_ = nullptr;            // the standard tooltip, as the system tray shows it
+    std::wstring tipFor_, tipText_; // the hover id and text it currently shows
+    RECT tipCell_{};
     std::optional<TrayIcon> lastClick_;
     std::optional<TrayIcon> pressedIcon_;
     POINT lastAt_{};

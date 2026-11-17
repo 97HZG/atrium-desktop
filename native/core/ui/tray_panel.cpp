@@ -25,7 +25,9 @@ constexpr float kCell = 40, kIcon = 20, kAir = (kCell - kIcon) / 2; // kAir: fro
 constexpr float kSplit = 14, kFooterH = 24;                            // icons to divider to footer; footer row
 constexpr double kStageMs = 240, kStaggerMs = 14, kRippleMs = 520;
 constexpr UINT_PTR kRefreshTimer = 0x5452415A;
-constexpr UINT_PTR kTipTimer = 0x5A15; // the hover delay before an icon's tooltip
+constexpr UINT_PTR kTipTimer = 0x5A15;   // the hover delay before an icon's tooltip
+constexpr UINT_PTR kHoverTimer = 0x5A17; // while an app's hover popup holds the pointer
+constexpr UINT kHoverMs = 50;
 // After a left click the panel stays one double-click time for the second click, then
 // steps aside; Surface's own timers are 0x5A01 and 0x5A03.
 constexpr UINT_PTR kClickTimer = 0x5A11;
@@ -260,6 +262,7 @@ void TrayPanel::Close()
     KillTimer(surface_.Hwnd(), kRefreshTimer);
     KillTimer(surface_.Hwnd(), kClickTimer);
     KillTimer(surface_.Hwnd(), kSettleTimer);
+    KillTimer(surface_.Hwnd(), kHoverTimer);
     lastClick_.reset();
     if (!surface_.Visible())
         return;
@@ -306,6 +309,13 @@ void TrayPanel::ShowTip()
     const size_t i = tipFor_.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(tipFor_.substr(5))) : icons_.size();
     if (tipFor_ != hover_ || i >= icons_.size() || !surface_.Visible())
         return;
+    const RECT win = surface_.Rect();
+    const float s = surface_.Scale();
+    const D2D1_RECT_F cell = CellRect(i);
+    const RECT cellPx{win.left + LONG(cell.left * s), win.top + LONG(cell.top * s), win.left + LONG(cell.right * s), win.top + LONG(cell.bottom * s)};
+    const std::wstring& text = icons_[i].tip;
+    if (tip_ && IsWindowVisible(tip_) && text == tipText_ && EqualRect(&cellPx, &tipCell_))
+        return;
     if (!tip_) {
         INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_WIN95_CLASSES};
         InitCommonControlsEx(&icc);
@@ -320,18 +330,18 @@ void TrayPanel::ShowTip()
         ti.lpszText = const_cast<wchar_t*>(L"");
         SendMessageW(tip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
     }
-    const std::wstring text = icons_[i].tip;
     TTTOOLINFOW ti{sizeof(ti)};
     ti.hwnd = surface_.Hwnd();
     ti.uId = 1;
     ti.lpszText = const_cast<wchar_t*>(text.c_str());
-    SendMessageW(tip_, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&ti));
-    const float s = surface_.Scale();
     SendMessageW(tip_, TTM_SETMAXTIPWIDTH, 0, LPARAM(400 * s));
+    SendMessageW(tip_, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&ti));
+    // Activated before TTM_GETBUBBLESIZE: an inactive tooltip has not yet sized its theme and font (#89).
+    if (!IsWindowVisible(tip_)) {
+        SendMessageW(tip_, TTM_TRACKPOSITION, 0, MAKELPARAM(win.left, win.top));
+        SendMessageW(tip_, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&ti));
+    }
     // Centred above the icon's cell, kept on its monitor.
-    RECT win{};
-    GetWindowRect(surface_.Hwnd(), &win);
-    const D2D1_RECT_F cell = CellRect(i);
     const LRESULT size = SendMessageW(tip_, TTM_GETBUBBLESIZE, 0, reinterpret_cast<LPARAM>(&ti));
     const int w = LOWORD(size), h = HIWORD(size);
     POINT at{win.left + LONG((cell.left + cell.right) / 2 * s) - w / 2, win.top + LONG(cell.top * s) - h - LONG(4 * s)};
@@ -342,19 +352,49 @@ void TrayPanel::ShowTip()
             at.y = win.top + LONG(cell.bottom * s) + LONG(4 * s);
     }
     SendMessageW(tip_, TTM_TRACKPOSITION, 0, MAKELPARAM(at.x, at.y));
-    SendMessageW(tip_, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&ti));
+    tipText_ = text;
+    tipCell_ = cellPx;
 }
 
 void TrayPanel::HideTip()
 {
     KillTimer(surface_.Hwnd(), kTipTimer);
     tipFor_.clear();
+    tipText_.clear();
+    tipCell_ = {};
     if (!tip_)
         return;
     TTTOOLINFOW ti{sizeof(ti)};
     ti.hwnd = surface_.Hwnd();
     ti.uId = 1;
     SendMessageW(tip_, TTM_TRACKACTIVATE, FALSE, reinterpret_cast<LPARAM>(&ti));
+}
+
+void TrayPanel::LeaveHover()
+{
+    const size_t i = hover_.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(hover_.substr(5))) : icons_.size();
+    POINT cur{};
+    HWND under = i < icons_.size() && surface_.Visible() && GetCursorPos(&cur) ? WindowFromPoint(cur) : nullptr;
+    if (under == surface_.Hwnd() && HitAt(surface_.ScreenToContent(cur)) == hover_) {
+        KillTimer(surface_.Hwnd(), kHoverTimer);
+        if (!tracking_) {
+            TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
+            tracking_ = TrackMouseEvent(&tme) != FALSE;
+        }
+        return;
+    }
+    DWORD pid = 0;
+    if (under)
+        GetWindowThreadProcessId(under, &pid);
+    // An app's own hover popup (NIN_POPUPOPEN) appears under the pointer and takes it from the panel (#89).
+    if (pid && pid == icons_[i].pid && pid != GetCurrentProcessId()) {
+        SetTimer(surface_.Hwnd(), kHoverTimer, kHoverMs, nullptr);
+        return;
+    }
+    KillTimer(surface_.Hwnd(), kHoverTimer);
+    model_.Hover(nullptr);
+    hover_.clear();
+    surface_.Invalidate();
 }
 
 void TrayPanel::SetAttention(const std::vector<TaskItem>& tasks)
@@ -545,6 +585,10 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             if (surface_.Visible()) model_.Refresh();
             return true;
         }
+        if (w == kHoverTimer) {
+            LeaveHover();
+            return true;
+        }
         return false;
     case WM_ACTIVATE:
         if (LOWORD(w) == WA_INACTIVE && surface_.Visible()) {
@@ -558,6 +602,7 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         }
         return false;
     case WM_MOUSEMOVE: {
+        KillTimer(surface_.Hwnd(), kHoverTimer);
         if (!tracking_) {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
             tracking_ = TrackMouseEvent(&tme) != FALSE;
@@ -583,10 +628,11 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_MOUSELEAVE:
         tracking_ = false;
         HideTip();
-        model_.Hover(nullptr);
-        hover_.clear();
-        pressed_.clear();
-        surface_.Invalidate();
+        if (!pressed_.empty()) {
+            pressed_.clear();
+            surface_.Invalidate();
+        }
+        LeaveHover();
         return true;
     case WM_LBUTTONDOWN:
     case WM_RBUTTONDOWN:
