@@ -1,5 +1,5 @@
 BasedOnStyle: WebKit
-ColumnLimit: 0
+ColumnLimit: 160
 IndentWidth: 4
 NamespaceIndentation: None
 FixNamespaceComments: true
@@ -9,8 +9,8 @@ AlignOperands: Align
 AlignTrailingComments:
   Kind: Leave
 AllowShortFunctionsOnASingleLine: All
-AllowShortIfStatementsOnASingleLine: AllIfsAndElse
-AllowShortLoopsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
 AllowShortLambdasOnASingleLine: All
 AllowShortBlocksOnASingleLine: Always
 AllowShortCaseLabelsOnASingleLine: true
@@ -29,3 +29,4 @@ SpaceBeforeCpp11BracedList: false
 SpaceAfterTemplateKeyword: false
 AlwaysBreakTemplateDeclarations: No
 BreakBeforeTernaryOperators: false
+SpaceInEmptyBlock: false

@@ -4,11 +4,13 @@
 #   ./tools/lint.ps1 -Base origin/main       also the diff: format, -Paths scope, -MaxLines budget
 #   ./tools/lint.ps1 -UpdateBaseline         record the ratchet counts (only ever lower them)
 #   -Root <tree>                             check another checkout with these rules
+#   -Fix                                     with -Base: format the changed lines in place first
 param(
     [string]$Root = (Split-Path -Parent $PSScriptRoot),
     [string]$Base,
     [string[]]$Paths,
     [int]$MaxLines = 0,
+    [switch]$Fix,
     [switch]$UpdateBaseline
 )
 $ErrorActionPreference = 'Stop'
@@ -131,6 +133,7 @@ if ($Base) {
             if ($count) { "--lines=${start}:$($start + $count - 1)" }
         })
         if (-not $ranges -or -not $clangFormat) { continue }
+        if ($Fix) { '' | & $clangFormat -i "--style=file:$style" @ranges (Join-Path $root $path) }
         # clang-format still flags some lines outside --lines (nested conditionals): only the touched ones count.
         $out = '' | & $clangFormat --dry-run "--style=file:$style" @ranges (Join-Path $root $path) 2>&1
         foreach ($m in $out | Select-String ':(\d+):\d+: warning') {
