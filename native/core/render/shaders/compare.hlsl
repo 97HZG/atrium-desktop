@@ -14,16 +14,36 @@ cbuffer CompareParams : register(b0)
     uint TileSize;
 };
 
+groupshared uint GroupCount;
+groupshared uint GroupMax;
+
 [numthreads(16, 16, 1)]
-void CS(uint3 id : SV_DispatchThreadID)
+void CS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID, uint3 group : SV_GroupID)
 {
-    if (id.x >= Width || id.y >= Height)
-        return;
-    float3 d = abs(Cur.Load(int3(id.xy, 0)).rgb - Prev.Load(int3(id.xy, 0)).rgb);
-    uint m = (uint)round(max(d.r, max(d.g, d.b)) * 255.0);
-    if (m == 0)
-        return;
-    InterlockedAdd(Out[0], 1);
-    InterlockedMax(Out[1], m);
-    InterlockedMax(Out[2 + (id.y / TileSize) * TilesX + id.x / TileSize], m);
+    if (local.x == 0 && local.y == 0) {
+        GroupCount = 0;
+        GroupMax = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint m = 0;
+    if (id.x < Width && id.y < Height) {
+        float3 d = abs(Cur.Load(int3(id.xy, 0)).rgb - Prev.Load(int3(id.xy, 0)).rgb);
+        m = (uint)round(max(d.r, max(d.g, d.b)) * 255.0);
+    }
+    if (m != 0) {
+        InterlockedAdd(GroupCount, 1);
+        InterlockedMax(GroupMax, m);
+        // The production renderer uses one tile; the heatmap fixture uses 16 px tiles.
+        // Preserve arbitrary tile sizes if a future caller crosses a tile in one group.
+        if (TileSize != 16 && TileSize < max(Width, Height))
+            InterlockedMax(Out[2 + (id.y / TileSize) * TilesX + id.x / TileSize], m);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (local.x == 0 && local.y == 0 && GroupCount != 0) {
+        InterlockedAdd(Out[0], GroupCount);
+        InterlockedMax(Out[1], GroupMax);
+        if (TileSize == 16 || TileSize >= max(Width, Height))
+            InterlockedMax(Out[2 + (group.y * 16 / TileSize) * TilesX + group.x * 16 / TileSize], GroupMax);
+    }
 }
