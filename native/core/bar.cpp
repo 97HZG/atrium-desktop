@@ -2410,7 +2410,9 @@ bool Bar::RenderSession()
             return true; // a new source (display mode change, secure desktop)
         // On Windows.Graphics.Capture after Desktop Duplication failed (it can after a lock or sleep):
         // Desktop Duplication again once it works, not only after a restart (#19).
-        if (!remote && duplicationFailed_ && !capture->KeepsOwnWindowsOut() && GetTickCount64() >= duplicationRetryAt_) {
+        // One that came back black is not tried again on the same displays: it would start fine and be black again.
+        if (!remote && duplicationFailed_ && !capture->KeepsOwnWindowsOut() && GetTickCount64() >= duplicationRetryAt_ &&
+            captureGeneration != blackGeneration_) {
             duplicationRetryAt_ = GetTickCount64() + 30000;
             HRESULT why = S_OK;
             bool elsewhere = false;
@@ -2542,7 +2544,8 @@ bool Bar::RenderSession()
                             // hide every window behind the wallpaper for minutes.
                             duplicationFailed_ = true;
                             duplicationRetryAt_ = GetTickCount64() + 30000;
-                            Log(L"render: the capture stays black over a lit screen; Windows.Graphics.Capture instead");
+                            blackGeneration_ = captureGeneration;
+                            Log(L"render: the capture stays black over a lit screen; Windows.Graphics.Capture until the displays change");
                         }
                     } else {
                         Log(L"render: the capture is black over a lit screen; starting it again");
