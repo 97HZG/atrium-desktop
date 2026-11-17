@@ -5,6 +5,7 @@
 #include "clock.h"
 #include "log.h"
 #include "motion.h"
+#include "shell/displays.h"
 #include "ui/notification_layout.h"
 
 #include <shellapi.h>
@@ -132,6 +133,9 @@ int Notifications::QuietState() const
     if (FAILED(SHQueryUserNotificationState(&state)))
         return QUNS_ACCEPTS_NOTIFICATIONS;
     if (state == QUNS_QUIET_TIME && quietIsOurs && quietIsOurs())
+        return QUNS_ACCEPTS_NOTIFICATIONS;
+    // With Windows' taskbar hidden, a maximized window covers its screen and reports QUNS_BUSY (#80).
+    if (state == QUNS_BUSY && !FullScreenInFront(MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY)))
         return QUNS_ACCEPTS_NOTIFICATIONS;
     return int(state);
 }
