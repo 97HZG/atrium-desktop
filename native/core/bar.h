@@ -271,7 +271,8 @@ private:
     bool duplicationFailed_ = false;            // Desktop Duplication cannot run here: Windows.Graphics.Capture
     ULONGLONG duplicationRetryAt_ = 0; // on Windows.Graphics.Capture: when to try Desktop Duplication again
     // The capture coming all black while the screen is not (BlackCapture): started again; black
-    // again at once, the glass shows the wallpaper until then.
+    // again at once, Windows.Graphics.Capture instead; black there too, the glass shows the
+    // wallpaper until then.
     ULONGLONG wallpaperUntil_ = 0;
     int blackRestarts_ = 0;
     double blackRestartMs_ = -1e9;
