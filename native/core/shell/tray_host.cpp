@@ -28,6 +28,7 @@ constexpr UINT kRecollectMs = 1500;
 constexpr DWORD kForwardMs = 4000;      // as long as an app waits for Explorer anyway
 constexpr DWORD kSignature = 0x34753423;
 constexpr uint64_t kImageBase = 1ull << 62; // apart from TrayModel's own picture versions
+constexpr wchar_t kTaskband[] = L"TaskbandHWND"; // Explorer's MSTaskSwWClass, on its Shell_TrayWnd
 
 // The shell's wire format (WM_COPYDATA dwData 1): handles as 32-bit values, the
 // same for 32- and 64-bit apps.
@@ -314,6 +315,7 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
         break;
     }
     if (m == quit_ && InSendMessageEx(nullptr) == ISMEX_NOSEND) { // posted by ~TrayHost
+        RemovePropW(h, kTaskband);
         DestroyWindow(h);
         return 0;
     }
@@ -514,6 +516,10 @@ void TrayHost::KeepFirst()
     if (shell && GetWindowRect(shell, &want) && GetWindowRect(w, &have) && !EqualRect(&want, &have))
         SetWindowPos(w, nullptr, want.left, want.top, want.right - want.left, want.bottom - want.top,
                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    // ITaskbarList::HrInit takes Explorer's taskband from the first Shell_TrayWnd, else fails with
+    // E_NOTIMPL: apps that show progress on their button would not start (TeraCopy #90, NanaZip #86).
+    if (HANDLE band = shell ? GetPropW(shell, kTaskband) : nullptr; band != GetPropW(w, kTaskband))
+        SetPropW(w, kTaskband, band);
     HWND first = FindWindowW(L"Shell_TrayWnd", nullptr);
     if (first == w) {
         if (yielded_.exchange(false)) {
