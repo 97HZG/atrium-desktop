@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
@@ -22,6 +23,7 @@ namespace Atrium.Settings;
 public sealed partial class MainWindow
 {
     private ModuleScene? _startScene, _trayScene, _imeScene, _statusScene, _clockScene;
+    private bool _minimized; // the scenes stand still: nothing of theirs is on screen
 
     private ModuleScene? SceneFor(int page) => page switch
     {
@@ -46,6 +48,14 @@ public sealed partial class MainWindow
     private void LeaveModulePages()
     {
         foreach (var scene in Scenes()) scene.Leave();
+    }
+
+    private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        bool minimized = sender.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+        if (minimized == _minimized) return;
+        _minimized = minimized;
+        foreach (var scene in Scenes()) scene.Wake();
     }
 
     private void StopModules()
@@ -422,10 +432,17 @@ public sealed partial class MainWindow
 
         protected void Kick()
         {
-            if (!Active || _ticking) return;
+            if (!Active || _ticking || M._minimized) return;
             _ticking = true;
             _last = Environment.TickCount64;
             CompositionTarget.Rendering += Tick;
+        }
+
+        // The window was minimized or restored.
+        public void Wake()
+        {
+            if (M._minimized) StopTicking();
+            else Kick();
         }
 
         private void StopTicking()

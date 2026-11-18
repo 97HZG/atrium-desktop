@@ -6,7 +6,6 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Storage.Pickers;
 
 namespace Atrium.Settings;
 
@@ -213,11 +212,7 @@ public sealed partial class MainWindow
 
     private async void OnAddPin(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        picker.FileTypeFilter.Add(".exe");
-        picker.FileTypeFilter.Add(".lnk");
-        var file = await picker.PickSingleFileAsync();
+        var file = await PickProgramAsync();
         if (file == null) return;
         if (_pinVms.Count >= 64)
         {
@@ -237,15 +232,13 @@ public sealed partial class MainWindow
     {
         var dialog = new ContentDialog
         {
-            Style = (Style)Application.Current.Resources["AtriumDialogStyle"],
-            XamlRoot = Content.XamlRoot,
             Title = Loc.T("Import Windows taskbar pins?"),
             Content = Loc.T("The current pinned list will be replaced by the apps pinned to the Windows taskbar."),
             PrimaryButtonText = Loc.T("Replace"),
             CloseButtonText = Loc.T("Cancel"),
             DefaultButton = ContentDialogButton.Close,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await AskAsync(dialog) != ContentDialogResult.Primary) return;
         CurrentSettings.Pins = CoreClient.ImportTaskbarPins();
         RebuildPins();
         Changed();

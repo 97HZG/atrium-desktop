@@ -361,6 +361,7 @@ internal static class TextMetrics
     {
         var key = (t.FontFamily.Source, t.FontSize, (int)t.FontWeight.Weight);
         if (Lines.TryGetValue(key, out double h)) return h;
+        if (Lines.Count >= 256) Lines.Clear(); // sizes in a glide are all different: bounded, not a cache of every one
         var probe = new TextBlock
         {
             FontFamily = t.FontFamily,

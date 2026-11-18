@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Storage.Pickers;
 
 namespace Atrium.Settings;
 
@@ -181,11 +180,7 @@ public sealed partial class MainWindow
 
     private async void OnAddExcluded(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        picker.FileTypeFilter.Add(".exe");
-        picker.FileTypeFilter.Add(".lnk");
-        var file = await picker.PickSingleFileAsync();
+        var file = await PickProgramAsync();
         if (file == null) return;
         // By its program's file name: still the same app after it updates into another folder.
         string exe = ShellIcons.ExecutablePath(file.Path);
@@ -225,15 +220,13 @@ public sealed partial class MainWindow
         }
         var dialog = new ContentDialog
         {
-            Style = (Style)Application.Current.Resources["AtriumDialogStyle"],
-            XamlRoot = Content.XamlRoot,
             Title = Loc.T(found.Count > 0 ? "Games found" : "No games found"),
             Content = found.Count > 0 ? new ScrollViewer { Content = list, MaxHeight = 420 } : null,
             PrimaryButtonText = found.Count > 0 ? Loc.T("Exclude selected") : "",
             CloseButtonText = Loc.T(found.Count > 0 ? "Cancel" : "OK"),
             DefaultButton = found.Count > 0 ? ContentDialogButton.Primary : ContentDialogButton.Close,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await AskAsync(dialog) != ContentDialogResult.Primary) return;
         ExcludedVm? last = null;
         foreach (var (box, game) in rows)
         {

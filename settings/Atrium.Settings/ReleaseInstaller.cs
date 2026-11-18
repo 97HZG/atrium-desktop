@@ -136,7 +136,7 @@ internal static class ReleaseInstaller
             return 0;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException or JsonException
-            or FormatException or InvalidOperationException or ArgumentException)
+            or FormatException or InvalidOperationException or ArgumentException or InvalidDataException or NotSupportedException)
         {
             App.LogCrash(error);
             if (cache != null)
@@ -221,12 +221,22 @@ internal static class ReleaseInstaller
             string actual = "sha256:" + Convert.ToHexString(SHA256.HashData(stream));
             if (!actual.Equals(digest, StringComparison.OrdinalIgnoreCase))
             {
+                stream.Close();
+                File.Delete(zip); // a retry downloads it again
                 throw new IOException(Loc.T("The update package failed verification. Download again."));
             }
         }
         string unpacked = Path.Combine(WorkDirectory, "unpacked");
         if (Directory.Exists(unpacked)) Directory.Delete(unpacked, true); // an interrupted extraction, not transfer data
-        ZipFile.ExtractToDirectory(zip, unpacked);
+        try
+        {
+            ZipFile.ExtractToDirectory(zip, unpacked);
+        }
+        catch (InvalidDataException)
+        {
+            File.Delete(zip); // damaged: a retry downloads it again
+            throw;
+        }
         string root = File.Exists(Path.Combine(unpacked, "Atrium.exe")) ? unpacked : Path.Combine(unpacked, "Atrium");
         ValidatePackage(root, pending.Release.Version);
         SaveJson(StatePath, new Prepared(pending.Release.Tag, pending.Release.Version.ToString(), root));

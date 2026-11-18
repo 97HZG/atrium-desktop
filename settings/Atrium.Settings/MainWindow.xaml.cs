@@ -12,6 +12,8 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.Storage;
+using Windows.Storage.Pickers;
 using Windows.UI;
 
 namespace Atrium.Settings;
@@ -83,6 +85,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private bool _loading;
     private bool _previewBusy, _previewPending;
     private bool _closePending;
+    private ContentDialog? _dialog; // the one shown (AskAsync)
     private readonly FrameworkElement[] _mains = [];
     private readonly FrameworkElement?[] _sides = [];
     private int _page;
@@ -139,6 +142,7 @@ public sealed partial class MainWindow : Window, IDisposable
             presenter.PreferredMinimumHeight = (int)(680 * scale);
         }
         AppWindow.Closing += OnClosing;
+        AppWindow.Changed += OnAppWindowChanged;
         nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _updateMessage = (handle, message, wparam, lparam, id, data) =>
         {
@@ -747,6 +751,34 @@ public sealed partial class MainWindow : Window, IDisposable
         Status.Title = title;
         Status.Message = message;
         Status.IsOpen = true;
+    }
+
+    // WinUI shows one dialog at a time and none on a window that is closing: then the answer is None.
+    private async Task<ContentDialogResult> AskAsync(ContentDialog dialog)
+    {
+        if (_dialog != null || Content.XamlRoot == null) return ContentDialogResult.None;
+        dialog.Style = (Style)Application.Current.Resources["AtriumDialogStyle"];
+        dialog.XamlRoot = Content.XamlRoot;
+        _dialog = dialog;
+        try { return await dialog.ShowAsync(); }
+        finally { _dialog = null; }
+    }
+
+    // An app (.exe or .lnk) the user picks; null when cancelled. Windows shows no picker to an
+    // unpackaged app run as administrator.
+    private async Task<StorageFile?> PickProgramAsync()
+    {
+        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        picker.FileTypeFilter.Add(".exe");
+        picker.FileTypeFilter.Add(".lnk");
+        try { return await picker.PickSingleFileAsync(); }
+        catch (COMException)
+        {
+            ShowMessage(InfoBarSeverity.Warning, Loc.T("The file picker is unavailable"),
+                Loc.T("Windows does not show it to apps run as administrator. Open the settings without administrator rights."));
+            return null;
+        }
     }
 
     // Follow the process exit event rather than polling the pipe while the settings window is idle.
@@ -1497,6 +1529,11 @@ public sealed partial class MainWindow : Window, IDisposable
     private async Task CloseRequestedAsync()
     {
         if (_closePending || _coreChanging) return;
+        if (_dialog != null) // a close while a dialog is up dismisses the dialog
+        {
+            _dialog.Hide();
+            return;
+        }
         _closePending = true;
         try
         {
@@ -1504,8 +1541,6 @@ public sealed partial class MainWindow : Window, IDisposable
             {
                 var dialog = new ContentDialog
                 {
-                    Style = (Style)Application.Current.Resources["AtriumDialogStyle"],
-                    XamlRoot = Content.XamlRoot,
                     Title = Loc.T("Save changes?"),
                     Content = Loc.T("Unsaved changes will be discarded when this window closes."),
                     PrimaryButtonText = Loc.T("Save"),
@@ -1513,7 +1548,7 @@ public sealed partial class MainWindow : Window, IDisposable
                     CloseButtonText = Loc.T("Cancel"),
                     DefaultButton = ContentDialogButton.Primary,
                 };
-                var result = await dialog.ShowAsync();
+                var result = await AskAsync(dialog);
                 if (result == ContentDialogResult.None) { _restartUpdate = null; return; }
                 if (result == ContentDialogResult.Primary && !await SaveAsync()) { _restartUpdate = null; return; }
             }
