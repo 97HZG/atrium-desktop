@@ -57,6 +57,7 @@ private:
     struct Shared {
         std::mutex lock;
         std::vector<Result> done;
+        std::vector<HWND> pending; // being taken: one worker a window, however often it is asked for
         HWND notify = nullptr;
         UINT message = 0;
     };

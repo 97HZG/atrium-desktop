@@ -58,6 +58,7 @@ add_executable(atrium_core WIN32
     shell/wechat_source.cpp
     shell/feishu_source.cpp
     ui/surface.cpp
+    ui/canvas.cpp
     ui/start_menu.cpp
     ui/notifications.cpp
     ui/tray_panel.cpp

@@ -149,6 +149,8 @@ WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, in
     if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) || frame.right <= frame.left || frame.bottom <= frame.top)
         frame = win;
     const int ww = win.right - win.left, wh = win.bottom - win.top;
+    if (ww > 16384 || wh > 16384) // no window is shown this large: not gigabytes for it
+        return {};
     BITMAPINFO bi{};
     bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
     bi.bmiHeader.biWidth = ww;
@@ -254,12 +256,22 @@ WindowSnapshots::~WindowSnapshots()
 
 void WindowSnapshots::Request(HWND window, int maxWidth, int maxHeight, float radius, int largeMax)
 {
+    // PrintWindow waits for the window's thread: a hung one would hold a worker and its bitmap for good.
+    if (IsHungAppWindow(window))
+        return;
+    {
+        std::lock_guard g(shared_->lock);
+        if (std::ranges::find(shared_->pending, window) != shared_->pending.end())
+            return;
+        shared_->pending.push_back(window);
+    }
     std::thread([shared = shared_, window, maxWidth, maxHeight, radius, largeMax] {
         // Physical px of every monitor, as the window's own picture is.
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         WindowPicture large;
         WindowPicture p = Capture(window, maxWidth, maxHeight, radius, largeMax, &large);
         std::lock_guard g(shared->lock);
+        std::erase(shared->pending, window);
         if (!shared->notify)
             return;
         shared->done.push_back(Result{window, std::move(p), std::move(large)});

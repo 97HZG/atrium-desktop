@@ -216,7 +216,8 @@ public:
 private:
     friend class Canvas;
     static LRESULT CALLBACK Proc(HWND, UINT, WPARAM, LPARAM);
-    void Paint();
+    void Paint();      // the frame now, unless one is being drawn: then the one after
+    void PaintFrame();
     void Present();
     bool EnsureDevice();
     void ResetDevice();
@@ -244,6 +245,7 @@ private:
     unsigned glassShown_ = 0; // GlassPanel::shown
     bool glassPending_ = false; // published since the last content frame
     bool presentPending_ = false; // one content buffer awaiting its glass; input stays responsive
+    bool painting_ = false;       // inside PaintFrame: a paint callback's message may ask for another
     std::optional<RECT> nextResize_;
     bool releaseResize_ = false;
     unsigned presentGen_ = 0;
