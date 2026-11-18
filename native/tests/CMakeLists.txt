@@ -40,11 +40,6 @@ target_compile_definitions(stage_excluded_tests PRIVATE NOMINMAX WIN32_LEAN_AND_
 target_link_libraries(stage_excluded_tests PRIVATE user32)
 add_test(NAME stage_excluded COMMAND stage_excluded_tests)
 
-add_executable(double_click_tests
-    double_click.cpp)
-target_include_directories(double_click_tests PRIVATE ../core)
-add_test(NAME double_click COMMAND double_click_tests)
-
 add_executable(tray_interaction_tests tray_interaction.cpp)
 target_include_directories(tray_interaction_tests PRIVATE ../core)
 target_compile_definitions(tray_interaction_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

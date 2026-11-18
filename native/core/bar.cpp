@@ -799,10 +799,9 @@ void Bar::BeginDrag(POINT pt)
     const auto& plate = scene_.items[size_t(from)].plate;
     dragging_ = true;
     dragKey_ = pressed_;
-    dragFrom_ = dragInsert_ = from;
+    dragInsert_ = from;
     grabDx_ = pressPt_.x - int((plate.left + plate.right) / 2);
     dragX_ = pt.x;
-    dragY_ = pt.y;
     scene_.pressedKey.clear();
     HideTooltip();
     Relayout();
@@ -811,7 +810,6 @@ void Bar::BeginDrag(POINT pt)
 void Bar::UpdateDrag(POINT pt)
 {
     dragX_ = pt.x;
-    dragY_ = pt.y;
     // Insertion point: the slot whose centre is nearest to the dragged plate's.
     float centre = float(pt.x - grabDx_);
     int slot = int(std::lround((centre - float(appsLeft_) - float(plate_) / 2) / float(pitch_)));
@@ -1288,7 +1286,6 @@ void Bar::Relayout()
     appsLeft_ = appsLeft;
     pitch_ = pitch;
     plate_ = plate;
-    gap_ = gap;
     shown_ = n;
     scene.separatorX = rightCount ? float(rightLeft - sepGap) : -1;
     if (showTray) {
@@ -1351,7 +1348,6 @@ void Bar::Relayout()
     hmonitor_ = mon;
     UpdateAppBar(mon, mi.rcMonitor, reserve);
     scale_ = s;
-    inset_ = inset;
     insetX_ = insetX;
     insetTop_ = insetTop;
     rise_ = rise;

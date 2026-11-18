@@ -37,7 +37,6 @@ public:
     virtual ID3D11Texture2D* Again() { return nullptr; }
     // Whether Atrium's windows may show in other captures while this one runs.
     virtual bool KeepsOwnWindowsOut() const = 0;
-    virtual const wchar_t* Name() const = 0;
 };
 
 class MonitorCapture : public BackdropSource {
@@ -50,7 +49,6 @@ public:
     ID3D11Texture2D* Acquire() override;
     void Release() override;
     bool KeepsOwnWindowsOut() const override { return false; }
-    const wchar_t* Name() const override { return L"Windows.Graphics.Capture"; }
 
 private:
     winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice device_{nullptr};
@@ -77,7 +75,6 @@ public:
     void Release() override;
     bool Lost() const override { return lost_; }
     bool KeepsOwnWindowsOut() const override { return true; }
-    const wchar_t* Name() const override { return L"DXGI Desktop Duplication"; }
     static bool Temporary(HRESULT why);
 
 private:

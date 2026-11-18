@@ -132,7 +132,6 @@ public:
     void Release() override {}
     ID3D11Texture2D* Again() override { return version_ ? texture_.get() : nullptr; }
     bool KeepsOwnWindowsOut() const override { return true; }
-    const wchar_t* Name() const override { return L"the wallpaper"; }
 
 private:
     const Gpu& gpu_;

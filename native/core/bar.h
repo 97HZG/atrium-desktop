@@ -219,10 +219,10 @@ private:
     // others make room at `dragInsert_`.
     bool dragging_ = false;
     std::wstring dragKey_;
-    int dragFrom_ = -1, dragInsert_ = -1;
-    int dragX_ = 0, dragY_ = 0, grabDx_ = 0;
+    int dragInsert_ = -1;
+    int dragX_ = 0, grabDx_ = 0;
     // App strip metrics of the last layout (client px).
-    int appsLeft_ = 0, pitch_ = 1, plate_ = 0, gap_ = 0, shown_ = 0;
+    int appsLeft_ = 0, pitch_ = 1, plate_ = 0, shown_ = 0;
     std::vector<std::wstring> hidden_; // apps behind the overflow entry
     int unread_ = 0;
     SystemStatus status_;
@@ -232,8 +232,8 @@ private:
     RECT applied_{};      // last window rect given to SetWindowPos
     int appliedRgn_[7]{}; // bar width, height, radius, insets, extension and edge of the last region
     // Room around the shape inside the windows (px): sides (shadow plus the
-    // magnified bar's stretch), top (shadow plus magnified icons), bottom.
-    int insetX_ = 0, insetTop_ = 0, inset_ = 0;
+    // magnified bar's stretch), top (shadow plus magnified icons).
+    int insetX_ = 0, insetTop_ = 0;
     int rise_ = 0;        // how far magnified or hopping icons reach above the shape
     int radius_ = 0;
     bool regionExtended_ = false;
