@@ -155,6 +155,15 @@ void Notifications::ClearPreparedUpdate()
 
 void Notifications::Post(Notice n, bool silent)
 {
+    if (!n.unread) { // the sender reports the conversation read: its cards go
+        std::vector<uint64_t> ids;
+        for (const Notice& o : notices_)
+            if (o.source == n.source && o.title == n.title)
+                ids.push_back(o.id);
+        for (uint64_t id : ids)
+            Remove(id);
+        return;
+    }
     n.time = GetTickCount64();
     // Repeats of the listener's notices, and bursts of the same title from one
     // app, become one card with a count.

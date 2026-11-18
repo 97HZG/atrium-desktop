@@ -285,19 +285,24 @@ void WeChatSource::Run()
                         auto old = unread.find(key);
                         // A chat not seen before counts only at the top of the list,
                         // where a new message puts it (scrolling brings old ones in).
-                        bool rose = old != unread.end() ? r.unread > old->second : r.unread > 0 && i < 3;
-                        if (baseline && rose && !r.muted) {
+                        bool rose = baseline && !r.muted && (old != unread.end() ? r.unread > old->second : r.unread > 0 && i < 3);
+                        // Not gated on baseline: WeChat in front clears it, and reading happens there (#79).
+                        bool read = old != unread.end() && old->second > 0 && r.unread == 0;
+                        if (rose || read) {
                             auto* n = new Notice();
                             n->source = L"wechat";
-                            n->app = Tr(L"WeChat");
-                            n->appId = exe;
                             n->title = r.chat;
-                            n->body = r.summary;
-                            if (!exe.empty())
-                                n->action = L"app:" + exe;
+                            n->unread = rose;
+                            if (rose) {
+                                n->app = Tr(L"WeChat");
+                                n->appId = exe;
+                                n->body = r.summary;
+                                if (!exe.empty())
+                                    n->action = L"app:" + exe;
+                            }
                             if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(n)))
                                 delete n;
-                            else
+                            else if (rose)
                                 Log(L"wechat: new message (unread %d)", r.unread);
                         }
                         unread[key] = r.unread;

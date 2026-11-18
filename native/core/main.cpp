@@ -1275,7 +1275,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             on = on && (m != Messenger::None ? MessengerOn(m) : n->source != L"windows" || g_app.displaySettings.notifyListener);
             if (g_app.notes && on) {
                 g_app.notes->Post(*n);
-                g_app.alerts.Noticed(m, GetTickCount64()); // its flash needs no plain card
+                if (n->unread)
+                    g_app.alerts.Noticed(m, GetTickCount64()); // its flash needs no plain card
             }
             delete n;
         }
