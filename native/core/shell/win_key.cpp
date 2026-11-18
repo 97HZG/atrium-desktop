@@ -8,6 +8,7 @@ namespace {
 
 // Marks the keys this hook sends on to Windows, so it lets them through.
 constexpr ULONG_PTR kOurs = 0x41545257; // "ATRW"
+constexpr UINT kRehookMs = 10000;
 
 WinKey* g_winKey = nullptr; // the hook procedure has no context of its own
 
@@ -76,8 +77,21 @@ void WinKey::Run()
     ready_ = true;
     // Low-level hooks are called on this thread while it waits for messages:
     // it does nothing else, so a busy UI thread never delays a key.
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0)
-        DispatchMessageW(&msg);
+    // Windows drops a hook that once answers too late (a busy sign-in) without a word, and the
+    // key would be Windows' for the rest of the session: it is set again now and then, between
+    // presses (#71). No key is handled between the two calls: hooks run inside GetMessage.
+    SetTimer(nullptr, 0, kRehookMs, nullptr);
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        if (msg.message != WM_TIMER) {
+            DispatchMessageW(&msg);
+        } else if (!held_ && !digit_) {
+            if (HHOOK again = SetWindowsHookExW(WH_KEYBOARD_LL, Hook, GetModuleHandleW(nullptr), 0)) {
+                if (hook)
+                    UnhookWindowsHookEx(hook);
+                hook = again;
+            }
+        }
+    }
     if (hook)
         UnhookWindowsHookEx(hook);
 }
