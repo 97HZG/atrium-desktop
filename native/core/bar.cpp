@@ -9,6 +9,7 @@
 #include "render/capture.h"
 #include "render/desktop_backdrop.h"
 #include "render/glass_renderer.h"
+#include "render/ime_swap.h"
 #include "render/ui_font.h"
 #include "ui/surface.h"
 
@@ -1295,6 +1296,13 @@ void Bar::Relayout()
     }
     if (!scene.hoverKey.empty() && std::none_of(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
+    // The input method announcement is timed state, not layout: it rides
+    // through a rebuild instead of vanishing mid-swap.
+    scene.imeGlyph = scene_.imeGlyph;
+    scene.imeMs = scene_.imeMs;
+    scene.imePrevGlyph = scene_.imePrevGlyph;
+    scene.imePrevAlpha = scene_.imePrevAlpha;
+    scene.imeContinued = scene_.imeContinued;
     scene_ = std::move(scene);
 
     // The window only changes when the bar's size does (not on every drag move).
@@ -1719,6 +1727,28 @@ void Bar::SetStatus(const SystemStatus& status)
     scene_.status = status;
     Publish();
     UpdateTooltips();
+}
+
+void Bar::AnnounceIme(const std::wstring& glyph)
+{
+    if (glyph.empty())
+        return;
+    // A switch while the previous glyph is still on screen crossfades from it
+    // instead of restarting the handshake, whose first step would flash the
+    // connection symbol back between the two glyphs.
+    const double now = ClockMs();
+    const double elapsed = now - scene_.imeMs;
+    // The swap may itself be a continued one: its symbol is already away from
+    // the start, so the normal timeline's showing test would miss it and the
+    // symbol would flash back between rapid changes.
+    const ImeSwapFrame current = scene_.imeGlyph.empty() ? ImeSwapFrame{} : ImeSwapAt(elapsed, scene_.imeContinued);
+    const bool continued = scene_.imeMs > 0 && current.out > 0.5f && current.in > 0.003f;
+    scene_.imeContinued = continued;
+    scene_.imePrevGlyph = continued ? scene_.imeGlyph : std::wstring();
+    scene_.imePrevAlpha = continued ? current.in : 0.f;
+    scene_.imeGlyph = glyph;
+    scene_.imeMs = now;
+    Publish(); // content only: the glass does not change
 }
 
 void Bar::SetUnread(int count)

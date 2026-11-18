@@ -1,16 +1,11 @@
 #include "shell/win_key.h"
 
 #include "log.h"
+#include "shell/keyboard_hook.h"
 
 namespace atrium {
 
 namespace {
-
-// Marks the keys this hook sends on to Windows, so it lets them through.
-constexpr ULONG_PTR kOurs = 0x41545257; // "ATRW"
-constexpr UINT kRehookMs = 10000;
-
-WinKey* g_winKey = nullptr; // the hook procedure has no context of its own
 
 // The window in front runs elevated: keys Atrium sends would not reach it.
 bool ForegroundElevated()
@@ -41,7 +36,7 @@ INPUT Key(DWORD vk, DWORD scan, bool extended)
     i.ki.wVk = WORD(vk);
     i.ki.wScan = WORD(scan);
     i.ki.dwFlags = extended ? KEYEVENTF_EXTENDEDKEY : 0;
-    i.ki.dwExtraInfo = kOurs;
+    i.ki.dwExtraInfo = kAtriumSyntheticKey;
     return i;
 }
 
@@ -49,113 +44,70 @@ INPUT Key(DWORD vk, DWORD scan, bool extended)
 
 WinKey::WinKey(HWND notify, UINT msg, bool alone, bool numbers) : notify_(notify), msg_(msg), alone_(alone), numbers_(numbers)
 {
-    g_winKey = this;
-    thread_ = std::thread([this] { Run(); });
-    // The hook is in place before the constructor returns (or failed and said so).
-    while (!ready_.load())
-        Sleep(1);
+    keyToken_ = KeyboardHook::Instance().Add(&WinKey::OnKey, this);
+    Log(L"winkey: watching the Windows key (%s%s%s)", alone_ ? L"start menu" : L"", alone_ && numbers_ ? L", " : L"", numbers_ ? L"Win + digits" : L"");
 }
 
-WinKey::~WinKey()
-{
-    if (threadId_)
-        PostThreadMessageW(threadId_, WM_QUIT, 0, 0);
-    thread_.join();
-    g_winKey = nullptr;
-}
+WinKey::~WinKey() { KeyboardHook::Instance().Remove(keyToken_); }
 
-void WinKey::Run()
+bool WinKey::OnKey(void* context, DWORD vk, DWORD scan, bool extended, bool down, bool /*injected*/, ULONG_PTR extraInfo)
 {
-    threadId_ = GetCurrentThreadId();
-    MSG msg;
-    PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE); // the thread's queue, for WM_QUIT
-    HHOOK hook = SetWindowsHookExW(WH_KEYBOARD_LL, Hook, GetModuleHandleW(nullptr), 0);
-    if (hook)
-        Log(L"winkey: watching the Windows key (%s%s%s)", alone_ ? L"start menu" : L"", alone_ && numbers_ ? L", " : L"", numbers_ ? L"Win + digits" : L"");
-    else
-        Log(L"winkey: could not watch the keyboard (%lu)", GetLastError());
-    ready_ = true;
-    // Low-level hooks are called on this thread while it waits for messages:
-    // it does nothing else, so a busy UI thread never delays a key.
-    // Windows drops a hook that once answers too late (a busy sign-in) without a word, and the
-    // key would be Windows' for the rest of the session: it is set again now and then, between
-    // presses (#71). No key is handled between the two calls: hooks run inside GetMessage.
-    SetTimer(nullptr, 0, kRehookMs, nullptr);
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        if (msg.message != WM_TIMER) {
-            DispatchMessageW(&msg);
-        } else if (!held_ && !digit_) {
-            if (HHOOK again = SetWindowsHookExW(WH_KEYBOARD_LL, Hook, GetModuleHandleW(nullptr), 0)) {
-                if (hook)
-                    UnhookWindowsHookEx(hook);
-                hook = again;
-            }
-        }
-    }
-    if (hook)
-        UnhookWindowsHookEx(hook);
-}
-
-LRESULT CALLBACK WinKey::Hook(int code, WPARAM w, LPARAM l)
-{
-    WinKey* self = g_winKey;
-    const auto* k = reinterpret_cast<const KBDLLHOOKSTRUCT*>(l);
-    if (code != HC_ACTION || !self || k->dwExtraInfo == kOurs)
-        return CallNextHookEx(nullptr, code, w, l);
-    const bool down = w == WM_KEYDOWN || w == WM_SYSKEYDOWN;
-    const bool win = k->vkCode == VK_LWIN || k->vkCode == VK_RWIN;
+    WinKey* self = static_cast<WinKey*>(context);
+    if (!self || extraInfo == kAtriumSyntheticKey)
+        return false; // Atrium's own replay: let it through
+    const bool win = vk == VK_LWIN || vk == VK_RWIN;
     if (win && down) {
         if (!self->held_) { // not the key's auto-repeat
             self->held_ = true;
             self->used_ = false;
-            self->key_ = k->vkCode;
-            self->scan_ = k->scanCode;
-            self->extended_ = (k->flags & LLKHF_EXTENDED) != 0;
+            self->key_ = vk;
+            self->scan_ = scan;
+            self->extended_ = extended;
             self->passed_ = ForegroundElevated();
         }
-        return self->passed_ ? CallNextHookEx(nullptr, code, w, l) : 1; // held back
+        return !self->passed_; // held back
     }
     if (win) {
-        if (self->held_ && k->vkCode == self->key_) {
+        if (self->held_ && vk == self->key_) {
             const bool held = !self->passed_;
             self->held_ = false;
             if (held) { // Windows never saw it go down
                 if (self->used_)
-                    return 1;
+                    return true;
                 if (self->alone_) { // no start menu of its own
                     PostMessageW(self->notify_, self->msg_, 0, 0);
-                    return 1;
+                    return true;
                 }
                 // Only the digits are ours: Windows' start menu, as if never held.
                 INPUT keys[2] = {Key(self->key_, self->scan_, self->extended_), Key(self->key_, self->scan_, self->extended_)};
                 keys[1].ki.dwFlags |= KEYEVENTF_KEYUP;
                 SendInput(2, keys, sizeof(INPUT));
-                return 1;
+                return true;
             }
         }
-        return CallNextHookEx(nullptr, code, w, l);
+        return false;
     }
-    if (self->digit_ && k->vkCode == self->digit_) { // the kept digit: its repeats and its release
+    if (self->digit_ && vk == self->digit_) { // the kept digit: its repeats and its release
         if (!down)
             self->digit_ = 0;
-        return 1;
+        return true;
     }
     if (down && self->held_ && !self->passed_) {
-        const bool digit = k->vkCode >= '0' && k->vkCode <= '9';
+        const bool digit = vk >= '0' && vk <= '9';
         const bool modified = (GetAsyncKeyState(VK_SHIFT) | GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_MENU)) & 0x8000;
         if (digit && self->numbers_ && !modified) {
             self->used_ = true;
-            self->digit_ = k->vkCode;
-            PostMessageW(self->notify_, self->msg_, k->vkCode == '0' ? 10 : k->vkCode - '0', 0);
-            return 1;
+            self->digit_ = vk;
+            PostMessageW(self->notify_, self->msg_, vk == '0' ? 10 : vk - '0', 0);
+            return true;
         }
         // Another key: a shortcut. The Windows key goes on to Windows first, then this key.
         self->passed_ = true;
-        INPUT keys[2] = {Key(self->key_, self->scan_, self->extended_), Key(k->vkCode, k->scanCode, (k->flags & LLKHF_EXTENDED) != 0)};
+        INPUT keys[2] = {Key(self->key_, self->scan_, self->extended_), Key(vk, scan, extended)};
         SendInput(2, keys, sizeof(INPUT));
-        return 1;
+        return true;
     }
-    return CallNextHookEx(nullptr, code, w, l);
+    return false;
 }
 
 } // namespace atrium

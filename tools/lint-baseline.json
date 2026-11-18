@@ -52,7 +52,6 @@
   "shell/wechat_source.cpp|raw-new": 1,
   "shell/wechat_source.cpp|try": 1,
   "shell/wifi.cpp|sleep": 1,
-  "shell/win_key.cpp|sleep": 1,
   "ui/control_center.cpp|raw-delete": 4,
   "ui/control_center.cpp|raw-new": 4,
   "ui/control_center.cpp|sleep": 3,
