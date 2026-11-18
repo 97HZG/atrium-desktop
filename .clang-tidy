@@ -4,9 +4,13 @@ Checks: >
   -bugprone-narrowing-conversions,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-exception-escape,
+  -bugprone-pointer-arithmetic-on-polymorphic-object,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  -clang-analyzer-optin.performance.Padding,
   performance-*,
   -performance-no-int-to-ptr,
   -performance-enum-size,
+  -performance-inefficient-string-concatenation,
   modernize-*,
   -modernize-return-braced-init-list,
   -modernize-use-trailing-return-type,
@@ -40,13 +44,14 @@ Checks: >
   cppcoreguidelines-slicing,
   cppcoreguidelines-pro-type-cstyle-cast,
   google-explicit-constructor
-ExtraArgs: ['-Wno-missing-field-initializers', '-Wno-missing-braces']
+ExtraArgs: ['-Wno-missing-field-initializers', '-Wno-missing-braces', '-D_XM_NO_INTRINSICS_', '-Wno-cast-function-type-mismatch']
 HeaderFilterRegex: '.*[\\/]native[\\/](core|tests)[\\/].*'
 CheckOptions:
   readability-function-cognitive-complexity.Threshold: 40
   modernize-use-auto.MinTypeNameLength: 8
   readability-function-cognitive-complexity.IgnoreMacros: true
   readability-function-size.LineThreshold: 120
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
   readability-identifier-naming.NamespaceCase: lower_case
   readability-identifier-naming.ClassCase: CamelCase
   readability-identifier-naming.StructCase: CamelCase
@@ -66,6 +71,7 @@ CheckOptions:
   readability-identifier-naming.GlobalConstantPrefix: k
   readability-identifier-naming.ConstexprVariableCase: CamelCase
   readability-identifier-naming.ConstexprVariablePrefix: k
+  readability-identifier-naming.ConstexprVariableIgnoredRegexp: '^WM_[A-Z_]+$' # window messages read as the system's
   readability-identifier-naming.StaticConstantCase: CamelCase
   readability-identifier-naming.StaticConstantPrefix: k
   readability-identifier-naming.GlobalVariableCase: camelBack
@@ -73,3 +79,5 @@ CheckOptions:
   readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
   readability-identifier-naming.FunctionIgnoredRegexp: '^(wmain|wWinMain)$'
   readability-identifier-naming.MethodIgnoredRegexp: '^(get|put)_[A-Z]\w*$'
+  readability-identifier-naming.VirtualMethodIgnoredRegexp: '^(get|put)_[A-Z]\w*$'
+  bugprone-empty-catch.AllowEmptyCatchForExceptions: '::winrt::hresult_error' # a WinRT call the system may refuse: nothing to do

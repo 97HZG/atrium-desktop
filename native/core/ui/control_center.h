@@ -68,7 +68,7 @@ private:
     float PaintHeader(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& title, bool on, const std::wstring& toggleId);
     void Switch(Canvas& c, const Theme& t, D2D1_RECT_F r, bool on, float hv);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
-    std::wstring HitAt(POINT client) const;
+    std::wstring HitAt(POINT pt) const;
     void Activate(const std::wstring& id);
     void Scan(bool rescan);
     void ReadRadios(bool devices);

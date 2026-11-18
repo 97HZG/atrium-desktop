@@ -70,13 +70,13 @@ public sealed partial class MainWindow
     private static Task NextFrame()
     {
         var done = new TaskCompletionSource();
-        void rendered(object? _1, object _2)
+        void Rendered(object? _1, object _2)
         {
-            CompositionTarget.Rendering -= rendered;
+            CompositionTarget.Rendering -= Rendered;
             done.TrySetResult();
         }
 
-        CompositionTarget.Rendering += rendered;
+        CompositionTarget.Rendering += Rendered;
         return done.Task;
     }
 

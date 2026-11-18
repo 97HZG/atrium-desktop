@@ -314,7 +314,7 @@ void TrayPanel::Refresh()
 void TrayPanel::ArmTip()
 {
     HideTip();
-    const size_t i = hover_.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(hover_.substr(5))) : icons_.size();
+    const size_t i = hover_.starts_with(L"icon:") ? size_t(std::stoul(hover_.substr(5))) : icons_.size();
     if (i >= icons_.size() || private_ || icons_[i].appTooltip || icons_[i].tip.empty())
         return;
     tipFor_ = hover_;
@@ -326,7 +326,7 @@ void TrayPanel::ArmTip()
 
 void TrayPanel::ShowTip()
 {
-    const size_t i = tipFor_.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(tipFor_.substr(5))) : icons_.size();
+    const size_t i = tipFor_.starts_with(L"icon:") ? size_t(std::stoul(tipFor_.substr(5))) : icons_.size();
     if (tipFor_ != hover_ || i >= icons_.size() || !surface_.Visible())
         return;
     const RECT win = surface_.Rect();
@@ -392,7 +392,7 @@ void TrayPanel::HideTip()
 
 void TrayPanel::LeaveHover()
 {
-    const size_t i = hover_.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(hover_.substr(5))) : icons_.size();
+    const size_t i = hover_.starts_with(L"icon:") ? size_t(std::stoul(hover_.substr(5))) : icons_.size();
     POINT cur{};
     HWND under = i < icons_.size() && surface_.Visible() && GetCursorPos(&cur) ? WindowFromPoint(cur) : nullptr;
     if (under == surface_.Hwnd() && HitAt(surface_.ScreenToContent(cur)) == hover_) {
@@ -499,7 +499,7 @@ void TrayPanel::Paint(Canvas& c)
         c.EndGroup();
         c.EndGroup();
         // Only an existing task attention signal for the exact executable. No guessed unread count.
-        if (icon.flashing || (!icon.exe.empty() && std::find(attention_.begin(), attention_.end(), icon.exe) != attention_.end())) {
+        if (icon.flashing || (!icon.exe.empty() && std::ranges::find(attention_, icon.exe) != attention_.end())) {
             const float pulse = 0.72f + 0.28f * float(std::sin((c.now - openedMs_) * 0.006));
             c.Fill(D2D1::RectF(ir.right - 3, ir.top - 3, ir.right + 4, ir.top + 4), 3.5f, D2D1::ColorF(0.96f, 0.22f, 0.25f, pulse));
             c.Continue();
@@ -641,7 +641,7 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         if (h != hover_) {
             hover_ = h;
             // A hosted icon's app is told the pointer is on it, as the system tray does.
-            const size_t i = h.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(h.substr(5))) : icons_.size();
+            const size_t i = h.starts_with(L"icon:") ? size_t(std::stoul(h.substr(5))) : icons_.size();
             model_.Hover(i < icons_.size() && !icons_[i].hostKey.empty() ? &icons_[i] : nullptr);
             ArmTip();
             surface_.Invalidate();
@@ -650,7 +650,7 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     }
     case WM_MBUTTONUP: {
         const std::wstring h = HitAt(pt);
-        const size_t i = h.rfind(L"icon:", 0) == 0 ? size_t(std::stoul(h.substr(5))) : icons_.size();
+        const size_t i = h.starts_with(L"icon:") ? size_t(std::stoul(h.substr(5))) : icons_.size();
         if (i < icons_.size() && !icons_[i].hostKey.empty())
             model_.MiddleClick(icons_[i]);
         return true;
@@ -696,11 +696,10 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     }
     case WM_KEYDOWN:
-        if (w == VK_ESCAPE) {
+        if (w == VK_ESCAPE)
             Close();
-            return true;
-        }
-        return false;
+        return w == VK_ESCAPE;
+    default: break;
     }
     (void)result;
     return false;

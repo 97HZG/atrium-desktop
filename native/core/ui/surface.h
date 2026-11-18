@@ -76,7 +76,7 @@ POINT PopupOrigin(RECT bar, RECT popup, RECT anchor);
 // Drawing helpers bound to one surface's device context.
 class Canvas {
 public:
-    Canvas(Surface& surface, ID2D1DeviceContext* d2d, float scale, D2D1_MATRIX_3X2_F base) : scale(scale), s_(surface), d2d_(d2d), base_(base) {}
+    Canvas(Surface& surface, ID2D1DeviceContext* d2d, float scale) : scale(scale), s_(surface), d2d_(d2d) {}
     float scale; // px per DIP; every coordinate below is in DIP
     bool panel = false; // the glass is not there (yet): paint a plain panel instead
     double now = 0;     // ClockMs() of this frame
@@ -93,10 +93,10 @@ public:
     float DarkAt(D2D1_RECT_F r) const;
     void Callout(D2D1_RECT_F body, float radius, float tipX, float halfWidth, float tailHeight, float tailInset, D2D1_COLOR_F color);
     // Draws what follows faded and scaled around (cx, cy), moved by (dx, dy); DIP. Groups nest.
-    void BeginGroup(float opacity, float scale, float cx, float cy, float dx = 0, float dy = 0);
+    void BeginGroup(float opacity, float k, float cx, float cy, float dx = 0, float dy = 0);
     void EndGroup();
 
-    D2D1_RECT_F Px(D2D1_RECT_F dip) const;
+    D2D1_RECT_F Px(D2D1_RECT_F r) const;
     void Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c);
     void Stroke(D2D1_RECT_F r, float radius, D2D1_COLOR_F c, float width = 1);
     void Line(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float width = 1);
@@ -146,7 +146,6 @@ private:
     ID2D1SolidColorBrush* Brush(D2D1_COLOR_F c);
     Surface& s_;
     ID2D1DeviceContext* d2d_;
-    D2D1_MATRIX_3X2_F base_;
     float alpha_ = 1; // opacity of the current group
     std::vector<std::pair<D2D1_MATRIX_3X2_F, float>> groups_;
     winrt::com_ptr<ID2D1Image> blurTarget_;
@@ -275,10 +274,6 @@ private:
     bool popOpen_ = true;
     float rippleX_ = 0, rippleY_ = 0;
     double rippleMs_ = 0;
-    static GlassHost* host_;
-    static bool capturable_;
-    static bool captureVisible_;
-    static std::vector<Surface*> all_;
     bool private_ = false;
     void ApplyCaptureExclusion();
     int bufW_ = 0, bufH_ = 0;

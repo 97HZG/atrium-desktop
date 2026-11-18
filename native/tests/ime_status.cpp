@@ -61,10 +61,10 @@ void CheckWatch()
     Require(!watch.Update(a, zh), "the first read only seeds the baseline");
     Require(!watch.Update(a, zh), "the same state never announces twice");
     Require(watch.Update(a, en), "a switch announces");
-    Require(!watch.state().native, "the announced state is the newest one");
+    Require(!watch.State().native, "the announced state is the newest one");
     Require(watch.Update(a, zh), "switching back announces too");
     Require(!watch.Update(b, en), "another window brings its own state without news");
-    Require(watch.state().layout == zh.layout && !watch.state().native, "that window's state reseeded the baseline");
+    Require(watch.State().layout == zh.layout && !watch.State().native, "that window's state reseeded the baseline");
     ImeStatus stalled = en;
     stalled.reliable = false;
     Require(!watch.Update(b, stalled), "a stalled read announces nothing");

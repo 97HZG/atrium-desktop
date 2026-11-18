@@ -36,7 +36,7 @@ namespace {
 
 constexpr int kIconPx = 64;
 std::atomic<DWORD> g_syntheticInput{0}; // GetLastInputInfo time of the last pointer click Atrium sent
-static_assert(tray::providerTimeout == int32_t(UIA_E_TIMEOUT));
+static_assert(tray::kProviderTimeout == int32_t(UIA_E_TIMEOUT));
 
 std::wstring Lower(std::wstring s)
 {
@@ -281,7 +281,7 @@ std::map<std::wstring, Program> RunningPrograms()
         p.windows.push_back(h);
         wchar_t title[256];
         if (c->titles && IsWindowVisible(h) && InternalGetWindowText(h, title, 256) > 0) // sends no message (a hung window)
-            p.titles.push_back(title);
+            p.titles.emplace_back(title);
         return TRUE;
     };
     EnumWindows(each, reinterpret_cast<LPARAM>(&ctx));
@@ -605,6 +605,7 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
     };
     auto rect = [](const RECT& r) { return tray::Rect{r.left, r.top, r.right, r.bottom}; };
     std::vector<tray::Button> bs;
+    bs.reserve(buttons.size());
     for (const auto& b : buttons)
         bs.push_back({b.tip, b.promoted, rect(b.bounds)});
     std::vector<tray::Record> rs;
@@ -628,11 +629,10 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
     }
     std::vector<tray::Program> ps;
     const auto initial = tray::Match(bs, rs);
-    const bool needPrograms =
-        std::any_of(initial.items.begin(), initial.items.end(), [](const auto& item) { return item.button != tray::none && item.record == tray::none; });
+    const bool needPrograms = std::ranges::any_of(initial.items, [](const auto& item) { return item.button != tray::kNone && item.record == tray::kNone; });
     for (const auto& [path, program] : running) {
         if (!needPrograms || path.empty() || path[0] == L'|' || program.windows.empty() ||
-            std::any_of(rs.begin(), rs.end(), [&](const auto& r) { return r.live && r.exe == path; }))
+            std::ranges::any_of(rs, [&](const auto& r) { return r.live && r.exe == path; }))
             continue;
         tray::Program value;
         value.exe = path;
@@ -645,7 +645,7 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
         diagnostics->records = rs.size();
         for (size_t r = 0; r < rs.size(); ++r) {
             diagnostics->live += rs[r].live;
-            diagnostics->aliases += result.aliases[r] != tray::none && result.aliases[r] != r;
+            diagnostics->aliases += result.aliases[r] != tray::kNone && result.aliases[r] != r;
             diagnostics->shared += result.sharedPlace[r];
         }
         for (const auto& item : result.items)
@@ -653,7 +653,7 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
     }
     std::vector<int> match;
     for (const auto& item : result.items) {
-        if (item.button == tray::none) {
+        if (item.button == tray::kNone) {
             const auto& r = rs[item.record];
             Found f;
             f.tip = r.tip;
@@ -667,10 +667,10 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
         }
         Found& f = buttons[match.size()];
         f.method = item.method;
-        if (item.record != tray::none) {
+        if (item.record != tray::kNone) {
             f.recordId = rs[item.record].identity;
             match.push_back(int(item.record));
-        } else if (item.program != tray::none) {
+        } else if (item.program != tray::kNone) {
             Record r;
             r.exe = ps[item.program].exe;
             r.id = L"run:" + r.exe;
@@ -695,11 +695,11 @@ const wchar_t* RouteName(tray::Route route)
 HRESULT ToolbarClick(const Found& target, tray::Action action)
 {
     wchar_t cls[80]{};
-    if (!IsWindow(target.toolbar) || !GetClassNameW(target.toolbar, cls, 80) || wcscmp(cls, L"ToolbarWindow32"))
+    if (!IsWindow(target.toolbar) || !GetClassNameW(target.toolbar, cls, 80) || wcscmp(cls, L"ToolbarWindow32") != 0)
         return E_INVALIDARG;
     HWND root = GetAncestor(target.toolbar, GA_ROOT);
     GetClassNameW(root, cls, 80);
-    if (wcscmp(cls, L"Shell_TrayWnd") && wcscmp(cls, L"NotifyIconOverflowWindow"))
+    if (wcscmp(cls, L"Shell_TrayWnd") != 0 && wcscmp(cls, L"NotifyIconOverflowWindow") != 0)
         return E_INVALIDARG;
     DWORD pid = 0, shellPid = 0;
     GetWindowThreadProcessId(root, &pid);
@@ -825,6 +825,9 @@ bool ForegroundExisting(const std::wstring& exe)
 // back only if the user has not moved it meanwhile. Any user input cancels it.
 struct TaskbarClickReveal {
     bool active = SystemChrome::RevealForClick();
+    TaskbarClickReveal() = default;
+    TaskbarClickReveal(const TaskbarClickReveal&) = delete;
+    TaskbarClickReveal& operator=(const TaskbarClickReveal&) = delete;
     ~TaskbarClickReveal()
     {
         if (active)
@@ -842,10 +845,8 @@ struct TrayPointerDesktop {
     void Wait(DWORD ms) const { Sleep(ms); }
     bool Interacting() const
     {
-        for (int key : {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2, VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN})
-            if (GetAsyncKeyState(key) & 0x8000)
-                return true;
-        return false;
+        constexpr int kKeys[] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2, VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN};
+        return std::ranges::any_of(kKeys, [](int key) { return (GetAsyncKeyState(key) & 0x8000) != 0; });
     }
     bool Target(POINT& p) const
     {
@@ -914,18 +915,14 @@ HRESULT PointerRightClick(IUIAutomation* uia, const Found& target)
             opened = OverflowWindow();
     }
     // Not the chevron again: that is another activation and can dismiss the app's new menu.
-    struct Hide {
-        HWND h;
-        ~Hide()
-        {
-            if (h && IsWindow(h))
-                ShowWindowAsync(h, SW_HIDE);
-        }
-    } hide{opened};
+    std::unique_ptr<HWND__, void (*)(HWND)> hide(opened, [](HWND h) {
+        if (IsWindow(h))
+            ShowWindowAsync(h, SW_HIDE);
+    });
     // Showing the overflow can materialise and reorder its buttons: the same UIA element, never another.
     bool available = false;
     auto buttons = FindButtons(uia, available);
-    auto it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) {
+    auto it = std::ranges::find_if(buttons, [&](const Found& f) {
         BOOL same = FALSE;
         return f.element && SUCCEEDED(uia->CompareElements(target.element.get(), f.element.get(), &same)) && same;
     });
@@ -933,7 +930,7 @@ HRESULT PointerRightClick(IUIAutomation* uia, const Found& target)
         return E_ABORT;
     TrayPointerDesktop desktop{uia, it->element.get(), it->host};
     const auto result = tray::RightClick(desktop);
-    return result == tray::PointerClick::sent ? S_OK : result == tray::PointerClick::cancelled ? E_ABORT : E_FAIL;
+    return result == tray::PointerClick::Sent ? S_OK : result == tray::PointerClick::Cancelled ? E_ABORT : E_FAIL;
 }
 
 } // namespace
@@ -960,7 +957,7 @@ TrayModel::~TrayModel()
 void TrayModel::Refresh()
 {
     std::lock_guard g(mutex_);
-    if (std::none_of(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }))
+    if (std::ranges::none_of(jobs_, [](const Job& j) { return j.refresh; }))
         jobs_.push_back({true, {}});
     cv_.notify_all();
 }
@@ -1039,7 +1036,7 @@ bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction)
     if (fallback.exe.empty())
         fallback.exe = icon.exe;
     std::lock_guard g(mutex_);
-    jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }), {false, fallback, action});
+    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), {false, fallback, action});
     cv_.notify_all();
     return true;
 }
@@ -1049,8 +1046,7 @@ void TrayModel::Click(const TrayIcon& icon, bool right)
     if (ClickHosted(icon, right ? tray::HostAction::Right : tray::HostAction::Left))
         return;
     std::lock_guard g(mutex_);
-    jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }),
-                 {false, icon, right ? tray::Action::Right : tray::Action::Left});
+    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), {false, icon, right ? tray::Action::Right : tray::Action::Left});
     cv_.notify_all();
 }
 
@@ -1059,14 +1055,14 @@ void TrayModel::DoubleClick(const TrayIcon& icon, bool continuation)
     if (ClickHosted(icon, continuation ? tray::HostAction::DoubleContinuation : tray::HostAction::Double))
         return;
     std::lock_guard g(mutex_);
-    jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }),
+    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }),
                  {false, icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double});
     cv_.notify_all();
 }
 void TrayModel::OpenSystemTray()
 {
     std::lock_guard g(mutex_);
-    jobs_.insert(std::find_if(jobs_.begin(), jobs_.end(), [](const Job& j) { return j.refresh; }), {false, {}, tray::Action::Left, true});
+    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), {false, {}, tray::Action::Left, true});
     cv_.notify_all();
 }
 
@@ -1122,7 +1118,7 @@ std::vector<TrayIcon> TrayModel::Icons() const
     // Windows' own order (the system tray's), whatever was built of Explorer's tray when
     // it was read: the same icon stays in the same place from one opening to the next.
     auto inWindowsOrder = [](std::vector<TrayIcon> list) {
-        std::stable_sort(list.begin(), list.end(), [](const TrayIcon& a, const TrayIcon& b) { return a.order < b.order; });
+        std::ranges::stable_sort(list, [](const TrayIcon& a, const TrayIcon& b) { return a.order < b.order; });
         for (size_t i = 0; i < list.size(); ++i)
             list[i].index = int(i);
         return list;
@@ -1319,6 +1315,7 @@ void TrayModel::Worker()
                 auto match = MatchButtons(buttons, records, ordered, appNames);
                 auto resolve = [&]() -> Found* {
                     std::vector<tray::TargetKey> candidates;
+                    candidates.reserve(buttons.size());
                     for (size_t b = 0; b < buttons.size(); ++b) {
                         candidates.push_back(
                             {session, buttons[b].runtimeId, buttons[b].recordId, match[b] >= 0 ? records[size_t(match[b])].exe : L"", buttons[b].tip});
@@ -1326,7 +1323,7 @@ void TrayModel::Worker()
                     const auto resolved = tray::ResolveTarget(job.icon.Target(), ReadShellSession(), candidates);
                     Log(L"tray: click resolve=%s shellPid=%lu shellStarted=%llu shellWindow=%llu", tray::ResolutionName(resolved.reason), DWORD(session.pid),
                         session.started, session.window);
-                    return resolved.index == tray::none ? nullptr : &buttons[resolved.index];
+                    return resolved.index == tray::kNone ? nullptr : &buttons[resolved.index];
                 };
                 Found* target = resolve();
                 HWND taskbar = ShellTaskbar(), overflow = OverflowWindow();
@@ -1477,12 +1474,12 @@ void TrayModel::Worker()
                             pic.version, r.png.size());
                         pic.exe = r.exe;
                         pic.snapshot = r.png;
-                        const int tone = img.empty() ? 0 : GlyphTone(img);
+                        const int tone = img.Empty() ? 0 : GlyphTone(img);
                         pic.inked = tone ? std::make_shared<const IconImage>(InkedGlyph(img, tone)) : nullptr;
                         if (tone)
                             Log(L"tray: %s draws a %s glyph: it follows the ink", PathFindFileNameW(r.exe.c_str()), tone > 0 ? L"white" : L"black");
                         pic.inkedOnLight = tone > 0;
-                        pic.image = img.empty() ? nullptr : std::make_shared<const IconImage>(std::move(img));
+                        pic.image = img.Empty() ? nullptr : std::make_shared<const IconImage>(std::move(img));
                     }
                     t.imageVersion = pic.version;
                     t.image = pic.image;
@@ -1526,8 +1523,8 @@ void TrayModel::Worker()
                 Log(L"tray: reconcile records=%zu live=%zu aliases=%zu sharedPlace=%zu unknown=%zu uiaMs=%llu", diagnostics.records, diagnostics.live,
                     diagnostics.aliases, diagnostics.shared, diagnostics.unknown, readMs);
                 Log(L"tray: %zu icons (%d recognised %s%s) in %llu ms%s", buttons.size(), recognised, ordered ? L"in Windows' order" : L"by name",
-                    std::any_of(buttons.begin(), buttons.end(), [](const Found& f) { return f.toolbar != nullptr; }) ? L", classic tray" : L"",
-                    GetTickCount64() - readStart, available ? L"" : L", the shell's tray was not found");
+                    std::ranges::any_of(buttons, [](const Found& f) { return f.toolbar != nullptr; }) ? L", classic tray" : L"", GetTickCount64() - readStart,
+                    available ? L"" : L", the shell's tray was not found");
                 for (size_t b = 0; b < buttons.size(); ++b) {
                     std::wstring exe = match[b] >= 0 ? records[size_t(match[b])].exe : L"-";
                     Log(L"tray: item=%zu source=%s match=%s promoted=%d index=%d identity=%s tip='%s' exe='%s'", b, buttons[b].element ? L"uia" : L"record",

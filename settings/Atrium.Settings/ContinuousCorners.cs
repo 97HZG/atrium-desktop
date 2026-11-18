@@ -16,7 +16,7 @@ namespace Atrium.Settings;
 // Visual states require normal dependency properties: WinUI cannot animate
 // custom attached properties. Keep these logical paints separate from the
 // renderer brush so leaving a state restores the original binding correctly.
-public sealed class ContinuousSurface : Grid
+public sealed partial class ContinuousSurface : Grid
 {
     public static readonly DependencyProperty PaintProperty = DependencyProperty.Register(
         nameof(Paint), typeof(Brush), typeof(ContinuousSurface), new PropertyMetadata(null,
@@ -34,7 +34,7 @@ public sealed class ContinuousSurface : Grid
 
 // Applies the analytic boundary as an alpha mask. Native CornerRadius / cubic
 // clips are removed; layout, content, focus, input and motion stay with WinUI.
-public sealed class ContinuousCorners : DependencyObject
+public sealed partial class ContinuousCorners : DependencyObject
 {
     public static readonly DependencyProperty EnabledProperty = DependencyProperty.RegisterAttached(
         "Enabled", typeof(bool), typeof(ContinuousCorners), new PropertyMetadata(false, EnabledChanged));
@@ -96,30 +96,30 @@ public sealed class ContinuousCorners : DependencyObject
 
     private sealed class State
     {
-        private readonly FrameworkElement element;
-        private readonly DependencyProperty radiusProperty, backgroundProperty, strokeProperty;
-        private AnalyticBrush? fill;
-        private AnalyticBrush? outline;
-        private SpriteVisual? outlineVisual;
-        private bool changing;
+        private readonly FrameworkElement _element;
+        private readonly DependencyProperty _radiusProperty, _backgroundProperty, _strokeProperty;
+        private AnalyticBrush? _fill;
+        private AnalyticBrush? _outline;
+        private SpriteVisual? _outlineVisual;
+        private bool _changing;
         internal double Corner;
         internal Brush? Background;
-        private Brush? stroke;
-        private readonly Brush? baseBackground, baseStroke;
-        private readonly FocusChrome? focus;
-        private CompositionGeometricClip? nativeClip;
-        private (double Width, double Height, double Radius) clipGeometry;
+        private Brush? _stroke;
+        private readonly Brush? _baseBackground, _baseStroke;
+        private readonly FocusChrome? _focus;
+        private CompositionGeometricClip? _nativeClip;
+        private (double Width, double Height, double Radius) _clipGeometry;
         internal void RefreshPaint()
         {
-            Background = GetPaint(element) ?? baseBackground;
-            stroke = GetEdge(element) ?? baseStroke;
+            Background = GetPaint(_element) ?? _baseBackground;
+            _stroke = GetEdge(_element) ?? _baseStroke;
             Update();
         }
 
         internal State(FrameworkElement element)
         {
-            this.element = element;
-            (radiusProperty, backgroundProperty, strokeProperty) = element switch
+            _element = element;
+            (_radiusProperty, _backgroundProperty, _strokeProperty) = element switch
             {
                 Border => (Border.CornerRadiusProperty, Border.BackgroundProperty, Border.BorderBrushProperty),
                 Grid => (Grid.CornerRadiusProperty, Panel.BackgroundProperty, Grid.BorderBrushProperty),
@@ -128,25 +128,25 @@ public sealed class ContinuousCorners : DependencyObject
                 _ => throw new InvalidOperationException(),
             };
             Corner = Radius(element);
-            baseBackground = (Brush?)element.GetValue(backgroundProperty);
-            baseStroke = (Brush?)element.GetValue(strokeProperty);
-            Background = GetPaint(element) ?? baseBackground;
-            stroke = GetEdge(element) ?? baseStroke;
-            element.RegisterPropertyChangedCallback(backgroundProperty, (_, _) =>
+            _baseBackground = (Brush?)element.GetValue(_backgroundProperty);
+            _baseStroke = (Brush?)element.GetValue(_strokeProperty);
+            Background = GetPaint(element) ?? _baseBackground;
+            _stroke = GetEdge(element) ?? _baseStroke;
+            element.RegisterPropertyChangedCallback(_backgroundProperty, (_, _) =>
             {
-                if (changing) return;
-                Background = (Brush?)element.GetValue(backgroundProperty);
+                if (_changing) return;
+                Background = (Brush?)element.GetValue(_backgroundProperty);
                 Update();
             });
-            element.RegisterPropertyChangedCallback(strokeProperty, (_, _) =>
+            element.RegisterPropertyChangedCallback(_strokeProperty, (_, _) =>
             {
-                if (changing) return;
-                stroke = (Brush?)element.GetValue(strokeProperty);
+                if (_changing) return;
+                _stroke = (Brush?)element.GetValue(_strokeProperty);
                 Update();
             });
-            element.RegisterPropertyChangedCallback(radiusProperty, (_, _) =>
+            element.RegisterPropertyChangedCallback(_radiusProperty, (_, _) =>
             {
-                if (changing) return;
+                if (_changing) return;
                 Corner = Radius(element);
                 Update();
             });
@@ -157,17 +157,17 @@ public sealed class ContinuousCorners : DependencyObject
                 ContentPresenter => ContentPresenter.BorderThicknessProperty,
                 _ => Shape.StrokeThicknessProperty,
             };
-            element.RegisterPropertyChangedCallback(thicknessProperty, (_, _) => { if (!changing) Update(); });
+            element.RegisterPropertyChangedCallback(thicknessProperty, (_, _) => { if (!_changing) Update(); });
             element.SizeChanged += (_, _) => Update();
             element.ActualThemeChanged += (_, _) => Update();
-            element.Unloaded += (_, _) => { fill?.Deactivate(); outline?.Deactivate(); };
+            element.Unloaded += (_, _) => { _fill?.Deactivate(); _outline?.Deactivate(); };
             element.Loaded += (_, _) => Update();
             for (var parent = Control.GetIsTemplateFocusTarget(element) ? VisualTreeHelper.GetParent(element) : null;
                  parent != null; parent = VisualTreeHelper.GetParent(parent))
             {
                 if (parent is not Control control) continue;
                 if (control is not ScrollViewer and not UserControl and not ItemsControl && (control.IsTabStop || control.UseSystemFocusVisuals))
-                    focus = FocusOwners.GetValue(control, c => new FocusChrome(c, element));
+                    _focus = FocusOwners.GetValue(control, c => new FocusChrome(c, element));
                 break;
             }
             Update();
@@ -190,7 +190,7 @@ public sealed class ContinuousCorners : DependencyObject
             Rectangle r => r.Fill,
             _ => null,
         };
-        private Thickness Thickness => element switch
+        private Thickness Thickness => _element switch
         {
             Border b => b.BorderThickness,
             Grid p => p.BorderThickness,
@@ -198,7 +198,7 @@ public sealed class ContinuousCorners : DependencyObject
             Rectangle r => new Thickness(r.StrokeThickness),
             _ => new Thickness(),
         };
-        private TimeSpan Transition => element switch
+        private TimeSpan Transition => _element switch
         {
             Border b => b.BackgroundTransition?.Duration ?? TimeSpan.Zero,
             Panel p => p.BackgroundTransition?.Duration ?? TimeSpan.Zero,
@@ -208,12 +208,12 @@ public sealed class ContinuousCorners : DependencyObject
 
         private void Update()
         {
-            if (element.ActualWidth <= 0 || element.ActualHeight <= 0) return;
-            changing = true;
+            if (_element.ActualWidth <= 0 || _element.ActualHeight <= 0) return;
+            _changing = true;
             try
             {
-                element.SetValue(radiusProperty, element is Rectangle ? 0d : new CornerRadius(0));
-                if (element is Rectangle rect) rect.RadiusY = 0;
+                _element.SetValue(_radiusProperty, _element is Rectangle ? 0d : new CornerRadius(0));
+                if (_element is Rectangle rect) rect.RadiusY = 0;
                 // Keep live acrylic and bitmap brushes connected to XAML: image
                 // invalidation, alignment, transitions and material policies stay
                 // native. The finite path clip below is still the A08 gap;
@@ -221,53 +221,53 @@ public sealed class ContinuousCorners : DependencyObject
                 if (Background is AcrylicBrush or ImageBrush)
                 {
                     ApplyNativeClip();
-                    element.SetValue(backgroundProperty, Background);
+                    _element.SetValue(_backgroundProperty, Background);
                 }
                 else
                 {
-                    if (GetClipChildren(element)) ApplyNativeClip();
-                    else if (nativeClip != null) ElementCompositionPreview.GetElementVisual(element).Clip = null;
+                    if (GetClipChildren(_element)) ApplyNativeClip();
+                    else if (_nativeClip != null) ElementCompositionPreview.GetElementVisual(_element).Clip = null;
                     if (Background != null)
                     {
-                        fill ??= new AnalyticBrush(element);
-                        fill.Update(Corner, 0, Background, Transition);
+                        _fill ??= new AnalyticBrush(_element);
+                        _fill.Update(Corner, 0, Background, Transition);
                     }
-                    element.SetValue(backgroundProperty, Background == null ? null : fill);
+                    _element.SetValue(_backgroundProperty, Background == null ? null : _fill);
                 }
-                element.SetValue(strokeProperty, Transparent);
+                _element.SetValue(_strokeProperty, Transparent);
                 double width = Math.Max(Math.Max(Thickness.Left, Thickness.Right), Math.Max(Thickness.Top, Thickness.Bottom));
-                if (stroke != null && width > 0)
+                if (_stroke != null && width > 0)
                 {
-                    if (outline == null)
+                    if (_outline == null)
                     {
-                        outline = new AnalyticBrush(element, false);
-                        outlineVisual = CompositorFor(element).CreateSpriteVisual();
-                        outlineVisual.Brush = outline.Native;
-                        ElementCompositionPreview.SetElementChildVisual(element, outlineVisual);
+                        _outline = new AnalyticBrush(_element, false);
+                        _outlineVisual = CompositorFor(_element).CreateSpriteVisual();
+                        _outlineVisual.Brush = _outline.Native;
+                        ElementCompositionPreview.SetElementChildVisual(_element, _outlineVisual);
                     }
-                    outline.Update(Corner, width, stroke, Transition);
-                    outlineVisual!.Size = new Vector2((float)element.ActualWidth, (float)element.ActualHeight);
-                    outlineVisual.Opacity = 1;
+                    _outline.Update(Corner, width, _stroke, Transition);
+                    _outlineVisual!.Size = new Vector2((float)_element.ActualWidth, (float)_element.ActualHeight);
+                    _outlineVisual.Opacity = 1;
                 }
                 else
                 {
-                    outlineVisual?.Opacity = 0;
+                    _outlineVisual?.Opacity = 0;
                 }
 
-                focus?.Update(Corner);
+                _focus?.Update(Corner);
             }
-            finally { changing = false; }
+            finally { _changing = false; }
         }
 
         private void ApplyNativeClip()
         {
-            var next = (element.ActualWidth, element.ActualHeight, Corner);
-            if (nativeClip != null && clipGeometry == next)
+            var next = (_element.ActualWidth, _element.ActualHeight, Corner);
+            if (_nativeClip != null && _clipGeometry == next)
             {
-                ElementCompositionPreview.GetElementVisual(element).Clip = nativeClip;
+                ElementCompositionPreview.GetElementVisual(_element).Clip = _nativeClip;
                 return;
             }
-            clipGeometry = next;
+            _clipGeometry = next;
             float w = (float)next.ActualWidth, h = (float)next.ActualHeight;
             var p = CornerProfile.For(w, h, (float)Corner);
             // No CanvasDevice: this path is device-independent. The points are a
@@ -293,105 +293,105 @@ public sealed class ContinuousCorners : DependencyObject
 
             builder.EndFigure(CanvasFigureLoop.Closed);
             using var geometry = CanvasGeometry.CreatePath(builder);
-            var compositor = ElementCompositionPreview.GetElementVisual(element).Compositor;
+            var compositor = ElementCompositionPreview.GetElementVisual(_element).Compositor;
             var path = compositor.CreatePathGeometry(new CompositionPath(geometry));
-            nativeClip ??= compositor.CreateGeometricClip();
-            nativeClip.Geometry = path;
-            ElementCompositionPreview.GetElementVisual(element).Clip = nativeClip;
+            _nativeClip ??= compositor.CreateGeometricClip();
+            _nativeClip.Geometry = path;
+            ElementCompositionPreview.GetElementVisual(_element).Clip = _nativeClip;
         }
     }
 
     private sealed class FocusChrome
     {
-        private readonly Control control;
-        private readonly FrameworkElement owner;
-        private readonly AnalyticBrush primary, secondary;
-        private readonly SpriteVisual outer, inner;
-        private readonly ContainerVisual visual;
-        private readonly double primaryWidth, secondaryWidth;
+        private readonly Control _control;
+        private readonly FrameworkElement _owner;
+        private readonly AnalyticBrush _primary, _secondary;
+        private readonly SpriteVisual _outer, _inner;
+        private readonly ContainerVisual _visual;
+        private readonly double _primaryWidth, _secondaryWidth;
         internal FocusChrome(Control control, FrameworkElement owner)
         {
-            this.control = control;
-            this.owner = owner;
-            primaryWidth = control.FocusVisualPrimaryThickness.Left;
-            secondaryWidth = control.FocusVisualSecondaryThickness.Left;
+            _control = control;
+            _owner = owner;
+            _primaryWidth = control.FocusVisualPrimaryThickness.Left;
+            _secondaryWidth = control.FocusVisualSecondaryThickness.Left;
             // Keep the original brushes (including their theme bindings), widths
             // and margin. Suppress only the platform's circular focus geometry.
             control.UseSystemFocusVisuals = true;
             control.FocusVisualPrimaryThickness = new Thickness(0);
             control.FocusVisualSecondaryThickness = new Thickness(0);
             var compositor = CompositorFor(owner);
-            primary = new AnalyticBrush(owner, false);
-            secondary = new AnalyticBrush(owner, false);
-            outer = compositor.CreateSpriteVisual(); outer.Brush = primary.Native;
-            inner = compositor.CreateSpriteVisual(); inner.Brush = secondary.Native;
-            visual = compositor.CreateContainerVisual();
-            visual.Children.InsertAtTop(outer);
-            visual.Children.InsertAtTop(inner);
-            ElementCompositionPreview.SetElementChildVisual(control, visual);
+            _primary = new AnalyticBrush(owner, false);
+            _secondary = new AnalyticBrush(owner, false);
+            _outer = compositor.CreateSpriteVisual(); _outer.Brush = _primary.Native;
+            _inner = compositor.CreateSpriteVisual(); _inner.Brush = _secondary.Native;
+            _visual = compositor.CreateContainerVisual();
+            _visual.Children.InsertAtTop(_outer);
+            _visual.Children.InsertAtTop(_inner);
+            ElementCompositionPreview.SetElementChildVisual(control, _visual);
             control.RegisterPropertyChangedCallback(UIElement.FocusStateProperty, (_, _) => Show());
             Show();
         }
         internal void Update(double radius)
         {
-            var margin = control.FocusVisualMargin;
-            double w = Math.Max(0, owner.ActualWidth - margin.Left - margin.Right);
-            double h = Math.Max(0, owner.ActualHeight - margin.Top - margin.Bottom);
+            var margin = _control.FocusVisualMargin;
+            double w = Math.Max(0, _owner.ActualWidth - margin.Left - margin.Right);
+            double h = Math.Max(0, _owner.ActualHeight - margin.Top - margin.Bottom);
             radius -= margin.Left;
-            primary.Update(radius, primaryWidth + secondaryWidth, control.FocusVisualPrimaryBrush, TimeSpan.Zero, w, h);
-            outer.Size = new Vector2((float)w, (float)h);
-            secondary.Update(Math.Max(0, radius - primaryWidth), secondaryWidth, control.FocusVisualSecondaryBrush, TimeSpan.Zero,
-                Math.Max(0, w - 2 * primaryWidth), Math.Max(0, h - 2 * primaryWidth));
-            inner.Size = new Vector2((float)Math.Max(0, w - 2 * primaryWidth), (float)Math.Max(0, h - 2 * primaryWidth));
-            inner.Offset = new Vector3((float)primaryWidth, (float)primaryWidth, 0);
-            inner.Opacity = secondaryWidth > 0 ? 1 : 0;
-            outer.Opacity = primaryWidth > 0 ? 1 : 0;
-            var position = owner.TransformToVisual(control).TransformPoint(default);
-            visual.Offset = new Vector3((float)(position.X + margin.Left), (float)(position.Y + margin.Top), 0);
+            _primary.Update(radius, _primaryWidth + _secondaryWidth, _control.FocusVisualPrimaryBrush, TimeSpan.Zero, w, h);
+            _outer.Size = new Vector2((float)w, (float)h);
+            _secondary.Update(Math.Max(0, radius - _primaryWidth), _secondaryWidth, _control.FocusVisualSecondaryBrush, TimeSpan.Zero,
+                Math.Max(0, w - 2 * _primaryWidth), Math.Max(0, h - 2 * _primaryWidth));
+            _inner.Size = new Vector2((float)Math.Max(0, w - 2 * _primaryWidth), (float)Math.Max(0, h - 2 * _primaryWidth));
+            _inner.Offset = new Vector3((float)_primaryWidth, (float)_primaryWidth, 0);
+            _inner.Opacity = _secondaryWidth > 0 ? 1 : 0;
+            _outer.Opacity = _primaryWidth > 0 ? 1 : 0;
+            var position = _owner.TransformToVisual(_control).TransformPoint(default);
+            _visual.Offset = new Vector3((float)(position.X + margin.Left), (float)(position.Y + margin.Top), 0);
         }
-        private void Show() => visual.Opacity = control.FocusState == FocusState.Keyboard ? 1 : 0;
+        private void Show() => _visual.Opacity = _control.FocusState == FocusState.Keyboard ? 1 : 0;
     }
 
-    private sealed class AnalyticBrush : XamlCompositionBrushBase
+    private sealed partial class AnalyticBrush : XamlCompositionBrushBase
     {
-        private readonly FrameworkElement owner;
-        private readonly Compositor compositor;
-        private readonly CompositionMaskBrush mask;
-        private readonly CompositionColorBrush color;
-        private readonly CompositionNineGridBrush nine;
-        private readonly CompositionSurfaceBrush maskSource;
-        private readonly SpriteVisual? raster;
-        private readonly CompositionVisualSurface? rasterSurface;
-        private Brush? source;
-        private long sourceToken;
-        private long gradientStartToken, gradientEndToken;
-        private CompositionLinearGradientBrush? gradient;
-        private MaskKey? activeMask;
-        private (double W, double H, double R, double Stroke, double Scale) geometry;
-        private int generation;
-        internal CompositionBrush Native => mask;
+        private readonly FrameworkElement _owner;
+        private readonly Compositor _compositor;
+        private readonly CompositionMaskBrush _mask;
+        private readonly CompositionColorBrush _color;
+        private readonly CompositionNineGridBrush _nine;
+        private readonly CompositionSurfaceBrush _maskSource;
+        private readonly SpriteVisual? _raster;
+        private readonly CompositionVisualSurface? _rasterSurface;
+        private Brush? _source;
+        private long _sourceToken;
+        private long _gradientStartToken, _gradientEndToken;
+        private CompositionLinearGradientBrush? _gradient;
+        private MaskKey? _activeMask;
+        private (double W, double H, double R, double Stroke, double Scale) _geometry;
+        private int _generation;
+        internal CompositionBrush Native => _mask;
 
         internal AnalyticBrush(FrameworkElement owner, bool xaml = true)
         {
-            this.owner = owner;
-            compositor = CompositorFor(owner);
-            color = compositor.CreateColorBrush(Colors.Transparent);
-            mask = compositor.CreateMaskBrush();
-            mask.Source = color;
-            maskSource = compositor.CreateSurfaceBrush();
-            maskSource.Stretch = CompositionStretch.Fill;
-            nine = compositor.CreateNineGridBrush();
-            nine.Source = maskSource;
-            mask.Mask = nine;
+            _owner = owner;
+            _compositor = CompositorFor(owner);
+            _color = _compositor.CreateColorBrush(Colors.Transparent);
+            _mask = _compositor.CreateMaskBrush();
+            _mask.Source = _color;
+            _maskSource = _compositor.CreateSurfaceBrush();
+            _maskSource.Stretch = CompositionStretch.Fill;
+            _nine = _compositor.CreateNineGridBrush();
+            _nine.Source = _maskSource;
+            _mask.Mask = _nine;
             if (xaml)
             {
                 // XAML adds its own primitive mask. A surface is a supported
                 // input there; nesting a CompositionMaskBrush is not.
-                raster = compositor.CreateSpriteVisual();
-                raster.Brush = mask;
-                rasterSurface = compositor.CreateVisualSurface();
-                rasterSurface.SourceVisual = raster;
-                var surfaceBrush = compositor.CreateSurfaceBrush(rasterSurface);
+                _raster = _compositor.CreateSpriteVisual();
+                _raster.Brush = _mask;
+                _rasterSurface = _compositor.CreateVisualSurface();
+                _rasterSurface.SourceVisual = _raster;
+                var surfaceBrush = _compositor.CreateSurfaceBrush(_rasterSurface);
                 surfaceBrush.Stretch = CompositionStretch.Fill;
                 CompositionBrush = surfaceBrush;
             }
@@ -399,27 +399,27 @@ public sealed class ContinuousCorners : DependencyObject
 
         internal void Update(double radius, double stroke, Brush? next, TimeSpan transition, double? width = null, double? height = null)
         {
-            var nextGeometry = (width ?? owner.ActualWidth, height ?? owner.ActualHeight, radius, stroke, owner.XamlRoot?.RasterizationScale ?? 1);
-            if (geometry != nextGeometry)
+            var nextGeometry = (width ?? _owner.ActualWidth, height ?? _owner.ActualHeight, radius, stroke, _owner.XamlRoot?.RasterizationScale ?? 1);
+            if (_geometry != nextGeometry)
             {
-                geometry = nextGeometry;
-                if (raster != null)
+                _geometry = nextGeometry;
+                if (_raster != null)
                 {
-                    raster.Size = new Vector2((float)(geometry.W * geometry.Scale), (float)(geometry.H * geometry.Scale));
-                    rasterSurface!.SourceSize = raster.Size;
+                    _raster.Size = new Vector2((float)(_geometry.W * _geometry.Scale), (float)(_geometry.H * _geometry.Scale));
+                    _rasterSurface!.SourceSize = _raster.Size;
                 }
-                _ = SetMaskAsync(++generation);
+                _ = SetMaskAsync(++_generation);
             }
-            if (!ReferenceEquals(source, next))
+            if (!ReferenceEquals(_source, next))
             {
                 Deactivate();
-                source = next;
-                if (source is SolidColorBrush)
-                    sourceToken = source.RegisterPropertyChangedCallback(SolidColorBrush.ColorProperty, (_, _) => SetSource(TimeSpan.Zero));
-                if (source is LinearGradientBrush)
+                _source = next;
+                if (_source is SolidColorBrush)
+                    _sourceToken = _source.RegisterPropertyChangedCallback(SolidColorBrush.ColorProperty, (_, _) => SetSource(TimeSpan.Zero));
+                if (_source is LinearGradientBrush)
                 {
-                    gradientStartToken = source.RegisterPropertyChangedCallback(LinearGradientBrush.StartPointProperty, (_, _) => SetGradientPosition());
-                    gradientEndToken = source.RegisterPropertyChangedCallback(LinearGradientBrush.EndPointProperty, (_, _) => SetGradientPosition());
+                    _gradientStartToken = _source.RegisterPropertyChangedCallback(LinearGradientBrush.StartPointProperty, (_, _) => SetGradientPosition());
+                    _gradientEndToken = _source.RegisterPropertyChangedCallback(LinearGradientBrush.EndPointProperty, (_, _) => SetGradientPosition());
                 }
                 SetSource(transition);
             }
@@ -427,77 +427,77 @@ public sealed class ContinuousCorners : DependencyObject
 
         internal void Deactivate()
         {
-            if (source is SolidColorBrush) source.UnregisterPropertyChangedCallback(SolidColorBrush.ColorProperty, sourceToken);
-            if (source is LinearGradientBrush)
+            if (_source is SolidColorBrush) _source.UnregisterPropertyChangedCallback(SolidColorBrush.ColorProperty, _sourceToken);
+            if (_source is LinearGradientBrush)
             {
-                source.UnregisterPropertyChangedCallback(LinearGradientBrush.StartPointProperty, gradientStartToken);
-                source.UnregisterPropertyChangedCallback(LinearGradientBrush.EndPointProperty, gradientEndToken);
+                _source.UnregisterPropertyChangedCallback(LinearGradientBrush.StartPointProperty, _gradientStartToken);
+                _source.UnregisterPropertyChangedCallback(LinearGradientBrush.EndPointProperty, _gradientEndToken);
             }
-            source = null;
+            _source = null;
         }
 
         private void SetSource(TimeSpan transition)
         {
-            if (source is LinearGradientBrush linear)
+            if (_source is LinearGradientBrush linear)
             {
-                gradient ??= compositor.CreateLinearGradientBrush();
-                gradient.ColorStops.Clear();
-                foreach (var stop in linear.GradientStops) gradient.ColorStops.Add(compositor.CreateColorGradientStop((float)stop.Offset, stop.Color));
+                _gradient ??= _compositor.CreateLinearGradientBrush();
+                _gradient.ColorStops.Clear();
+                foreach (var stop in linear.GradientStops) _gradient.ColorStops.Add(_compositor.CreateColorGradientStop((float)stop.Offset, stop.Color));
                 SetGradientPosition();
-                mask.Source = gradient;
+                _mask.Source = _gradient;
                 return;
             }
-            mask.Source = color;
-            var target = source is SolidColorBrush solid ? solid.Color : Colors.Transparent;
+            _mask.Source = _color;
+            var target = _source is SolidColorBrush solid ? solid.Color : Colors.Transparent;
             if (transition > TimeSpan.Zero)
             {
-                var animation = compositor.CreateColorKeyFrameAnimation();
+                var animation = _compositor.CreateColorKeyFrameAnimation();
                 // Auto can sweep through purple between neutral and blue UI
                 // states. Interpolate the channels without introducing a hue.
                 animation.InterpolationColorSpace = CompositionColorSpace.Rgb;
                 animation.Duration = transition;
-                animation.InsertKeyFrame(1, target, compositor.CreateLinearEasingFunction());
-                color.StartAnimation("Color", animation);
+                animation.InsertKeyFrame(1, target, _compositor.CreateLinearEasingFunction());
+                _color.StartAnimation("Color", animation);
             }
-            else { color.StopAnimation("Color"); color.Color = target; }
+            else { _color.StopAnimation("Color"); _color.Color = target; }
         }
 
         private void SetGradientPosition()
         {
-            if (source is not LinearGradientBrush linear || gradient == null) return;
-            gradient.StartPoint = new Vector2((float)linear.StartPoint.X, (float)linear.StartPoint.Y);
-            gradient.EndPoint = new Vector2((float)linear.EndPoint.X, (float)linear.EndPoint.Y);
+            if (_source is not LinearGradientBrush linear || _gradient == null) return;
+            _gradient.StartPoint = new Vector2((float)linear.StartPoint.X, (float)linear.StartPoint.Y);
+            _gradient.EndPoint = new Vector2((float)linear.EndPoint.X, (float)linear.EndPoint.Y);
         }
 
         private async Task SetMaskAsync(int ticket)
         {
-            var (W, H, R, Stroke, Scale) = geometry;
-            float scale = (float)Scale, w = (float)W * scale, h = (float)H * scale, r = (float)R * scale, s = (float)Stroke * scale;
+            var (width, height, radius, stroke, rawScale) = _geometry;
+            float scale = (float)rawScale, w = (float)width * scale, h = (float)height * scale, r = (float)radius * scale, s = (float)stroke * scale;
             var profile = CornerProfile.For(w, h, r);
             var inner = CornerProfile.For(Math.Max(0, w - 2 * s), Math.Max(0, h - 2 * s), Math.Max(0, r - s));
             var key = new MaskKey(profile, inner, s);
-            nine.SetInsets(profile.Reach);
-            nine.SetInsetScales(raster == null ? 1 / scale : 1);
-            if (activeMask == key && maskSource.Surface != null) return;
+            _nine.SetInsets(profile.Reach);
+            _nine.SetInsetScales(_raster == null ? 1 / scale : 1);
+            if (_activeMask == key && _maskSource.Surface != null) return;
             var surface = await MaskForAsync(key);
-            if (ticket != generation) return;
-            maskSource.Surface = surface;
-            activeMask = key;
+            if (ticket != _generation) return;
+            _maskSource.Surface = surface;
+            _activeMask = key;
         }
     }
 
     private readonly record struct MaskKey(CornerProfile Outer, CornerProfile Inner, float Stroke);
     private static readonly Dictionary<MaskKey, (long Bytes, Task<LoadedImageSurface> Surface)> Masks = [];
-    private static long maskBytes;
+    private static long _maskBytes;
     private static Task<LoadedImageSurface> MaskForAsync(MaskKey key)
     {
         if (Masks.TryGetValue(key, out var cached)) return cached.Surface;
         int inset = (int)MathF.Ceiling(key.Outer.Reach) + 1, size = inset * 2 + 1;
         long bytes = (long)size * size * 4;
-        while (Masks.Count > 0 && (Masks.Count >= 64 || maskBytes + bytes > 4 * 1024 * 1024))
+        while (Masks.Count > 0 && (Masks.Count >= 64 || _maskBytes + bytes > 4 * 1024 * 1024))
         {
             var first = Masks.First();
-            maskBytes -= first.Value.Bytes;
+            _maskBytes -= first.Value.Bytes;
             Masks.Remove(first.Key);
         }
         byte[] pixels = new byte[size * size * 4];
@@ -519,7 +519,7 @@ public sealed class ContinuousCorners : DependencyObject
 
         var surface = LoadPixelsAsync((uint)size, (uint)size, pixels);
         Masks.Add(key, (bytes, surface));
-        maskBytes += bytes;
+        _maskBytes += bytes;
         return surface;
     }
 

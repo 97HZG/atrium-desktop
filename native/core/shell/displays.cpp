@@ -31,7 +31,7 @@ std::vector<DisplayInfo> ConnectedDisplays()
 
 HMONITOR ResolveDisplay(const std::vector<DisplayInfo>& displays, const std::wstring& id)
 {
-    auto selected = std::find_if(displays.begin(), displays.end(), [&](const DisplayInfo& d) { return !id.empty() && d.id == id; });
+    auto selected = std::ranges::find_if(displays, [&](const DisplayInfo& d) { return !id.empty() && d.id == id; });
     if (selected != displays.end())
         return selected->monitor;
     return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
@@ -73,14 +73,14 @@ bool TilesFill(const std::vector<RECT>& tiles, const RECT& work, int slack)
             if (y > work.top && y < work.bottom)
                 ys.push_back(y);
     }
-    std::sort(xs.begin(), xs.end());
-    std::sort(ys.begin(), ys.end());
+    std::ranges::sort(xs);
+    std::ranges::sort(ys);
     for (size_t i = 0; i + 1 < xs.size(); ++i)
         for (size_t j = 0; j + 1 < ys.size(); ++j) {
             if (xs[i] == xs[i + 1] || ys[j] == ys[j + 1])
                 continue;
             const POINT mid{(xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2};
-            if (std::none_of(grown.begin(), grown.end(), [&](const RECT& t) { return PtInRect(&t, mid) != FALSE; }))
+            if (std::ranges::none_of(grown, [&](const RECT& t) { return PtInRect(&t, mid) != FALSE; }))
                 return false;
         }
     return true;
@@ -150,7 +150,7 @@ std::vector<TaskItem> TaskItemsForDisplay(const std::vector<TaskItem>& items, co
     // Keep pins, but restrict running dots, previews and active state to this display.
     for (TaskItem& item : result) {
         std::erase_if(item.windows, [&](HWND window) { return monitorOf(window) != monitor; });
-        item.active = std::find(item.windows.begin(), item.windows.end(), foreground) != item.windows.end();
+        item.active = std::ranges::find(item.windows, foreground) != item.windows.end();
         if (item.windows.empty())
             item.attention = false;
     }

@@ -39,7 +39,7 @@ struct ImeStatus {
     bool upper = false;     // Shift held or CapsLock on: latin letters are capital
     bool caps = false;      // CapsLock's toggle, read on the UI thread (it latches: always news)
     bool reliable = true;   // both control messages came back; false: this read got nothing
-    bool empty() const { return layout == 0; }
+    bool Empty() const { return layout == 0; }
 
     bool Latin() const { return !ime || !open || !native; }
 
@@ -63,7 +63,7 @@ struct ImeStatus {
 // announces.
 inline void ImeCarryForward(ImeStatus& now, const ImeStatus& last)
 {
-    if (now.reliable || now.empty() || last.empty() || now.layout != last.layout || !now.ime)
+    if (now.reliable || now.Empty() || last.Empty() || now.layout != last.layout || !now.ime)
         return;
     now.open = last.open;
     now.native = last.native;
@@ -125,14 +125,14 @@ private:
 
     HWND window_;
     UINT message_;
-    HWINEVENTHOOK foreground_ = nullptr;
-    HWINEVENTHOOK ime_ = nullptr;
-    int keyToken_ = 0;       // the shared keyboard hook's registration
-    HANDLE wake_ = nullptr;  // the worker reads after a burst of events
+    HANDLE wake_ = nullptr; // the worker reads after a burst of events
     std::atomic<bool> stop_{false};
     std::atomic<bool> toggle_{false}; // a click waits for the worker
     std::atomic<bool> caps_{false}; // the latch (hook thread writes, the UI thread reads)
     bool capsDown_ = false; // the key is held: its repeat does not flip the latch again
+    HWINEVENTHOOK foreground_ = nullptr;
+    HWINEVENTHOOK ime_ = nullptr;
+    int keyToken_ = 0; // the shared keyboard hook's registration
     std::thread thread_;
 };
 
@@ -143,10 +143,10 @@ private:
 // is such a change, a Shift held alone is not (SameAs).
 class ImeWatch {
 public:
-    // True when `status` should announce now; the caller shows state().
+    // True when `status` should announce now; the caller shows State().
     bool Update(HWND window, const ImeStatus& status)
     {
-        if (!window || status.empty() || !status.reliable)
+        if (!window || status.Empty() || !status.reliable)
             return false;
         if (!window_ || window != window_) {
             window_ = window;
@@ -159,8 +159,8 @@ public:
         return true;
     }
 
-    const ImeStatus& state() const { return shown_; }
-    void reset() { *this = ImeWatch{}; }
+    const ImeStatus& State() const { return shown_; }
+    void Reset() { *this = ImeWatch{}; }
 
 private:
     HWND window_ = nullptr;

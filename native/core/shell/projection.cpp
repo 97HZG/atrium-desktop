@@ -24,42 +24,36 @@ namespace {
 struct DisplaySubscription {
     DeviceWatcher watcher{nullptr};
     event_token added{}, updated{}, removed{}, completed{}, stopped{};
+    DisplaySubscription() = default;
+    DisplaySubscription(const DisplaySubscription&) = delete;
+    DisplaySubscription& operator=(const DisplaySubscription&) = delete;
     ~DisplaySubscription()
     {
         if (!watcher)
             return;
-        // Revoke before Stop, outside State::lock: a callback may be finishing.
-        try {
-            if (added.value)
-                watcher.Added(added);
-        } catch (...) {
-        }
-        try {
-            if (updated.value)
-                watcher.Updated(updated);
-        } catch (...) {
-        }
-        try {
-            if (removed.value)
-                watcher.Removed(removed);
-        } catch (...) {
-        }
-        try {
-            if (completed.value)
-                watcher.EnumerationCompleted(completed);
-        } catch (...) {
-        }
-        try {
-            if (stopped.value)
-                watcher.Stopped(stopped);
-        } catch (...) {
-        }
-        try {
+        // Revoke before Stop, outside State::lock: a callback may be finishing,
+        // and the watcher may go away under any one step.
+        auto step = [](auto&& f) {
+            try {
+                f();
+            } catch (const hresult_error&) {
+            }
+        };
+        if (added.value)
+            step([&] { watcher.Added(added); });
+        if (updated.value)
+            step([&] { watcher.Updated(updated); });
+        if (removed.value)
+            step([&] { watcher.Removed(removed); });
+        if (completed.value)
+            step([&] { watcher.EnumerationCompleted(completed); });
+        if (stopped.value)
+            step([&] { watcher.Stopped(stopped); });
+        step([&] {
             auto status = watcher.Status();
             if (status == DeviceWatcherStatus::Started || status == DeviceWatcherStatus::EnumerationCompleted)
                 watcher.Stop();
-        } catch (...) {
-        }
+        });
     }
 };
 } // namespace
@@ -169,7 +163,7 @@ std::vector<WirelessDisplay> DisplayFinder::Displays() const
     std::vector<WirelessDisplay> list;
     for (const auto& [id, name] : state_->found)
         list.push_back({id, name});
-    std::sort(list.begin(), list.end(), [](const WirelessDisplay& a, const WirelessDisplay& b) { return a.name < b.name; });
+    std::ranges::sort(list, [](const WirelessDisplay& a, const WirelessDisplay& b) { return a.name < b.name; });
     return list;
 }
 

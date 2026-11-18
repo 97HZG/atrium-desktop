@@ -9,13 +9,13 @@
 
 namespace {
 
-int failures = 0;
+int g_failures = 0;
 
 void Check(bool ok, const char* what)
 {
     if (!ok) {
         std::fprintf(stderr, "FAIL: %s\n", what);
-        ++failures;
+        ++g_failures;
     }
 }
 
@@ -26,35 +26,35 @@ int main()
     using namespace atrium;
 
     auto plan = PlanQuiet(kQuietProfileOff, true, false, {});
-    Check(plan.action == QuietAction::hide && plan.profile == kQuietProfile && plan.owns, "unrestricted is switched to alarms only");
+    Check(plan.action == QuietAction::Hide && plan.profile == kQuietProfile && plan.owns, "unrestricted is switched to alarms only");
 
     plan = PlanQuiet(L"Microsoft.QuietHoursProfile.PriorityOnly", true, false, {});
-    Check(plan.action == QuietAction::hide && plan.profile == kQuietProfile && plan.owns, "priority only is switched to alarms only");
+    Check(plan.action == QuietAction::Hide && plan.profile == kQuietProfile && plan.owns, "priority only is switched to alarms only");
 
     plan = PlanQuiet(L"Microsoft.QuietHoursProfile.SomeNewMode", true, false, {});
-    Check(plan.action == QuietAction::hide && plan.profile == kQuietProfile && plan.owns, "an unknown profile is switched to alarms only");
+    Check(plan.action == QuietAction::Hide && plan.profile == kQuietProfile && plan.owns, "an unknown profile is switched to alarms only");
 
     plan = PlanQuiet(kQuietProfile, true, false, {});
-    Check(plan.action == QuietAction::none, "alarms only is already what the setting asks for");
+    Check(plan.action == QuietAction::None, "alarms only is already what the setting asks for");
 
     plan = PlanQuiet(L"", true, false, {});
-    Check(plan.action == QuietAction::none, "an unavailable service is left alone");
+    Check(plan.action == QuietAction::None, "an unavailable service is left alone");
 
     plan = PlanQuiet(kQuietProfile, false, true, kQuietProfileOff);
-    Check(plan.action == QuietAction::restore && plan.profile == kQuietProfileOff, "turning the setting off restores unrestricted");
+    Check(plan.action == QuietAction::Restore && plan.profile == kQuietProfileOff, "turning the setting off restores unrestricted");
 
     plan = PlanQuiet(kQuietProfile, false, true, L"Microsoft.QuietHoursProfile.PriorityOnly");
-    Check(plan.action == QuietAction::restore && plan.profile == L"Microsoft.QuietHoursProfile.PriorityOnly",
+    Check(plan.action == QuietAction::Restore && plan.profile == L"Microsoft.QuietHoursProfile.PriorityOnly",
           "turning the setting off restores the profile the user had");
 
     plan = PlanQuiet(kQuietProfile, false, true, L"");
-    Check(plan.action == QuietAction::restore && plan.profile == kQuietProfileOff, "an empty previous profile falls back to unrestricted");
+    Check(plan.action == QuietAction::Restore && plan.profile == kQuietProfileOff, "an empty previous profile falls back to unrestricted");
 
     plan = PlanQuiet(kQuietProfile, false, false, {});
-    Check(plan.action == QuietAction::none, "a profile Atrium did not set is left alone");
+    Check(plan.action == QuietAction::None, "a profile Atrium did not set is left alone");
 
-    if (failures) {
-        std::fprintf(stderr, "%d quiet profile check(s) failed\n", failures);
+    if (g_failures) {
+        std::fprintf(stderr, "%d quiet profile check(s) failed\n", g_failures);
         return 1;
     }
     std::puts("quiet profile checks passed");

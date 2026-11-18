@@ -269,7 +269,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
         std::vector<std::wstring> apps;
         for (const auto& v : o.GetNamedArray(L"stageExcluded"))
             if (v.ValueType() == json::JsonValueType::String)
-                apps.push_back(std::wstring(v.GetString()));
+                apps.emplace_back(v.GetString());
         s.stageExcluded = std::move(apps);
     }
     flag(L"remoteVisible", s.remoteVisible);
@@ -392,7 +392,7 @@ bool SetStartOnLogin(bool enabled)
 {
     if (IsDevelopmentBuild())
         return true;
-    constexpr auto key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    constexpr auto kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
     wchar_t exe[32768]{};
     DWORD length = GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe)));
     if (!length || length == std::size(exe))
@@ -400,7 +400,7 @@ bool SetStartOnLogin(bool enabled)
     std::wstring command = L"\"" + std::wstring(exe) + L"\"";
     wchar_t current[32771]{};
     DWORD size = sizeof(current);
-    LSTATUS read = RegGetValueW(HKEY_CURRENT_USER, key, L"Atrium", RRF_RT_REG_SZ, nullptr, current, &size);
+    LSTATUS read = RegGetValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium", RRF_RT_REG_SZ, nullptr, current, &size);
     const bool runEntry = read == ERROR_SUCCESS;
     const std::wstring task = LogonTaskProgram();
     if (!enabled) {
@@ -412,16 +412,17 @@ bool SetStartOnLogin(bool enabled)
             return false;
         if (!runEntry)
             return true;
-        LSTATUS result = RegDeleteKeyValueW(HKEY_CURRENT_USER, key, L"Atrium");
+        LSTATUS result = RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium");
         return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
     }
     // The logon task, and no Run entry left to start Atrium a second time (also from
-    // earlier versions, which started from the Run key).
-    if ((_wcsicmp(task.c_str(), exe) == 0 || RegisterLogonTask(exe)) && (!runEntry || RegDeleteKeyValueW(HKEY_CURRENT_USER, key, L"Atrium") == ERROR_SUCCESS))
+    // earlier versions, which started from the Run kRunKey).
+    if ((_wcsicmp(task.c_str(), exe) == 0 || RegisterLogonTask(exe)) &&
+        (!runEntry || RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium") == ERROR_SUCCESS))
         return true;
     if (read == ERROR_SUCCESS && command == current)
         return true;
-    return RegSetKeyValueW(HKEY_CURRENT_USER, key, L"Atrium", REG_SZ, command.c_str(), DWORD((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+    return RegSetKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium", REG_SZ, command.c_str(), DWORD((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
 }
 
 bool StartupTurnedOff()
@@ -458,7 +459,7 @@ bool IsDevelopmentBuild()
 
 bool LowIntegrity()
 {
-    static const bool low = [] {
+    static const bool kLow = [] {
         HANDLE token = nullptr;
         if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
             return false;
@@ -474,7 +475,7 @@ bool LowIntegrity()
         CloseHandle(token);
         return below;
     }();
-    return low;
+    return kLow;
 }
 
 bool SaveSettings(const Settings& s, std::wstring* warning, std::wstring* error)
@@ -499,8 +500,8 @@ bool SaveSettings(const Settings& s, std::wstring* warning, std::wstring* error)
             *error = TrFormat(L"Could not write %s: %s (error %lu)", path.c_str(), reason.c_str(), code);
             // Below medium integrity (an executable carrying a Low label) nothing in the profile is writable.
             if (LowIntegrity())
-                *error += Tr(L"\nAtrium is running at low integrity and cannot write to your profile. Unzip it to an ordinary folder (such as D:\\\\Atrium), "
-                             L"make sure Atrium.exe has no Low integrity label, then start it again.");
+                *error += Tr(
+                    L"\nAtrium is running at low integrity and cannot write to your profile. Unzip it to an ordinary folder (such as D:\\\\Atrium), make sure Atrium.exe has no Low integrity label, then start it again.");
         }
         return false;
     }

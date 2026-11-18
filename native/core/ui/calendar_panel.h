@@ -18,7 +18,6 @@ namespace atrium {
 class CalendarPanel {
 public:
     explicit CalendarPanel(HINSTANCE instance);
-    ~CalendarPanel();
 
     // anchor: the clock on screen; bar: the bar's glass shape.
     void Open(RECT anchor, RECT bar);
@@ -47,7 +46,7 @@ private:
     void PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintCapsule(Canvas& c, const Theme& t, D2D1_RECT_F cap);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
-    std::wstring HitAt(POINT client) const;
+    std::wstring HitAt(POINT pt) const;
     void Activate(const std::wstring& id);
     void ShowMonth(int y, int m, int direction);
     void Place();

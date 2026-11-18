@@ -38,12 +38,15 @@ Require(Loc.Tag == "en", "A setting cannot traverse outside the locale directory
 Loc.Apply("ZH-hans");
 Require(Loc.Tag == "zh-Hans" && Loc.T("Open") == "打开", "Tags are case insensitive and old zh aliases remain supported.");
 Require(!LocalizationValidation.NativeMatches("%s %lu", "%lu %s"), "Native argument order and lengths are checked.");
-Require(!LocalizationValidation.NativeMatches("%s", "%n") && !LocalizationValidation.NativeMatches("%s", "%2$s"), "Unsafe or unsupported conversions are rejected.");
+Require(!LocalizationValidation.NativeMatches("%s", "%n") && !LocalizationValidation.NativeMatches("%s", "%2$s"),
+    "Unsafe or unsupported conversions are rejected.");
 Require(LocalizationValidation.NativeMatches("%*.*f %%", "%*.*f %%"), "Width, precision stars and escaped percent are supported.");
 Require(!LocalizationValidation.NativeMatches("%.0f", "%.1000000f"), "Translations cannot add unbounded precision.");
 Require(LocalizationValidation.ManagedMatches("{{value}} {0} {1}", "{1} {{value}} {0}"), "Managed escapes and reordering are supported.");
-Require(!LocalizationValidation.ManagedMatches("{0}", "{{0}}") && !LocalizationValidation.ManagedMatches("{0}", "{0"), "Escaped or malformed fields do not masquerade as arguments.");
-Require(!LocalizationValidation.ManagedMatches("{0}", "{0,1000000000}") && !LocalizationValidation.ManagedMatches("{0}", "{0:N999999999}"), "Translations cannot introduce huge alignment or precision.");
+Require(!LocalizationValidation.ManagedMatches("{0}", "{{0}}") && !LocalizationValidation.ManagedMatches("{0}", "{0"),
+    "Escaped or malformed fields do not masquerade as arguments.");
+Require(!LocalizationValidation.ManagedMatches("{0}", "{0,1000000000}") && !LocalizationValidation.ManagedMatches("{0}", "{0:N999999999}"),
+    "Translations cannot introduce huge alignment or precision.");
 Require(LocalizationValidation.DuplicateKeys("{\"a\":{\"one\":\"x\"},\"b\":{\"one\":\"y\"}}").Length == 0, "Plural forms have independent object scopes.");
 Require(LocalizationValidation.DuplicateKeys("{\"a\":1,\"a\":2}").Length == 1, "Actual duplicate object properties are rejected.");
 await Task.WhenAll(Task.Run(() =>

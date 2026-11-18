@@ -1,6 +1,7 @@
 #include "shell/notification_listener.h"
 
 #include "log.h"
+#include "../posted.h"
 
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -30,14 +31,15 @@ const wchar_t* AccessName(wunm::UserNotificationListenerAccessStatus s)
 // app (AppInfo, DisplayInfo: the app's resources) costs far more, so only a toast to post does.
 std::wstring TextOf(const wun::UserNotification& un)
 {
-    std::wstring all;
     try {
+        std::wstring all;
         if (auto binding = un.Notification().Visual().GetBinding(wun::KnownNotificationBindings::ToastGeneric()))
             for (const auto& text : binding.GetTextElements())
                 all += std::wstring(text.Text()) + L"\x1f";
-    } catch (...) {
+        return all;
+    } catch (const winrt::hresult_error&) {
+        return {}; // dismissed or malformed while reading
     }
-    return all;
 }
 
 Notice ToNotice(const wun::UserNotification& un)
@@ -49,8 +51,11 @@ Notice ToNotice(const wun::UserNotification& un)
         auto info = un.AppInfo();
         n.appId = std::wstring(info.AppUserModelId());
         n.app = std::wstring(info.DisplayInfo().DisplayName());
-    } catch (...) {
+    } catch (const winrt::hresult_error&) {
+        n.app.clear(); // unpackaged senders have no AppInfo
     }
+    if (!n.appId.empty())
+        n.action = L"app:" + n.appId;
     try {
         auto binding = un.Notification().Visual().GetBinding(wun::KnownNotificationBindings::ToastGeneric());
         if (binding) {
@@ -65,18 +70,16 @@ Notice ToNotice(const wun::UserNotification& un)
                 }
             }
         }
-    } catch (...) {
+    } catch (const winrt::hresult_error&) {
+        return n; // dismissed mid-read: keep whatever text and metadata arrived
     }
-    if (!n.appId.empty())
-        n.action = L"app:" + n.appId;
     return n;
 }
 
 } // namespace
 
-NotificationListener::NotificationListener(HWND notify, UINT msg) : notify_(notify), msg_(msg)
+NotificationListener::NotificationListener(HWND notify, UINT msg) : notify_(notify), msg_(msg), wake_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
 {
-    wake_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     thread_ = std::thread([this] { Run(); });
 }
 
@@ -136,10 +139,10 @@ void NotificationListener::Run()
                             continue;
                         Notice n = ToNotice(un);
                         std::wstring app = n.app; // the UI thread owns the notice once posted
-                        auto* p = new Notice(std::move(n));
-                        if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(p)))
-                            delete p;
-                        else if (++posted <= 3 || posted % 50 == 0)
+                        if (!PostOwned(notify_, msg_, 0, std::make_unique<Notice>(std::move(n))))
+                            continue;
+                        ++posted;
+                        if (posted <= 3 || posted % 50 == 0)
                             Log(L"listener: %s toast from %s (%d so far)", old == seen.end() ? L"new" : L"updated", app.c_str(), posted);
                     }
                     seen = std::move(now);

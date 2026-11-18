@@ -7,6 +7,7 @@
 #include "log.h"
 #include "motion.h"
 #include "render/wifi_glyph.h"
+#include "../posted.h"
 
 #include <shellapi.h>
 #include <windowsx.h>
@@ -30,11 +31,11 @@ constexpr float kStageH = 58; // Stage Manager's row, under the connections
 constexpr int kMaxRows = 6, kMaxOutputs = 4, kMaxApps = 5, kMaxDisplays = 4;
 constexpr UINT_PTR kStatusTimer = 1;
 constexpr double kPageMs = 320;
-constexpr UINT WM_WIFI_LIST = WM_APP + 0x50;  // wParam generation, lParam std::vector<WifiNetwork>*
-constexpr UINT WM_WIFI_AGAIN = WM_APP + 0x51; // after connecting: read the state and the list again
-constexpr UINT WM_CC_RADIOS = WM_APP + 0x52;  // lParam RadioRead*
-constexpr UINT WM_CC_BRIGHT = WM_APP + 0x53;  // the brightness worker is done (wParam: the value it set last)
-constexpr UINT WM_CC_AUDIO = WM_APP + 0x54;   // lParam AudioRead*
+constexpr UINT WM_WIFI_LIST = WM_APP + 0x50;   // wParam generation, lParam std::vector<WifiNetwork>*
+constexpr UINT WM_WIFI_AGAIN = WM_APP + 0x51;  // after connecting: read the state and the list again
+constexpr UINT WM_CC_RADIOS = WM_APP + 0x52;   // lParam RadioRead*
+constexpr UINT WM_CC_BRIGHT = WM_APP + 0x53;   // the brightness worker is done (wParam: the value it set last)
+constexpr UINT WM_CC_AUDIO = WM_APP + 0x54;    // lParam AudioRead*
 constexpr UINT WM_CC_DISPLAYS = WM_APP + 0x55; // the wireless displays in range changed
 constexpr UINT WM_CC_PROJECTED = WM_APP + 0x56; // wParam 1 projecting, 0 refused; lParam std::wstring* the display (null: stopped)
 constexpr UINT WM_CC_RADIO_SET = WM_APP + 0x57;
@@ -78,7 +79,7 @@ void SendWinK()
 void Bars(Canvas& c, float x, float cy, int signal, D2D1_COLOR_F ink) { c.WifiFan(x + 8, cy, 12, WifiSteps(signal), ink); }
 
 // Runs `work` on a thread of its own with a multithreaded COM apartment (WinRT, WMI).
-template<class F> void OnWorker(F work)
+template<class F> void OnWorker(const F& work)
 {
     std::thread([work] {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
@@ -230,11 +231,7 @@ void ControlCenter::Scan(bool rescan)
     rescan = std::exchange(scanRescan_, false);
     HWND h = surface_.Hwnd();
     unsigned gen = ++scanGen_;
-    std::thread([h, rescan, gen] {
-        auto* list = new std::vector<WifiNetwork>(ListWifi(rescan));
-        if (!PostMessageW(h, WM_WIFI_LIST, gen, reinterpret_cast<LPARAM>(list)))
-            delete list;
-    }).detach();
+    std::thread([h, rescan, gen] { PostOwned(h, WM_WIFI_LIST, gen, std::make_unique<std::vector<WifiNetwork>>(ListWifi(rescan))); }).detach();
 }
 
 void ControlCenter::ReadRadios(bool devices)
@@ -251,7 +248,7 @@ void ControlCenter::ReadRadios(bool devices)
     HWND h = surface_.Hwnd();
     bool bright = !brightRead_;
     OnWorker([h, devices, bright, gen] {
-        auto* r = new RadioRead();
+        auto r = std::make_unique<RadioRead>();
         r->gen = gen;
         r->radios = QueryRadios();
         if (devices && r->radios.btOn) {
@@ -260,8 +257,7 @@ void ControlCenter::ReadRadios(bool devices)
         }
         if (bright)
             r->brightness = GetBrightness();
-        if (!PostMessageW(h, WM_CC_RADIOS, 0, reinterpret_cast<LPARAM>(r)))
-            delete r;
+        PostOwned(h, WM_CC_RADIOS, 0, std::move(r));
     });
 }
 
@@ -309,13 +305,12 @@ void ControlCenter::ReadAudio(bool icons)
     HWND h = surface_.Hwnd();
     int px = int(std::lround(26 * surface_.Scale()));
     OnWorker([h, px, icons, gen] {
-        auto* r = new AudioRead();
+        auto r = std::make_unique<AudioRead>();
         r->gen = gen;
         r->outputs = ListAudioOutputs();
         r->apps = ListAudioApps(icons ? px : 0);
         r->icons = icons;
-        if (!PostMessageW(h, WM_CC_AUDIO, 0, reinterpret_cast<LPARAM>(r)))
-            delete r;
+        PostOwned(h, WM_CC_AUDIO, 0, std::move(r));
     });
 }
 
@@ -820,7 +815,7 @@ void ControlCenter::PaintSound(Canvas& c, const Theme& t, D2D1_RECT_F card)
         float ih = Hover(c, mid, hover_ == mid);
         if (ih > 0.001f || pressed_ == mid)
             c.Fill(D2D1::RectF(icon.left - 4, icon.top - 4, icon.right + 4, icon.bottom + 4), 9, pressed_ == mid ? t.press : Alpha(t.hover, ih));
-        if (!a.icon.empty())
+        if (!a.icon.Empty())
             c.Image(L"audio:" + a.key, a.icon, icon, a.muted ? 0.4f : 1.f);
         else
             c.Glyph(a.key == L"#system" ? L"\uE767" : L"\uE71D", icon, 14, a.muted ? t.faint : t.text);
@@ -985,7 +980,7 @@ std::wstring ControlCenter::HitAt(POINT pt) const
     // Small controls first: they sit on larger rows.
     for (const Hit& h : hits_)
         if ((h.id == L"disconnect" || h.id == L"mute" || h.id == L"wifi" || h.id == L"bt" || h.id == L"rescan" || h.id == L"castoff" || h.id == L"castscan" ||
-             h.id.rfind(L"amute:", 0) == 0) &&
+             h.id.starts_with(L"amute:")) &&
             In(h.rect, x, y))
             return h.id;
     for (const Hit& h : hits_)
@@ -1086,9 +1081,7 @@ void ControlCenter::Activate(const std::wstring& id)
         std::wstring target = connecting_;
         OnWorker([h, target] {
             bool ok = ProjectTo(target);
-            auto* d = new std::wstring(target);
-            if (!PostMessageW(h, WM_CC_PROJECTED, ok ? 1 : 0, reinterpret_cast<LPARAM>(d)))
-                delete d;
+            PostOwned(h, WM_CC_PROJECTED, ok ? 1 : 0, std::make_unique<std::wstring>(target));
         });
         surface_.Invalidate();
     } else if (id == L"castoff") {
@@ -1245,7 +1238,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         }
         return true;
     case WM_CC_RADIOS: {
-        std::unique_ptr<RadioRead> r(reinterpret_cast<RadioRead*>(l));
+        auto r = TakePosted<RadioRead>(l);
         radioBusy_ = false;
         if (r->gen != radioGen_ || radioWriteBusy_) {
             if (radioPending_ && !radioWriteBusy_)
@@ -1272,7 +1265,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     }
     case WM_CC_AUDIO: {
-        std::unique_ptr<AudioRead> r(reinterpret_cast<AudioRead*>(l));
+        auto r = TakePosted<AudioRead>(l);
         audioBusy_ = false;
         if (audioPending_ && !outputWriteBusy_)
             ReadAudio(audioIcons_);
@@ -1283,12 +1276,12 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         float before = Size().height;
         bool missing = false;
         for (AudioApp& a : r->apps) {
-            if (!a.icon.empty())
+            if (!a.icon.Empty())
                 continue;
-            auto old = std::find_if(apps_.begin(), apps_.end(), [&](const AudioApp& o) { return o.key == a.key; });
-            if (old != apps_.end() && !old->icon.empty())
+            auto old = std::ranges::find_if(apps_, [&](const AudioApp& o) { return o.key == a.key; });
+            if (old != apps_.end() && !old->icon.Empty())
                 a.icon = old->icon;
-            else if (!r->icons && !a.path.empty() && std::find(iconTried_.begin(), iconTried_.end(), a.key) == iconTried_.end())
+            else if (!r->icons && !a.path.empty() && std::ranges::find(iconTried_, a.key) == iconTried_.end())
                 missing = true;
             if (r->icons)
                 iconTried_.push_back(a.key);
@@ -1312,7 +1305,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     }
     case WM_CC_PROJECTED: {
-        std::unique_ptr<std::wstring> d(reinterpret_cast<std::wstring*>(l));
+        auto d = TakePosted<std::wstring>(l);
         connecting_.clear();
         if (d && w) {
             projecting_ = *d;
@@ -1329,14 +1322,13 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     }
     case WM_CC_BRIGHT:
         brightBusy_ = false;
-        if (brightPending_ >= 0 && brightPending_ != int(w)) {
+        if (brightPending_ >= 0 && brightPending_ != int(w))
             SetBrightnessAsync(brightPending_);
-        } else {
+        else
             brightPending_ = -1;
-        }
         return true;
     case WM_WIFI_LIST: {
-        std::unique_ptr<std::vector<WifiNetwork>> list(reinterpret_cast<std::vector<WifiNetwork>*>(l));
+        auto list = TakePosted<std::vector<WifiNetwork>>(l);
         auto gen = unsigned(w);
         scanBusy_ = false;
         bool again = scanPending_;
@@ -1461,6 +1453,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             return true;
         }
         return false;
+    default: break;
     }
     (void)result;
     return false;

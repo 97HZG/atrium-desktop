@@ -15,6 +15,8 @@ namespace {
 struct ComScope {
     bool owned;
     ComScope() : owned(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {}
+    ComScope(const ComScope&) = delete;
+    ComScope& operator=(const ComScope&) = delete;
     ~ComScope()
     {
         if (owned)
@@ -25,8 +27,9 @@ struct ComScope {
 struct Bstr {
     BSTR b;
     explicit Bstr(const std::wstring& s) : b(SysAllocStringLen(s.data(), UINT(s.size()))) {}
+    Bstr(const Bstr&) = delete;
+    Bstr& operator=(const Bstr&) = delete;
     ~Bstr() { SysFreeString(b); }
-    operator BSTR() const { return b; }
 };
 
 std::wstring UserSid()
@@ -60,7 +63,7 @@ winrt::com_ptr<ITaskFolder> RootFolder()
     if (FAILED(service->Connect(none, none, none, none)))
         return nullptr;
     winrt::com_ptr<ITaskFolder> folder;
-    service->GetFolder(Bstr(L"\\"), folder.put());
+    service->GetFolder(Bstr(L"\\").b, folder.put());
     return folder;
 }
 
@@ -99,7 +102,7 @@ bool RegisterLogonTask(const std::wstring& exe)
                              Xml(exe) + L"</Command></Exec></Actions></Task>";
     VARIANT none{};
     winrt::com_ptr<IRegisteredTask> task;
-    HRESULT hr = folder->RegisterTask(Bstr(TaskName(sid)), Bstr(xml), TASK_CREATE_OR_UPDATE, none, none, TASK_LOGON_INTERACTIVE_TOKEN, none, task.put());
+    HRESULT hr = folder->RegisterTask(Bstr(TaskName(sid)).b, Bstr(xml).b, TASK_CREATE_OR_UPDATE, none, none, TASK_LOGON_INTERACTIVE_TOKEN, none, task.put());
     if (FAILED(hr))
         Log(L"startup: the logon task could not be registered (0x%08X)", unsigned(hr));
     return SUCCEEDED(hr);
@@ -114,7 +117,7 @@ std::wstring LogonTaskProgram()
     winrt::com_ptr<ITaskDefinition> definition;
     winrt::com_ptr<IActionCollection> actions;
     winrt::com_ptr<IAction> action;
-    if (!folder || FAILED(folder->GetTask(Bstr(TaskName(sid)), task.put())) || FAILED(task->get_Definition(definition.put())) ||
+    if (!folder || FAILED(folder->GetTask(Bstr(TaskName(sid)).b, task.put())) || FAILED(task->get_Definition(definition.put())) ||
         FAILED(definition->get_Actions(actions.put())) || FAILED(actions->get_Item(1, action.put())))
         return {};
     auto exec = action.try_as<IExecAction>();
@@ -135,7 +138,7 @@ bool RemoveLogonTask()
     auto folder = sid.empty() ? nullptr : RootFolder();
     if (!folder)
         return false;
-    HRESULT hr = folder->DeleteTask(Bstr(TaskName(sid)), 0);
+    HRESULT hr = folder->DeleteTask(Bstr(TaskName(sid)).b, 0);
     return SUCCEEDED(hr) || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
 }
 

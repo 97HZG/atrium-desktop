@@ -6,7 +6,7 @@
 using namespace atrium;
 
 namespace {
-const RECT screen{-1920, 0, 0, 1080}; // a display left of the primary one
+const RECT kScreen{-1920, 0, 0, 1080}; // a display left of the primary one
 
 void Require(bool condition, const char* message)
 {
@@ -21,16 +21,16 @@ RECT Strip(const EdgeFrame& f) { return f.ToArea(RECT{LONG(f.Along() / 2) - 200,
 
 void CheckPlacement()
 {
-    Require(Same(Strip({BarEdge::Bottom, screen}), {-1160, 1016, -760, 1080}), "bottom: the strip sits on the bottom edge");
-    Require(Same(Strip({BarEdge::Top, screen}), {-1160, 0, -760, 64}), "top: the strip sits on the top edge");
-    Require(Same(Strip({BarEdge::Left, screen}), {-1920, 340, -1856, 740}), "left: the strip runs down the left edge");
-    Require(Same(Strip({BarEdge::Right, screen}), {-64, 340, 0, 740}), "right: the strip runs down the right edge");
+    Require(Same(Strip({BarEdge::Bottom, kScreen}), {-1160, 1016, -760, 1080}), "bottom: the strip sits on the bottom edge");
+    Require(Same(Strip({BarEdge::Top, kScreen}), {-1160, 0, -760, 64}), "top: the strip sits on the top edge");
+    Require(Same(Strip({BarEdge::Left, kScreen}), {-1920, 340, -1856, 740}), "left: the strip runs down the left edge");
+    Require(Same(Strip({BarEdge::Right, kScreen}), {-64, 340, 0, 740}), "right: the strip runs down the right edge");
 }
 
 void CheckRoundTrip()
 {
     for (BarEdge edge : {BarEdge::Bottom, BarEdge::Top, BarEdge::Left, BarEdge::Right}) {
-        const EdgeFrame f{edge, screen};
+        const EdgeFrame f{edge, kScreen};
         const POINT p{-700, 333};
         const POINT back = f.ToArea(f.FromArea(p));
         Require(back.x == p.x && back.y == p.y, "a point comes back to where it was");
@@ -42,7 +42,7 @@ void CheckRoundTrip()
 void CheckAxes()
 {
     // u grows left to right on horizontal edges and top to bottom on vertical ones; v grows toward the edge.
-    const EdgeFrame left{BarEdge::Left, screen}, top{BarEdge::Top, screen};
+    const EdgeFrame left{BarEdge::Left, kScreen}, top{BarEdge::Top, kScreen};
     Require(left.Along() == 1080 && left.Across() == 1920, "a side edge runs along the screen's height");
     Require(left.FromArea(POINT{-1920, 10}).x == 10 && left.FromArea(POINT{-1920, 10}).y == 1920, "left: the edge is the far end of v");
     Require(top.FromArea(POINT{-1910, 0}).y == 1080, "top: the edge is the far end of v");

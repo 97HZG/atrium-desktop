@@ -1,6 +1,7 @@
 #include "ime_status.h"
 
 #include "keyboard_hook.h"
+#include "../posted.h"
 
 #include <imm.h>
 
@@ -131,17 +132,19 @@ ImeStatus QueryImeStatus(HWND foreground, bool askIme)
     return status;
 }
 
-ImeWatcher::ImeWatcher(HWND window, UINT message) : window_(window), message_(message)
+ImeWatcher::ImeWatcher(HWND window, UINT message)
+    : window_(window),
+      message_(message),
+      wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+      caps_(ForegroundCapsLock()), // the latch as it already is; every press then flips it
+      foreground_(SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT)),
+      // CHANGE is not watched: it fires for every composition and candidate
+      // change, which would read the IME on every key of a sentence. Shift and
+      // Ctrl+Space cover the middle/English switch.
+      ime_(SetWinEventHook(EVENT_OBJECT_IME_SHOW, EVENT_OBJECT_IME_HIDE, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT)),
+      keyToken_(KeyboardHook::Instance().Add(&ImeWatcher::OnKey, this))
 {
     g_watcher = this;
-    caps_ = ForegroundCapsLock(); // the latch as it already is; every press then flips it
-    wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    foreground_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT);
-    // CHANGE is not watched: it fires for every composition and candidate
-    // change, which would read the IME on every key of a sentence. Shift and
-    // Ctrl+Space cover the middle/English switch.
-    ime_ = SetWinEventHook(EVENT_OBJECT_IME_SHOW, EVENT_OBJECT_IME_HIDE, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT);
-    keyToken_ = KeyboardHook::Instance().Add(&ImeWatcher::OnKey, this);
     thread_ = std::thread([this] { Run(); });
     Wake(); // the state already in front, before the first switch
 }
@@ -191,7 +194,7 @@ void ImeWatcher::Run()
             continue;
         HWND focus = FocusWindow(foreground), asked = focus;
         ImeStatus status = QueryImeStatus(focus);
-        if (status.empty() && focus != foreground)
+        if (status.Empty() && focus != foreground)
             status = QueryImeStatus(asked = foreground);
         if (toggle_.exchange(false) && status.reliable) {
             Switch(asked, status);
@@ -199,15 +202,13 @@ void ImeWatcher::Run()
         }
         if (foreground != GetForegroundWindow() || FocusWindow(foreground) != focus)
             continue; // the foreground moved while the IME was asked: not a state of anything
-        if (!status.reliable && !status.empty() && !last.empty() && status.layout == last.layout)
+        if (!status.reliable && !status.Empty() && !last.Empty() && status.layout == last.layout)
             ImeCarryForward(status, last);
-        if (status.reliable && !status.empty())
+        if (status.reliable && !status.Empty())
             last = status;
-        if (status.empty() || !status.reliable)
+        if (status.Empty() || !status.reliable)
             continue; // never announce a read that did not finish
-        auto sample = std::make_unique<Sample>(Sample{foreground, status});
-        if (PostMessageW(window_, message_, 0, reinterpret_cast<LPARAM>(sample.get())))
-            (void)sample.release();
+        PostOwned(window_, message_, 0, std::make_unique<Sample>(Sample{foreground, status}));
     }
 }
 
@@ -238,7 +239,7 @@ bool ImeWatcher::OnKey(void* context, DWORD vk, DWORD /*scan*/, bool /*extended*
         return false;
     const bool caseKey = vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_CAPITAL;
     const bool switchKey = vk == VK_SPACE && ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN) | GetAsyncKeyState(VK_CONTROL)) & 0x8000) != 0;
-    const bool imeKey = vk == VK_KANA || vk == VK_KANJI || vk == VK_HANGUL || vk == VK_HANJA;
+    const bool imeKey = vk == VK_KANA || vk == VK_KANJI; // VK_HANGUL and VK_HANJA share these codes
     // Atrium's Win key hook replays the Space of Win+Space itself: the Win key
     // is already up when the replay arrives, so the combination above no longer
     // sees it.

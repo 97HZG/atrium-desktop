@@ -2,6 +2,7 @@
 
 #include "log.h"
 #include "shell/wifi.h"
+#include "../posted.h"
 
 #include <windows.h>
 #include <endpointvolume.h>
@@ -131,8 +132,7 @@ void SystemStatusReader::Run()
         }
         if (WaitForSingleObject(quit_, 0) == WAIT_OBJECT_0)
             break;
-        if (PostMessageW(notify_, readyMessage_, 0, reinterpret_cast<LPARAM>(status.get())))
-            status.release();
+        PostOwned(notify_, readyMessage_, 0, std::move(status));
     }
     if (g_watched && g_callback)
         g_watched->UnregisterControlChangeNotify(g_callback.get());

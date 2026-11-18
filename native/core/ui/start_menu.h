@@ -123,8 +123,8 @@ private:
     void Paint(Canvas& c);
     void PaintSearch(Canvas& c, const Theme& t);
     void PaintTiles(Canvas& c, const Theme& t, float shown);
-    // A tile in `cell`: its icon (a folder: its first apps, small) and name. target: a carried app would go into it.
-    void PaintTileFace(Canvas& c, const Theme& t, const Tile& tile, D2D1_RECT_F cell, const std::wstring& id, bool selected, bool target);
+    // A tile in `r`: its icon (a folder: its first apps, small) and name. target: a carried app would go into it.
+    void PaintTileFace(Canvas& c, const Theme& t, const Tile& tile, D2D1_RECT_F r, const std::wstring& id, bool selected, bool target);
     void DrawIcon(Canvas& c, const std::wstring& id, int px, D2D1_RECT_F r, float radius);
     void PaintRows(Canvas& c, const Theme& t, const std::vector<Row>& rows, float shown);
     void PaintIndex(Canvas& c, const Theme& t); // the A-Z list's letters, and the one being picked
@@ -221,7 +221,7 @@ private:
     void Launch(const CatalogApp& app);
     void ContextMenu(const std::wstring& id, POINT screen);
     void RunPower(int index);
-    std::wstring HitAt(POINT client) const;
+    std::wstring HitAt(POINT pt) const;
     const std::vector<Row>& RowsShown() const { return query_.empty() ? list_ : results_; }
     bool Listing() const { return !query_.empty() || allApps_; }
     void MoveSelection(int dx, int dy);

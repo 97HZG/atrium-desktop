@@ -18,7 +18,7 @@ const wchar_t* const kLunarMonths[] = {L"正", L"二", L"三", L"四", L"五", L
 
 std::wstring LunarDay(int d)
 {
-    static const wchar_t* const digits[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"七", L"八", L"九", L"十"};
+    static constexpr const wchar_t* kDigits[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"七", L"八", L"九", L"十"};
     if (d == 10)
         return L"初十";
     if (d == 20)
@@ -26,7 +26,7 @@ std::wstring LunarDay(int d)
     if (d == 30)
         return L"三十";
     const wchar_t* tens = d < 10 ? L"初" : d < 20 ? L"十" : d < 30 ? L"廿" : L"三";
-    return std::wstring(tens) + digits[(d - 1) % 10];
+    return std::wstring(tens) + kDigits[(d - 1) % 10];
 }
 
 std::wstring LunarMonth(int m, bool leap) { return std::wstring(leap ? L"闰" : L"") + kLunarMonths[std::clamp(m, 1, 12) - 1] + L"月"; }
@@ -35,28 +35,28 @@ std::wstring LunarMonth(int m, bool leap) { return std::wstring(leap ? L"闰" : 
 
 int DaysIn(int y, int m)
 {
-    static const int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    static constexpr int kDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    return m == 2 && leap ? 29 : days[m - 1];
+    return m == 2 && leap ? 29 : kDays[m - 1];
 }
 
 int Weekday(int y, int m, int d)
 {
-    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    static constexpr int kOffsets[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
     if (m < 3)
         y -= 1;
-    int sunday0 = (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7; // 0 Sunday
+    int sunday0 = (y + y / 4 - y / 100 + y / 400 + kOffsets[m - 1] + d) % 7; // 0 Sunday
     return (sunday0 + 6) % 7;
 }
 
 ChineseCalendar::ChineseCalendar()
 {
     UErrorCode e = U_ZERO_ERROR;
-    gregorian_ = ucal_open(nullptr, 0, "en_US@calendar=gregorian", UCAL_GREGORIAN, &e);
+    gregorian_ = static_cast<void*>(ucal_open(nullptr, 0, "en_US@calendar=gregorian", UCAL_GREGORIAN, &e));
     if (U_FAILURE(e))
         gregorian_ = nullptr;
     e = U_ZERO_ERROR;
-    chinese_ = ucal_open(nullptr, 0, "zh_CN@calendar=chinese", UCAL_DEFAULT, &e);
+    chinese_ = static_cast<void*>(ucal_open(nullptr, 0, "zh_CN@calendar=chinese", UCAL_DEFAULT, &e));
     if (U_FAILURE(e))
         chinese_ = nullptr;
     if (!Available())
@@ -97,11 +97,11 @@ std::wstring ChineseCalendar::Line(int y, int m, int d) const
         return {};
     if (LanguageIsEnglish())
         return L"Lunar " + std::to_wstring(lm) + L"/" + std::to_wstring(ld);
-    static const wchar_t stems[] = L"甲乙丙丁戊己庚辛壬癸";
-    static const wchar_t branches[] = L"子丑寅卯辰巳午未申酉戌亥";
+    static constexpr wchar_t kStems[] = L"甲乙丙丁戊己庚辛壬癸";
+    static constexpr wchar_t kBranches[] = L"子丑寅卯辰巳午未申酉戌亥";
     std::wstring year;
     if (cy >= 1)
-        year = std::wstring(1, stems[(cy - 1) % 10]) + branches[(cy - 1) % 12] + L"年 ";
+        year = std::wstring(1, kStems[(cy - 1) % 10]) + kBranches[(cy - 1) % 12] + L"年 ";
     return L"农历" + year + LunarMonth(lm, leap) + LunarDay(ld);
 }
 
@@ -138,9 +138,9 @@ std::wstring ChineseCalendar::DayLabel(int y, int m, int d, bool* festival) cons
         int m, d;
         const wchar_t* name;
     };
-    static const F festivals[] = {{1, 1, L"春节"},    {1, 15, L"元宵节"}, {5, 5, L"端午节"}, {7, 7, L"七夕"},
-                                  {8, 15, L"中秋节"}, {9, 9, L"重阳节"},  {12, 8, L"腊八节"}};
-    for (const F& f : festivals)
+    static constexpr F kFestivals[] = {{1, 1, L"春节"},    {1, 15, L"元宵节"}, {5, 5, L"端午节"}, {7, 7, L"七夕"},
+                                       {8, 15, L"中秋节"}, {9, 9, L"重阳节"},  {12, 8, L"腊八节"}};
+    for (const F& f : kFestivals)
         if (!leap && f.m == lm && f.d == ld)
             return mark(f.name);
     if (lm == 12 && !leap) {

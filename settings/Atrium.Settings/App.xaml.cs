@@ -15,9 +15,8 @@ public partial class App : Application
 
     public static string WindowTitle => Loc.T("Atrium Settings");
     internal static MainWindow? CurrentWindow { get; private set; }
-    private static BarSettings? s_pendingCurrent, s_pendingSaved;
-    private static Mutex? s_instance;
-    private MainWindow? _window;
+    private static BarSettings? _pendingCurrent, _pendingSaved;
+    private static Mutex? _instance;
 
     public App()
     {
@@ -43,13 +42,15 @@ public partial class App : Application
         Loc.Load(); // also before the single-instance lookup: the title follows the language
         // Single instance: a second launch (tray menu, double click) brings the
         // existing window to the front instead of opening another one.
-        s_instance = new Mutex(true, @"Local\Atrium.Settings", out bool created);
+        _instance = new Mutex(true, @"Local\Atrium.Settings", out bool created);
         if (!created)
         {
+            _instance.Dispose();
+            _instance = null;
             nint other = FindWindow(null, WindowTitle);
             if (other != IntPtr.Zero)
             {
-                GetWindowThreadProcessId(other, out uint pid);
+                _ = GetWindowThreadProcessId(other, out uint pid);
                 bool same = false;
                 try
                 {
@@ -59,7 +60,9 @@ public partial class App : Application
                 catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
                 if (!same)
                 {
-                    MessageBox(IntPtr.Zero, Loc.T("Atrium Settings is running from another location. Close that window, then open the settings in this folder."), "Atrium", 0x40);
+                    _ = MessageBox(IntPtr.Zero,
+                        Loc.T("Atrium Settings is running from another location. Close that window, then open the settings in this folder."),
+                        "Atrium", 0x40);
                     Exit();
                     return;
                 }
@@ -75,9 +78,8 @@ public partial class App : Application
         }
         try
         {
-            _window = new MainWindow();
-            CurrentWindow = _window;
-            _window.Activate();
+            CurrentWindow = new MainWindow();
+            CurrentWindow.Activate();
         }
         catch (Exception e)
         {
@@ -91,8 +93,8 @@ public partial class App : Application
     // was on its way, so the new window can show them as unsaved.
     internal static void ReloadWindow(int page, BarSettings? current = null, BarSettings? saved = null)
     {
-        s_pendingCurrent = current?.Clone();
-        s_pendingSaved = saved?.Clone();
+        _pendingCurrent = current?.Clone();
+        _pendingSaved = saved?.Clone();
         var old = CurrentWindow;
         old?.ReleaseForReload();
         var window = new MainWindow(page);
@@ -105,8 +107,8 @@ public partial class App : Application
     // saved settings; they were still unsaved when the old window closed.
     internal static (BarSettings? Current, BarSettings? Saved) TakePendingState()
     {
-        var state = (s_pendingCurrent, s_pendingSaved);
-        s_pendingCurrent = s_pendingSaved = null;
+        var state = (_pendingCurrent, _pendingSaved);
+        _pendingCurrent = _pendingSaved = null;
         return state;
     }
 

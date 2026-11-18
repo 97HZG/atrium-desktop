@@ -35,6 +35,8 @@ inline HWND ShellTaskbar(DWORD skip = GetCurrentProcessId())
 inline std::atomic_int g_shellQuestions{0};
 struct ShellQuestion {
     ShellQuestion() { ++g_shellQuestions; }
+    ShellQuestion(const ShellQuestion&) = delete;
+    ShellQuestion& operator=(const ShellQuestion&) = delete;
     ~ShellQuestion() { --g_shellQuestions; }
 };
 

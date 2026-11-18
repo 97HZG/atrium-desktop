@@ -4,6 +4,7 @@
 
 #include "log.h"
 #include "shell/uia_client.h"
+#include "../posted.h"
 
 #include <tlhelp32.h>
 #include <uiautomation.h>
@@ -32,10 +33,7 @@ bool IsTime(const std::wstring& s)
         return false;
     if (s == L"昨天" || s.starts_with(L"星期"))
         return true;
-    for (wchar_t c : s)
-        if (!iswdigit(c) && c != L':' && c != L'/' && c != L'-')
-            return false;
-    return true;
+    return std::ranges::all_of(s, [](wchar_t c) { return iswdigit(c) || c == L':' || c == L'/' || c == L'-'; });
 }
 
 std::wstring Trim(std::wstring s)
@@ -122,9 +120,8 @@ std::vector<HWND> WeChatWindows(DWORD pid)
 
 } // namespace
 
-WeChatSource::WeChatSource(HWND notify, UINT msg) : notify_(notify), msg_(msg)
+WeChatSource::WeChatSource(HWND notify, UINT msg) : notify_(notify), msg_(msg), wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr))
 {
-    wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     thread_ = std::thread([this] { Run(); });
 }
 
@@ -150,13 +147,7 @@ void WeChatSource::Run()
         VariantClear(&v);
         if (FAILED(hr))
             return hr;
-        cache = nullptr;
-        winrt::com_ptr<IUIAutomationCondition> raw;
-        if (FAILED(hr = u->CreateCacheRequest(cache.put())) || FAILED(hr = cache->AddProperty(UIA_AutomationIdPropertyId)) ||
-            FAILED(hr = cache->AddProperty(UIA_NamePropertyId)) || FAILED(hr = cache->put_TreeScope(TreeScope_Element)) ||
-            FAILED(hr = u->get_RawViewCondition(raw.put())) || FAILED(hr = cache->put_TreeFilter(raw.get())))
-            return hr;
-        return cache->put_AutomationElementMode(AutomationElementMode_None);
+        return CreateRawCache(u, {UIA_AutomationIdPropertyId, UIA_NamePropertyId}, cache);
     });
     std::map<std::wstring, int> unread; // chat row id -> unread count last seen
     bool baseline = false;
@@ -180,7 +171,7 @@ void WeChatSource::Run()
             Row r = Parse(name);
             std::wstring key = id && *id ? id : r.chat;
             if (!r.chat.empty())
-                rows.push_back({key, r});
+                rows.emplace_back(key, r);
         }
         SysFreeString(id);
         SysFreeString(name);
@@ -199,7 +190,7 @@ void WeChatSource::Run()
                     PROCESSENTRY32W pe{sizeof(pe)};
                     for (BOOL ok = snap != INVALID_HANDLE_VALUE && Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe))
                         if (_wcsicmp(pe.szExeFile, L"Weixin.exe") == 0 || _wcsicmp(pe.szExeFile, L"WeChat.exe") == 0)
-                            procs.push_back({pe.th32ProcessID, ProgramPath(pe.th32ProcessID)});
+                            procs.emplace_back(pe.th32ProcessID, ProgramPath(pe.th32ProcessID));
                     if (snap != INVALID_HANDLE_VALUE)
                         CloseHandle(snap);
                     listed = tick;
@@ -209,7 +200,7 @@ void WeChatSource::Run()
                 // UI thread, and typing made one per key, #79); its list then is the next baseline.
                 DWORD front = 0;
                 GetWindowThreadProcessId(GetForegroundWindow(), &front);
-                if (std::any_of(procs.begin(), procs.end(), [&](const auto& p) { return p.first == front; })) {
+                if (std::ranges::any_of(procs, [&](const auto& p) { return p.first == front; })) {
                     watch.Clear();
                     baseline = false;
                     WaitForUiaWake(wake_, 1000);
@@ -227,16 +218,16 @@ void WeChatSource::Run()
                             continue;
                         int n = 0;
                         all->get_Length(&n);
-                        std::vector<winrt::com_ptr<IUIAutomationElement>> found_;
+                        std::vector<winrt::com_ptr<IUIAutomationElement>> elements;
                         for (int i = 0; i < n; ++i) {
                             winrt::com_ptr<IUIAutomationElement> e;
                             all->GetElement(i, e.put());
                             readRow(e.get(), rows);
                             if (e)
-                                found_.push_back(std::move(e));
+                                elements.push_back(std::move(e));
                         }
                         if (n > 0) {
-                            held = std::move(found_);
+                            held = std::move(elements);
                             heldProgram = program;
                             exe = program;
                             if (!watch.Contains(h)) {
@@ -289,7 +280,7 @@ void WeChatSource::Run()
                         // Not gated on baseline: WeChat in front clears it, and reading happens there (#79).
                         bool read = old != unread.end() && old->second > 0 && r.unread == 0;
                         if (rose || read) {
-                            auto* n = new Notice();
+                            auto n = std::make_unique<Notice>();
                             n->source = L"wechat";
                             n->title = r.chat;
                             n->unread = rose;
@@ -300,9 +291,7 @@ void WeChatSource::Run()
                                 if (!exe.empty())
                                     n->action = L"app:" + exe;
                             }
-                            if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(n)))
-                                delete n;
-                            else if (rose)
+                            if (PostOwned(notify_, msg_, 0, std::move(n)) && rose)
                                 Log(L"wechat: new message (unread %d)", r.unread);
                         }
                         unread[key] = r.unread;

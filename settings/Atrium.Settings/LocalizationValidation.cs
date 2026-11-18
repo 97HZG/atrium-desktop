@@ -9,8 +9,7 @@ namespace Atrium.Settings;
 // is not a printf template; callers select the appropriate format grammar.
 public static class LocalizationValidation
 {
-    public static bool ValidTag(string tag) => tag.Length is > 0 and <= 32 &&
-        Regex.IsMatch(tag, @"\A[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\z", RegexOptions.CultureInvariant);
+    public static bool ValidTag(string tag) => tag.Length is > 0 and <= 32 && TagPattern.IsMatch(tag);
 
     public static string[]? NativeTokens(string text)
     {
@@ -27,8 +26,11 @@ public static class LocalizationValidation
         return [.. tokens];
     }
 
+    // Constructed, not generated: tools/check-localization.ps1 compiles this file without source generators.
+    private static readonly Regex TagPattern = new(@"\A[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\z", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     private static readonly Regex NativePattern = new(@"\G%[-+ #0]*(?:\*|[0-9]+)?(?:\.(?:\*|[0-9]*))?(?:I32|I64|hh|ll|[hljztLIw])?[diouxXfFeEgGaAcCsSp]",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+    private static readonly Regex CountEscapes = new(@"\{\{|\}\}|\{0\}", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     public static bool NativeMatches(string source, string translated)
     {
@@ -68,7 +70,7 @@ public static class LocalizationValidation
     public static bool CountMatches(string source, string translated)
     {
         // TrPlural and Loc.Plural share the {0}-only, unformatted count syntax.
-        static bool Valid(string value) => Regex.Replace(value, @"\{\{|\}\}|\{0\}", "").IndexOfAny(['{', '}']) < 0;
+        static bool Valid(string value) => CountEscapes.Replace(value, "").IndexOfAny(['{', '}']) < 0;
         return Valid(source) && Valid(translated) && ManagedMatches(source, translated);
     }
 

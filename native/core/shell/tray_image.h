@@ -1,3 +1,4 @@
+// Tray icon artwork selection: live snapshot ahead of application branding.
 #pragma once
 namespace atrium::tray {
 enum class Artwork { Missing, Snapshot, Application };

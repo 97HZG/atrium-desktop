@@ -44,8 +44,6 @@ CalendarPanel::CalendarPanel(HINSTANCE instance) : surface_(instance, L"Atrium C
         firstWeekday_ = int(first % 7);
 }
 
-CalendarPanel::~CalendarPanel() = default;
-
 void CalendarPanel::ShowMonth(int y, int m, int direction)
 {
     year_ = y;
@@ -182,7 +180,8 @@ void CalendarPanel::PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card)
     c.BeginGroup(monthDir_ ? e : 1, 1, w / 2, gridTop + 3 * kCellH, float(monthDir_) * 28 * (1 - e), 0);
     for (size_t i = 0; i < days_.size(); ++i) {
         const Day& d = days_[i];
-        float x = kPad + float(i % 7) * cellW, y = gridTop + float(i / 7) * kCellH;
+        const size_t col = i % 7, row = i / 7;
+        float x = kPad + float(col) * cellW, y = gridTop + float(row) * kCellH;
         D2D1_RECT_F cell = D2D1::RectF(x + 2, y + 2, x + cellW - 2, y + kCellH - 2);
         std::wstring id = L"day:" + std::to_wstring(i);
         bool inMonth = d.m == month_, today = d.y == now.wYear && d.m == now.wMonth && d.d == now.wDay;
@@ -300,11 +299,9 @@ bool CalendarPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             Close();
         return false;
     case WM_TIMER:
-        if (w == kTickTimer) {
+        if (w == kTickTimer)
             surface_.Invalidate(); // the seconds
-            return true;
-        }
-        return false;
+        return w == kTickTimer;
     case WM_MOUSEMOVE: {
         if (!tracking_) {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
@@ -364,6 +361,7 @@ bool CalendarPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             return true;
         }
         return false;
+    default: break;
     }
     (void)result;
     return false;

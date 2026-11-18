@@ -31,26 +31,26 @@ struct DoubleClick {
     // is the first of the next one.
     bool Click(const std::wstring& id, unsigned long long now, unsigned long long window)
     {
-        if (!id.empty() && id == last && now - lastMs <= window) {
+        if (!id.empty() && id == last_ && now - lastMs_ <= window) {
             Clear();
             return true;
         }
-        last = id;
-        lastMs = now;
+        last_ = id;
+        lastMs_ = now;
         return false;
     }
     // Whether a click waits for its second one.
-    bool Waiting() const { return !last.empty(); }
-    bool WaitingFor(const std::wstring& id) const { return !id.empty() && id == last; }
+    bool Waiting() const { return !last_.empty(); }
+    bool WaitingFor(const std::wstring& id) const { return !id.empty() && id == last_; }
     void Clear()
     {
-        last.clear();
-        lastMs = 0;
+        last_.clear();
+        lastMs_ = 0;
     }
 
 private:
-    std::wstring last;
-    unsigned long long lastMs = 0;
+    std::wstring last_;
+    unsigned long long lastMs_ = 0;
 };
 
 } // namespace atrium

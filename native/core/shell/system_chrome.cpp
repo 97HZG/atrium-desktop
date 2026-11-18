@@ -298,7 +298,7 @@ void SystemChrome::SetBannersHidden(bool hidden)
     bannersHidden_ = hidden;
     const std::wstring now = QuietProfile();
     const QuietPlan plan = PlanQuiet(now, hidden, quietOurs_, quietBefore_);
-    if (plan.action == QuietAction::hide) {
+    if (plan.action == QuietAction::Hide) {
         if (SetQuietProfile(plan.profile.c_str())) {
             quietBefore_ = now;
             quietOurs_ = true;
@@ -310,7 +310,7 @@ void SystemChrome::SetBannersHidden(bool hidden)
             quietReady_ = false;
             Log(L"chrome: Do Not Disturb could not be turned on (was %s)", now.c_str());
         }
-    } else if (plan.action == QuietAction::restore) {
+    } else if (plan.action == QuietAction::Restore) {
         quietReady_ = false;
         if (now == kQuietProfile) {
             if (SetQuietProfile(plan.profile.c_str()))

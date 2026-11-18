@@ -127,6 +127,7 @@ private:
     bool Beside(RECT& frame) const; // moves a frame over the strip's place beside it; false if it was not over it
     void MoveBeside(HWND window);   // the window beside the strip (minimized: where it comes back)
     void Save();
+    std::vector<HWND> ParkedInOrder() const; // put away first, first
     void Load();
     int Capacity() const;
 
@@ -146,8 +147,8 @@ private:
     RECT Zone() const;                           // where the strip goes, to the screen's edge, px
     RECT WorkArea() const;
     D2D1_RECT_F Box(const Entry& e) const; // the windows' room, content DIP
-    int EntryAt(POINT content) const;
-    std::shared_ptr<const WindowPicture> PictureOf(HWND window, const std::wstring& key, std::wstring& cacheKey);
+    int EntryAt(POINT pt) const;
+    std::shared_ptr<const WindowPicture> PictureOf(HWND window, const std::wstring& app, std::wstring& cacheKey);
     // Where window j of a card stands at rest, strip DIP; `angle` its turn.
     Pose PoseOf(const Entry& e, size_t j, const WindowPicture& p, float angle) const;
     bool StripPose(HWND window, Pose& pose);   // at rest in the strip, flight DIP

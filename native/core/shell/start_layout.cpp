@@ -76,7 +76,7 @@ void StartLayout::Clamp()
     // A folder keeps at least one app; an app appears once.
     std::vector<std::wstring> seen;
     auto fresh = [&](const std::wstring& id) {
-        if (id.empty() || std::find(seen.begin(), seen.end(), id) != seen.end())
+        if (id.empty() || std::ranges::find(seen, id) != seen.end())
             return false;
         seen.push_back(id);
         return true;
@@ -95,7 +95,7 @@ void StartLayout::Clamp()
     tiles = std::move(kept);
     std::vector<std::wstring> once;
     for (std::wstring& id : hidden)
-        if (!id.empty() && std::find(once.begin(), once.end(), id) == once.end())
+        if (!id.empty() && std::ranges::find(once, id) == once.end())
             once.push_back(std::move(id));
     hidden = std::move(once);
 }
@@ -148,12 +148,12 @@ StartLayout LoadStartLayout()
     if (o.HasKey(L"hidden") && o.GetNamedValue(L"hidden").ValueType() == json::JsonValueType::Array)
         for (const auto& v : o.GetNamedArray(L"hidden"))
             if (v.ValueType() == json::JsonValueType::String)
-                layout.hidden.push_back(std::wstring(v.GetString()));
+                layout.hidden.emplace_back(v.GetString());
     if (o.HasKey(L"windowsPins") && o.GetNamedValue(L"windowsPins").ValueType() == json::JsonValueType::Array) {
         layout.windowsPinsKnown = true;
         for (const auto& v : o.GetNamedArray(L"windowsPins"))
             if (v.ValueType() == json::JsonValueType::String)
-                layout.windowsPins.push_back(std::wstring(v.GetString()));
+                layout.windowsPins.emplace_back(v.GetString());
     }
     layout.Clamp();
     return layout;

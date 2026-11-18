@@ -33,7 +33,7 @@ int main()
         Check(r.attempts.size() == 2 && r.attempts.back().route == Route::Toolbar, "classic right messages after failed context menu");
         r = Dispatch(Action::Left, false, [](Route) { return int32_t(0); }, unseen);
         Check(r.outcome == Outcome::AcceptedUnconfirmed && r.attempts.size() == 1, "S_OK without evidence is not success or safe to repeat");
-        r = Dispatch(Action::Left, true, [](Route) { return providerTimeout; }, unseen);
+        r = Dispatch(Action::Left, true, [](Route) { return kProviderTimeout; }, unseen);
         Check(r.outcome == Outcome::AcceptedUnconfirmed && r.attempts.size() == 1, "timeout does not prove the asynchronous action was cancelled");
         r = Dispatch(Action::Right, false, fail, [](bool) { return true; });
         Check(r.outcome == Outcome::Observed && r.attempts.size() == 1, "observed response wins even with provider error");

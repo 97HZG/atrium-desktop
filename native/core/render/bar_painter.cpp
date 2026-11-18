@@ -84,7 +84,7 @@ IDWriteTextFormat* BarPainter::Format(float px, DWRITE_FONT_WEIGHT weight, const
 
 ID2D1Bitmap1* BarPainter::BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& item)
 {
-    if (!item.image || item.image->empty())
+    if (!item.image || item.image->Empty())
         return nullptr;
     auto& b = bitmaps_[item.imageId];
     if (!b) {
@@ -421,7 +421,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
             DrawItem(d2d, scene, it, brush.get(), ink, wash); // on top of the others
     // Drop bitmaps of icons that are gone or were replaced.
     for (auto it = bitmaps_.begin(); it != bitmaps_.end();)
-        it = std::find(usedBitmaps_.begin(), usedBitmaps_.end(), it->first) != usedBitmaps_.end() ? std::next(it) : bitmaps_.erase(it);
+        it = std::ranges::find(usedBitmaps_, it->first) != usedBitmaps_.end() ? std::next(it) : bitmaps_.erase(it);
 
     const EdgeFrame frame = FrameFor(scene);
     if (sepX_ >= 0) {
@@ -924,7 +924,7 @@ void BarPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity
     ID2D1SolidColorBrush* sheen = logoSheen_.get();
     sheen->SetOpacity(opacity);
     for (int i = 0; i < 4; ++i) {
-        float x = left + float(i % 2) * (pane + gap), y = top + float(i / 2) * (pane + gap);
+        float x = left + float(i % 2) * (pane + gap), y = top + float(i >> 1) * (pane + gap);
         D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(x, y, x + pane, y + pane), corner, corner);
         FillContinuousRect(d2d, rr.rect, rr.radiusX, grad);
         // A faint lit edge on top of each pane.

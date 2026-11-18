@@ -208,7 +208,13 @@ public sealed partial class MainWindow
         fill.GradientStops.Add(new GradientStop { Color = Rgb(bottom), Offset = 1 });
         var g = new Grid { Width = 40, Height = 40, IsHitTestVisible = false };
         g.Children.Add(new Border { Background = fill, CornerRadius = new CornerRadius(10) });
-        g.Children.Add(new FontIcon { Glyph = glyph, FontSize = 19, Foreground = WhiteInk, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") });
+        g.Children.Add(new FontIcon
+        {
+            Glyph = glyph,
+            FontSize = 19,
+            Foreground = WhiteInk,
+            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+        });
         return g;
     }
 
@@ -448,7 +454,7 @@ public sealed partial class MainWindow
             if (!moving && !marks && _applied == _posted && !_postedLow) StopTicking();
         }
 
-        private static GlassTile BarTile(BarGeometry L) => new(L.BarX, L.BarY, L.BarW, L.BarH, L.Radius);
+        private static GlassTile BarTile(BarGeometry bar) => new(bar.BarX, bar.BarY, bar.BarW, bar.BarH, bar.Radius);
 
         // The glass for this frame, unless it is the one already on its way; while shapes move at a
         // lower resolution (so it keeps up with the frames), sharp again once they rest.
@@ -481,7 +487,7 @@ public sealed partial class MainWindow
             {
                 var k = (j.Tiles[i], spec, key);
                 if (!_cache.TryGetValue(k, out var o) && !_warm.TryGetValue(k, out o))
-                    o = GlassRenderer.CardOverlays(bg, j.Material, j.Rs, new[] { j.Tiles[i] }, j.Scale)[0];
+                    o = GlassRenderer.CardOverlays(bg, j.Material, j.Rs, [j.Tiles[i]], j.Scale)[0];
                 overlays[i] = next[k] = o;
             }
             _cache = next;
@@ -496,7 +502,7 @@ public sealed partial class MainWindow
                 double r = j.Rs * m;
                 if (Picture(j, r) is not { } low) continue;
                 var k = (j.Tiles[0], GlassSpec.For(j.Material, j.Scale * r), low.Item2);
-                warm[k] = _warm.TryGetValue(k, out var o) ? o : GlassRenderer.CardOverlays(low.Item1, j.Material, r, new[] { j.Tiles[0] }, j.Scale)[0];
+                warm[k] = _warm.TryGetValue(k, out var o) ? o : GlassRenderer.CardOverlays(low.Item1, j.Material, r, [j.Tiles[0]], j.Scale)[0];
             }
             _warm = warm;
         }
@@ -562,9 +568,9 @@ public sealed partial class MainWindow
             Canvas.SetTop(image, t.Y + t.H / 2 - h / 2);
         }
 
-        private void LayoutBar(BarGeometry L)
+        private void LayoutBar(BarGeometry bar)
         {
-            int running = M.CurrentSettings.ShowRunning && L.N > M._previewPins.Length ? M._previewPins.Length : -1;
+            int running = M.CurrentSettings.ShowRunning && bar.N > M._previewPins.Length ? M._previewPins.Length : -1;
             for (int i = 0; i < MaxPreviewApps; i++)
             {
                 var vm = i < M._previewPins.Length ? M._previewPins[i] : M._previewRunning;
@@ -572,7 +578,7 @@ public sealed partial class MainWindow
             }
             SetBarClock();
             // No pointer on the bar: no magnification, no hover plate.
-            Face.Layout(L, _barDark, L.N, running, 2, 1, 0, 0, BarStatus());
+            Face.Layout(bar, _barDark, bar.N, running, 2, 1, 0, 0, BarStatus());
         }
 
         protected void SetBarClock()
@@ -1126,7 +1132,8 @@ public sealed partial class MainWindow
         private readonly TextBlock[] _rowTitle = new TextBlock[2], _rowSub = new TextBlock[2];
         // Battery (or power), casting, Stage Manager.
         private readonly Path _battTrack = RingPath(4), _battLevel = RingPath(4);
-        private readonly Ellipse _powerDisc = new() { IsHitTestVisible = false }, _castDisc = new() { IsHitTestVisible = false }, _stageDisc = new() { IsHitTestVisible = false };
+        private readonly Ellipse _powerDisc = new() { IsHitTestVisible = false }, _castDisc = new() { IsHitTestVisible = false },
+                                 _stageDisc = new() { IsHitTestVisible = false };
         private readonly TextBlock _battGlyph, _battTitle, _battSub, _castGlyph, _castTitle, _castSub, _stageGlyph, _stageTitle, _stageSub;
         // The sliders.
         private readonly LevelRow _bright, _sound;

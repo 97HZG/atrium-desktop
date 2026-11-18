@@ -17,7 +17,8 @@ internal static partial class WidgetFaces
     private sealed record WeatherDay(string Label, int Code, double Lo, double Hi);
     private sealed record WeatherData(string City, double Temp, double Hi, double Lo, int Code, bool Day, WeatherHour[] Hours, WeatherDay[] Days);
 
-    private static string WeatherPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "weather.json");
+    private static string WeatherPath =>
+        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "weather.json");
 
     public static long WeatherStamp()
     {
@@ -35,7 +36,8 @@ internal static partial class WidgetFaces
                     .Select(h => new WeatherHour((string?)h["label"] ?? "", (int)((double?)h["code"] ?? 0), (bool?)h["day"] ?? true, (double?)h["temp"] ?? 0,
                                                  (int)((double?)h["event"] ?? 0))).ToArray();
                 var days = (o["days"] as JsonArray ?? []).OfType<JsonObject>()
-                    .Select(d => new WeatherDay((string?)d["label"] ?? "", (int)((double?)d["code"] ?? 0), (double?)d["lo"] ?? 0, (double?)d["hi"] ?? 0)).ToArray();
+                    .Select(d => new WeatherDay((string?)d["label"] ?? "", (int)((double?)d["code"] ?? 0),
+                                                (double?)d["lo"] ?? 0, (double?)d["hi"] ?? 0)).ToArray();
                 if (hours.Length > 0 && days.Length > 0)
                 {
                     return new WeatherData((string?)o["city"] ?? "", (double?)o["temp"] ?? 0, (double?)o["hi"] ?? 0, (double?)o["lo"] ?? 0,
@@ -43,11 +45,15 @@ internal static partial class WidgetFaces
                 }
             }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or FormatException) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
+                                      or InvalidOperationException or FormatException)
+        {
+        }
         return new WeatherData(Loc.T("Nanjing"), 18, 21, 12, 2, true,
-            [ new(Loc.T("Now"), 2, true, 18, 0), new(Loc.T("15:00"), 1, true, 19, 0), new(Loc.T("16:00"), 1, true, 19, 0), new("17:12", 0, true, 0, 2),
-                                new(Loc.T("18:00"), 1, false, 16, 0), new(Loc.T("19:00"), 0, false, 15, 0) ],
-            [new(Loc.T("Today"), 2, 12, 21), new(Loc.T("Tue"), 61, 11, 17), new(Loc.T("Wed"), 3, 9, 15), new(Loc.T("Thu"), 0, 8, 18), new(Loc.T("Fri"), 1, 10, 20)]);
+            [new(Loc.T("Now"), 2, true, 18, 0), new(Loc.T("15:00"), 1, true, 19, 0), new(Loc.T("16:00"), 1, true, 19, 0), new("17:12", 0, true, 0, 2),
+                new(Loc.T("18:00"), 1, false, 16, 0), new(Loc.T("19:00"), 0, false, 15, 0)],
+            [new(Loc.T("Today"), 2, 12, 21), new(Loc.T("Tue"), 61, 11, 17), new(Loc.T("Wed"), 3, 9, 15),
+                new(Loc.T("Thu"), 0, 8, 18), new(Loc.T("Fri"), 1, 10, 20)]);
     }
 
     private static string Condition(int code) => code switch
@@ -84,7 +90,7 @@ internal static partial class WidgetFaces
     private static string Deg(double t) => Math.Round(t, MidpointRounding.AwayFromZero) + "°";
 
     // The full-colour face's sky (SkyFace): blue by day, navy by night, greyer under clouds, rain and fog.
-    private static Brush SkyBrush()
+    private static LinearGradientBrush SkyBrush()
     {
         var d = LoadWeather();
         bool day = d.Day;
@@ -107,42 +113,43 @@ internal static partial class WidgetFaces
         Color text = p.Text, sub = p.Sub, faint = p.Track;
         var ink = p.Icon;
         bool dark = ink == Ink.Dark;
-        const double pad = 16;
-        Text(c, d.City, pad, 12, w - pad - (size == "small" ? 0 : 120), 32, 14.5, text, 2, 0, p);
-        Text(c, Deg(d.Temp), pad - 2, 30, w / 2 + 40, 82, 44, text, 0, 0, p);
+        const double Inset = 16;
+        Text(c, d.City, Inset, 12, w - Inset - (size == "small" ? 0 : 120), 32, 14.5, text, 2, 0, p);
+        Text(c, Deg(d.Temp), Inset - 2, 30, w / 2 + 40, 82, 44, text, 0, 0, p);
         string range = Loc.F("H {0}  L {1}", Deg(d.Hi), Deg(d.Lo));
         if (size == "small")
         {
-            Icon(c, d.Code, d.Day, pad + 11, h - 62, 22, 0, ink);
-            Text(c, Condition(d.Code), pad, h - 48, w - pad, h - 30, 13, text, 2, 0, p);
-            Text(c, range, pad, h - 30, w - pad, h - 12, 12, text, 2, 0, p);
+            Icon(c, d.Code, d.Day, Inset + 11, h - 62, 22, 0, ink);
+            Text(c, Condition(d.Code), Inset, h - 48, w - Inset, h - 30, 13, text, 2, 0, p);
+            Text(c, range, Inset, h - 30, w - Inset, h - 12, 12, text, 2, 0, p);
             return;
         }
-        Icon(c, d.Code, d.Day, w - pad - 10, 24, 20, 0, ink);
-        Text(c, Condition(d.Code), w / 2, 40, w - pad, 58, 13, text, 2, 2, p);
-        Text(c, range, w / 2 - 20, 58, w - pad, 76, 12.5, text, 2, 2, p);
-        double hy = size == "large" ? 92 : 90, colW = (w - 2 * pad) / 6;
-        if (size == "large") Line(c, pad, hy - 6, w - pad, hy - 6, faint, 1);
+        Icon(c, d.Code, d.Day, w - Inset - 10, 24, 20, 0, ink);
+        Text(c, Condition(d.Code), w / 2, 40, w - Inset, 58, 13, text, 2, 2, p);
+        Text(c, range, w / 2 - 20, 58, w - Inset, 76, 12.5, text, 2, 2, p);
+        double hy = size == "large" ? 92 : 90, colW = (w - 2 * Inset) / 6;
+        if (size == "large") Line(c, Inset, hy - 6, w - Inset, hy - 6, faint, 1);
         for (int i = 0; i < Math.Min(6, d.Hours.Length); i++)
         {
             var hr = d.Hours[i];
-            double x0 = pad + colW * i, cx = x0 + colW / 2;
+            double x0 = Inset + colW * i, cx = x0 + colW / 2;
             Text(c, hr.Label, x0 - 4, hy, x0 + colW + 4, hy + 16, 11.5, sub, 2, 1, p);
             Icon(c, hr.Code, hr.Day, cx, hy + 31, 22, hr.Event, ink);
-            Text(c, hr.Event != 0 ? (hr.Event == 1 ? Loc.T("Sunrise") : Loc.T("Sunset")) : Deg(hr.Temp), x0 - 4, hy + 46, x0 + colW + 4, hy + 64, hr.Event != 0 ? 12 : 13.5, text, 2, 1, p);
+            string hourValue = hr.Event != 0 ? (hr.Event == 1 ? Loc.T("Sunrise") : Loc.T("Sunset")) : Deg(hr.Temp);
+            Text(c, hourValue, x0 - 4, hy + 46, x0 + colW + 4, hy + 64, hr.Event != 0 ? 12 : 13.5, text, 2, 1, p);
         }
         if (size != "large") return;
         double top2 = hy + 76;
-        Line(c, pad, top2 - 6, w - pad, top2 - 6, faint, 1);
+        Line(c, Inset, top2 - 6, w - Inset, top2 - 6, faint, 1);
         var days = d.Days.Take(5).ToArray();
         double weekLo = days.Min(x => x.Lo), weekHi = days.Max(x => x.Hi), span = Math.Max(1, weekHi - weekLo);
-        double rowH = (h - 12 - top2) / Math.Max(1, days.Length), barL = 170, barR = w - pad - 44;
+        double rowH = (h - 12 - top2) / Math.Max(1, days.Length), barL = 170, barR = w - Inset - 44;
         for (int i = 0; i < days.Length; i++)
         {
             var day = days[i];
             double y = top2 + rowH * i, cy = y + rowH / 2;
-            Text(c, day.Label, pad, y, pad + 60, y + rowH, 14, text, 2, 0, p);
-            Icon(c, day.Code, true, pad + 84, cy, 22, 0, ink);
+            Text(c, day.Label, Inset, y, Inset + 60, y + rowH, 14, text, 2, 0, p);
+            Icon(c, day.Code, true, Inset + 84, cy, 22, 0, ink);
             Text(c, Deg(day.Lo), barL - 46, y, barL - 8, y + rowH, 14, sub, 2, 2, p);
             Fill(c, barL, cy - 2.5, barR, cy + 2.5, 2.5, faint);
             double x0 = barL + (barR - barL) * (day.Lo - weekLo) / span, x1 = Math.Max(x0 + 5, barL + (barR - barL) * (day.Hi - weekLo) / span);
@@ -159,7 +166,7 @@ internal static partial class WidgetFaces
                 Circle(c, x, cy, 4.5, dark ? Rgb(0xFFFFFF) : Rgb(0x1C2333, 0.55));
                 Circle(c, x, cy, 3.2, dark ? Rgb(0x1C2333, 0.9) : Rgb(0xFFFFFF));
             }
-            Text(c, Deg(day.Hi), barR + 6, y, w - pad, y + rowH, 14, text, 2, 2, p);
+            Text(c, Deg(day.Hi), barR + 6, y, w - Inset, y + rowH, 14, text, 2, 2, p);
         }
     }
 
@@ -196,7 +203,8 @@ internal static partial class WidgetFaces
         for (int i = 0; i < 8; i++)
         {
             double a = i * Math.PI / 4;
-            Line(c, cx + Math.Cos(a) * 0.31 * s, cy + Math.Sin(a) * 0.31 * s, cx + Math.Cos(a) * 0.43 * s, cy + Math.Sin(a) * 0.43 * s, gold, Math.Max(1, 0.075 * s));
+            Line(c, cx + Math.Cos(a) * 0.31 * s, cy + Math.Sin(a) * 0.31 * s,
+                cx + Math.Cos(a) * 0.43 * s, cy + Math.Sin(a) * 0.43 * s, gold, Math.Max(1, 0.075 * s));
         }
     }
 

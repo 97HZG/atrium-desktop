@@ -35,7 +35,14 @@ constexpr UINT WM_BAR_LAYOUT = WM_APP + 0x71; // defer DPI relayout until SetWin
 // DCompositionWaitForCompositorClock (Windows 11): waits for the next composed frame or a handle;
 // WAIT_OBJECT_0 + count is the clock. Looked up at run time (absent before build 22000).
 using WaitClockFn = DWORD(WINAPI*)(UINT, const HANDLE*, DWORD);
-const WaitClockFn g_waitClock = reinterpret_cast<WaitClockFn>(GetProcAddress(LoadLibraryW(L"dcomp.dll"), "DCompositionWaitForCompositorClock"));
+const WaitClockFn kWaitForCompositorClock = reinterpret_cast<WaitClockFn>(GetProcAddress(LoadLibraryW(L"dcomp.dll"), "DCompositionWaitForCompositorClock"));
+
+// Another app bar or the taskbar moved (ABN_POSCHANGED and the like).
+UINT AppBarNotice()
+{
+    static const UINT kNotice = RegisterWindowMessageW(L"Atrium.AppBar");
+    return kNotice;
+}
 
 constexpr wchar_t kVisualClass[] = L"AtriumBarVisual";
 constexpr wchar_t kInputClass[] = L"AtriumBarInput";
@@ -81,7 +88,7 @@ std::map<Bar*, CaptureWindows> g_capturePolicies; // UI-thread only
 void ApplyCapturePolicies()
 {
     // One capture fallback must exclude every Atrium window to prevent feedback.
-    const bool visible = std::all_of(g_capturePolicies.begin(), g_capturePolicies.end(), [](const auto& entry) { return entry.second.visible; });
+    const bool visible = std::ranges::all_of(g_capturePolicies, [](const auto& entry) { return entry.second.visible; });
     for (const auto& [bar, windows] : g_capturePolicies) {
         SetCaptureExclusion(windows.visual, visible);
         SetCaptureExclusion(windows.input, visible);
@@ -317,29 +324,33 @@ struct BarDropTarget : winrt::implements<BarDropTarget, IDropTarget> {
     }
 };
 
-Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display) : debugCapturable_(debugCapturable), displayOverride_(std::move(display))
+Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display)
+    : debugCapturable_(debugCapturable),
+      displayOverride_(std::move(display)),
+      wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+      quit_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
+      frame_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+      captureAck_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+      captureVisible_(debugCapturable)
 {
     RegisterClasses(instance);
-    wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    quit_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    frame_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory3), reinterpret_cast<IUnknown**>(dwrite_.put()));
 
     // Visual: never hit-tested (layered + transparent), no redirection bitmap.
-    visual_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_LAYERED, kVisualClass,
-                              L"Atrium Bar", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
+    visual_ = CreateWindowExW( // NOLINT(cppcoreguidelines-prefer-member-initializer): after RegisterClasses
+        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_LAYERED, kVisualClass, L"Atrium Bar",
+        WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
     SetLayeredWindowAttributes(visual_, 0, 255, LWA_ALPHA);
     // Input: draws nothing, so it is invisible; its window region is the shape.
-    input_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP, kInputClass, L"Atrium Bar Input", WS_POPUP, 0, 0,
-                             1, 1, nullptr, nullptr, instance, nullptr);
+    input_ = CreateWindowExW( // NOLINT(cppcoreguidelines-prefer-member-initializer): after RegisterClasses
+        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP, kInputClass, L"Atrium Bar Input", WS_POPUP, 0, 0, 1, 1, nullptr,
+        nullptr, instance, nullptr);
     SetWindowLongPtrW(input_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     SetWindowLongPtrW(input_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&Bar::InputProc));
     SetWindowLongPtrW(visual_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     SetWindowLongPtrW(visual_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&Bar::VisualProc));
     // Out of every capture until the render thread has a backdrop that
     // leaves them out by itself (Desktop Duplication).
-    captureAck_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    captureVisible_ = debugCapturable_;
     if (debugCapturable_)
         Log(L"bar: --debug-capturable, Atrium shows in screenshots (with Windows.Graphics.Capture, the backdrop freezes after the first frame)");
     SetCaptureExclusion(visual_, captureVisible_);
@@ -508,8 +519,7 @@ void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
         return;
     }
     if (!appBar_) {
-        static const UINT notice = RegisterWindowMessageW(L"Atrium.AppBar");
-        abd.uCallbackMessage = notice;
+        abd.uCallbackMessage = AppBarNotice();
         if (!AppBarMessage(ABM_NEW, abd))
             return;
         appBar_ = true;
@@ -537,8 +547,7 @@ void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
 LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     POINT pt = LayoutPoint({GET_X_LPARAM(l), GET_Y_LPARAM(l)});
-    static const UINT appBarNotice = RegisterWindowMessageW(L"Atrium.AppBar");
-    if (m == appBarNotice && appBarNotice) {
+    if (m == AppBarNotice() && AppBarNotice()) {
         if (w == ABN_POSCHANGED) { // another app bar or the taskbar moved: claim the strip again
             appBarRect_ = RECT{};
             Relayout();
@@ -737,7 +746,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
                 onOverflow(hidden_, anchor);
         } else if (launch ? bool(onLaunch) : bool(onActivate)) {
             // Starting an app (or another instance) hops its icon, as in the macOS Dock.
-            auto t = std::find_if(items_.begin(), items_.end(), [&](const TaskItem& i) { return i.key == key; });
+            auto t = std::ranges::find_if(items_, [&](const TaskItem& i) { return i.key == key; });
             if (t != items_.end() && (launch || t->windows.empty()))
                 Bounce(key);
             (launch ? onLaunch : onActivate)(key);
@@ -774,6 +783,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             onContextMenu(screen);
         return 0;
     }
+    default: break;
     }
     return DefWindowProcW(h, m, w, l);
 }
@@ -830,11 +840,11 @@ void Bar::EndDrag(bool commit)
         TaskItem t = std::move(items_[size_t(from)]);
         items_.erase(items_.begin() + from);
         items_.insert(items_.begin() + dragInsert_, std::move(t));
-        auto shared = std::find_if(allItems_.begin(), allItems_.end(), [&](const TaskItem& item) { return item.key == key; });
+        auto shared = std::ranges::find_if(allItems_, [&](const TaskItem& item) { return item.key == key; });
         TaskItem movedItem = std::move(*shared);
         allItems_.erase(shared);
-        const std::wstring before = dragInsert_ + 1 < int(items_.size()) ? items_[size_t(dragInsert_ + 1)].key : L"";
-        auto insertion = std::find_if(allItems_.begin(), allItems_.end(), [&](const TaskItem& item) { return item.key == before; });
+        const std::wstring before = dragInsert_ + 1 < int(items_.size()) ? items_[size_t(dragInsert_) + 1].key : L"";
+        auto insertion = std::ranges::find_if(allItems_, [&](const TaskItem& item) { return item.key == before; });
         allItems_.insert(insertion, std::move(movedItem));
     }
     scene_.hoverKey = moved ? key : scene_.hoverKey;
@@ -898,10 +908,9 @@ void Bar::RefreshDisplays(bool workAreaOnly)
     std::vector<DisplayInfo> before = std::move(displays_);
     displays_ = ConnectedDisplays();
     WatchDisplaysIfNeeded();
-    const bool same =
-        workAreaOnly && std::equal(before.begin(), before.end(), displays_.begin(), displays_.end(), [](const DisplayInfo& a, const DisplayInfo& b) {
-            return a.monitor == b.monitor && a.id == b.id && EqualRect(&a.bounds, &b.bounds) && a.primary == b.primary;
-        });
+    const bool same = workAreaOnly && std::ranges::equal(before, displays_, [](const DisplayInfo& a, const DisplayInfo& b) {
+                          return a.monitor == b.monitor && a.id == b.id && EqualRect(&a.bounds, &b.bounds) && a.primary == b.primary;
+                      });
     if (!same)
         ++displayGeneration_; // HMONITOR can be reused after a mode or adapter change.
     summonMonitor_ = nullptr;
@@ -922,7 +931,7 @@ void Bar::WatchDisplays()
     POINT point{};
     GetCursorPos(&point);
     HMONITOR monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONULL);
-    auto target = std::find_if(displays_.begin(), displays_.end(), [&](const DisplayInfo& d) { return d.monitor == monitor; });
+    auto target = std::ranges::find_if(displays_, [&](const DisplayInfo& d) { return d.monitor == monitor; });
     // The pointer must stay at the actual edge; screen crossings do not summon the Dock.
     if (target == displays_.end() || monitor == hmonitor_ || !AtDisplayEdge(edge_, point, target->bounds)) {
         summonMonitor_ = nullptr;
@@ -961,7 +970,7 @@ void Bar::SetItems(std::vector<TaskItem> items)
     auto visible = [](const std::vector<TaskItem>& v) {
         std::wstring sig;
         for (const auto& t : v)
-            sig += t.key + L"|" + std::to_wstring(t.windows.size() > 0) + std::to_wstring(t.active) + std::to_wstring(t.attention) + L"|" +
+            sig += t.key + L"|" + std::to_wstring(!t.windows.empty()) + std::to_wstring(t.active) + std::to_wstring(t.attention) + L"|" +
                    std::to_wstring(t.iconVersion) + L"\n";
         return sig;
     };
@@ -1256,7 +1265,7 @@ void Bar::Relayout()
             c = f->second;
         else if (iconProvider) {
             IconImage img = iconProvider(t.key, iconPx);
-            if (!img.empty())
+            if (!img.Empty())
                 c = {t.iconVersion, iconPx, nextIconId_++, std::make_shared<const IconImage>(std::move(img))};
         }
         if (c.image) {
@@ -1318,7 +1327,7 @@ void Bar::Relayout()
         scene.extras.push_back(std::move(desk));
         hits_.push_back({kDesktopKey, RECT{deskLeft - gap / 2, hitTop, insetX + barW, hitBottom}}); // to the bar's very end
     }
-    if (!scene.hoverKey.empty() && std::none_of(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == scene.hoverKey; }))
+    if (!scene.hoverKey.empty() && std::ranges::none_of(hits_, [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
     // The input method glyph is the foreground window's, not layout: it rides through a rebuild.
     scene.imeGlyph = scene_.imeGlyph;
@@ -1426,12 +1435,10 @@ void CALLBACK Bar::WinEvent(HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG idO
     Bar* bar = found->second;
     if (event == EVENT_OBJECT_LOCATIONCHANGE) {
         if (bar->filterTasks_ && !bar->layoutPending_) {
-            const bool known = std::any_of(bar->allItems_.begin(), bar->allItems_.end(), [&](const TaskItem& item) {
-                return std::find(item.windows.begin(), item.windows.end(), hwnd) != item.windows.end();
-            });
-            const bool shown = std::any_of(bar->items_.begin(), bar->items_.end(), [&](const TaskItem& item) {
-                return std::find(item.windows.begin(), item.windows.end(), hwnd) != item.windows.end();
-            });
+            const bool known =
+                std::ranges::any_of(bar->allItems_, [&](const TaskItem& item) { return std::ranges::find(item.windows, hwnd) != item.windows.end(); });
+            const bool shown =
+                std::ranges::any_of(bar->items_, [&](const TaskItem& item) { return std::ranges::find(item.windows, hwnd) != item.windows.end(); });
             if (known && shown != (MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) == bar->hmonitor_)) {
                 bar->layoutPending_ = true;
                 PostMessageW(bar->input_, WM_BAR_LAYOUT, 0, 0);
@@ -1833,13 +1840,13 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
 void Bar::ShowTooltip()
 {
     const std::wstring& key = scene_.hoverKey;
-    auto hit = std::find_if(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == key; });
+    auto hit = std::ranges::find_if(hits_, [&](const Hit& h) { return h.key == key; });
     const int rise = scene_.magnify > 1.001f ? rise_ : 0;
     const POINT tip =
         hit != hits_.end() ? EdgeFrame{edge_, window_}.ToArea(POINT{(hit->rect.left + hit->rect.right) / 2, int(scene_.bar.top) - rise}) : POINT{};
     // An app with windows: its windows, previewed, instead of the tooltip (as the Windows taskbar).
     if (onPreview && hit != hits_.end() && !IsEntry(key)) {
-        auto item = std::find_if(items_.begin(), items_.end(), [&](const TaskItem& t) { return t.key == key; });
+        auto item = std::ranges::find_if(items_, [&](const TaskItem& t) { return t.key == key; });
         if (item != items_.end() && !item->windows.empty()) {
             tooltip_->Hide(false);
             previewShown_ = true;
@@ -2108,6 +2115,8 @@ bool Bar::RenderSession()
     struct PanelState {
         explicit PanelState(HWND owner) : hwnd(owner) {}
         ~PanelState() { ForgetGlass(hwnd); }
+        PanelState(const PanelState&) = delete;
+        PanelState& operator=(const PanelState&) = delete;
         HWND hwnd; // frame/ink records leave with the layer, including device resets
         std::unique_ptr<GlassRenderer> renderer;
         unsigned pop = 0;
@@ -2215,8 +2224,8 @@ bool Bar::RenderSession()
                 extra.source = std::make_unique<MonitorCapture>(gpu, monitor, frame_);
             }
         }
-        const bool canShow = capture->KeepsOwnWindowsOut() && std::all_of(panelCaptures.begin(), panelCaptures.end(),
-                                                                          [](const auto& entry) { return entry.second.source->KeepsOwnWindowsOut(); });
+        const bool canShow =
+            capture->KeepsOwnWindowsOut() && std::ranges::all_of(panelCaptures, [](const auto& entry) { return entry.second.source->KeepsOwnWindowsOut(); });
         if (canShow != mayShowInCapture) {
             ShowOwnWindowsToCapture(canShow);
             mayShowInCapture = canShow;
@@ -2245,14 +2254,14 @@ bool Bar::RenderSession()
             extra.source->Release();
         }
         for (auto it = panels.begin(); it != panels.end();) {
-            bool listed = std::any_of(snap.panels.begin(), snap.panels.end(), [&](const GlassPanel& p) { return p.hwnd == it->first; });
+            bool listed = std::ranges::any_of(snap.panels, [&](const GlassPanel& p) { return p.hwnd == it->first; });
             it = listed ? std::next(it) : panels.erase(it);
         }
         bool moving = false;
         double now = ClockMs();
         // Widgets sample the desktop, never the windows above them; only a
         // new picture of it (or a move) draws their glass again.
-        bool widgets = std::any_of(snap.panels.begin(), snap.panels.end(), [](const GlassPanel& p) { return p.desktop && p.visible; });
+        bool widgets = std::ranges::any_of(snap.panels, [](const GlassPanel& p) { return p.desktop && p.visible; });
         desktop.Update(widgets ? snap.settings.widgetBackdrop : std::wstring(L"off"));
         for (auto& [hwnd, ps] : panels)
             if (ps.burstFrames && now - ps.burstLast > 250) {
@@ -2468,13 +2477,13 @@ bool Bar::RenderSession()
         // clock (D45): one wake-up per composed frame, at the display's rate. A timeout would
         // be rounded up to 15.6 ms, and the popups' latency objects (no vsync) would spin.
         // Pending readbacks are polled soon.
-        bool owed = barOwed || inkDue || std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.owed; });
+        bool owed = barOwed || inkDue || std::ranges::any_of(panels, [](const auto& e) { return e.second.owed; });
         bool paced = animating || panelsMoving || owed;
-        bool readback = renderer.ReadbackPending() ||
-                        std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.renderer && e.second.renderer->ReadbackPending(); });
+        bool readback =
+            renderer.ReadbackPending() || std::ranges::any_of(panels, [](const auto& e) { return e.second.renderer && e.second.renderer->ReadbackPending(); });
         DWORD w = WAIT_FAILED;
-        if (paced && g_waitClock) {
-            w = g_waitClock(3, handles, 100);
+        if (paced && kWaitForCompositorClock) {
+            w = kWaitForCompositorClock(3, handles, 100);
             if (w == WAIT_OBJECT_0 + 3 || w == WAIT_TIMEOUT) {
                 ++tick;
             } else if (w > WAIT_OBJECT_0 + 3) {
@@ -2496,11 +2505,11 @@ bool Bar::RenderSession()
         if (w == WAIT_OBJECT_0)
             return false;
         if (GetTickCount64() - statsStart >= 60000) {
-            std::sort(workMs.begin(), workMs.end());
+            std::ranges::sort(workMs);
             auto pct = [&](double q) { return workMs.empty() ? 0.0 : workMs[std::min(workMs.size() - 1, size_t(q * double(workMs.size())))]; };
-            std::sort(presentMs.begin(), presentMs.end());
+            std::ranges::sort(presentMs);
             double presentP95 = presentMs.empty() ? 0.0 : presentMs[std::min(presentMs.size() - 1, size_t(0.95 * double(presentMs.size())))];
-            std::sort(panelsMs.begin(), panelsMs.end());
+            std::ranges::sort(panelsMs);
             double panelsP95 = panelsMs.empty() ? 0.0 : panelsMs[std::min(panelsMs.size() - 1, size_t(0.95 * double(panelsMs.size())))];
             PROCESS_MEMORY_COUNTERS_EX mem{sizeof(mem)};
             GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&mem), sizeof(mem));

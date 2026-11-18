@@ -24,6 +24,8 @@ class DisplayFinder {
 public:
     DisplayFinder();
     ~DisplayFinder();
+    DisplayFinder(const DisplayFinder&) = delete;
+    DisplayFinder& operator=(const DisplayFinder&) = delete;
     void Start(HWND hwnd, UINT msg);
     void Stop();
     std::vector<WirelessDisplay> Displays() const;

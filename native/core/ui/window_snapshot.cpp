@@ -126,13 +126,13 @@ float CornerRadius(HWND window)
 {
     if (IsZoomed(window))
         return 0;
-    static const bool eleven = [] {
+    static const bool kEleven = [] {
         using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
         OSVERSIONINFOW v{sizeof(v)};
         auto get = reinterpret_cast<RtlGetVersionFn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
         return get && get(&v) == 0 && v.dwBuildNumber >= 22000;
     }();
-    if (!eleven)
+    if (!kEleven)
         return 0;
     DWM_WINDOW_CORNER_PREFERENCE pref = DWMWCP_DEFAULT;
     DwmGetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
@@ -222,7 +222,7 @@ WindowPicture PlaceholderPicture(const IconImage& icon, int width, int height, b
         px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = tone;
         px[i * 4 + 3] = 255;
     }
-    if (!icon.empty()) {
+    if (!icon.Empty()) {
         // The icon (premultiplied) over the panel, in the middle.
         const int ox = (width - icon.width) / 2, oy = (height - icon.height) / 2;
         for (int y = 0; y < icon.height; ++y)

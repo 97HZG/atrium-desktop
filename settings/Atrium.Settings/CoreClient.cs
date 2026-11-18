@@ -10,7 +10,7 @@ namespace Atrium.Settings;
 
 // Client of the Atrium.Core settings pipe (docs/SETTINGS-PROTOCOL.md). When the
 // core is not running, settings are read from and written to the file directly.
-internal sealed class CoreClient : IDisposable
+internal sealed partial class CoreClient : IDisposable
 {
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint processId);
@@ -87,7 +87,8 @@ internal sealed class CoreClient : IDisposable
             ConnectionError = null;
             return true;
         }
-        catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or OperationCanceledException or System.ComponentModel.Win32Exception)
+        catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException
+            or ArgumentException or InvalidOperationException or OperationCanceledException or System.ComponentModel.Win32Exception)
         {
             if (e is not TimeoutException and not OperationCanceledException)
             {
@@ -111,7 +112,7 @@ internal sealed class CoreClient : IDisposable
         if (coreStopped) { _connectionLost = false; ConnectionError = null; }
     }
 
-    private async Task<JsonObject?> RequestAsync(JsonObject request)
+    private async Task<JsonNode?> RequestAsync(JsonObject request)
     {
         var pipe = _pipe;
         var connection = _connection;
@@ -136,7 +137,8 @@ internal sealed class CoreClient : IDisposable
                 message.Write(_readBuffer, 0, n);
                 if (message.Length > 1024 * 1024) throw new IOException(Loc.T("The core's reply was too large"));
             } while (!pipe.IsMessageComplete);
-            return JsonNode.Parse(message.GetBuffer().AsSpan(0, (int)message.Length)) as JsonObject;
+            var reply = JsonNode.Parse(message.GetBuffer().AsSpan(0, (int)message.Length));
+            return reply is JsonObject ? reply : null;
         }
         catch (Exception e) when (e is IOException or ObjectDisposedException or JsonException or OperationCanceledException)
         {
@@ -205,7 +207,12 @@ internal sealed class CoreClient : IDisposable
         bool connected = Connected;
         var r = await RequestAsync(request);
         // Not connected: nothing to preview. A connection lost on the way: not done.
-        if (r == null) return connected || _connectionLost ? Loc.T("The core did not reply in time or the connection closed; the result is not confirmed. Please reconnect.") : null;
+        if (r == null)
+        {
+            return connected || _connectionLost
+                ? Loc.T("The core did not reply in time or the connection closed; the result is not confirmed. Please reconnect.")
+                : null;
+        }
         if (op == "commit") LastSaveWarning = r["warning"]?.GetValue<string>();
         return r["op"]?.GetValue<string>() == "ok" ? null : r["message"]?.GetValue<string>() ?? "error";
     }

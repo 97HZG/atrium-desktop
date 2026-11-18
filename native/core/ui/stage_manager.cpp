@@ -15,6 +15,7 @@
 #include <functional>
 #include <climits>
 #include <cmath>
+#include <ranges>
 #include <thread>
 
 namespace json = winrt::Windows::Data::Json;
@@ -105,7 +106,7 @@ bool Transient(HWND h)
            r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
 }
 
-bool Has(const std::vector<std::wstring>& set, const std::wstring& key) { return std::find(set.begin(), set.end(), key) != set.end(); }
+bool Has(const std::vector<std::wstring>& set, const std::wstring& key) { return std::ranges::find(set, key) != set.end(); }
 
 // Each window waits on a card of its own: keyed by its app's key and itself ('|' is in neither an
 // app's path nor its AUMID).
@@ -152,8 +153,8 @@ float Lerp(float a, float b, float t) { return a + (b - a) * t; }
 
 D2D1_POINT_2F Project(const D2D1_MATRIX_4X4_F& m, float x, float y)
 {
-    const float X = x * m._11 + y * m._21 + m._41, Y = x * m._12 + y * m._22 + m._42, W = x * m._14 + y * m._24 + m._44;
-    return D2D1::Point2F(X / W, Y / W);
+    const float px = x * m._11 + y * m._21 + m._41, py = x * m._12 + y * m._22 + m._42, pw = x * m._14 + y * m._24 + m._44;
+    return D2D1::Point2F(px / pw, py / pw);
 }
 
 float EaseOut3(float t) { return 1 - (1 - t) * (1 - t) * (1 - t); }
@@ -240,7 +241,7 @@ void StageManager::SetExcluded(std::vector<std::wstring> apps)
             for (const TaskItem& t : snapshot) {
                 if (!StageAppExcluded(excluded_, t.key))
                     continue;
-                if (std::find(t.windows.begin(), t.windows.end(), it->first) != t.windows.end()) {
+                if (std::ranges::find(t.windows, it->first) != t.windows.end()) {
                     excluded = true;
                     break;
                 }
@@ -366,7 +367,7 @@ void StageManager::Update(const std::vector<TaskItem>& items)
             excludedWindows_.insert(excludedWindows_.end(), t.windows.begin(), t.windows.end());
             continue;
         }
-        const bool rootHere = std::find(t.windows.begin(), t.windows.end(), root) != t.windows.end();
+        const bool rootHere = std::ranges::find(t.windows, root) != t.windows.end();
         for (HWND h : t.windows) {
             TaskItem w = t;
             w.key = WindowKey(t.key, h);
@@ -404,7 +405,7 @@ void StageManager::Update(const std::vector<TaskItem>& items)
     AdoptMinimized();
     if (!pending_.empty() && GetTickCount64() > pendingUntil_)
         pending_.clear();
-    auto active = std::find_if(items_.begin(), items_.end(), [](const TaskItem& t) { return t.active; });
+    auto active = std::ranges::find_if(items_, [](const TaskItem& t) { return t.active; });
     // A window in front, on this screen, of an app not on the stage: its set takes the stage. Not
     // while a set picked in the strip is on its way to the front.
     if (active != items_.end() && root && !IsIconic(root) && OnMonitor(root, monitor_) && !Transient(root)) {
@@ -414,7 +415,7 @@ void StageManager::Update(const std::vector<TaskItem>& items)
                 // Another window of an app on the stage (a chat opened from the main window) joins
                 // it; the app's other windows stay up.
                 const std::wstring app = AppOf(active->key);
-                const bool sameApp = std::any_of(stage_.begin(), stage_.end(), [&](const std::wstring& k) { return AppOf(k) == app; });
+                const bool sameApp = std::ranges::any_of(stage_, [&](const std::wstring& k) { return AppOf(k) == app; });
                 Stage(sameApp ? Set{active->key} : SetOf(active->key), sameApp, root, false);
                 MoveBeside(root); // a window taking the stage over the strip moves beside it
             }
@@ -474,7 +475,7 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, c
                         best = std::min(best, d->second);
             return best;
         };
-        std::stable_sort(others.begin(), others.end(), [&](const Set& a, const Set& b) { return nearest(a) < nearest(b); });
+        std::ranges::stable_sort(others, [&](const Set& a, const Set& b) { return nearest(a) < nearest(b); });
         if (!left.empty())
             others.insert(others.begin(), left);
         // An app is in one set only: the newest.
@@ -564,7 +565,7 @@ void StageManager::RequestPicture(HWND window)
 void StageManager::SetLarge(Flight& f)
 {
     auto it = pictures_.find(f.window);
-    if (it == pictures_.end() || !it->second.large || !it->second.large->ok || f.key.rfind(L"stage|w|", 0) != 0)
+    if (it == pictures_.end() || !it->second.large || !it->second.large->ok || !f.key.starts_with(L"stage|w|"))
         return;
     f.large = it->second.large;
     f.largeKey = f.key + L"|L";
@@ -622,8 +623,8 @@ void StageManager::PictureTaken()
             std::vector<std::pair<ULONGLONG, HWND>> full;
             for (const auto& [h, q] : pictures_)
                 if (q.large && std::max(q.large->width, q.large->height) > kLargeOld)
-                    full.push_back({q.taken, h});
-            std::sort(full.begin(), full.end(), std::greater<>());
+                    full.emplace_back(q.taken, h);
+            std::ranges::sort(full, std::greater<>());
             for (size_t i = kLargeKept; i < full.size(); ++i) {
                 Picture& q = pictures_[full[i].second];
                 q.large = std::make_shared<const WindowPicture>(Smaller(*q.large, kLargeOld));
@@ -647,7 +648,7 @@ void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std:
     for (const auto& [h, p] : parked_)
         if (Has(keys, p.key))
             mine.emplace_back(p.seq, h);
-    std::sort(mine.begin(), mine.end());
+    std::ranges::sort(mine);
     if (!front && !mine.empty())
         front = mine.back().second;
     // Kept out of the strip's band: they come back beside it.
@@ -663,7 +664,7 @@ void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std:
         std::wstring key;
         auto picture = from ? PictureOf(h, parked_[h].key, key) : nullptr;
         std::erase_if(flights_, [&](const Flight& f) { return f.window == h; });
-        if (!picture || !IsWindow(h) || key.rfind(L"stage|w|", 0) != 0)
+        if (!picture || !IsWindow(h) || !key.starts_with(L"stage|w|"))
             continue;
         Flight f;
         f.window = h;
@@ -767,11 +768,7 @@ void StageManager::RestoreAll()
     for (const auto& [h, p] : parked_)
         if (IsWindow(h))
             Transitions(h, true);
-    std::vector<std::pair<uint64_t, HWND>> all;
-    for (const auto& [h, p] : parked_)
-        all.emplace_back(p.seq, h);
-    std::sort(all.begin(), all.end());
-    for (const auto& [seq, h] : all)
+    for (HWND h : ParkedInOrder())
         if (IsWindow(h) && IsIconic(h))
             ShowQuietly(h);
     parked_.clear();
@@ -876,7 +873,7 @@ bool StageManager::AdoptMinimized()
     for (HWND h : flyIn) {
         std::wstring key;
         auto picture = PictureOf(h, parked_[h].key, key);
-        if (!picture || !picture->ok || key.rfind(L"stage|w|", 0) != 0)
+        if (!picture || !picture->ok || !key.starts_with(L"stage|w|"))
             continue; // no picture yet: the card just comes
         std::erase_if(flights_, [&](const Flight& f) { return f.window == h; });
         Flight f;
@@ -888,7 +885,7 @@ bool StageManager::AdoptMinimized()
         SetLarge(f);
         flights_.push_back(std::move(f));
     }
-    if (std::any_of(flyIn.begin(), flyIn.end(), [&](HWND h) { return Flying(h); }))
+    if (std::ranges::any_of(flyIn, [&](HWND h) { return Flying(h); }))
         Launch();
     Log(L"stage: %s minimized to the strip", gone.front().c_str());
     Save();
@@ -948,8 +945,7 @@ void StageManager::Prune()
         return false;
     });
     for (Set& set : recent_)
-        std::erase_if(set,
-                      [&](const std::wstring& k) { return std::none_of(parked_.begin(), parked_.end(), [&](const auto& kv) { return kv.second.key == k; }); });
+        std::erase_if(set, [&](const std::wstring& k) { return std::ranges::none_of(parked_, [&](const auto& kv) { return kv.second.key == k; }); });
     std::erase_if(recent_, [](const Set& set) { return set.empty(); });
     // Pictures of windows no longer waiting are old by the time they wait again; but not those of the
     // stage's (on their way back from the strip, or up): minimized, they go back with them.
@@ -973,14 +969,24 @@ void StageManager::Prune()
     Save();
 }
 
+std::vector<HWND> StageManager::ParkedInOrder() const
+{
+    std::vector<std::pair<uint64_t, HWND>> bySeq;
+    bySeq.reserve(parked_.size());
+    for (const auto& [h, p] : parked_)
+        bySeq.emplace_back(p.seq, h);
+    std::ranges::sort(bySeq);
+    std::vector<HWND> out;
+    out.reserve(bySeq.size());
+    for (const auto& [seq, h] : bySeq)
+        out.push_back(h);
+    return out;
+}
+
 void StageManager::Save()
 {
     json::JsonArray list;
-    std::vector<std::pair<uint64_t, HWND>> all;
-    for (const auto& [h, p] : parked_)
-        all.emplace_back(p.seq, h);
-    std::sort(all.begin(), all.end());
-    for (const auto& [seq, h] : all) {
+    for (HWND h : ParkedInOrder()) {
         json::JsonObject o;
         o.SetNamedValue(L"hwnd", json::JsonValue::CreateNumberValue(double(reinterpret_cast<uintptr_t>(h))));
         o.SetNamedValue(L"key", json::JsonValue::CreateStringValue(parked_[h].key));
@@ -1049,11 +1055,10 @@ void StageManager::Load()
         }
     // Apps only known from their windows: each a set of its own.
     for (const auto& [h, p] : parked_)
-        if (std::none_of(recent_.begin(), recent_.end(), [&](const Set& set) { return Has(set, p.key); }))
+        if (std::ranges::none_of(recent_, [&](const Set& set) { return Has(set, p.key); }))
             recent_.push_back(Set{p.key});
     for (Set& set : recent_)
-        std::erase_if(set,
-                      [&](const std::wstring& k) { return std::none_of(parked_.begin(), parked_.end(), [&](const auto& kv) { return kv.second.key == k; }); });
+        std::erase_if(set, [&](const std::wstring& k) { return std::ranges::none_of(parked_, [&](const auto& kv) { return kv.second.key == k; }); });
     std::erase_if(recent_, [](const Set& set) { return set.empty(); });
 }
 
@@ -1162,10 +1167,10 @@ void StageManager::Rebuild(bool keepAnchor)
             }
             if (mine.empty())
                 continue;
-            std::sort(mine.rbegin(), mine.rend()); // most recent first
+            std::ranges::sort(std::ranges::reverse_view(mine)); // most recent first
             Entry e;
             e.keys = set;
-            std::stable_sort(e.keys.begin(), e.keys.end(), [&](const std::wstring& a, const std::wstring& b) {
+            std::ranges::stable_sort(e.keys, [&](const std::wstring& a, const std::wstring& b) {
                 auto newest = [&](const std::wstring& k) {
                     uint64_t n = 0;
                     for (const auto& [seq, h] : mine)
@@ -1183,12 +1188,12 @@ void StageManager::Rebuild(bool keepAnchor)
     scrollCount_ = next.size();
     scroll_.Fit(scrollCount_);
     if (keepAnchor && !entries_.empty()) {
-        auto anchor = std::find_if(next.begin(), next.end(), [&](const Entry& e) { return e.keys == entries_.front().keys; });
+        auto anchor = std::ranges::find_if(next, [&](const Entry& e) { return e.keys == entries_.front().keys; });
         if (anchor != next.end())
             scroll_.Anchor(size_t(anchor - next.begin()), scrollCount_);
     }
     if (!next.empty())
-        std::rotate(next.begin(), next.begin() + scroll_.Offset(), next.end());
+        std::ranges::rotate(next, next.begin() + scroll_.Offset());
     if (next.size() > size_t(Capacity()))
         next.resize(size_t(Capacity()));
     // An index can now name another group. Check identity before the old keys are moved/cleared.
@@ -1199,7 +1204,7 @@ void StageManager::Rebuild(bool keepAnchor)
     const bool visible = shown_ && surface_.Visible();
     // A set keeps its card (where it is, how far it is hovered).
     for (Entry& e : next) {
-        auto old = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& o) { return o.keys == e.keys; });
+        auto old = std::ranges::find_if(entries_, [&](const Entry& o) { return o.keys == e.keys; });
         if (old != entries_.end()) {
             e.hover = old->hover;
             e.y = old->y;
@@ -1515,9 +1520,11 @@ std::shared_ptr<const WindowPicture> StageManager::PictureOf(HWND window, const 
         const int w = int(std::lround(kBoxW * s)), h = int(std::lround(kBoxW * s / 1.6f));
         // The largest icon the app has, up to 52 DIP.
         IconImage icon;
-        for (int px : {int(std::lround(52 * s)), 64, 48, 32})
-            if (!(icon = tasks_.Icon(AppOf(app), px)).empty())
+        for (int px : {int(std::lround(52 * s)), 64, 48, 32}) {
+            icon = tasks_.Icon(AppOf(app), px);
+            if (!icon.Empty())
                 break;
+        }
         p = std::make_shared<const WindowPicture>(PlaceholderPicture(icon, w, h, AppsDark()));
     }
     return p;
@@ -1553,7 +1560,7 @@ bool StageManager::StripPose(HWND window, Pose& pose)
     if (!shown_)
         return false;
     for (const Entry& e : entries_) {
-        auto at = std::find(e.windows.begin(), e.windows.end(), window);
+        auto at = std::ranges::find(e.windows, window);
         if (at == e.windows.end())
             continue;
         auto parked = parked_.find(window);
@@ -1587,7 +1594,7 @@ StageManager::Pose StageManager::PlacePose(const RECT& frame) const
 
 bool StageManager::Flying(HWND window) const
 {
-    return std::any_of(flights_.begin(), flights_.end(), [&](const Flight& f) { return f.window == window; });
+    return std::ranges::any_of(flights_, [&](const Flight& f) { return f.window == window; });
 }
 
 void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow, bool image)
@@ -1598,7 +1605,7 @@ void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wst
     const D2D1::Matrix4x4F m = Tilt(pose.cx * s, pose.cy * s, pose.ox * s, pose.oy * s, pose.angle, kDepth * s, pose.z * s);
     const D2D1_RECT_F& r = pose.rect;
     const float f = (r.right - r.left) / float(p.width), sp = float(kShadowPad) * f, pp = float(kPicturePad) * f;
-    if (shadow > 0.004f && !p.shadow.empty())
+    if (shadow > 0.004f && !p.shadow.Empty())
         c.ImagePerspective(key + L"|s", p.shadow, D2D1::RectF(r.left - sp, r.top - sp, r.right + sp, r.bottom + sp),
                            m * D2D1::Matrix4x4F::Translation(0, kShadowDrop * s, 0), kShadowAlpha * opacity * shadow);
     if (image)
@@ -1614,7 +1621,7 @@ void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
     const float rv = Reveal(std::max(index, 0), c.now);
     const float opacity = e.appear * std::clamp(rv * 1.6f, 0.f, 1.f);
     // A card whose pictures are all on their way in (or out) shows once they are there.
-    if (opacity < 0.004f || std::all_of(e.windows.begin(), e.windows.end(), [&](HWND h) { return Flying(h); }))
+    if (opacity < 0.004f || std::ranges::all_of(e.windows, [&](HWND h) { return Flying(h); }))
         return;
     const D2D1_RECT_F box = Box(e);
     const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
@@ -1647,19 +1654,19 @@ void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
         const float outer = onRight_ ? front.rect.right : front.rect.left;
         const float bottom = Project(m, outer * s, front.rect.bottom * s).y / s;
         const int iconPx = int(std::lround(kIcon * s));
-        static const IconImage shadow = SoftShadow(96, 96);
+        static const IconImage kShadow = SoftShadow(96, 96);
         std::vector<std::wstring> apps; // one icon an app, though several of its windows are in the set
         for (const std::wstring& key : e.keys)
             if (!Has(apps, AppOf(key)) && apps.size() < 3)
                 apps.push_back(AppOf(key));
         for (size_t j = apps.size(); j-- > 0;) {
             IconImage icon = tasks_.Icon(apps[j], iconPx);
-            if (icon.empty())
+            if (icon.Empty())
                 continue;
             const float ix = (onRight_ ? box.right : box.left) + dir * (10 + 24 * float(j)), iy = bottom - 6;
             const D2D1_RECT_F ir = D2D1::RectF(ix - kIcon / 2, iy - kIcon / 2, ix + kIcon / 2, iy + kIcon / 2);
             const float sp = kIcon * float(kShadowPad) / 96;
-            c.Image(L"stage|shadow", shadow, D2D1::RectF(ir.left - sp, ir.top - sp + 2, ir.right + sp, ir.bottom + sp + 2), 0.45f);
+            c.Image(L"stage|shadow", kShadow, D2D1::RectF(ir.left - sp, ir.top - sp + 2, ir.right + sp, ir.bottom + sp + 2), 0.45f);
             c.Image(L"stage|" + apps[j] + L"|" + std::to_wstring(iconPx), icon, ir);
         }
     }
@@ -1795,7 +1802,7 @@ bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
                     late.push_back(h);
             for (HWND h : late)
                 PutDown(h, false); // no picture in time: it waits without one
-            if (std::any_of(parked_.begin(), parked_.end(), [](const auto& kv) { return !kv.second.down; }))
+            if (std::ranges::any_of(parked_, [](const auto& kv) { return !kv.second.down; }))
                 SetTimer(surface_.Hwnd(), kDownTimer, kDownMs / 4, nullptr);
             return true;
         }
@@ -1868,8 +1875,8 @@ bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         }
         return true;
     }
+    default: return false;
     }
-    return false;
 }
 
 } // namespace atrium

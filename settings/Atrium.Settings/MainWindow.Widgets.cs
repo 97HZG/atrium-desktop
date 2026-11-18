@@ -53,7 +53,12 @@ public sealed partial class MainWindow
             foreach (var choice in WidgetChoices.Where(c => c.Category == category))
                 grid.Children.Add(GalleryCard(choice));
             var section = new StackPanel { Spacing = 8 };
-            section.Children.Add(new TextBlock { Text = Loc.T(category), Style = (Style)Application.Current.Resources["RowTitleStyle"], Margin = new Thickness(4, 0, 0, 0) });
+            section.Children.Add(new TextBlock
+            {
+                Text = Loc.T(category),
+                Style = (Style)Application.Current.Resources["RowTitleStyle"],
+                Margin = new Thickness(4, 0, 0, 0),
+            });
             section.Children.Add(grid);
             _widgetSections[category] = section;
             WidgetGallery.Children.Add(section);
@@ -89,7 +94,7 @@ public sealed partial class MainWindow
     private BarSettings? _galleryMaterial;
     private int _galleryGen = -1;
 
-    private FrameworkElement GalleryCard(WidgetChoice c)
+    private Button GalleryCard(WidgetChoice c)
     {
         var stage = new Border { Height = 118, CornerRadius = new CornerRadius(14), Background = PhotoBrush() };
         var face = new Viewbox { Stretch = Stretch.Fill };
@@ -129,7 +134,8 @@ public sealed partial class MainWindow
         button.Click += async (_, _) =>
         {
             string? error = await _client.AddWidgetAsync(c.Kind, c.Size);
-            WidgetHint.Text = error == null ? Loc.F("Added “{0}” to the desktop.", c.Name) : error.Contains("room") ? Loc.T("No room on the desktop: remove or shrink a widget first.") : Loc.F("Not added: {0}", error);
+            WidgetHint.Text = error == null ? Loc.F("Added “{0}” to the desktop.", c.Name)
+                : error.Contains("room") ? Loc.T("No room on the desktop: remove or shrink a widget first.") : Loc.F("Not added: {0}", error);
             WidgetHint.Visibility = Visibility.Visible;
         };
         return button;
@@ -138,7 +144,11 @@ public sealed partial class MainWindow
     // The gallery again when the picture or the material changed since it was drawn.
     private void RefreshGallery()
     {
-        if (_galleryMaterial != null && _galleryMaterial.SameMaterial(CurrentSettings) && _galleryMaterial.WidgetMaterial == CurrentSettings.WidgetMaterial && _galleryGen == Photo.Generation) return;
+        if (_galleryMaterial != null && _galleryMaterial.SameMaterial(CurrentSettings) &&
+            _galleryMaterial.WidgetMaterial == CurrentSettings.WidgetMaterial && _galleryGen == Photo.Generation)
+        {
+            return;
+        }
         foreach (var preview in _galleryStages) RenderGalleryCard(preview);
     }
 
@@ -153,7 +163,7 @@ public sealed partial class MainWindow
         var (w, h) = WidgetFaces.Size(c.Size);
         double k = Math.Min((sw - 28) / w, (sh - 28) / h);
         var tile = new GlassTile((sw - w * k) / 2, (sh - h * k) / 2, w * k, h * k, 22 * k);
-        PostTiles(stage, sw, sh, k, new[] { tile }, null, frame =>
+        PostTiles(stage, sw, sh, k, [tile], null, frame =>
         {
             frame.Apply(stage);
             viewport.Width = sw;

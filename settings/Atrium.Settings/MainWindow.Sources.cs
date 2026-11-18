@@ -11,7 +11,7 @@ namespace Atrium.Settings;
 
 // A row of a list of apps under a preview (the notification sources, the apps Stage Manager
 // leaves alone): the app's icon, found from its program, and its name.
-public abstract class AppRowVm : INotifyPropertyChanged
+public abstract partial class AppRowVm : INotifyPropertyChanged
 {
     public string Title { get; set { field = value; Raise(nameof(Title)); } } = "";
     public string Glyph { get; protected init; } = "\uecaa";
@@ -35,7 +35,7 @@ public abstract class AppRowVm : INotifyPropertyChanged
 }
 
 // A notification source: one chat app, or the other apps' Windows notifications.
-public sealed class SourceVm : AppRowVm
+public sealed partial class SourceVm : AppRowVm
 {
     private readonly Func<BarSettings, bool> _get;
     private readonly Action<BarSettings, bool> _set;
@@ -67,7 +67,7 @@ public sealed class SourceVm : AppRowVm
 }
 
 // An app Stage Manager leaves alone: one entry of stageExcluded (or the Snipping Tool's three).
-public sealed class ExcludedVm : AppRowVm
+public sealed partial class ExcludedVm : AppRowVm
 {
     private readonly MainWindow _owner;
 
@@ -100,11 +100,13 @@ public sealed partial class MainWindow
 
     private void InitSources()
     {
-        _sources.Add(new SourceVm(this, "WeChat", "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.",
+        _sources.Add(new SourceVm(this, "WeChat",
+            "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.",
             "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v));
         _sources.Add(new SourceVm(this, "QQ", "QQ's Windows notifications; when it flashes for a message without one, a card says there is a new message.",
             "\ue8bd", ["QQ.exe"], s => s.NotifyQQ, (s, v) => s.NotifyQQ = v));
-        _sources.Add(new SourceVm(this, "Feishu", "Reads the text of Feishu's popups; when it flashes for a message without one, a card says there is a new message.",
+        _sources.Add(new SourceVm(this, "Feishu",
+            "Reads the text of Feishu's popups; when it flashes for a message without one, a card says there is a new message.",
             "\ue8bd", ["Feishu.exe", "Lark.exe"], s => s.NotifyFeishu, (s, v) => s.NotifyFeishu = v));
         _sources.Add(new SourceVm(this, "WeCom", "When WeCom flashes for a new message, a card says so.",
             "\ue8bd", ["WXWork.exe", "WeCom.exe", "WXWorkLocal.exe", "WXWorkLocalPro.exe"], s => s.NotifyWeCom, (s, v) => s.NotifyWeCom = v));
@@ -149,7 +151,7 @@ public sealed partial class MainWindow
                 continue;
             }
             bool program = entry.EndsWith(".exe", StringComparison.OrdinalIgnoreCase), path = entry.Contains('\\') && !GameFinder.IsFolder(entry);
-            _excluded.Add(new ExcludedVm(this, ExcludedTitle(entry), path ? entry : "", program && !path ? [entry] : [], new[] { entry }));
+            _excluded.Add(new ExcludedVm(this, ExcludedTitle(entry), path ? entry : "", program && !path ? [entry] : [], [entry]));
         }
         foreach (var vm in _excluded) _ = LoadRowIconAsync(vm);
         RefreshExcluded();
@@ -191,7 +193,7 @@ public sealed partial class MainWindow
         string entry = Path.GetFileName(exe).ToLowerInvariant();
         if (CurrentSettings.StageExcluded.Contains(entry, StringComparer.OrdinalIgnoreCase)) return;
         lock (ProgramPaths) ProgramPaths[entry] = exe;
-        var vm = new ExcludedVm(this, ExcludedTitle(entry), exe, [], new[] { entry });
+        var vm = new ExcludedVm(this, ExcludedTitle(entry), exe, [], [entry]);
         _excluded.Add(vm);
         _ = LoadRowIconAsync(vm);
         SyncExcluded();
@@ -236,7 +238,7 @@ public sealed partial class MainWindow
         foreach (var (box, game) in rows)
         {
             if (box.IsChecked != true || CurrentSettings.StageExcluded.Contains(game.Entry, StringComparer.OrdinalIgnoreCase)) continue;
-            last = new ExcludedVm(this, game.Title, game.Icon, [], new[] { game.Entry }, named: true);
+            last = new ExcludedVm(this, game.Title, game.Icon, [], [game.Entry], named: true);
             _excluded.Add(last);
             _ = LoadRowIconAsync(last);
             SyncExcluded();

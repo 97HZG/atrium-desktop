@@ -86,7 +86,8 @@ internal static class ReleaseInstaller
         {
             // The worker atomically replaces/removes state as the UI reads progress.
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-            return JsonSerializer.Deserialize<T>(stream) ?? throw new JsonException(Loc.F("The update state is empty or incomplete: {0}", Path.GetFileName(path)));
+            return JsonSerializer.Deserialize<T>(stream)
+                ?? throw new JsonException(Loc.F("The update state is empty or incomplete: {0}", Path.GetFileName(path)));
         }
         catch (FileNotFoundException) { return default; }
         catch (DirectoryNotFoundException) { return default; }
@@ -218,7 +219,10 @@ internal static class ReleaseInstaller
         {
             using var stream = File.OpenRead(zip);
             string actual = "sha256:" + Convert.ToHexString(SHA256.HashData(stream));
-            if (!actual.Equals(digest, StringComparison.OrdinalIgnoreCase)) throw new IOException(Loc.T("The update package failed verification. Download again."));
+            if (!actual.Equals(digest, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException(Loc.T("The update package failed verification. Download again."));
+            }
         }
         string unpacked = Path.Combine(WorkDirectory, "unpacked");
         if (Directory.Exists(unpacked)) Directory.Delete(unpacked, true); // an interrupted extraction, not transfer data
@@ -237,8 +241,7 @@ internal static class ReleaseInstaller
     private static void NotifyReady()
     {
         IntPtr host = FindWindow("AtriumCoreHost", null);
-        if (host == IntPtr.Zero) return;
-        GetWindowThreadProcessId(host, out uint pid);
+        if (host == IntPtr.Zero || GetWindowThreadProcessId(host, out uint pid) == 0) return;
         try
         {
             using var core = Process.GetProcessById((int)pid);

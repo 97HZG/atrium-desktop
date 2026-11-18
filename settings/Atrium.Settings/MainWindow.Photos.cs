@@ -24,7 +24,7 @@ public sealed partial class MainWindow
     // Every preview that renders over the picture on the CPU re-renders when it changes.
     private event Action? PhotoChanged;
 
-    private Brush PhotoBrush()
+    private ImageBrush PhotoBrush()
     {
         EnsureSharedPhoto();
         return _sharedPhoto;
@@ -130,7 +130,12 @@ public sealed partial class MainWindow
         _waits.Remove(key);
         if (!_frozen.Remove(key, out var f)) return;
         var image = f.Snapshot;
-        var fade = new DoubleAnimation { To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(420)), EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        var fade = new DoubleAnimation
+        {
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(420)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
         Storyboard.SetTarget(fade, image);
         Storyboard.SetTargetProperty(fade, "Opacity");
         var story = new Storyboard { Children = { fade } };

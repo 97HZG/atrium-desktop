@@ -471,7 +471,7 @@ void BuildIndex()
                 continue;
             for (const DestEntry& entry : ParseDestList(ReadStream(storage.get(), L"DestList"))) {
                 std::wstring path = entry.real;
-                if (path.rfind(L"knownfolder:", 0) == 0 || path.rfind(L"::", 0) == 0) {
+                if (path.starts_with(L"knownfolder:") || path.starts_with(L"::")) {
                     const std::wstring resolved = ShellDisplayName(path, SIGDN_DESKTOPABSOLUTEPARSING);
                     if (resolved.empty())
                         continue;
@@ -592,7 +592,7 @@ std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, cons
     for (DestEntry& entry : entries) {
         if (entry.path.empty())
             continue;
-        if (entry.real.rfind(L"knownfolder:", 0) == 0 || entry.real.rfind(L"::", 0) == 0) {
+        if (entry.real.starts_with(L"knownfolder:") || entry.real.starts_with(L"::")) {
             const std::wstring resolved = ShellDisplayName(entry.real, SIGDN_DESKTOPABSOLUTEPARSING);
             if (resolved.empty()) {
                 Log(L"jump: shell name '%s' does not resolve", entry.real.c_str());
@@ -600,7 +600,7 @@ std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, cons
             }
             entry.real = resolved;
         }
-        const bool shellItem = entry.real.rfind(L"::", 0) == 0;
+        const bool shellItem = entry.real.starts_with(L"::");
         // A network item is kept without asking: an offline share answers in
         // tens of seconds, and the entry is the system's own recent item.
         if (!shellItem && !IsRemoteShare(entry.real) && GetFileAttributesW(entry.real.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -612,7 +612,7 @@ std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, cons
             Log(L"jump: pinned %d '%s' -> '%s'", entry.pin, entry.path.c_str(), entry.real.c_str());
         (entry.pin > 0 ? pinnedEntries : otherEntries).push_back(std::move(entry));
     }
-    std::stable_sort(pinnedEntries.begin(), pinnedEntries.end(), [](const DestEntry& a, const DestEntry& b) { return a.pin < b.pin; });
+    std::ranges::stable_sort(pinnedEntries, [](const DestEntry& a, const DestEntry& b) { return a.pin < b.pin; });
     for (const DestEntry& entry : pinnedEntries)
         data->pinned.push_back(ItemForPath(entry.path));
 
@@ -648,7 +648,7 @@ std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, cons
                 recentCovered = true;
                 // A known category is not stored in the file: its rows are the automatic list.
                 if (out.items.empty())
-                    out.items = recentItems(category.known == 1 ? 5 : 5);
+                    out.items = recentItems(5);
             }
             if (out.items.empty())
                 continue;

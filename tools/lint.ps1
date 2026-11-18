@@ -68,15 +68,38 @@ foreach ($rel in $files | Where-Object { $_ -match $text -and $_ -notmatch '^tes
         } elseif ($crlf) { Fail $where 'line-ending' 'CRLF for PowerShell' }
         if ($line.Contains("`t")) { Fail $where 'tab' 'indent with spaces' }
         if ($line -match '\s$' -and $rel -notmatch '\.md$') { Fail $where 'trailing-space' 'delete it' }
-        if ($rel -match $code -and $line.Length -gt 160) { Fail $where 'line-length' "$($line.Length) > 160 columns" }
+        # A line of one XAML attribute or one string (a sentence to translate) cannot be wrapped further.
+        $unbreakable = ($rel.EndsWith('.xaml') -and $line -match '^\s*[\w:.]+="[^"]*"\s*/?>?\s*$') -or
+            ($rel -match '\.(cs|cpp|h)$' -and $line -match '^\s*((Loc\.[TF]|Tr|TrFormat)\()?L?"(?:[^"\\]|\\.)*"\)?[,;)]*\s*$')
+        if ($rel -match $code -and $line.Length -gt 160 -and -not $unbreakable) { Fail $where 'line-length' "$($line.Length) > 160 columns" }
         $blank = if ($line.Trim()) { 0 } else { $blank + 1 }
         if ($blank -eq 2 -and $rel -match $code) { Fail $where 'blank-lines' 'one blank line at most' }
     }
 }
 
+# --- XAML: an element sits four spaces deeper than its parent; a start tag's other lines follow it ------------
+foreach ($rel in $files | Where-Object { $_ -match '\.xaml$' }) {
+    $lines = [IO.File]::ReadAllLines((Join-Path $Root $rel))
+    $depth = 0
+    $open = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $s = $lines[$i].Trim()
+        if ($open) {
+            if ($s.EndsWith('/>')) { $open = $false } elseif ($s.EndsWith('>')) { $open = $false; $depth++ }
+            continue
+        }
+        if (-not $s.StartsWith('<') -or $s.StartsWith('<?')) { continue }
+        if ($s.StartsWith('</')) { $depth-- }
+        $indent = $lines[$i].Length - $lines[$i].TrimStart(' ').Length
+        if ($indent -ne 4 * $depth) { Fail "${rel}:$($i + 1)" 'xaml-indent' "indent $(4 * $depth) spaces, the element's depth" }
+        if ($s.StartsWith('</') -or $s.StartsWith('<!--') -or $s.EndsWith('/>') -or $s -match '</[\w:.]+>$') { continue }
+        if ($s.EndsWith('>')) { $depth++ } else { $open = $true }
+    }
+}
+
 # --- Native: layers, banned and ratcheted constructs ----------------------------------------------------------
 # Who may include whom. Root headers are either foundation (anyone) or composition (root only).
-$foundation = 'bar_edge.h', 'clock.h', 'icon_image.h', 'localization.h', 'localization_format.h', 'log.h', 'motion.h', 'notice.h', 'resource.h',
+$foundation = 'bar_edge.h', 'clock.h', 'icon_image.h', 'localization.h', 'localization_format.h', 'log.h', 'motion.h', 'notice.h', 'posted.h', 'resource.h',
     'settings.h', 'status.h'
 $layers = @{ render = @(); shell = @(); ui = @('render', 'shell') }
 # Configuration macros set before the headers that read them; any other value is a constexpr.
@@ -204,6 +227,9 @@ if ($Tidy) {
             # Long and tangled functions are ratcheted: they may only get shorter and simpler.
             if ($check -eq 'readability-function-cognitive-complexity' -and $text -match "function '(.+)' has cognitive complexity of (\d+)") {
                 $counts["$($rel.Substring(7))|complexity|$($Matches[1])"] = [int]$Matches[2]
+            } elseif ($check -eq 'readability-function-cognitive-complexity' -and $text -match 'lambda has cognitive complexity of (\d+)') {
+                $key = "$($rel.Substring(7))|complexity|(lambda)" # the file's most tangled one
+                $counts[$key] = [Math]::Max([int]$counts[$key], [int]$Matches[1])
             } elseif ($check -eq 'readability-function-size' -and $text -match "function '(.+)' exceeds") {
                 $current = "$($rel.Substring(7))|function-lines|$($Matches[1])"
                 $counts[$current] = 0

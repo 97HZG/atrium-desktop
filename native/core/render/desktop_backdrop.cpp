@@ -162,7 +162,8 @@ void DesktopBackdrop::Update(const std::wstring& mode)
                     GetWindowRect(desktop_, &r);
                     origin_ = POINT{r.left, r.top};
                     // Where this frame differs from the last one; all of it when Windows cannot say.
-                    RECT dirty{r.left, r.top, r.left + size_.Width, r.top + size_.Height};
+                    const RECT whole{r.left, r.top, r.left + size_.Width, r.top + size_.Height};
+                    RECT dirty = whole;
                     try {
                         auto regions = latest.DirtyRegions();
                         if (regions.Size() > 0) {
@@ -172,6 +173,7 @@ void DesktopBackdrop::Update(const std::wstring& mode)
                                              std::max(dirty.right, LONG(r.left + d.X + d.Width)), std::max(dirty.bottom, LONG(r.top + d.Y + d.Height))};
                         }
                     } catch (const winrt::hresult_error&) {
+                        dirty = whole;
                     }
                     Store(tex.get());
                     Changed(dirty);
@@ -245,7 +247,8 @@ bool DesktopBackdrop::StartCapture()
                 s.session.IsCursorCaptureEnabled(false);
                 try {
                     s.session.IsBorderRequired(false);
-                } catch (const winrt::hresult_error&) {
+                } catch (const winrt::hresult_error& e) {
+                    Log(L"render: the desktop capture keeps its border (0x%08X)", static_cast<unsigned>(e.code()));
                 }
                 s.session.StartCapture();
                 s.ok = true;

@@ -65,7 +65,7 @@ void WindowPreview::SetWindows(const std::vector<HWND>& windows)
     for (HWND h : windows) {
         if (!IsWindow(h) || !IsWindowVisible(h))
             continue;
-        auto old = std::find_if(cards_.begin(), cards_.end(), [&](const Card& c) { return c.window == h; });
+        auto old = std::ranges::find_if(cards_, [&](const Card& c) { return c.window == h; });
         Card c;
         if (old != cards_.end()) {
             c = std::move(*old);
@@ -78,7 +78,7 @@ void WindowPreview::SetWindows(const std::vector<HWND>& windows)
     DropThumbs();
     cards_ = std::move(next);
     auto indexOf = [&](HWND window) {
-        auto item = std::find_if(cards_.begin(), cards_.end(), [&](const Card& c) { return c.window == window; });
+        auto item = std::ranges::find_if(cards_, [&](const Card& c) { return c.window == window; });
         return item != cards_.end() ? int(item - cards_.begin()) : -1;
     };
     hover_ = indexOf(hovered);
@@ -136,7 +136,7 @@ void WindowPreview::Refresh(const std::vector<TaskItem>& items)
 {
     if (!surface_.Visible())
         return;
-    auto item = std::find_if(items.begin(), items.end(), [&](const TaskItem& task) { return task.key == key_; });
+    auto item = std::ranges::find_if(items, [&](const TaskItem& task) { return task.key == key_; });
     if (item == items.end()) {
         Close();
         return;
@@ -280,7 +280,7 @@ void WindowPreview::Paint(Canvas& c)
         // The title row: the app's icon, the window's title, the close button with the pointer on the card.
         float ty = card.rect.top + kCardPad, cy = ty + kTitleH / 2 - 2;
         float textLeft = card.rect.left + kCardPad + 2;
-        if (!icon_.empty()) {
+        if (!icon_.Empty()) {
             c.Image(L"preview|" + key_, icon_, D2D1::RectF(textLeft, cy - 8, textLeft + 16, cy + 8));
             textLeft += 22;
         }
@@ -297,7 +297,7 @@ void WindowPreview::Paint(Canvas& c)
             c.Fill(card.image, kCardR - 4, t.card);
             float ic = std::min(48.f, (card.image.bottom - card.image.top) * 0.5f), mx = (card.image.left + card.image.right) / 2,
                   my = (card.image.top + card.image.bottom) / 2;
-            if (!icon_.empty())
+            if (!icon_.Empty())
                 c.Image(L"preview|" + key_, icon_, D2D1::RectF(mx - ic / 2, my - ic / 2, mx + ic / 2, my + ic / 2), 0.9f);
         }
     }
@@ -393,6 +393,7 @@ bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             onActivate(target);
         return true;
     }
+    default: break;
     }
     (void)result;
     return false;

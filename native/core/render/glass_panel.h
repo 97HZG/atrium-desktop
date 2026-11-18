@@ -65,6 +65,9 @@ bool IsGlassPresented(HWND hwnd, unsigned gen);            // UI thread; never w
 
 class GlassHost {
 public:
+    GlassHost() = default;
+    GlassHost(const GlassHost&) = delete;
+    GlassHost& operator=(const GlassHost&) = delete;
     virtual ~GlassHost() = default;
     virtual void SetPanel(const GlassPanel& panel) = 0; // UI thread
 };

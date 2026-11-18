@@ -1,3 +1,4 @@
+// Task Scheduler sign-in task that starts Atrium with the user session.
 #pragma once
 
 #include <string>

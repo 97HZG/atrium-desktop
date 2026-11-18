@@ -124,7 +124,7 @@ struct Settings {
 
     std::wstring ToJson() const;
     // Missing keys keep the values of `base`; malformed JSON returns false.
-    static bool FromJson(const std::wstring& json, const Settings& base, Settings& out);
+    static bool FromJson(const std::wstring& text, const Settings& base, Settings& out);
 };
 
 // %LOCALAPPDATA%\Atrium\settings.json

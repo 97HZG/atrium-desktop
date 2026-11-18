@@ -68,7 +68,7 @@ std::vector<CatalogApp> Enumerate()
         if (!app.name.empty() && !app.id.empty())
             apps.push_back(std::move(app));
     }
-    std::sort(apps.begin(), apps.end(), [](const CatalogApp& a, const CatalogApp& b) {
+    std::ranges::sort(apps, [](const CatalogApp& a, const CatalogApp& b) {
         return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE | SORT_DIGITSASNUMBERS, a.name.c_str(), int(a.name.size()), b.name.c_str(),
                                int(b.name.size()), nullptr, nullptr, 0) == CSTR_LESS_THAN;
     });
@@ -224,12 +224,12 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
 {
     std::vector<CatalogApp> out;
     auto add = [&](const CatalogApp& a) {
-        if (std::none_of(out.begin(), out.end(), [&](const CatalogApp& o) { return SameText(o.id, a.id); }))
+        if (std::ranges::none_of(out, [&](const CatalogApp& o) { return SameText(o.id, a.id); }))
             out.push_back(a);
     };
     for (const auto& [key, value] : layout) {
         if (key == L"packagedAppId") {
-            auto it = std::find_if(apps.begin(), apps.end(), [&](const CatalogApp& a) { return SameText(a.aumid, value) || SameText(a.id, value); });
+            auto it = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.aumid, value) || SameText(a.id, value); });
             if (it != apps.end())
                 add(*it);
             else
@@ -240,10 +240,10 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
             continue;
         std::wstring expanded = ExpandFolders(value);
         // Start layouts exported before the rename still refer to this shortcut.
-        constexpr std::wstring_view legacy = L"\\Atrium.Core.lnk";
-        if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES && expanded.size() >= legacy.size() &&
-            SameText(expanded.substr(expanded.size() - legacy.size()), std::wstring(legacy)))
-            expanded.replace(expanded.size() - legacy.size(), legacy.size(), L"\\Atrium.lnk");
+        constexpr std::wstring_view kLegacy = L"\\Atrium.Core.lnk";
+        if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES && expanded.size() >= kLegacy.size() &&
+            SameText(expanded.substr(expanded.size() - kLegacy.size()), std::wstring(kLegacy)))
+            expanded.replace(expanded.size() - kLegacy.size(), kLegacy.size(), L"\\Atrium.lnk");
         if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES) {
             Log(L"catalog: start pin %s not found", value.c_str());
             continue;
@@ -264,9 +264,9 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
             std::wstring file = link.id.substr(link.id.find_last_of(L"\\/") + 1);
             link.name = file.size() > 4 ? file.substr(0, file.size() - 4) : file;
         }
-        auto it = std::find_if(apps.begin(), apps.end(), [&](const CatalogApp& a) { return SameText(a.aumid, link.aumid) || SameText(a.id, link.aumid); });
+        auto it = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.aumid, link.aumid) || SameText(a.id, link.aumid); });
         if (it == apps.end())
-            it = std::find_if(apps.begin(), apps.end(), [&](const CatalogApp& a) { return SameText(a.target, link.target) && SameText(a.name, link.name); });
+            it = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.target, link.target) && SameText(a.name, link.name); });
         add(it != apps.end() ? *it : link);
     }
     return out;
@@ -330,7 +330,7 @@ std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
         do {
             const std::wstring name = fd.cFileName, folded = Fold(name);
             if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || name == L"." || name == L".." ||
-                std::any_of(std::begin(kSystem), std::end(kSystem), [&](const wchar_t* s) { return folded == s; }))
+                std::ranges::any_of(kSystem, [&](const wchar_t* s) { return folded == s; }))
                 continue;
             const std::wstring dir = programs + L"\\" + name;
             std::vector<std::pair<std::wstring, std::wstring>> links;
@@ -345,9 +345,9 @@ std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
                     shown = s;
                 CoTaskMemFree(s);
             }
-            auto it = std::find_if(found.begin(), found.end(), [&](const auto& f) { return Fold(f.first) == Fold(shown); });
+            auto it = std::ranges::find_if(found, [&](const auto& f) { return Fold(f.first) == Fold(shown); });
             if (it == found.end())
-                found.push_back({shown, std::move(links)});
+                found.emplace_back(shown, std::move(links));
             else
                 it->second.insert(it->second.end(), links.begin(), links.end());
         } while (FindNextFileW(h, &fd));
@@ -367,9 +367,8 @@ std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
 
 } // namespace
 
-AppCatalog::AppCatalog(HWND notify, UINT readyMsg) : notify_(notify), msg_(readyMsg)
+AppCatalog::AppCatalog(HWND notify, UINT readyMsg) : notify_(notify), msg_(readyMsg), refresh_(true)
 {
-    refresh_ = true;
     thread_ = std::thread([this] { Worker(); });
 }
 
@@ -505,7 +504,7 @@ void AppCatalog::PruneIcons()
         icons_.erase(victim);
     }
     while (failed_.size() > 512) {
-        auto victim = std::min_element(failed_.begin(), failed_.end(), [](const auto& a, const auto& b) { return a.second.time < b.second.time; });
+        auto victim = std::ranges::min_element(failed_, [](const auto& a, const auto& b) { return a.second.time < b.second.time; });
         failed_.erase(victim);
     }
 }
@@ -592,7 +591,7 @@ void AppCatalog::Worker()
         {
             std::lock_guard g(mutex_);
             requested_.erase(job);
-            if (!img.empty()) {
+            if (!img.Empty()) {
                 icons_[job] = {std::move(img), ++iconUse_};
                 failed_.erase(job);
             } else {
@@ -683,7 +682,7 @@ bool AppCatalog::Matches(const CatalogApp& app, const std::wstring& query)
         return true;
     // Localised names hide the English one ("计算器"); the id and the exe
     // usually carry it (Microsoft.WindowsCalculator_..., notepad.exe).
-    if (std::all_of(q.begin(), q.end(), [](wchar_t c) { return c < 128 && iswalnum(c); }) && NameInitials(app.name).starts_with(q))
+    if (std::ranges::all_of(q, [](wchar_t c) { return c < 128 && iswalnum(c); }) && NameInitials(app.name).starts_with(q))
         return true;
     auto tail = [](const std::wstring& s) {
         size_t p = s.find_last_of(L"\\/");

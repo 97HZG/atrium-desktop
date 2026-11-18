@@ -49,15 +49,15 @@ internal sealed class BarSettings
     public bool TrayHost { get; set; } = true;         // Atrium receives the apps' tray icons itself
     public bool StartTray { get; set; } = true;        // the tray's button in the start menu
     public bool StartStatus { get; set; } = true;      // its network, volume and battery buttons
-    public bool StartCentered { get; set; } = false;   // it opens in the middle of the screen, not at the left
-    public bool StartWithBar { get; set; } = false;    // the Windows key brings an auto-hidden bar up with it
+    public bool StartCentered { get; set; }            // it opens in the middle of the screen, not at the left
+    public bool StartWithBar { get; set; }             // the Windows key brings an auto-hidden bar up with it
     // The start menu's size and its icons' size: small | medium | large | xlarge;
     // empty: not known yet (the core fills it in from start.json).
     public string StartSize { get; set; } = "";
     public string StartIcon { get; set; } = "";
     public bool ShowStatus { get; set; } = true;
     public bool ShowNotifications { get; set; } = true;
-    public bool ShowDesktop { get; set; } = false;     // the Show Desktop slot at the bar's right end
+    public bool ShowDesktop { get; set; }              // the Show Desktop slot at the bar's right end
     public bool ShowRunning { get; set; } = true;
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public string Language { get; set; } = "auto"; // auto (follow Windows) | a locale tag: en, zh-Hans, ...
@@ -85,7 +85,7 @@ internal sealed class BarSettings
     public bool NotifyWeCom { get; set; } = true;      // WeCom's messages (a card when it flashes for one)
     public bool NotifyDingTalk { get; set; } = true;   // DingTalk's messages (likewise)
     public bool AttentionLight { get; set; } = true;   // an app asking for attention: its icon lit white on the bar
-    public bool AttentionBounce { get; set; } = false; // its icon hops a few times
+    public bool AttentionBounce { get; set; }          // its icon hops a few times
     public bool Bar { get; set; } = true;              // the glass bar module (off: Windows' taskbar and banners)
     public bool Widgets { get; set; } = true;          // desktop widgets (their layout is the core's widgets.json)
     public bool WidgetsOnRight { get; set; }
@@ -290,8 +290,10 @@ internal sealed class BarSettings
         s.StartStatus = Flag("startStatus", f.StartStatus);
         s.StartCentered = Flag("startCentered", f.StartCentered);
         s.StartWithBar = Flag("startWithBar", f.StartWithBar);
-        s.StartSize = o?["startSize"] is JsonValue ss0 && ss0.TryGetValue(out string? size) && size is "small" or "medium" or "large" or "xlarge" ? size! : f.StartSize;
-        s.StartIcon = o?["startIcon"] is JsonValue si0 && si0.TryGetValue(out string? iconSize) && iconSize is "small" or "medium" or "large" or "xlarge" ? iconSize! : f.StartIcon;
+        s.StartSize = o?["startSize"] is JsonValue ss0 && ss0.TryGetValue(out string? size) && size is "small" or "medium" or "large" or "xlarge"
+            ? size! : f.StartSize;
+        s.StartIcon = o?["startIcon"] is JsonValue si0 && si0.TryGetValue(out string? iconSize) && iconSize is "small" or "medium" or "large" or "xlarge"
+            ? iconSize! : f.StartIcon;
         s.ShowStatus = Flag("showStatus", f.ShowStatus);
         s.ShowNotifications = Flag("showNotifications", f.ShowNotifications);
         s.ShowDesktop = Flag("showDesktop", f.ShowDesktop);
@@ -388,15 +390,20 @@ internal sealed class BarSettings
         Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && HoverRise == o.HoverRise && RiseNear == o.RiseNear &&
         MagnifyNear == o.MagnifyNear && NearEnter == o.NearEnter && NearLeave == o.NearLeave && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
         ShowClockSeconds == o.ShowClockSeconds &&
-        ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus && StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
+        ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus &&
+        StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
-        ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus &&
+        ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
+        BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout &&
+        NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu &&
-        NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk && AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && Bar == o.Bar && Widgets == o.Widgets &&
+        NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk &&
+        AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
         StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize &&
         StageExcluded.SequenceEqual(o.StageExcluded, StringComparer.OrdinalIgnoreCase) && WidgetMaterial == o.WidgetMaterial &&
-        HideTaskbar == o.HideTaskbar && HideBanners == o.HideBanners && RemoteVisible == o.RemoteVisible && WinKeyStart == o.WinKeyStart && WinNumbers == o.WinNumbers &&
+        HideTaskbar == o.HideTaskbar && HideBanners == o.HideBanners && RemoteVisible == o.RemoteVisible &&
+        WinKeyStart == o.WinKeyStart && WinNumbers == o.WinNumbers &&
         StartOnLogin == o.StartOnLogin &&
         DockDisplayMode == o.DockDisplayMode && DockDisplayDelay == o.DockDisplayDelay && DockDisplay == o.DockDisplay && DesktopDisplay == o.DesktopDisplay &&
         TaskbarApps == o.TaskbarApps && TaskbarRightPrimaryOnly == o.TaskbarRightPrimaryOnly &&

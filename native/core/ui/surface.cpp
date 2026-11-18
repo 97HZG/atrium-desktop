@@ -100,16 +100,18 @@ constexpr wchar_t kClass[] = L"AtriumSurface";
 constexpr UINT_PTR kHideTimer = 0x5A01, kGlassWaitTimer = 0x5A03;
 constexpr UINT kHideMs = 140;     // the closing pop (PopVisual) lasts 130 ms
 constexpr double kGlassWaitMs = 300; // then a plain panel stands in for missing glass
-
 constexpr UINT WM_SURFACE_FRAME = WM_APP + 0x42;
-
 D2D1_COLOR_F Rgba(uint32_t rgb, float a) { return D2D1::ColorF(rgb, a); }
+// Small text over glass is a step heavier: below 12.5 DIP a regular reads as a medium (D40).
+DWRITE_FONT_WEIGHT GlassWeight(float size, DWRITE_FONT_WEIGHT w) { return size <= 12.5f && w <= DWRITE_FONT_WEIGHT_NORMAL ? DWRITE_FONT_WEIGHT_MEDIUM : w; }
 
 // Frames for the popups' animations, in step with the compositor: a thread
 // waits for each composition (DwmFlush) and tells the windows that want a
 // frame. (A 10 ms timer really fires every 16-31 ms and stutters.)
 class FramePump {
 public:
+    FramePump(const FramePump&) = delete;
+    FramePump& operator=(const FramePump&) = delete;
     static FramePump& Get()
     {
         static FramePump pump;
@@ -118,7 +120,7 @@ public:
     void Want(HWND h)
     {
         std::lock_guard g(mutex_);
-        if (std::find(wanting_.begin(), wanting_.end(), h) == wanting_.end())
+        if (std::ranges::find(wanting_, h) == wanting_.end())
             wanting_.push_back(h);
         if (!thread_.joinable())
             thread_ = std::thread([this] { Run(); });
@@ -126,6 +128,7 @@ public:
     }
 
 private:
+    FramePump() = default;
     ~FramePump()
     {
         {
@@ -166,13 +169,11 @@ private:
 
 uint32_t g_tint = 0xFFFFFF;
 double g_transparency = 0.95;
+GlassHost* g_host = nullptr;
+bool g_capturable = false, g_captureVisible = false;
+std::vector<Surface*> g_all;
 
 } // namespace
-
-GlassHost* Surface::host_ = nullptr;
-bool Surface::capturable_ = false;
-bool Surface::captureVisible_ = false;
-std::vector<Surface*> Surface::all_;
 
 void Theme::SetGlass(uint32_t tint, double transparency)
 {
@@ -384,12 +385,6 @@ void Canvas::Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLO
     d2d_->DrawGeometry(g.get(), Brush(c), width * scale, RoundStroke(d2d_));
 }
 
-// Small text over glass is a step heavier: below 12.5 DIP a regular reads as a medium (D40).
-static DWRITE_FONT_WEIGHT GlassWeight(float sizeDip, DWRITE_FONT_WEIGHT w)
-{
-    return sizeDip <= 12.5f && w <= DWRITE_FONT_WEIGHT_NORMAL ? DWRITE_FONT_WEIGHT_MEDIUM : w;
-}
-
 IDWriteTextFormat* Canvas::Format(float px, DWRITE_FONT_WEIGHT w, bool glyph, int align, bool wrap)
 {
     auto key = std::make_tuple(int(std::lround(px * 8)), int(w), glyph, align, wrap);
@@ -514,7 +509,7 @@ ID2D1Bitmap* Canvas::Bitmap(const std::wstring& key, const IconImage& image)
 {
     auto& b = s_.bitmaps_[key];
     if (!b) {
-        if (image.empty())
+        if (image.Empty())
             return nullptr;
         D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
         if (FAILED(d2d_->CreateBitmap(D2D1::SizeU(UINT32(image.width), UINT32(image.height)), image.bgra.data(), UINT32(image.width * 4), &bp, b.put())))
@@ -686,7 +681,7 @@ void Canvas::BeginGroup(float opacity, float k, float cx, float cy, float dx, fl
 {
     D2D1_MATRIX_3X2_F current;
     d2d_->GetTransform(&current);
-    groups_.push_back({current, alpha_});
+    groups_.emplace_back(current, alpha_);
     D2D1_MATRIX_3X2_F local = D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(cx * scale, cy * scale)) * D2D1::Matrix3x2F::Translation(dx * scale, dy * scale);
     d2d_->SetTransform(local * current);
     alpha_ *= std::clamp(opacity, 0.f, 1.f);
@@ -710,6 +705,9 @@ struct Surface::Shared {
     winrt::com_ptr<ID2D1Factory1> d2dFactory;
     winrt::com_ptr<ID2D1Device> d2d;
     bool lost = false;
+    Shared() = default;
+    Shared(const Shared&) = delete;
+    Shared& operator=(const Shared&) = delete;
     ~Shared()
     {
         if (d2d)
@@ -767,34 +765,33 @@ Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, flo
     // The glass below the content samples the screen: the window must not be
     // in what it samples (Desktop Duplication always leaves it out; other
     // captures only while the bar uses Windows.Graphics.Capture).
-    all_.push_back(this);
+    g_all.push_back(this);
     ApplyCaptureExclusion();
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dwrite_.put()));
 }
 
 Surface::~Surface()
 {
-    all_.erase(std::remove(all_.begin(), all_.end(), this), all_.end());
+    std::erase(g_all, this);
     if (hwnd_) {
-        if (host_) {
+        if (g_host) {
             GlassPanel p;
             p.hwnd = hwnd_;
-            host_->SetPanel(p); // not visible: removes the layer
+            g_host->SetPanel(p); // not visible: removes the layer
         }
         SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
         DestroyWindow(hwnd_);
     }
 }
 
-void Surface::SetGlassHost(GlassHost* host) { host_ = host; }
-void Surface::SetCapturable(bool capturable) { capturable_ = capturable; }
-
-void Surface::ApplyCaptureExclusion() { SetCaptureExclusion(hwnd_, (capturable_ || captureVisible_) && !private_); }
+void Surface::SetGlassHost(GlassHost* host) { g_host = host; }
+void Surface::SetCapturable(bool capturable) { g_capturable = capturable; }
+void Surface::ApplyCaptureExclusion() { SetCaptureExclusion(hwnd_, (g_capturable || g_captureVisible) && !private_); }
 
 void Surface::SetCaptureVisible(bool visible)
 {
-    captureVisible_ = visible;
-    for (Surface* s : all_)
+    g_captureVisible = visible;
+    for (Surface* s : g_all)
         s->ApplyCaptureExclusion();
 }
 
@@ -815,8 +812,8 @@ D2D1_SIZE_U Surface::BufferSize() const
                        UINT32(std::max({1, int(window_.bottom - window_.top), int(std::lround(resizeReserve_.height * scale_)) + inset})));
 }
 
-POINT Surface::ScreenToContent(POINT p) const { return POINT{p.x - rect_.left, p.y - rect_.top}; }
-POINT Surface::ContentToScreen(POINT p) const { return POINT{p.x + rect_.left, p.y + rect_.top}; }
+POINT Surface::ScreenToContent(POINT screen) const { return POINT{screen.x - rect_.left, screen.y - rect_.top}; }
+POINT Surface::ContentToScreen(POINT content) const { return POINT{content.x + rect_.left, content.y + rect_.top}; }
 
 void Surface::SetRadius(float dip)
 {
@@ -848,7 +845,7 @@ void Surface::SetShapes(const std::vector<ShapeDip>& shapes, bool animating)
 
 void Surface::PublishPanel()
 {
-    if (!host_ || glassless_)
+    if (!g_host || glassless_)
         return;
     GlassPanel p;
     p.hwnd = hwnd_;
@@ -891,7 +888,7 @@ void Surface::PublishPanel()
     p.rippleX = rippleX_;
     p.rippleY = rippleY_;
     p.rippleMs = rippleMs_;
-    host_->SetPanel(p);
+    g_host->SetPanel(p);
 }
 
 void Surface::SetGlassless(bool on)
@@ -970,6 +967,7 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_GLASS_INK: self->SetInk(w != 0, InkFor(h)); return 0;
+    default: break;
     }
     // Mouse positions in content coordinates; presses on the margin are the caller's to decide.
     const bool mouse = (m >= WM_MOUSEFIRST && m <= WM_MBUTTONDBLCLK && m != WM_MOUSEWHEEL) || m == WM_MOUSEHWHEEL;
@@ -1007,8 +1005,8 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (self->onDismiss)
             self->onDismiss();
         return 0;
+    default: return DefWindowProcW(h, m, w, l);
     }
-    return DefWindowProcW(h, m, w, l);
 }
 
 void Surface::Place(RECT rect)
@@ -1316,11 +1314,10 @@ void Surface::Paint()
     frameWanted_ = false;
     if (paint) {
         float inset = float(InsetPx());
-        D2D1_MATRIX_3X2_F base = D2D1::Matrix3x2F::Translation(inset, inset);
-        d2d_->SetTransform(base);
-        Canvas c(*this, d2d_.get(), scale_, base);
+        d2d_->SetTransform(D2D1::Matrix3x2F::Translation(inset, inset));
+        Canvas c(*this, d2d_.get(), scale_);
         c.now = ClockMs();
-        c.panel = !host_ || (!glassReady_ && c.now - shownMs_ > kGlassWaitMs);
+        c.panel = !g_host || (!glassReady_ && c.now - shownMs_ > kGlassWaitMs);
         if (c.panel) {
             c.theme = Theme::Panel();
             c.inkDark = c.theme.light ? 1.f : 0.f;

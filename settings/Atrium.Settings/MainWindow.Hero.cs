@@ -144,23 +144,25 @@ public sealed partial class MainWindow
         return BarLayout(s, _heroW, _heroH, Math.Min(1.0, (_heroW - 48) / (HeroReferenceW + 2 * GlassSpec.InsetDip)), true);
     }
 
-    // The bar at scale S at the bottom of a view of viewW x viewH; `wave`: as if the pointer
+    // The bar at scale `scale` at the bottom of a view of viewW x viewH; `wave`: as if the pointer
     // rested on the second app (else no magnification).
-    private BarGeometry BarLayout(BarSettings s, double viewW, double viewH, double S, bool wave)
+    private BarGeometry BarLayout(BarSettings s, double viewW, double viewH, double scale, bool wave)
     {
-        double H = s.Height, I = Math.Clamp(s.IconSize, 12, H - 16);
-        double P = Math.Max(I + 4, Math.Min(H - 12, Math.Round(I * 1.55)));
-        double v = Math.Floor((H - P) / 2), pad = v + 4, gap = Math.Max(4, Math.Round(I * 0.18));
-        double timePx = H * 0.25, datePx = H * 0.19, sepGap = 8;
+        double h = s.Height, i = Math.Clamp(s.IconSize, 12, h - 16);
+        double p = Math.Max(i + 4, Math.Min(h - 12, Math.Round(i * 1.55)));
+        double v = Math.Floor((h - p) / 2), pad = v + 4, gap = Math.Max(4, Math.Round(i * 0.18));
+        double timePx = h * 0.25, datePx = h * 0.19, sepGap = 8;
         double clockW = s.ShowClock ? Math.Max(timePx * (s.ShowClockSeconds ? 4.8 : 2.75), datePx * 5.7) + 22 : 0;
-        double deskW = s.ShowDesktop ? Math.Max(10, Math.Round(I * 0.45)) : 0; // the Show Desktop slot
-        int rightCount = (s.ShowTray ? 1 : 0) + (s.ImeStatus ? 1 : 0) + (s.ShowStatus ? 1 : 0) + (s.ShowNotifications ? 1 : 0) + (s.ShowClock ? 1 : 0) + (s.ShowDesktop ? 1 : 0);
-        double statusExtra = s.StatusStyle == "icons" ? Math.Round(I * 1.3) : 0; // three icons: about an icon wider
-        double rightW = (rightCount - (s.ShowClock ? 1 : 0) - (s.ShowDesktop ? 1 : 0)) * P + (s.ShowStatus ? statusExtra : 0) + clockW + deskW + Math.Max(0, rightCount - 1) * gap;
-        double Content(int n) => Math.Max(2 * H, 2 * pad + P + 2 * gap + n * P + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
-        double mag = Math.Clamp(s.Magnify, 1, 2), pitch = P + gap;
+        double deskW = s.ShowDesktop ? Math.Max(10, Math.Round(i * 0.45)) : 0; // the Show Desktop slot
+        int rightCount = (s.ShowTray ? 1 : 0) + (s.ImeStatus ? 1 : 0) + (s.ShowStatus ? 1 : 0) +
+            (s.ShowNotifications ? 1 : 0) + (s.ShowClock ? 1 : 0) + (s.ShowDesktop ? 1 : 0);
+        double statusExtra = s.StatusStyle == "icons" ? Math.Round(i * 1.3) : 0; // three icons: about an icon wider
+        double rightW = (rightCount - (s.ShowClock ? 1 : 0) - (s.ShowDesktop ? 1 : 0)) * p +
+            (s.ShowStatus ? statusExtra : 0) + clockW + deskW + Math.Max(0, rightCount - 1) * gap;
+        double Content(int n) => Math.Max(2 * h, 2 * pad + p + 2 * gap + n * p + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
+        double mag = Math.Clamp(s.Magnify, 1, 2), pitch = p + gap;
         double stretch = mag > 1.001 ? Math.Ceiling((mag - 1) * pitch * 2.3) : 0;
-        double maxW = Math.Max(2 * H, Math.Min(s.Width, (viewW - 16) / S - stretch));
+        double maxW = Math.Max(2 * h, Math.Min(s.Width, (viewW - 16) / scale - stretch));
         int n = _previewPins.Length + (s.ShowRunning ? 1 : 0);
         while (n > 0 && Content(n) > maxW) n--;
         double barW = s.AutoWidth ? Math.Min(Content(n), maxW) : maxW;
@@ -175,62 +177,63 @@ public sealed partial class MainWindow
             return x;
         }
         double deskLeft = Slot(deskW, s.ShowDesktop);
-        double bellLeft = Slot(P, s.ShowNotifications), clockLeft = Slot(clockW, s.ShowClock);
-        double statusLeft = Slot(P + statusExtra, s.ShowStatus), imeLeft = Slot(P, s.ImeStatus), trayLeft = Slot(P, s.ShowTray);
+        double bellLeft = Slot(p, s.ShowNotifications), clockLeft = Slot(clockW, s.ShowClock);
+        double statusLeft = Slot(p + statusExtra, s.ShowStatus), imeLeft = Slot(p, s.ImeStatus), trayLeft = Slot(p, s.ShowTray);
         double rightLeft = rightCount > 0 ? cursor + gap : barW - pad;
-        double appsMin = pad + P + 2 * gap;
-        double appsLeft = appsMin + Math.Max(0, (rightLeft - (rightCount > 0 ? 2 * sepGap : 0) - appsMin - (n * P + Math.Max(0, n - 1) * gap)) / 2);
-        double reff = Math.Min(s.CornerRadius, Math.Min(H, barW) / 2);
+        double appsMin = pad + p + 2 * gap;
+        double appsLeft = appsMin + Math.Max(0, (rightLeft - (rightCount > 0 ? 2 * sepGap : 0) - appsMin - (n * p + Math.Max(0, n - 1) * gap)) / 2);
+        double reff = Math.Min(s.CornerRadius, Math.Min(h, barW) / 2);
 
-        double bx = (viewW - barW * S) / 2;
-        double by = Math.Max(10, viewH - s.Margin * S - H * S);
-        double X(double left) => left < 0 ? -1 : bx + left * S;
+        double bx = (viewW - barW * scale) / 2;
+        double by = Math.Max(10, viewH - s.Margin * scale - h * scale);
+        double X(double left) => left < 0 ? -1 : bx + left * scale;
 
         // As if the pointer rested on the bar, just above the second app: the icons take the wave
         // with 栏上方提前放大图标 (magnifyNear); the glass rises on its own switch below.
-        double k = wave && mag > 1.001 && s.MagnifyNear ? mag - 1 : 0, range = pitch * 2.3 * S;
-        double centre = n > 1 ? bx + (appsLeft + pitch) * S + P * S / 2 : bx + (pad + P / 2) * S;
+        double k = wave && mag > 1.001 && s.MagnifyNear ? mag - 1 : 0, range = pitch * 2.3 * scale;
+        double centre = n > 1 ? bx + (appsLeft + pitch) * scale + p * scale / 2 : bx + (pad + p / 2) * scale;
         double Map(double u)
         {
             if (k <= 0) return u;
             double x = (u - centre) / range;
             return u + k * range * (x >= 1 ? 0.5 : x <= -1 ? -0.5 : x / 2 + Math.Sin(Math.PI * x) / (2 * Math.PI));
         }
-        double left = Map(bx), right = Map(bx + barW * S);
+        double left = Map(bx), right = Map(bx + barW * scale);
 
         // The loupe's view: the whole top right corner and the bell, 10 DIP of air around.
         double lw = Math.Max(64, reff + 34), lh = Math.Max(56, reff + 26);
-        return new BarGeometry(S, bx, left, by, right - left, H * S, reff * S, maxW * S,
-            n, I * S, P * S, Math.Max(4, Math.Min(P / 2, reff - v)) * S, appsLeft, pitch, by + v * S,
-            clockW > 0, X(clockLeft), clockW * S, timePx * S, datePx * S, rightCount > 0 ? bx + (rightLeft - sepGap) * S : -1,
-            bx + pad * S, X(trayLeft), X(imeLeft), X(statusLeft), X(bellLeft),
+        return new BarGeometry(scale, bx, left, by, right - left, h * scale, reff * scale, maxW * scale,
+            n, i * scale, p * scale, Math.Max(4, Math.Min(p / 2, reff - v)) * scale, appsLeft, pitch, by + v * scale,
+            clockW > 0, X(clockLeft), clockW * scale, timePx * scale, datePx * scale, rightCount > 0 ? bx + (rightLeft - sepGap) * scale : -1,
+            bx + pad * scale, X(trayLeft), X(imeLeft), X(statusLeft), X(bellLeft),
             k, centre, range,
-            right - (lw - 10) * S, by - 10 * S, lw * S, lh * S, statusExtra * S, deskLeft < 0 ? -1 : bx + (deskLeft + deskW / 2) * S);
+            right - (lw - 10) * scale, by - 10 * scale, lw * scale, lh * scale, statusExtra * scale,
+            deskLeft < 0 ? -1 : bx + (deskLeft + deskW / 2) * scale);
     }
 
     private void UpdateHero()
     {
         UpdateReadout();
         if (HeroBlock.Visibility != Visibility.Visible || _renderWorker == null) return;
-        var L = ComputeLayout(CurrentSettings);
-        if (L == null) return;
+        var bar = ComputeLayout(CurrentSettings);
+        if (bar == null) return;
         bool loupe = Loupe.Visibility == Visibility.Visible;
         if (loupe)
         {
-            Loupe.Width = Math.Round(L.LoupeW * LoupeZoom);
-            Loupe.Height = Math.Round(L.LoupeH * LoupeZoom);
+            Loupe.Width = Math.Round(bar.LoupeW * LoupeZoom);
+            Loupe.Height = Math.Round(bar.LoupeH * LoupeZoom);
             LoupeCanvas.Clip = new RectangleGeometry { Rect = new Rect(0, 0, Loupe.Width, Loupe.Height) };
         }
-        PositionTaskbar(L, loupe);
-        DrawAnnotations(L);
-        _renderWorker.Post(new RenderJob(CurrentSettings.Clone(), L, _heroW, _heroH, RasterScale, loupe, Photo.Capture(), Photo.Generation));
+        PositionTaskbar(bar, loupe);
+        DrawAnnotations(bar);
+        _renderWorker.Post(new RenderJob(CurrentSettings.Clone(), bar, _heroW, _heroH, RasterScale, loupe, Photo.Capture(), Photo.Generation));
     }
 
     private bool DarkInk() => CurrentSettings.TextColor == "dark" || (CurrentSettings.TextColor == "auto" && _darkInk);
 
-    private void PositionTaskbar(BarGeometry L, bool loupe)
+    private void PositionTaskbar(BarGeometry bar, bool loupe)
     {
-        int running = CurrentSettings.ShowRunning && L.N > _previewPins.Length ? _previewPins.Length : -1;
+        int running = CurrentSettings.ShowRunning && bar.N > _previewPins.Length ? _previewPins.Length : -1;
         for (int i = 0; i < MaxPreviewApps; i++)
         {
             var vm = i < _previewPins.Length ? _previewPins[i] : _previewRunning;
@@ -241,17 +244,17 @@ public sealed partial class MainWindow
         string time = clock.ToString(CurrentSettings.ShowClockSeconds ? "H:mm:ss" : "H:mm"), date = clock.ToString("yyyy/M/d");
         _face.SetClock(time, date);
         var status = StatusLook.Current();
-        _face.Layout(L, DarkInk(), L.N, running, CurrentSettings.Magnify, 1, 0, 0, status);
+        _face.Layout(bar, DarkInk(), bar.N, running, CurrentSettings.Magnify, 1, 0, 0, status);
         if (loupe)
         {
             _loupeFace.SetClock(time, date);
-            _loupeFace.Layout(L, DarkInk(), L.N, running, CurrentSettings.Magnify, LoupeZoom, L.LoupeX0, L.LoupeY0, status);
+            _loupeFace.Layout(bar, DarkInk(), bar.N, running, CurrentSettings.Magnify, LoupeZoom, bar.LoupeX0, bar.LoupeY0, status);
         }
     }
 
     // ---- Dimension marks for the card in use ----
 
-    private void DrawAnnotations(BarGeometry L)
+    private void DrawAnnotations(BarGeometry bar)
     {
         foreach (var a in _annotations) HeroCanvas.Children.Remove(a);
         _annotations.Clear();
@@ -259,7 +262,18 @@ public sealed partial class MainWindow
         var white = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255));
         void Line(double x1, double y1, double x2, double y2, bool dashed = false)
         {
-            var l = new Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, Stroke = white, StrokeThickness = 1.5, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, IsHitTestVisible = false };
+            var l = new Line
+            {
+                X1 = x1,
+                Y1 = y1,
+                X2 = x2,
+                Y2 = y2,
+                Stroke = white,
+                StrokeThickness = 1.5,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                IsHitTestVisible = false,
+            };
             if (dashed) l.StrokeDashArray = [3, 3];
             _annotations.Add(l);
             HeroCanvas.Children.Add(l);
@@ -271,7 +285,13 @@ public sealed partial class MainWindow
                 Background = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(7, 2, 7, 3),
-                Child = new TextBlock { Text = text, FontSize = 11, FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"], Foreground = new SolidColorBrush(Color.FromArgb(255, 22, 24, 29)) },
+                Child = new TextBlock
+                {
+                    Text = text,
+                    FontSize = 11,
+                    FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"],
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 22, 24, 29)),
+                },
                 IsHitTestVisible = false,
             };
             Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment((TextBlock)chip.Child, FontNumeralAlignment.Tabular);
@@ -282,22 +302,22 @@ public sealed partial class MainWindow
             HeroCanvas.Children.Add(chip);
         }
 
-        double barBottom = L.BarY + L.BarH, barRight = L.BarX + L.BarW;
+        double barBottom = bar.BarY + bar.BarH, barRight = bar.BarX + bar.BarW;
         if (_engaged == Loc.T("Height"))
         {
-            double x = L.BarX - 14;
-            Line(x, L.BarY, x, barBottom); Line(x - 4, L.BarY, x + 4, L.BarY); Line(x - 4, barBottom, x + 4, barBottom);
-            Chip($"{Math.Round(CurrentSettings.Height)} px", x - 30, L.BarY + L.BarH / 2 - 10);
+            double x = bar.BarX - 14;
+            Line(x, bar.BarY, x, barBottom); Line(x - 4, bar.BarY, x + 4, bar.BarY); Line(x - 4, barBottom, x + 4, barBottom);
+            Chip($"{Math.Round(CurrentSettings.Height)} px", x - 30, bar.BarY + bar.BarH / 2 - 10);
         }
         else if (_engaged == Loc.T("Edge spacing"))
         {
-            double x = L.BarX + L.BarW * 0.5;
+            double x = bar.BarX + bar.BarW * 0.5;
             Line(x, barBottom, x, _heroH); Line(x - 4, barBottom, x + 4, barBottom); Line(x - 4, _heroH - 1, x + 4, _heroH - 1);
             Chip($"{Math.Round(CurrentSettings.Margin)} px", x + 34, (barBottom + _heroH) / 2 - 10);
         }
         else if (_engaged == Loc.T("Maximum width"))
         {
-            double y = L.BarY - 12, x0 = (_heroW - L.MaxW) / 2, x1 = x0 + L.MaxW;
+            double y = bar.BarY - 12, x0 = (_heroW - bar.MaxW) / 2, x1 = x0 + bar.MaxW;
             Line(x0, y, x1, y, dashed: true); Line(x0, y - 4, x0, y + 4); Line(x1, y - 4, x1, y + 4);
             Chip($"{Math.Round(CurrentSettings.Width)} px", _heroW / 2, y - 24);
         }
@@ -305,8 +325,8 @@ public sealed partial class MainWindow
         {
             // The band above the bar that answers a pointer coming down onto it (栏上方提前拱起 /
             // 提前放大图标): a dashed line at the enter distance, and the leave one while it is set.
-            double x0 = L.BarX + 8, x1 = Math.Max(x0 + 1, barRight - 8);
-            double enterY = L.BarY - CurrentSettings.NearEnter * L.S, leaveY = L.BarY - CurrentSettings.NearLeave * L.S;
+            double x0 = bar.BarX + 8, x1 = Math.Max(x0 + 1, barRight - 8);
+            double enterY = bar.BarY - CurrentSettings.NearEnter * bar.S, leaveY = bar.BarY - CurrentSettings.NearLeave * bar.S;
             Line(x0, enterY, x1, enterY, dashed: true);
             Chip(Loc.F("Enter {0} px", Math.Round(CurrentSettings.NearEnter)), x0 + 44, enterY - 22);
             if (_engaged == Loc.T("Leave distance"))
@@ -318,21 +338,29 @@ public sealed partial class MainWindow
         else if (_engaged == Loc.T("Corner radius"))
         {
             // The circle the corner is an arc of, and its radius.
-            double r = Math.Max(L.Radius, 2);
-            var circle = new Ellipse { Width = 2 * r, Height = 2 * r, Stroke = white, StrokeThickness = 1.25, StrokeDashArray = [3, 3], IsHitTestVisible = false };
-            Canvas.SetLeft(circle, L.BarX);
-            Canvas.SetTop(circle, L.BarY);
+            double r = Math.Max(bar.Radius, 2);
+            var circle = new Ellipse
+            {
+                Width = 2 * r,
+                Height = 2 * r,
+                Stroke = white,
+                StrokeThickness = 1.25,
+                StrokeDashArray = [3, 3],
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(circle, bar.BarX);
+            Canvas.SetTop(circle, bar.BarY);
             _annotations.Add(circle);
             HeroCanvas.Children.Add(circle);
-            Line(L.BarX + r, L.BarY + r, L.BarX + r - r * 0.7071, L.BarY + r - r * 0.7071);
-            Chip($"R {Math.Round(Math.Min(CurrentSettings.CornerRadius, CurrentSettings.Height / 2))} px", L.BarX + r, L.BarY - 30);
+            Line(bar.BarX + r, bar.BarY + r, bar.BarX + r - r * 0.7071, bar.BarY + r - r * 0.7071);
+            Chip($"R {Math.Round(Math.Min(CurrentSettings.CornerRadius, CurrentSettings.Height / 2))} px", bar.BarX + r, bar.BarY - 30);
         }
         else if (_engaged == Loc.T("Icon size"))
         {
-            if (L.N == 0) return;
-            double x = L.PlateX(0) + L.P / 2 - L.Icon / 2 - 4, y0 = L.PlateY + L.P / 2 - L.Icon / 2, y1 = y0 + L.Icon;
+            if (bar.N == 0) return;
+            double x = bar.PlateX(0) + bar.P / 2 - bar.Icon / 2 - 4, y0 = bar.PlateY + bar.P / 2 - bar.Icon / 2, y1 = y0 + bar.Icon;
             Line(x, y0, x, y1); Line(x - 3, y0, x + 3, y0); Line(x - 3, y1, x + 3, y1);
-            Chip($"{Math.Round(CurrentSettings.IconSize)} px", L.PlateX(0) + L.P / 2, L.BarY - 28);
+            Chip($"{Math.Round(CurrentSettings.IconSize)} px", bar.PlateX(0) + bar.P / 2, bar.BarY - 28);
         }
     }
 
@@ -342,7 +370,7 @@ public sealed partial class MainWindow
     {
         int pw = (int)Math.Round(j.W * j.Rs), ph = (int)Math.Round(j.H * j.Rs);
         if (pw < 8 || ph < 8) return;
-        var L = j.L;
+        var bar = j.L;
 
         // Main view: the photo once per size, then the glass alone, over it.
         string key = $"{pw}x{ph}/{j.W:F1}x{j.H:F1}/{j.PhotoGeneration}";
@@ -357,17 +385,17 @@ public sealed partial class MainWindow
         // rises with 跟随鼠标拱起 + 栏上方提前拱起 (hoverRise + riseNear), whether or not the
         // icons take the wave with it.
         double waveRise = j.S.HoverRise && j.S.RiseNear ? Math.Clamp(j.S.Magnify, 1, 2) - 1 : 0;
-        GlassSpec Spec(double ppd) => GlassSpec.For(j.S, L.S * ppd) with
+        GlassSpec Spec(double ppd) => GlassSpec.For(j.S, bar.S * ppd) with
         {
-            WaveX = (float)((L.Centre - L.BarX - L.BarW / 2) * ppd),
-            WaveWidth = (float)(L.Range * (1 + L.K / 2) * ppd),
-            WaveHeight = (float)(L.Icon * waveRise * ppd),
+            WaveX = (float)((bar.Centre - bar.BarX - bar.BarW / 2) * ppd),
+            WaveWidth = (float)(bar.Range * (1 + bar.K / 2) * ppd),
+            WaveHeight = (float)(bar.Icon * waveRise * ppd),
         };
         var spec = Spec(j.Rs);
         int inset = (int)spec.Inset;
         int rise = spec.RiseInset;
-        int bx = (int)Math.Round(L.BarX * j.Rs), by = (int)Math.Round(L.BarY * j.Rs);
-        int bw = (int)Math.Round(L.BarW * j.Rs), bh = (int)Math.Round(L.BarH * j.Rs);
+        int bx = (int)Math.Round(bar.BarX * j.Rs), by = (int)Math.Round(bar.BarY * j.Rs);
+        int bw = (int)Math.Round(bar.BarW * j.Rs), bh = (int)Math.Round(bar.BarH * j.Rs);
         int gw = bw + 2 * inset, gh = bh + 2 * inset + rise;
         var frames = _heroFrames;
         if (frames == null || frames.Width != gw || frames.Height != gh)
@@ -379,14 +407,15 @@ public sealed partial class MainWindow
         frames.Publish(luma, (bx - inset) / j.Rs, (by - inset - rise) / j.Rs, j.Rs);
 
         // Only the material page with the loupe enabled needs its second render.
-        int lw = j.Loupe ? (int)Math.Round(Math.Round(L.LoupeW * LoupeZoom) * j.Rs) : 0, lh = j.Loupe ? (int)Math.Round(Math.Round(L.LoupeH * LoupeZoom) * j.Rs) : 0;
+        int lw = j.Loupe ? (int)Math.Round(Math.Round(bar.LoupeW * LoupeZoom) * j.Rs) : 0;
+        int lh = j.Loupe ? (int)Math.Round(Math.Round(bar.LoupeH * LoupeZoom) * j.Rs) : 0;
         if (j.Loupe)
         {
             double ppd = LoupeZoom * j.Rs;
-            string lkey = $"{lw}x{lh}/{j.W:F1}x{j.H:F1}/{L.LoupeX0:F2},{L.LoupeY0:F2}/{j.PhotoGeneration}";
+            string lkey = $"{lw}x{lh}/{j.W:F1}x{j.H:F1}/{bar.LoupeX0:F2},{bar.LoupeY0:F2}/{j.PhotoGeneration}";
             if (_loupeBg == null || lkey != _loupeKey)
             {
-                _loupeBg = Backdrop.Create(lw, lh, j.W, j.H, L.LoupeX0, L.LoupeY0, ppd, j.Photo.Value);
+                _loupeBg = Backdrop.Create(lw, lh, j.W, j.H, bar.LoupeX0, bar.LoupeY0, ppd, j.Photo.Value);
                 _loupeKey = lkey;
             }
             var lframes = _loupeFrames;
@@ -395,8 +424,8 @@ public sealed partial class MainWindow
             Buffer.BlockCopy(_loupeBg.Base, 0, lframes.Back, 0, _loupeBg.Base.Length);
             var lspec = Spec(ppd);
             int linset = (int)lspec.Inset;
-            int lbx = (int)Math.Round((L.BarX - L.LoupeX0) * ppd), lby = (int)Math.Round((L.BarY - L.LoupeY0) * ppd);
-            int lbw = (int)Math.Round(L.BarW * ppd), lbh = (int)Math.Round(L.BarH * ppd);
+            int lbx = (int)Math.Round((bar.BarX - bar.LoupeX0) * ppd), lby = (int)Math.Round((bar.BarY - bar.LoupeY0) * ppd);
+            int lbw = (int)Math.Round(bar.BarW * ppd), lbh = (int)Math.Round(bar.BarH * ppd);
             GlassRenderer.Draw(_loupeBg, lframes.Back, lbx - linset, lby - linset - lspec.RiseInset,
                 lbw + 2 * linset, lbh + 2 * linset + lspec.RiseInset, lspec);
             lframes.Publish(luma);
@@ -468,8 +497,8 @@ public sealed partial class MainWindow
     // ---- Preset swatches: the same renderer on a small canvas ----
 
     private const double SwatchW = 240, SwatchH = 72;
-    private static (int Gen, Backdrop Bg)? s_swatchBg;
-    private static readonly Lock s_swatchLock = new();
+    private static (int Gen, Backdrop Bg)? _swatchBg;
+    private static readonly Lock SwatchLock = new();
 
     private BarSettings? _swatchSettings;
 
@@ -483,25 +512,25 @@ public sealed partial class MainWindow
     // Swatches are tiny; rendering them at 2x keeps them crisp up to 200 % scale.
     private void RenderSwatch(BarSettings material, Border target, SwatchPhoto? snapshot = null)
     {
-        const double rs = 2;
-        int w = (int)Math.Round(SwatchW * rs), h = (int)Math.Round(SwatchH * rs);
+        const double Rs = 2;
+        int w = (int)Math.Round(SwatchW * Rs), h = (int)Math.Round(SwatchH * Rs);
         Backdrop bg;
         snapshot ??= new SwatchPhoto(Photo.Generation, Photo.Capture());
         int gen = snapshot.Generation;
         var photo = snapshot.Photo;
         if (gen != Photo.Generation) return;
-        lock (s_swatchLock)
+        lock (SwatchLock)
         {
-            if (s_swatchBg?.Gen != gen) s_swatchBg = (gen, Backdrop.Create(w, h, SwatchW, SwatchH, 0, 0, rs, photo.Value));
-            bg = s_swatchBg.Value.Bg;
+            if (_swatchBg?.Gen != gen) _swatchBg = (gen, Backdrop.Create(w, h, SwatchW, SwatchH, 0, 0, Rs, photo.Value));
+            bg = _swatchBg.Value.Bg;
         }
         // A 60 DIP capsule at 60 %, centred.
         var s = material.Clone();
         s.Height = 60;
         s.CornerRadius = 30;
-        var spec = GlassSpec.For(s, 0.6 * rs);
+        var spec = GlassSpec.For(s, 0.6 * Rs);
         int inset = (int)spec.Inset;
-        int bw = (int)Math.Round(170 * rs), bh = (int)Math.Round(36 * rs);
+        int bw = (int)Math.Round(170 * Rs), bh = (int)Math.Round(36 * Rs);
         int bx = (w - bw) / 2, by = (h - bh) / 2;
         byte[] pixels = new byte[bg.Base.Length];
         Buffer.BlockCopy(bg.Base, 0, pixels, 0, pixels.Length);

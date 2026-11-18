@@ -1,3 +1,4 @@
+// Shared atomic state for hiding and temporarily revealing the Windows taskbar.
 #pragma once
 
 #include <atomic>

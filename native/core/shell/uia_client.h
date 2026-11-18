@@ -12,8 +12,9 @@
 
 #include <winrt/base.h>
 
-#include <atomic>
 #include <algorithm>
+#include <atomic>
+#include <initializer_list>
 #include <vector>
 
 namespace atrium {
@@ -49,12 +50,11 @@ class UiaWatch {
 public:
     UiaWatch(IUIAutomation* uia, HANDLE wake) : uia_(uia), changes_(winrt::make_self<UiaChanges>(wake)) {}
     ~UiaWatch() { Clear(); }
+    UiaWatch(const UiaWatch&) = delete;
+    UiaWatch& operator=(const UiaWatch&) = delete;
     bool Contains(HWND window) const
     {
-        for (const auto& item : roots_)
-            if (item.window == window)
-                return true;
-        return false;
+        return std::ranges::any_of(roots_, [&](const auto& item) { return item.window == window; });
     }
     void Add(HWND window, IUIAutomationElement* root)
     {
@@ -98,11 +98,13 @@ private:
 
 class UiaWindowWake {
 public:
-    UiaWindowWake(HANDLE wake, const wchar_t* windowClass) : wake_(wake), windowClass_(windowClass)
+    UiaWindowWake(HANDLE wake, const wchar_t* windowClass)
+        : wake_(wake),
+          windowClass_(windowClass),
+          show_(SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_REORDER, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS)),
+          name_(SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_VALUECHANGE, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS))
     {
-        active_ = this;
-        show_ = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_REORDER, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-        name_ = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_VALUECHANGE, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        g_active = this;
     }
     ~UiaWindowWake()
     {
@@ -110,8 +112,10 @@ public:
             UnhookWinEvent(show_);
         if (name_)
             UnhookWinEvent(name_);
-        active_ = nullptr;
+        g_active = nullptr;
     }
+    UiaWindowWake(const UiaWindowWake&) = delete;
+    UiaWindowWake& operator=(const UiaWindowWake&) = delete;
 
     template<typename Processes> void SetProcesses(const Processes& processes)
     {
@@ -123,7 +127,7 @@ public:
 private:
     static void CALLBACK Changed(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD)
     {
-        if (!active_)
+        if (!g_active)
             return;
         bool appearance = event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_HIDE;
         if (appearance && (object != OBJID_WINDOW || child != CHILDID_SELF || GetAncestor(window, GA_ROOT) != window))
@@ -131,14 +135,14 @@ private:
         HWND root = GetAncestor(window, GA_ROOT);
         DWORD pid = 0;
         GetWindowThreadProcessId(root, &pid);
-        if (!appearance && std::find(active_->processes_.begin(), active_->processes_.end(), pid) == active_->processes_.end())
+        if (!appearance && std::ranges::find(g_active->processes_, pid) == g_active->processes_.end())
             return;
         wchar_t name[96]{};
         GetClassNameW(root, name, int(std::size(name)));
-        if (wcsstr(name, active_->windowClass_))
-            SetEvent(active_->wake_);
+        if (wcsstr(name, g_active->windowClass_))
+            SetEvent(g_active->wake_);
     }
-    inline static thread_local UiaWindowWake* active_ = nullptr;
+    inline static thread_local UiaWindowWake* g_active = nullptr;
     HANDLE wake_;
     const wchar_t* windowClass_;
     std::vector<DWORD> processes_;
@@ -163,6 +167,27 @@ inline void WaitForUiaWake(HANDLE wake, DWORD timeout)
             DispatchMessageW(&msg);
         }
     }
+}
+
+// A cache request for `properties` of the found elements alone, over the raw view,
+// without live element references (a reader keeps nothing but what it cached).
+inline HRESULT CreateRawCache(IUIAutomation* uia, std::initializer_list<PROPERTYID> properties, winrt::com_ptr<IUIAutomationCacheRequest>& cache)
+{
+    cache = nullptr;
+    winrt::com_ptr<IUIAutomationCondition> raw;
+    HRESULT hr = uia->CreateCacheRequest(cache.put());
+    for (PROPERTYID property : properties)
+        if (SUCCEEDED(hr))
+            hr = cache->AddProperty(property);
+    if (SUCCEEDED(hr))
+        hr = cache->put_TreeScope(TreeScope_Element);
+    if (SUCCEEDED(hr))
+        hr = uia->get_RawViewCondition(raw.put());
+    if (SUCCEEDED(hr))
+        hr = cache->put_TreeFilter(raw.get());
+    if (SUCCEEDED(hr))
+        hr = cache->put_AutomationElementMode(AutomationElementMode_None);
+    return hr;
 }
 
 // `prepare` makes what the reader needs from the client (its conditions) and

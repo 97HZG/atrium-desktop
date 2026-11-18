@@ -8,12 +8,12 @@
 using namespace atrium::tray;
 
 namespace {
-int failures = 0;
+int g_failures = 0;
 void Check(bool ok, const char* what)
 {
     if (!ok) {
         std::printf("FAIL: %s\n", what);
-        ++failures;
+        ++g_failures;
     }
 }
 } // namespace
@@ -47,7 +47,7 @@ int main()
     Check(LOWORD(l) == WM_CONTEXTMENU && HIWORD(l) == 7, "v4: the notification and the id in lParam");
     Check(short(LOWORD(w)) == -1200 && short(HIWORD(w)) == 2000, "v4: the pointer in wParam, negative monitors too");
 
-    if (!failures)
+    if (!g_failures)
         std::printf("tray protocol: all checks passed\n");
-    return failures ? 1 : 0;
+    return g_failures ? 1 : 0;
 }

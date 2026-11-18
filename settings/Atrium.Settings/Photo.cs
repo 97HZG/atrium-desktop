@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text;
 using Windows.Graphics.Imaging;
 using Windows.Storage;
 
@@ -11,23 +10,23 @@ namespace Atrium.Settings;
 internal sealed class Photo
 {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern bool SystemParametersInfoW(uint action, uint param, StringBuilder value, uint winIni);
+    private static extern bool SystemParametersInfoW(uint action, uint param, [Out] char[] value, uint winIni);
 
     // How far down the photo the crop sits when it is cropped top and bottom (0 top, 1 bottom).
     public const float FocusY = 0.62f;
     private const int MaxDimension = 1600;
 
     public static string? Path { get; } = SamplePath("flow");
-    private static readonly Lazy<Photo> s_sample = new(() => Load(Path), LazyThreadSafetyMode.ExecutionAndPublication);
-    private static Lazy<Photo> s_selected = s_sample;
+    private static readonly Lazy<Photo> Flow = new(() => Load(Path), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<Photo> _selected = Flow;
 
     public static string Selected { get; private set; } = "flow";
     // The file behind the selection, for the previews that show it as a XAML image.
     public static string? SelectedPath { get; private set; } = Path;
-    public static int Generation => s_generation;
-    private static volatile int s_generation;
-    public static Photo Default => s_sample.Value;
-    public static Lazy<Photo> Capture() => s_selected;
+    public static int Generation => _generation;
+    private static volatile int _generation;
+    public static Photo Default => Flow.Value;
+    public static Lazy<Photo> Capture() => _selected;
 
     public static bool Select(string which)
     {
@@ -35,8 +34,8 @@ internal sealed class Photo
         string? path = which == "wallpaper" ? Wallpaper() : SamplePath(which);
         Selected = which;
         SelectedPath = path;
-        s_selected = which == "flow" ? s_sample : new Lazy<Photo>(() => Load(path), LazyThreadSafetyMode.ExecutionAndPublication);
-        s_generation++;
+        _selected = which == "flow" ? Flow : new Lazy<Photo>(() => Load(path), LazyThreadSafetyMode.ExecutionAndPublication);
+        _generation++;
         return true;
     }
 
@@ -53,9 +52,15 @@ internal sealed class Photo
 
     private static string? Wallpaper()
     {
-        var sb = new StringBuilder(520);
-        if (SystemParametersInfoW(0x0073 /* SPI_GETDESKWALLPAPER */, (uint)sb.Capacity, sb, 0) && File.Exists(sb.ToString())) return sb.ToString();
-        string transcoded = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
+        char[] buffer = new char[520];
+        if (SystemParametersInfoW(0x0073 /* SPI_GETDESKWALLPAPER */, (uint)buffer.Length, buffer, 0))
+        {
+            int end = Array.IndexOf(buffer, '\0');
+            string path = new(buffer, 0, end < 0 ? buffer.Length : end);
+            if (path.Length > 0 && File.Exists(path)) return path;
+        }
+        string transcoded = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
         return File.Exists(transcoded) ? transcoded : null;
     }
 

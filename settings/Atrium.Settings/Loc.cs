@@ -17,7 +17,6 @@ internal static class Loc
     private static readonly Dictionary<string, string> Strings = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Dictionary<string, string>> Plurals = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> Legacy = new(StringComparer.Ordinal);
-    private static List<(string Tag, string Name)>? _languages;
     private static bool _legacyLoaded;
     private static readonly Lock Sync = new();
 
@@ -28,8 +27,8 @@ internal static class Loc
     public static bool Chinese => Tag.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
 
     // The picker: manifest order, with the source language first.
-    public static IReadOnlyList<(string Tag, string Name)> Languages =>
-        _languages ??= LoadManifest();
+    public static List<(string Tag, string Name)> Languages =>
+        field ??= LoadManifest();
 
     // "auto" follows Windows' UI language (Chinese -> zh-Hans, anything else ->
     // en); any other value names a locale file. Unknown values fall back to en.

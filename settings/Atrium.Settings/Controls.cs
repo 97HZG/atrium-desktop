@@ -24,7 +24,7 @@ public static class Tokens
 }
 
 // A sidebar entry: a glyph and a name, in the item's ink (white when chosen).
-public sealed class NavLabel : StackPanel
+public sealed partial class NavLabel : StackPanel
 {
     private readonly FontIcon _icon = new() { FontSize = 16, Width = 22 };
     private readonly TextBlock _text = new() { FontSize = 15, VerticalAlignment = VerticalAlignment.Center };
@@ -54,7 +54,7 @@ public sealed class NavLabel : StackPanel
 }
 
 // A named switch; supporting help is available on hover.
-public sealed class ToggleTile : UserControl
+public sealed partial class ToggleTile : UserControl
 {
     private readonly TextBlock _title = new() { Style = Res<Style>("RowTitleStyle"), VerticalAlignment = VerticalAlignment.Center };
 
@@ -95,12 +95,12 @@ public sealed class ToggleTile : UserControl
 // A wrapping grid of equal-width cells: as many columns as fit MinCellWidth, each row as tall as
 // its tallest card. With StretchLastRow a short last row of two or more shares the full width. Unlike a virtualising ItemsRepeater every
 // card stays in the visual tree, so UI Automation can always find its controls.
-public sealed class ResponsiveGrid : Panel
+public sealed partial class ResponsiveGrid : Panel
 {
-    public static readonly DependencyProperty MinCellWidthProperty =
-        DependencyProperty.Register(nameof(MinCellWidth), typeof(double), typeof(ResponsiveGrid), new PropertyMetadata(320.0, (d, _) => ((ResponsiveGrid)d).InvalidateMeasure()));
-    public static readonly DependencyProperty GapProperty =
-        DependencyProperty.Register(nameof(Gap), typeof(double), typeof(ResponsiveGrid), new PropertyMetadata(16.0, (d, _) => ((ResponsiveGrid)d).InvalidateMeasure()));
+    public static readonly DependencyProperty MinCellWidthProperty = DependencyProperty.Register(
+        nameof(MinCellWidth), typeof(double), typeof(ResponsiveGrid), new PropertyMetadata(320.0, (d, _) => ((ResponsiveGrid)d).InvalidateMeasure()));
+    public static readonly DependencyProperty GapProperty = DependencyProperty.Register(
+        nameof(Gap), typeof(double), typeof(ResponsiveGrid), new PropertyMetadata(16.0, (d, _) => ((ResponsiveGrid)d).InvalidateMeasure()));
 
     public double MinCellWidth { get => (double)GetValue(MinCellWidthProperty); set => SetValue(MinCellWidthProperty, value); }
     public double Gap { get => (double)GetValue(GapProperty); set => SetValue(GapProperty, value); }
@@ -122,14 +122,14 @@ public sealed class ResponsiveGrid : Panel
         return Math.Max(1, Math.Min(MaxColumns, (int)Math.Floor((width + Gap) / (MinCellWidth + Gap))));
     }
 
-    protected override Size MeasureOverride(Size available)
+    protected override Size MeasureOverride(Size availableSize)
     {
-        int cols = Columns(available.Width);
+        int cols = Columns(availableSize.Width);
         var visible = Children.Where(c => c.Visibility != Visibility.Collapsed).ToList();
         double total = 0;
         for (int start = 0; start < visible.Count; start += cols)
         {
-            double cell = double.IsInfinity(available.Width) ? MinCellWidth : CellWidth(available.Width, cols, start, visible.Count);
+            double cell = double.IsInfinity(availableSize.Width) ? MinCellWidth : CellWidth(availableSize.Width, cols, start, visible.Count);
             double rowH = 0;
             for (int i = start; i < Math.Min(start + cols, visible.Count); i++)
             {
@@ -139,7 +139,7 @@ public sealed class ResponsiveGrid : Panel
             total += rowH + Gap;
         }
         if (visible.Count > 0) total -= Gap;
-        return new Size(double.IsInfinity(available.Width) ? cols * MinCellWidth + (cols - 1) * Gap : available.Width, total);
+        return new Size(double.IsInfinity(availableSize.Width) ? cols * MinCellWidth + (cols - 1) * Gap : availableSize.Width, total);
     }
 
     protected override Size ArrangeOverride(Size finalSize)

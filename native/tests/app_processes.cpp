@@ -64,6 +64,8 @@ struct Fixture {
         root = fs::path(temporary) / (L"Atrium-process-tests-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
         fs::create_directory(root);
     }
+    Fixture(const Fixture&) = delete;
+    Fixture& operator=(const Fixture&) = delete;
 
     fs::path Copy(const fs::path& source, const wchar_t* directory, const wchar_t* name)
     {

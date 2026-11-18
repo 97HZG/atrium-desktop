@@ -125,7 +125,7 @@ float MeasureUiText(IDWriteFactory* dw, const std::wstring& s, float px, DWRITE_
 void DrawUiText(ID2D1RenderTarget* rt, IDWriteFactory* dw, const std::wstring& s, IDWriteTextFormat* f, D2D1_RECT_F r, ID2D1Brush* b,
                 D2D1_DRAW_TEXT_OPTIONS options)
 {
-    bool digits = std::any_of(s.begin(), s.end(), [](wchar_t c) { return c >= L'0' && c <= L'9'; });
+    bool digits = std::ranges::any_of(s, [](wchar_t c) { return c >= L'0' && c <= L'9'; });
     winrt::com_ptr<IDWriteTextLayout> layout;
     if (!digits || !TheFace().tabular || FAILED(UiTextLayout(dw, s, f, r.right - r.left, r.bottom - r.top, layout.put()))) {
         rt->DrawText(s.c_str(), UINT32(s.size()), f, r, b, options);

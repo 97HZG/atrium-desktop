@@ -1,35 +1,52 @@
 // Manual integration probe. No CTest registration: --click changes foreground/menu state.
 // Compile the production adapter unchanged; omit task-model artwork/shortcut loading only.
-#include "../core/shell/tray_model.cpp"
+#include "shell/shell_taskbar.h"
+#include "shell/system_chrome.h"
+#include "shell/tray_model.h"
+
+#include <objbase.h>
+#include <shellapi.h>
+#include <uiautomation.h>
+#include <winrt/base.h>
+
+#include <algorithm>
 #include <iostream>
 
 namespace atrium {
 std::wstring AppExecutable(const std::wstring& path) { return path; }
 bool LoadAtriumIcon(const std::wstring&, int, IconImage&) { return false; }
 bool LoadShellImage(const std::wstring&, int, IconImage&, bool) { return false; }
+bool HIconToImage(HICON, IconImage&) { return false; }
+bool SystemChrome::RevealForClick()
+{
+    ShowWindow(ShellTaskbar(), SW_SHOWNA);
+    return true;
+}
+void SystemChrome::ConcealAfterClick() {}
 } // namespace atrium
+using namespace atrium;
 namespace {
 constexpr UINT kResult = WM_APP + 42;
-int completion = -1;
-HWND fixtureView = nullptr;
-bool fixtureRespond = true;
-std::vector<std::pair<UINT, UINT>> fixtureEvents;
+int g_completion = -1;
+HWND g_fixtureView = nullptr;
+bool g_fixtureRespond = true;
+std::vector<std::pair<UINT, UINT>> g_fixtureEvents;
 LRESULT CALLBACK ProbeProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (m == kResult && w)
-        completion = int(w);
+        g_completion = int(w);
     if (m == WM_TIMER && w == 99) {
         EndMenu();
         return 0;
     }
-    if (fixtureView && (m == WM_APP + 43 || m == WM_APP + 44)) {
+    if (g_fixtureView && (m == WM_APP + 43 || m == WM_APP + 44)) {
         const bool v4 = m == WM_APP + 44;
         const UINT id = v4 ? HIWORD(l) : UINT(w), event = v4 ? LOWORD(l) : UINT(l);
-        fixtureEvents.push_back({id, event});
-        if (!fixtureRespond)
+        g_fixtureEvents.emplace_back(id, event);
+        if (!g_fixtureRespond)
             return 0; // valid background-only action; no window/menu response
         if (event == WM_LBUTTONUP || event == NIN_SELECT || event == NIN_KEYSELECT)
-            ShowWindow(fixtureView, SW_SHOWNOACTIVATE);
+            ShowWindow(g_fixtureView, SW_SHOWNOACTIVATE);
         if (event == UINT(v4 ? WM_CONTEXTMENU : WM_RBUTTONUP)) {
             HMENU menu = CreatePopupMenu();
             AppendMenuW(menu, MF_STRING, 1, L"Atrium test menu (closes automatically)");
@@ -52,10 +69,20 @@ void Pump()
         DispatchMessageW(&msg);
     }
 }
+bool OpenOverflow(TrayModel& model)
+{
+    g_completion = -1;
+    model.OpenSystemTray();
+    const ULONGLONG deadline = GetTickCount64() + 5000;
+    while (g_completion < 0 && GetTickCount64() < deadline) {
+        Pump();
+        MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
+    }
+    return g_completion == 5;
+}
 } // namespace
 int wmain(int argc, wchar_t** argv)
 {
-    using namespace atrium;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     winrt::com_ptr<IUIAutomation> uia;
@@ -82,6 +109,9 @@ int wmain(int argc, wchar_t** argv)
         HWND window = CreateWindowW(wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
         struct Fixture {
             NOTIFYICONDATAW uid{}, guid{};
+            Fixture() = default;
+            Fixture(const Fixture&) = delete;
+            Fixture& operator=(const Fixture&) = delete;
             ~Fixture()
             {
                 Shell_NotifyIconW(NIM_DELETE, &uid);
@@ -118,50 +148,39 @@ int wmain(int argc, wchar_t** argv)
         }
         wchar_t path[32768]{};
         GetModuleFileNameW(nullptr, path, DWORD(std::size(path)));
+        TrayModel probe(window, kResult);
         if (interactions)
-            std::wcout << L"fixture materialize=" << ShowOverflow(uia.get()) << L'\n';
+            std::wcout << L"fixture materialize=" << OpenOverflow(probe) << L'\n';
         auto expect = [&](size_t expected) {
             size_t count = 0;
             for (int i = 0; i < 20; ++i) {
                 Pump();
+                probe.Refresh();
                 Sleep(50);
-                bool available = false, ordered = false;
-                auto buttons = FindButtons(uia.get(), available);
-                std::vector<Record> records;
-                const auto match = MatchButtons(buttons, records, ordered);
-                count = 0;
-                for (int r : match)
-                    if (r >= 0 && _wcsicmp(records[size_t(r)].exe.c_str(), path) == 0)
-                        ++count;
+                const auto icons = probe.Icons();
+                count = size_t(std::ranges::count_if(icons, [&](const TrayIcon& icon) { return _wcsicmp(icon.exe.c_str(), path) == 0; }));
                 if (count == expected)
                     break;
-                if (i == 19) {
-                    std::wcout << L"fixture path=" << path << L" records=" << records.size() << L" buttons=" << buttons.size() << L'\n';
-                    for (size_t b = 0; b < buttons.size(); ++b)
-                        if (buttons[b].tip.find(L"fixture") != std::wstring::npos)
-                            std::wcout << L"fixture button tip=" << buttons[b].tip << L" exe=" << (match[b] >= 0 ? records[size_t(match[b])].exe : L"?")
-                                       << L'\n';
-                    for (const auto& record : records)
-                        if (record.tip.find(L"fixture") != std::wstring::npos || record.exe.find(L"tray_live_probe") != std::wstring::npos)
-                            std::wcout << L"fixture record tip=" << record.tip << L" exe=" << record.exe << L'\n';
-                }
+                if (i == 19)
+                    for (const auto& icon : icons)
+                        std::wcout << L"fixture icon tip=" << icon.tip << L" exe=" << (icon.exe.empty() ? L"?" : icon.exe) << L'\n';
             }
             std::wcout << L"fixture expected=" << expected << L" actual=" << count << L'\n';
             return count == expected;
         };
         bool ok = expect(2);
         if (interactions && ok) {
-            fixtureView = CreateWindowW(wc.lpszClassName, L"Atrium tray interaction test", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 360, 180, nullptr,
-                                        nullptr, wc.hInstance, nullptr);
+            g_fixtureView = CreateWindowW(wc.lpszClassName, L"Atrium tray interaction test", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 360, 180,
+                                          nullptr, nullptr, wc.hInstance, nullptr);
             // Explicit manual test: materialize the native popup, then use the production worker.
-            const bool prepared = fixtureView && ShowOverflow(uia.get());
+            const bool prepared = g_fixtureView && OpenOverflow(probe);
             std::wcout << L"fixture popup prepared=" << prepared << L'\n';
             ok = prepared;
             if (prepared) {
                 TrayModel model(window, kResult);
                 for (UINT id : {4242u, 4243u})
                     for (bool right : {false, true}) {
-                        ShowWindow(fixtureView, SW_HIDE);
+                        ShowWindow(g_fixtureView, SW_HIDE);
                         model.Refresh();
                         ULONGLONG deadline = GetTickCount64() + 5000;
                         std::vector<TrayIcon> icons;
@@ -179,27 +198,27 @@ int wmain(int argc, wchar_t** argv)
                                 }
                                 chosen = &icon;
                             }
-                        completion = -1;
-                        fixtureEvents.clear();
+                        g_completion = -1;
+                        g_fixtureEvents.clear();
                         if (chosen)
                             model.Click(*chosen, right);
                         deadline = GetTickCount64() + 5000;
-                        while (chosen && completion < 0 && GetTickCount64() < deadline) {
+                        while (chosen && g_completion < 0 && GetTickCount64() < deadline) {
                             Pump();
                             Sleep(10);
                         }
                         const UINT expected = right ? (id == 4243 ? WM_CONTEXTMENU : WM_RBUTTONUP) : id == 4243 ? NIN_SELECT : WM_LBUTTONUP;
                         size_t callbacks = 0;
                         bool wrong = false;
-                        for (const auto& [recipient, event] : fixtureEvents) {
+                        for (const auto& [recipient, event] : g_fixtureEvents) {
                             if (event == expected || (!right && id == 4243 && event == NIN_KEYSELECT)) {
                                 ++callbacks;
                                 wrong |= recipient != id;
                             }
                         }
-                        const bool passed = completion == 1 && callbacks == 1 && !wrong;
+                        const bool passed = g_completion == 1 && callbacks == 1 && !wrong;
                         std::wcout << L"fixture id=" << id << L" action=" << (right ? L"right" : L"left") << L" callbacks=" << callbacks << L" completion="
-                                   << completion << L" passed=" << passed << L'\n';
+                                   << g_completion << L" passed=" << passed << L'\n';
                         ok = passed && ok;
                     }
             }
@@ -211,9 +230,9 @@ int wmain(int argc, wchar_t** argv)
                     Pump();
                     Sleep(10);
                 }
-                fixtureRespond = false;
-                completion = -1;
-                fixtureEvents.clear();
+                g_fixtureRespond = false;
+                g_completion = -1;
+                g_fixtureEvents.clear();
                 bool clicked = false;
                 for (const auto& icon : model.Icons())
                     if (icon.tip == guid.szTip && _wcsicmp(icon.exe.c_str(), path) == 0) {
@@ -222,17 +241,17 @@ int wmain(int argc, wchar_t** argv)
                         break;
                     }
                 deadline = GetTickCount64() + 5000;
-                while (clicked && completion < 0 && GetTickCount64() < deadline) {
+                while (clicked && g_completion < 0 && GetTickCount64() < deadline) {
                     Pump();
                     Sleep(10);
                 }
-                const bool quiet = completion == 4 && !fixtureEvents.empty();
-                std::wcout << L"fixture background-only completion=" << completion << L" passed=" << quiet << L'\n';
+                const bool quiet = g_completion == 4 && !g_fixtureEvents.empty();
+                std::wcout << L"fixture background-only completion=" << g_completion << L" passed=" << quiet << L'\n';
                 ok = quiet && ok;
-                fixtureRespond = true;
+                g_fixtureRespond = true;
             }
-            DestroyWindow(fixtureView);
-            fixtureView = nullptr;
+            DestroyWindow(g_fixtureView);
+            g_fixtureView = nullptr;
         }
         Shell_NotifyIconW(NIM_DELETE, &uid);
         ok = expect(1) && ok;
@@ -241,21 +260,28 @@ int wmain(int argc, wchar_t** argv)
         DestroyWindow(window);
         return ok ? 0 : 1;
     }
-    bool available = false, ordered = false;
-    auto buttons = FindButtons(uia.get(), available);
-    const auto buttonCount = buttons.size();
-    std::vector<Record> records;
     const auto begin = GetTickCount64();
-    const auto match = MatchButtons(buttons, records, ordered);
-    std::wcout << L"buttons=" << buttonCount << L" reconciled=" << buttons.size() << L" records=" << records.size() << L" matchMs=" << GetTickCount64() - begin
-               << L" taskbarVisible=" << IsWindowVisible(FindWindowW(L"Shell_TrayWnd", nullptr)) << L'\n';
-    for (size_t i = 0; i < buttons.size(); ++i)
-        std::wcout << i << L" source=" << (buttons[i].element ? L"uia" : L"record") << L" match=" << tray::MethodName(buttons[i].method) << L" identity="
-                   << buttons[i].recordId << L" exe=" << (match[i] >= 0 ? records[size_t(match[i])].exe : L"?") << L'\n';
+    std::vector<TrayIcon> snapshot;
+    {
+        TrayModel model(nullptr, 0);
+        model.Refresh();
+        while (!model.Loaded() && GetTickCount64() - begin < 10000) {
+            Pump();
+            MsgWaitForMultipleObjects(0, nullptr, FALSE, 5, QS_ALLINPUT);
+        }
+        snapshot = model.Icons();
+    }
+    const auto buttonCount = std::ranges::count(snapshot, false, &TrayIcon::fromRecord);
+    std::wcout << L"buttons=" << buttonCount << L" reconciled=" << snapshot.size() << L" matchMs=" << GetTickCount64() - begin << L" taskbarVisible="
+               << IsWindowVisible(FindWindowW(L"Shell_TrayWnd", nullptr)) << L'\n';
+    for (size_t i = 0; i < snapshot.size(); ++i)
+        std::wcout << i << L" source=" << (snapshot[i].fromRecord ? L"record" : L"uia") << L" match=" << snapshot[i].matchMethod << L" identity="
+                   << snapshot[i].recordId << L" exe=" << (snapshot[i].exe.empty() ? L"?" : snapshot[i].exe) << L'\n';
     if (argc == 1)
         return 0; // read-only by default
     if (argc == 2 && std::wstring(argv[1]) == L"--tree") {
-        for (HWND host : {FindWindowW(L"Shell_TrayWnd", nullptr), OverflowWindow()}) {
+        HWND overflow = FindWindowW(L"TopLevelWindowForOverflowXamlIsland", nullptr);
+        for (HWND host : {FindWindowW(L"Shell_TrayWnd", nullptr), overflow ? overflow : FindWindowW(L"NotifyIconOverflowWindow", nullptr)}) {
             if (HWND bridge = FindWindowExW(host, nullptr, L"Windows.UI.Composition.DesktopWindowContentBridge", nullptr))
                 host = bridge;
             winrt::com_ptr<IUIAutomationElement> root;
@@ -321,19 +347,19 @@ int wmain(int argc, wchar_t** argv)
             std::wcerr << L"No live icon; no application was launched\n";
         else {
             if (std::wstring(argv[1]) == L"--visible-click") {
-                std::wcout << L"prepared=" << ShowOverflow(uia.get()) << L'\n';
+                std::wcout << L"prepared=" << OpenOverflow(model) << L'\n';
             }
             if (std::wstring(argv[3]) == L"double")
                 model.DoubleClick(*chosen);
             else
                 model.Click(*chosen, std::wstring(argv[3]) == L"right");
             deadline = GetTickCount64() + 10000;
-            while (completion < 0 && GetTickCount64() < deadline) {
+            while (g_completion < 0 && GetTickCount64() < deadline) {
                 Pump();
                 Sleep(10);
             }
-            std::wcout << L"completion=" << completion << L" (1=observed,2=system-popup,3=needs-user,4=accepted-unconfirmed,5=explicit-popup)\n";
-            result = completion == 1 ? 0 : 1;
+            std::wcout << L"completion=" << g_completion << L" (1=observed,2=system-popup,3=needs-user,4=accepted-unconfirmed,5=explicit-popup)\n";
+            result = g_completion == 1 ? 0 : 1;
         }
     }
     DestroyWindow(window);

@@ -64,9 +64,12 @@ std::wstring SettingsPipeName()
     return L"\\\\.\\pipe\\Atrium.Core." + std::to_wstring(session);
 }
 
-SettingsServer::SettingsServer(HWND host, const Settings& saved) : host_(host), saved_(saved), current_(saved)
+SettingsServer::SettingsServer(HWND host, const Settings& saved)
+    : host_(host),
+      saved_(saved),
+      current_(saved),
+      quit_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
 {
-    quit_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     thread_ = std::thread([this] { Run(); });
 }
 

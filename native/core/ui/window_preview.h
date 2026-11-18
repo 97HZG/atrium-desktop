@@ -60,7 +60,7 @@ private:
     void UpdateThumbs();   // DWM: where the pictures go, how visible
     void DropThumbs();
     void SetWindows(const std::vector<HWND>& windows);
-    int CardAt(POINT content) const;
+    int CardAt(POINT pt) const;
 
     Surface surface_;
     std::wstring key_;

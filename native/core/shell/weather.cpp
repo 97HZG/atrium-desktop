@@ -482,7 +482,7 @@ bool WeatherSource::Fetch()
                 items.push_back({at, x});
             }
         }
-        std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.at < b.at; });
+        std::ranges::stable_sort(items, [](const Item& a, const Item& b) { return a.at < b.at; });
         if (items.size() > 6)
             items.resize(6);
     }

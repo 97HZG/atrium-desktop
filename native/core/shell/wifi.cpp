@@ -123,8 +123,7 @@ std::vector<WifiNetwork> ListWifi(bool rescan)
     WlanFreeMemory(list);
     for (auto& [ssid, n] : bySsid)
         out.push_back(n);
-    std::sort(out.begin(), out.end(),
-              [](const WifiNetwork& a, const WifiNetwork& b) { return a.connected != b.connected ? a.connected : a.signal > b.signal; });
+    std::ranges::sort(out, [](const WifiNetwork& a, const WifiNetwork& b) { return a.connected != b.connected ? a.connected : a.signal > b.signal; });
     return out;
 }
 

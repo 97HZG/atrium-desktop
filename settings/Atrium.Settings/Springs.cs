@@ -11,7 +11,7 @@ namespace Atrium.Settings;
 // The switch's knob (SwitchStyle): pressed, it stretches towards where it will go and squashes a
 // little; let go (or toggled) it springs back to round as it lands, so the switch feels elastic.
 // Composition animations on the knob's own visual: no layout, nothing on the UI thread per frame.
-public sealed class KnobFace : Grid
+public sealed partial class KnobFace : Grid
 {
     private ToggleSwitch? _owner;
     private Visual? _visual;
@@ -89,7 +89,7 @@ public sealed class KnobFace : Grid
 
 // A segmented control: the chosen segment's outline glides to the one picked (no check mark).
 // Holds RadioButtons in SegmentStyle as its XAML children.
-public sealed class SegmentTrack : Grid
+public sealed partial class SegmentTrack : Grid
 {
     private readonly Border _pill = new()
     {

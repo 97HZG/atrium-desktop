@@ -18,12 +18,12 @@ float Approach(float value, float target, double dtMs)
 // Integral of the raised cosine over [-1, 1], from zero to x.
 float WaveArea(float x)
 {
-    constexpr float pi = std::numbers::pi_v<float>;
+    constexpr float kPi = std::numbers::pi_v<float>;
     if (x >= 1)
         return 0.5f;
     if (x <= -1)
         return -0.5f;
-    return x / 2 + std::sin(pi * x) / (2 * pi);
+    return x / 2 + std::sin(kPi * x) / (2 * kPi);
 }
 } // namespace
 

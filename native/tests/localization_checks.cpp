@@ -12,12 +12,12 @@
 #include <thread>
 
 namespace {
-int failures = 0;
+int g_failures = 0;
 void Check(bool condition, const char* message)
 {
     if (!condition) {
         std::cerr << "FAIL: " << message << '\n';
-        ++failures;
+        ++g_failures;
     }
 }
 } // namespace
@@ -104,5 +104,5 @@ int wmain()
     reader.join();
     Check(good, "concurrent formatting and settings changes keep valid text");
     std::cout << "localization checks completed\n";
-    return failures ? 1 : 0;
+    return g_failures ? 1 : 0;
 }

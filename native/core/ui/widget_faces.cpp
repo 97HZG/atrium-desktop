@@ -141,7 +141,7 @@ SYSTEMTIME CityTime(const std::wstring& name, const SYSTEMTIME& now, std::wstrin
 
 const std::vector<WorldCity>& WorldCities()
 {
-    static const std::vector<WorldCity> cities = {
+    static const std::vector<WorldCity> kCities = {
         {L"北京", L"China Standard Time"},         {L"上海", L"China Standard Time"},
         {L"香港", L"China Standard Time"},         {L"台北", L"Taipei Standard Time"},
         {L"东京", L"Tokyo Standard Time"},         {L"首尔", L"Korea Standard Time"},
@@ -158,7 +158,7 @@ const std::vector<WorldCity>& WorldCities()
         {L"悉尼", L"AUS Eastern Standard Time"},   {L"墨尔本", L"AUS Eastern Standard Time"},
         {L"奥克兰", L"New Zealand Standard Time"},
     };
-    return cities;
+    return kCities;
 }
 
 bool HasWorldClocks(WidgetKind kind, WidgetSize size) { return size != WidgetSize::Small && (kind == WidgetKind::Clock || kind == WidgetKind::Digital); }
@@ -193,73 +193,73 @@ int FirstWeekday()
 
 // An analogue face: hands as on macOS (a thin neck, then the blade), the
 // second hand in orange over the others. numbers: 1-12 inside the rim, else ticks.
-void ClockFace(Canvas& c, float cx, float cy, float R, const SYSTEMTIME& t, const Pal& p, D2D1_COLOR_F face, D2D1_COLOR_F ink, bool numbers,
+void ClockFace(Canvas& c, float cx, float cy, float rad, const SYSTEMTIME& t, const Pal& p, D2D1_COLOR_F face, D2D1_COLOR_F ink, bool numbers,
                const std::wstring& label, D2D1_COLOR_F labelInk)
 {
     constexpr float kDeg = std::numbers::pi_v<float> / 180.f;
-    c.Circle(cx, cy, R, face);
+    c.Circle(cx, cy, rad, face);
     for (int h = 1; h <= 12; ++h) {
         float a = (float(h) * 30.f - 90.f) * kDeg;
         if (numbers) {
-            float r = R * 0.78f, fs = R * 0.21f;
+            float r = rad * 0.78f, fs = rad * 0.21f;
             std::wstring n = std::to_wstring(h);
             c.Text(n, D2D1::RectF(cx + r * std::cos(a) - fs, cy + r * std::sin(a) - fs * 0.72f, cx + r * std::cos(a) + fs, cy + r * std::sin(a) + fs * 0.72f),
                    fs, ink, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         } else {
-            float r0 = R * 0.80f, r1 = R * 0.92f;
+            float r0 = rad * 0.80f, r1 = rad * 0.92f;
             c.Capsule(cx + r0 * std::cos(a), cy + r0 * std::sin(a), cx + r1 * std::cos(a), cy + r1 * std::sin(a), Alpha(ink, h % 3 ? 0.45f : 0.9f),
-                      std::max(1.f, R * 0.045f));
+                      std::max(1.f, rad * 0.045f));
         }
     }
     if (!label.empty())
-        c.Text(label, D2D1::RectF(cx - R, cy + R * 0.26f, cx + R, cy + R * 0.26f + R * 0.2f), R * 0.15f, labelInk, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(label, D2D1::RectF(cx - rad, cy + rad * 0.26f, cx + rad, cy + rad * 0.26f + rad * 0.2f), rad * 0.15f, labelInk, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     float sec = float(t.wSecond), min = float(t.wMinute) + sec / 60.f, hour = float(t.wHour % 12) + min / 60.f;
     auto hand = [&](float angle, float length, float width) {
-        float a = (angle - 90.f) * kDeg, neck = R * 0.16f;
+        float a = (angle - 90.f) * kDeg, neck = rad * 0.16f;
         float dx = std::cos(a), dy = std::sin(a);
         c.Capsule(cx, cy, cx + dx * neck, cy + dy * neck, ink, std::max(1.2f, width * 0.36f));
         c.Capsule(cx + dx * neck, cy + dy * neck, cx + dx * length, cy + dy * length, ink, width);
     };
-    hand(hour * 30.f, R * 0.52f, std::max(2.5f, R * 0.075f));
-    hand(min * 6.f, R * 0.80f, std::max(2.5f, R * 0.075f));
-    c.Circle(cx, cy, std::max(2.2f, R * 0.055f), ink);
+    hand(hour * 30.f, rad * 0.52f, std::max(2.5f, rad * 0.075f));
+    hand(min * 6.f, rad * 0.80f, std::max(2.5f, rad * 0.075f));
+    c.Circle(cx, cy, std::max(2.2f, rad * 0.055f), ink);
     float a = (sec * 6.f - 90.f) * kDeg;
-    c.Capsule(cx - std::cos(a) * R * 0.18f, cy - std::sin(a) * R * 0.18f, cx + std::cos(a) * R * 0.86f, cy + std::sin(a) * R * 0.86f, p.orange,
-              std::max(1.f, R * 0.02f));
-    c.Circle(cx, cy, std::max(1.8f, R * 0.04f), p.orange);
-    c.Circle(cx, cy, std::max(0.8f, R * 0.016f), face);
+    c.Capsule(cx - std::cos(a) * rad * 0.18f, cy - std::sin(a) * rad * 0.18f, cx + std::cos(a) * rad * 0.86f, cy + std::sin(a) * rad * 0.86f, p.orange,
+              std::max(1.f, rad * 0.02f));
+    c.Circle(cx, cy, std::max(1.8f, rad * 0.04f), p.orange);
+    c.Circle(cx, cy, std::max(0.8f, rad * 0.016f), face);
 }
 
 constexpr float kPad = 14;
 
-void PaintClock(Canvas& c, WidgetSize size, const WidgetContent& content, const WidgetWorld& w, const Pal& p, float W, float H)
+void PaintClock(Canvas& c, WidgetSize size, const WidgetContent& content, const WidgetWorld& w, const Pal& p, float fw, float fh)
 {
     if (size == WidgetSize::Small) {
-        ClockFace(c, W / 2, H / 2, H / 2 - 9, w.now, p, p.face, p.text, true, w.city, p.sub);
+        ClockFace(c, fw / 2, fh / 2, fh / 2 - 9, w.now, p, p.face, p.text, true, w.city, p.sub);
         return;
     }
     // The world clock: four faces, dark where it is night.
-    const float colW = (W - 2 * kPad) / 4, R = 31;
+    const float colW = (fw - 2 * kPad) / 4, rad = 31;
     const std::vector<std::wstring> cities = WidgetCities(WidgetKind::Clock, content.cities);
     for (int i = 0; i < 4; ++i) {
         std::wstring when;
         SYSTEMTIME ct = CityTime(cities[size_t(i)], w.now, when);
         bool night = ct.wHour < 6 || ct.wHour >= 18;
-        float cx = kPad + colW * (float(i) + 0.5f), cy = (H - 2 * R - 42) / 2 + R - 2;
+        float cx = kPad + colW * (float(i) + 0.5f), cy = (fh - 2 * rad - 42) / 2 + rad - 2;
         D2D1_COLOR_F face = night ? p.nightFace : p.face, ink = night ? Rgba(0xFFFFFF, 0.96f) : p.text;
-        ClockFace(c, cx, cy, R, ct, p, face, ink, false, {}, ink);
-        c.Text(Tr(cities[size_t(i)].c_str()), D2D1::RectF(cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26), 12.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-               1);
-        c.Text(when, D2D1::RectF(cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        ClockFace(c, cx, cy, rad, ct, p, face, ink, false, {}, ink);
+        c.Text(Tr(cities[size_t(i)].c_str()), D2D1::RectF(cx - colW / 2, cy + rad + 8, cx + colW / 2, cy + rad + 26), 12.5f, p.text,
+               DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(when, D2D1::RectF(cx - colW / 2, cy + rad + 26, cx + colW / 2, cy + rad + 42), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
 }
 
 // Digits instead of hands: the time large, the day under it; the medium one
 // lists three more cities on the right.
-void PaintDigital(Canvas& c, WidgetSize size, const WidgetContent& content, const WidgetWorld& w, const Pal& p, float W, float H)
+void PaintDigital(Canvas& c, WidgetSize size, const WidgetContent& content, const WidgetWorld& w, const Pal& p, float fw, float fh)
 {
     const int wd = Weekday(w.now.wYear, w.now.wMonth, w.now.wDay);
-    const float leftW = size == WidgetSize::Small ? W - 2 * kPad : 150;
+    const float leftW = size == WidgetSize::Small ? fw - 2 * kPad : 150;
     c.Text(w.city.empty() ? Tr(L"Local") : w.city, D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 18), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     // Keep one size all day. Leave one DIP for glyph placement / rounding:
     // tabular figures can still differ slightly at the exact trimming boundary.
@@ -267,51 +267,51 @@ void PaintDigital(Canvas& c, WidgetSize size, const WidgetContent& content, cons
     const float timeW = leftW - 1;
     const float timeSize = fit > timeW ? 50 * timeW / fit : 50.f;
     c.Text(HourMinute(w.now), D2D1::RectF(kPad, kPad + 22, kPad + leftW, kPad + 84), timeSize, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-    c.Text(WeekLong(wd), D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 13, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(WeekLong(wd), D2D1::RectF(kPad + 2, fh - kPad - 40, kPad + leftW, fh - kPad - 20), 13, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     const std::wstring dateText = LanguageIsEnglish() ? std::wstring(kMonthsEn[std::clamp(int(w.now.wMonth), 1, 12) - 1]) + L" " + std::to_wstring(w.now.wDay) :
                                                         std::to_wstring(w.now.wMonth) + L"月" + std::to_wstring(w.now.wDay) + L"日";
-    c.Text(dateText, D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 13, p.text, DWRITE_FONT_WEIGHT_NORMAL);
+    c.Text(dateText, D2D1::RectF(kPad + 2, fh - kPad - 20, kPad + leftW, fh - kPad), 13, p.text, DWRITE_FONT_WEIGHT_NORMAL);
     if (size == WidgetSize::Small)
         return;
-    const float x0 = kPad + leftW + 8, rowH = (H - 2 * kPad) / 3;
+    const float x0 = kPad + leftW + 8, rowH = (fh - 2 * kPad) / 3;
     const std::vector<std::wstring> cities = WidgetCities(WidgetKind::Digital, content.cities);
     for (int i = 0; i < 3; ++i) {
         std::wstring when;
         SYSTEMTIME ct = CityTime(cities[size_t(i)], w.now, when);
         float y = kPad + rowH * float(i);
         if (i > 0)
-            c.Line(x0, y, W - kPad, y, Alpha(p.text, 0.12f));
-        c.Text(Tr(cities[size_t(i)].c_str()), D2D1::RectF(x0, y + 4, W - kPad - 70, y + rowH / 2 + 2), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        c.Text(when, D2D1::RectF(x0, y + rowH / 2, W - kPad - 70, y + rowH - 4), 10.5f, p.sub);
-        c.Text(HourMinute(ct), D2D1::RectF(W - kPad - 80, y, W - kPad, y + rowH), 22, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+            c.Line(x0, y, fw - kPad, y, Alpha(p.text, 0.12f));
+        c.Text(Tr(cities[size_t(i)].c_str()), D2D1::RectF(x0, y + 4, fw - kPad - 70, y + rowH / 2 + 2), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(when, D2D1::RectF(x0, y + rowH / 2, fw - kPad - 70, y + rowH - 4), 10.5f, p.sub);
+        c.Text(HourMinute(ct), D2D1::RectF(fw - kPad - 80, y, fw - kPad, y + rowH), 22, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
     }
 }
 
 // The day: the weekday in red, the date large, the lunar date (a festival in
 // red); the medium one adds the month, the large one is the month with the
 // lunar day under every date.
-void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float W, float H)
+void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float fw, float fh)
 {
     const SYSTEMTIME& now = w.now;
     const int first = FirstWeekday();
     const int lead = (Weekday(now.wYear, now.wMonth, 1) - first + 7) % 7, days = DaysIn(now.wYear, now.wMonth);
     if (size == WidgetSize::Large) {
-        c.Text(MonthName(now.wMonth), D2D1::RectF(kPad + 4, kPad, W / 2, kPad + 22), 16, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(MonthName(now.wMonth), D2D1::RectF(kPad + 4, kPad, fw / 2, kPad + 22), 16, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         std::wstring lunarToday = w.lunar ? w.lunar->MonthDay(now.wYear, now.wMonth, now.wDay) : std::wstring();
         const std::wstring head = LanguageIsEnglish() ? std::to_wstring(now.wYear) + (lunarToday.empty() ? std::wstring() : L" · " + lunarToday) :
                                                         std::to_wstring(now.wYear) + L"年" + (lunarToday.empty() ? std::wstring() : L" · 农历" + lunarToday);
-        c.Text(head, D2D1::RectF(W / 2 - 40, kPad, W - kPad - 4, kPad + 22), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 2);
-        const float gx = kPad, gw = W - 2 * kPad, cw = gw / 7;
+        c.Text(head, D2D1::RectF(fw / 2 - 40, kPad, fw - kPad - 4, kPad + 22), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 2);
+        const float gx = kPad, gw = fw - 2 * kPad, cw = gw / 7;
         float y = kPad + 28;
         for (int i = 0; i < 7; ++i)
             c.Text(WeekShort((first + i) % 7), D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 16), 10.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD,
                    1);
         y += 20;
         const int rows = (lead + days + 6) / 7;
-        const float rh = (H - kPad - y) / float(std::max(rows, 5));
+        const float rh = (fh - kPad - y) / float(std::max(rows, 5));
         for (int d = 1; d <= days; ++d) {
-            int cell = lead + d - 1;
-            float x0 = gx + float(cell % 7) * cw, y0 = y + float(cell / 7) * rh, cx = x0 + cw / 2;
+            int cell = lead + d - 1, row = cell / 7;
+            float x0 = gx + float(cell % 7) * cw, y0 = y + float(row) * rh, cx = x0 + cw / 2;
             bool today = d == now.wDay, weekend = (first + cell % 7) % 7 >= 5;
             if (today)
                 c.Fill(D2D1::RectF(cx - 18, y0 + 1, cx + 18, y0 + rh - 1), 10, p.blue);
@@ -329,33 +329,33 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
         return;
     }
     const int wd = Weekday(now.wYear, now.wMonth, now.wDay);
-    const float leftW = size == WidgetSize::Small ? W - 2 * kPad : 126;
+    const float leftW = size == WidgetSize::Small ? fw - 2 * kPad : 126;
     c.Text(WeekLong(wd), D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 20), 14, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(std::to_wstring(now.wDay), D2D1::RectF(kPad, kPad + 16, kPad + leftW, kPad + 80), 54, p.text, DWRITE_FONT_WEIGHT_NORMAL);
     bool festival = false;
     std::wstring label = w.lunar ? w.lunar->DayLabel(now.wYear, now.wMonth, now.wDay, &festival) : std::wstring();
     std::wstring lunar = w.lunar ? w.lunar->MonthDay(now.wYear, now.wMonth, now.wDay) : std::wstring();
     const std::wstring lunarLine = LanguageIsEnglish() ? lunar : (lunar.empty() ? std::wstring() : L"农历" + lunar);
-    c.Text(lunar.empty() ? std::wstring(MonthName(now.wMonth)) : lunarLine, D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 12.5f, p.text,
+    c.Text(lunar.empty() ? std::wstring(MonthName(now.wMonth)) : lunarLine, D2D1::RectF(kPad + 2, fh - kPad - 40, kPad + leftW, fh - kPad - 20), 12.5f, p.text,
            DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(festival ?
                label :
                (LanguageIsEnglish() ? std::to_wstring(now.wYear) + L" " + MonthName(now.wMonth) : std::to_wstring(now.wYear) + L"年" + MonthName(now.wMonth)),
-           D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 12, festival ? p.blue : p.sub, DWRITE_FONT_WEIGHT_NORMAL);
+           D2D1::RectF(kPad + 2, fh - kPad - 20, kPad + leftW, fh - kPad), 12, festival ? p.blue : p.sub, DWRITE_FONT_WEIGHT_NORMAL);
     if (size == WidgetSize::Small)
         return;
     // The month: weekday initials, the days, today in a red disc.
-    const float gx = kPad + leftW + 6, gw = W - kPad - gx, cw = gw / 7;
+    const float gx = kPad + leftW + 6, gw = fw - kPad - gx, cw = gw / 7;
     c.Text(MonthName(now.wMonth), D2D1::RectF(gx + 4, kPad - 1, gx + gw, kPad + 17), 12.5f, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     float y = kPad + 20;
     for (int i = 0; i < 7; ++i)
         c.Text(WeekShort((first + i) % 7), D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 14), 9.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     y += 16;
     int rows = (lead + days + 6) / 7;
-    float rh = std::min(17.f, (H - kPad - y) / float(rows));
+    float rh = std::min(17.f, (fh - kPad - y) / float(rows));
     for (int d = 1; d <= days; ++d) {
-        int cell = lead + d - 1;
-        float x0 = gx + float(cell % 7) * cw, y0 = y + float(cell / 7) * rh, cx = x0 + cw / 2, cy = y0 + rh / 2;
+        int cell = lead + d - 1, row = cell / 7;
+        float x0 = gx + float(cell % 7) * cw, y0 = y + float(row) * rh, cx = x0 + cw / 2, cy = y0 + rh / 2;
         bool today = d == now.wDay;
         if (today)
             c.Circle(cx, cy, rh / 2 + 0.5f, p.blue);
@@ -369,32 +369,31 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
 }
 
 // Batteries: a ring round the computer, the level under it.
-void PaintBattery(Canvas& c, const WidgetWorld& w, const Pal& p, float W, float H)
+void PaintBattery(Canvas& c, const WidgetWorld& w, const Pal& p, float fw, float fh)
 {
-    const float cx = W / 2, cy = H / 2 - 12, R = 44;
-    c.Arc(cx, cy, R, -90, 270, p.track, 9);
+    const float cx = fw / 2, cy = fh / 2 - 12, rad = 44;
+    c.Arc(cx, cy, rad, -90, 270, p.track, 9);
     if (w.status.battery) {
         int pct = std::clamp(w.status.batteryPercent, 0, 100);
         D2D1_COLOR_F level = pct <= 20 && !w.status.charging ? p.red : p.green;
-        c.Arc(cx, cy, R, -90, -90 + 360.f * float(pct) / 100.f, level, 9);
+        c.Arc(cx, cy, rad, -90, -90 + 360.f * float(pct) / 100.f, level, 9);
         c.Glyph(L"\uE7F8", D2D1::RectF(cx - 22, cy - 22, cx + 22, cy + 22), 24, p.text);
         // The level, with a bolt before it while charging.
         std::wstring n = std::to_wstring(pct) + L"%";
-        float tw = c.TextWidth(n, 19, DWRITE_FONT_WEIGHT_SEMI_BOLD), bolt = w.status.charging ? 16.f : 0.f, x0 = (W - tw - bolt) / 2;
+        float tw = c.TextWidth(n, 19, DWRITE_FONT_WEIGHT_SEMI_BOLD), bolt = w.status.charging ? 16.f : 0.f, x0 = (fw - tw - bolt) / 2;
         if (w.status.charging)
-            c.Glyph(L"\uE945", D2D1::RectF(x0 - 2, cy + R + 10, x0 + bolt, cy + R + 36), 13, level);
-        c.Text(n, D2D1::RectF(x0 + bolt, cy + R + 10, x0 + bolt + tw + 4, cy + R + 36), 19, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            c.Glyph(L"\uE945", D2D1::RectF(x0 - 2, cy + rad + 10, x0 + bolt, cy + rad + 36), 13, level);
+        c.Text(n, D2D1::RectF(x0 + bolt, cy + rad + 10, x0 + bolt + tw + 4, cy + rad + 36), 19, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     } else {
-        c.Arc(cx, cy, R, -90, 270, p.green, 9);
+        c.Arc(cx, cy, rad, -90, 270, p.green, 9);
         c.Glyph(L"\uE83E", D2D1::RectF(cx - 22, cy - 22, cx + 22, cy + 22), 22, p.text);
-        c.Text(Tr(L"Plugged in"), D2D1::RectF(0, cy + R + 12, W, cy + R + 34), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(Tr(L"Plugged in"), D2D1::RectF(0, cy + rad + 12, fw, cy + rad + 34), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     }
-    (void)H;
 }
 
 // The processor, the memory and the system disk: bars (small) or rings
 // (medium), green, orange from 70 %, red from 90 %.
-void PaintSystem(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float W, float H)
+void PaintSystem(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float fw, float fh)
 {
     struct Gauge {
         const wchar_t* name;
@@ -408,13 +407,13 @@ void PaintSystem(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p,
     auto colour = [&](float v) { return v >= 0.9f ? p.red : v >= 0.7f ? p.orange : p.green; };
     auto pct = [](float v) { return std::to_wstring(int(std::lround(std::clamp(v, 0.f, 1.f) * 100))) + L"%"; };
     if (size == WidgetSize::Small) {
-        c.Text(Tr(L"System"), D2D1::RectF(kPad + 2, kPad - 2, W - kPad, kPad + 16), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        const float rowH = (H - 2 * kPad - 18) / 3;
+        c.Text(Tr(L"System"), D2D1::RectF(kPad + 2, kPad - 2, fw - kPad, kPad + 16), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        const float rowH = (fh - 2 * kPad - 18) / 3;
         for (int i = 0; i < 3; ++i) {
             float y = kPad + 18 + rowH * float(i);
-            c.Text(gauges[i].name, D2D1::RectF(kPad + 2, y + 2, W / 2, y + 22), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-            c.Text(pct(gauges[i].value), D2D1::RectF(W / 2, y + 2, W - kPad - 2, y + 22), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
-            D2D1_RECT_F track = D2D1::RectF(kPad + 2, y + 26, W - kPad - 2, y + 32);
+            c.Text(gauges[i].name, D2D1::RectF(kPad + 2, y + 2, fw / 2, y + 22), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            c.Text(pct(gauges[i].value), D2D1::RectF(fw / 2, y + 2, fw - kPad - 2, y + 22), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+            D2D1_RECT_F track = D2D1::RectF(kPad + 2, y + 26, fw - kPad - 2, y + 32);
             c.Fill(track, 3, p.track);
             float v = std::clamp(gauges[i].value, 0.f, 1.f);
             if (v > 0.01f)
@@ -422,15 +421,15 @@ void PaintSystem(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p,
         }
         return;
     }
-    const float colW = (W - 2 * kPad) / 3, R = 34, cy = kPad + 6 + R;
+    const float colW = (fw - 2 * kPad) / 3, rad = 34, cy = kPad + 6 + rad;
     for (int i = 0; i < 3; ++i) {
         float cx = kPad + colW * (float(i) + 0.5f), v = std::clamp(gauges[i].value, 0.f, 1.f);
-        c.Arc(cx, cy, R, -90, 270, p.track, 8);
+        c.Arc(cx, cy, rad, -90, 270, p.track, 8);
         if (v > 0.005f)
-            c.Arc(cx, cy, R, -90, -90 + 360.f * v, colour(v), 8);
-        c.Text(pct(v), D2D1::RectF(cx - R, cy - 12, cx + R, cy + 12), 17, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-        c.Text(gauges[i].name, D2D1::RectF(cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-        c.Text(gauges[i].detail, D2D1::RectF(cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
+            c.Arc(cx, cy, rad, -90, -90 + 360.f * v, colour(v), 8);
+        c.Text(pct(v), D2D1::RectF(cx - rad, cy - 12, cx + rad, cy + 12), 17, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(gauges[i].name, D2D1::RectF(cx - colW / 2, cy + rad + 8, cx + colW / 2, cy + rad + 26), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(gauges[i].detail, D2D1::RectF(cx - colW / 2, cy + rad + 26, cx + colW / 2, cy + rad + 42), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
 }
 
@@ -449,43 +448,45 @@ const wchar_t* BluetoothGlyph(BluetoothKind k)
     }
 }
 
-void PaintBluetooth(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float W, float H)
+void PaintBluetooth(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float fw, float fh)
 {
     const auto& devices = w.bluetooth;
     const size_t n = std::min<size_t>(devices.size(), 4);
     auto colour = [&](int pct) { return pct <= 20 ? p.red : p.green; };
     if (w.bluetoothRead && n == 0) {
-        c.Glyph(L"\uE702", D2D1::RectF(0, H / 2 - 40, W, H / 2 - 4), 26, p.sub);
-        c.Text(Tr(L"No connected devices"), D2D1::RectF(kPad, H / 2 + 4, W - kPad, H / 2 + 24), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Glyph(L"\uE702", D2D1::RectF(0, fh / 2 - 40, fw, fh / 2 - 4), 26, p.sub);
+        c.Text(Tr(L"No connected devices"), D2D1::RectF(kPad, fh / 2 + 4, fw - kPad, fh / 2 + 24), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         return;
     }
     if (size == WidgetSize::Small) {
-        const float cw = (W - 2 * kPad) / 2, ch = (H - 2 * kPad) / 2, R = 21;
+        const float cw = (fw - 2 * kPad) / 2, ch = (fh - 2 * kPad) / 2, rad = 21;
         for (size_t i = 0; i < 4; ++i) {
-            const float cx = kPad + cw * (float(i % 2) + 0.5f), cy = kPad + ch * float(i / 2) + 26;
-            c.Arc(cx, cy, R, -90, 270, p.track, 5);
+            const size_t row = i / 2;
+            const float cx = kPad + cw * (float(i % 2) + 0.5f), cy = kPad + ch * float(row) + 26;
+            c.Arc(cx, cy, rad, -90, 270, p.track, 5);
             if (i >= n)
                 continue;
             const int pct = std::clamp(devices[i].percent, 0, 100);
             if (pct > 0)
-                c.Arc(cx, cy, R, -90, -90 + 360.f * float(pct) / 100.f, colour(pct), 5);
-            c.Glyph(BluetoothGlyph(devices[i].kind), D2D1::RectF(cx - R, cy - R, cx + R, cy + R), 15, p.text);
-            c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(cx - cw / 2, cy + R + 4, cx + cw / 2, cy + R + 20), 11.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+                c.Arc(cx, cy, rad, -90, -90 + 360.f * float(pct) / 100.f, colour(pct), 5);
+            c.Glyph(BluetoothGlyph(devices[i].kind), D2D1::RectF(cx - rad, cy - rad, cx + rad, cy + rad), 15, p.text);
+            c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(cx - cw / 2, cy + rad + 4, cx + cw / 2, cy + rad + 20), 11.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                   1);
         }
         return;
     }
-    const float rowH = (H - 2 * kPad) / 4;
+    const float rowH = (fh - 2 * kPad) / 4;
     for (size_t i = 0; i < n; ++i) {
         const float y = kPad + rowH * float(i), mid = y + rowH / 2;
         const int pct = std::clamp(devices[i].percent, 0, 100);
         c.Glyph(BluetoothGlyph(devices[i].kind), D2D1::RectF(kPad, mid - 12, kPad + 26, mid + 12), 16, p.text);
-        c.Text(devices[i].name, D2D1::RectF(kPad + 34, mid - 10, W - kPad - 112, mid + 10), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        const D2D1_RECT_F track = D2D1::RectF(W - kPad - 106, mid - 3, W - kPad - 50, mid + 3);
+        c.Text(devices[i].name, D2D1::RectF(kPad + 34, mid - 10, fw - kPad - 112, mid + 10), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        const D2D1_RECT_F track = D2D1::RectF(fw - kPad - 106, mid - 3, fw - kPad - 50, mid + 3);
         c.Fill(track, 3, p.track);
         if (pct > 0)
             c.Fill(D2D1::RectF(track.left, track.top, track.left + std::max(6.f, (track.right - track.left) * float(pct) / 100.f), track.bottom), 3,
                    colour(pct));
-        c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(W - kPad - 46, mid - 10, W - kPad, mid + 10), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+        c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(fw - kPad - 46, mid - 10, fw - kPad, mid + 10), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
     }
 }
 
@@ -558,7 +559,7 @@ float GraphTop(const std::vector<NetworkRate>& h)
 {
     float peak = 0;
     for (const NetworkRate& r : h)
-        peak = std::max(peak, std::max(r.down, r.up));
+        peak = std::max({peak, r.down, r.up});
     if (peak <= 16384.f)
         return 16384.f;
     const float e = std::pow(10.f, std::floor(std::log10(peak)));
@@ -582,7 +583,7 @@ void GraphLine(Canvas& c, const std::vector<NetworkRate>& h, bool out, float l, 
 
 // The link's traffic: what comes in and what goes out, each with its arrow, the last minute of both
 // under them, and the adapter with the speed it negotiated. The medium one adds this session's totals.
-void PaintNetwork(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float W, float H)
+void PaintNetwork(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float fw, float fh)
 {
     const NetworkMonitor* n = w.network;
     const bool compact = size == WidgetSize::Small; // not `small`: rpcndr.h defines that as char
@@ -591,15 +592,15 @@ void PaintNetwork(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p
     const bool mono = p.icon == Ink::Mono;
     const D2D1_COLOR_F down = mono ? Alpha(p.text, 0.95f) : p.blue;
     const D2D1_COLOR_F up = mono ? Alpha(p.text, 0.5f) : p.orange;
-    c.Text(Tr(L"Network"), D2D1::RectF(pad + 1, pad - 2, W - pad - 40, pad + 16), compact ? 12.5f : 13.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(Tr(L"Network"), D2D1::RectF(pad + 1, pad - 2, fw - pad - 40, pad + 16), compact ? 12.5f : 13.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     if (!n || !n->Linked()) {
-        c.Glyph(L"\uE774", D2D1::RectF(0, H / 2 - 48, W, H / 2 - 14), 24, p.sub);
-        c.Text(Tr(L"No network available"), D2D1::RectF(pad, H / 2 - 6, W - pad, H / 2 + 14), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Glyph(L"\uE774", D2D1::RectF(0, fh / 2 - 48, fw, fh / 2 - 14), 24, p.sub);
+        c.Text(Tr(L"No network available"), D2D1::RectF(pad, fh / 2 - 6, fw - pad, fh / 2 + 14), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         return;
     }
     if (!compact) {
         const std::wstring speed = LinkText(n->LinkMbps());
-        c.Text(speed.empty() ? n->Name() : n->Name() + L" · " + speed, D2D1::RectF(W / 2 - 60, pad - 1, W - pad - 1, pad + 16), 11, p.sub,
+        c.Text(speed.empty() ? n->Name() : n->Name() + L" · " + speed, D2D1::RectF(fw / 2 - 60, pad - 1, fw - pad - 1, pad + 16), 11, p.sub,
                DWRITE_FONT_WEIGHT_NORMAL, 2);
     }
     // A rate: its arrow, then the value at `font` with the unit on the same baseline. MiSans' line
@@ -610,7 +611,7 @@ void PaintNetwork(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p
         const float cy = (top + bottom) / 2, x0 = pad + 2;
         RateArrow(c, x0 + arrow, cy, arrow, !out, out ? up : down);
         const float x = x0 + 2 * arrow + 9;
-        c.Text(value, D2D1::RectF(x, top, W - pad, bottom), font, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(value, D2D1::RectF(x, top, fw - pad, bottom), font, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         const float tw = c.TextWidth(value, font, DWRITE_FONT_WEIGHT_SEMI_BOLD), shift = 0.381f * (font - unitSize);
         c.Text(unit, D2D1::RectF(x + tw + 4, top + shift, x + tw + 4 + unitSize * 5, bottom + shift), unitSize, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     };
@@ -619,28 +620,28 @@ void PaintNetwork(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p
     if (compact) {
         rate(32, 60, n->DownBps(), false, 6.5f, 20, 10.5f);
         rate(62, 84, n->UpBps(), true, 5, 14.5f, 9.5f);
-        c.Line(pad, 126, W - pad, 126, p.track);
-        GraphLine(c, history, false, pad, 90, W - pad, 126, top, down);
-        GraphLine(c, history, true, pad, 90, W - pad, 126, top, up);
-        c.Text(n->Name(), D2D1::RectF(pad + 1, H - pad - 14, W - pad, H - pad + 1), 10, p.sub);
+        c.Line(pad, 126, fw - pad, 126, p.track);
+        GraphLine(c, history, false, pad, 90, fw - pad, 126, top, down);
+        GraphLine(c, history, true, pad, 90, fw - pad, 126, top, up);
+        c.Text(n->Name(), D2D1::RectF(pad + 1, fh - pad - 14, fw - pad, fh - pad + 1), 10, p.sub);
         return;
     }
     rate(34, 72, n->DownBps(), false, 8, 32, 12.5f);
     rate(74, 96, n->UpBps(), true, 6, 18, 11);
-    c.Line(pad, 136, W - pad, 136, p.track);
-    GraphLine(c, history, false, pad, 102, W - pad, 136, top, down);
-    GraphLine(c, history, true, pad, 102, W - pad, 136, top, up);
-    c.Text(TrFormat(L"Received %s · sent %s", BytesText(n->DownBytes()).c_str(), BytesText(n->UpBytes()).c_str()), D2D1::RectF(pad, 140, W - pad, 154), 10,
+    c.Line(pad, 136, fw - pad, 136, p.track);
+    GraphLine(c, history, false, pad, 102, fw - pad, 136, top, down);
+    GraphLine(c, history, true, pad, 102, fw - pad, 136, top, up);
+    c.Text(TrFormat(L"Received %s · sent %s", BytesText(n->DownBytes()).c_str(), BytesText(n->UpBytes()).c_str()), D2D1::RectF(pad, 140, fw - pad, 154), 10,
            p.sub);
 }
 
 // A note: its title, then the text; while editing, the caret, and the text
 // scrolled up when the caret goes below the card.
-void PaintNotes(Canvas& c, const WidgetContent& n, const Pal& p, float W, float H, std::vector<WidgetHit>& hits)
+void PaintNotes(Canvas& c, const WidgetContent& n, const Pal& p, float fw, float fh, std::vector<WidgetHit>& hits)
 {
-    c.Text(Tr(L"Notes"), D2D1::RectF(kPad + 2, kPad - 2, W - kPad, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    const D2D1_RECT_F box = D2D1::RectF(kPad + 2, kPad + 24, W - kPad - 2, H - kPad);
-    hits.push_back({D2D1::RectF(0, 0, W, H), L"text"});
+    c.Text(Tr(L"Notes"), D2D1::RectF(kPad + 2, kPad - 2, fw - kPad, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const D2D1_RECT_F box = D2D1::RectF(kPad + 2, kPad + 24, fw - kPad - 2, fh - kPad);
+    hits.push_back({D2D1::RectF(0, 0, fw, fh), L"text"});
     const float size = 13.5f;
     if (n.text.empty() && !n.editing) {
         c.Text(Tr(L"Tap to write…"), box, size, p.faint, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
@@ -664,21 +665,21 @@ void PaintNotes(Canvas& c, const WidgetContent& n, const Pal& p, float W, float 
 
 // Reminders: the title and the count still to do, then the list
 // in their original order, each with its circle; a last row adds one.
-void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, float H, std::vector<WidgetHit>& hits)
+void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float fw, float fh, std::vector<WidgetHit>& hits)
 {
     int open = int(std::count_if(r.items.begin(), r.items.end(), [](const Reminder& i) { return !i.done; }));
-    c.Text(Tr(L"Reminders"), D2D1::RectF(kPad + 2, kPad - 2, W - kPad - 40, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(std::to_wstring(open), D2D1::RectF(W - kPad - 48, kPad - 6, W - kPad - 2, kPad + 22), 22, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
-    const float bottom = H - kReminderBottom, view = bottom - kReminderTop;
+    c.Text(Tr(L"Reminders"), D2D1::RectF(kPad + 2, kPad - 2, fw - kPad - 40, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(std::to_wstring(open), D2D1::RectF(fw - kPad - 48, kPad - 6, fw - kPad - 2, kPad + 22), 22, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+    const float bottom = fh - kReminderBottom, view = bottom - kReminderTop;
     const float limit = std::max(0.f, float(r.items.size() + 1) * kReminderRow - view);
     const float scroll = std::clamp(r.scroll, 0.f, limit);
     auto hit = [&](D2D1_RECT_F rect, const std::wstring& id) {
         rect.top = std::max(rect.top, kReminderTop);
         rect.bottom = std::min(rect.bottom, bottom);
         if (rect.bottom > rect.top)
-            hits.push_back({rect, std::move(id)});
+            hits.push_back({rect, id});
     };
-    c.Clip(D2D1::RectF(kPad - 4, kReminderTop, W - kPad, bottom));
+    c.Clip(D2D1::RectF(kPad - 4, kReminderTop, fw - kPad, bottom));
     int first = int(scroll / kReminderRow);
     int last = std::min(int(r.items.size()), int(std::ceil((scroll + view) / kReminderRow)));
     for (int idx = first; idx < last; ++idx) {
@@ -692,7 +693,7 @@ void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, fl
             c.Arc(cx, cy, 7.4f, -90, 270, p.sub, 1.5f);
         }
         hit(D2D1::RectF(kPad - 4, y, kPad + 22, y + kReminderRow), L"toggle:" + std::to_wstring(idx));
-        D2D1_RECT_F text = D2D1::RectF(kPad + 26, y, W - kPad, y + kReminderRow);
+        D2D1_RECT_F text = D2D1::RectF(kPad + 26, y, fw - kPad, y + kReminderRow);
         bool editing = r.editing && r.item == idx;
         c.Text(it.text.empty() && !editing ? Tr(L"New Reminder") : it.text, text, 13.5f, it.done ? p.sub : it.text.empty() ? p.faint : p.text);
         if (it.done && !it.text.empty())
@@ -711,28 +712,29 @@ void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, fl
         float y = kReminderTop + kReminderRow * float(r.items.size()) - scroll;
         if (y < bottom) {
             c.Text(L"+", D2D1::RectF(kPad - 1, y, kPad + 19, y + kReminderRow), 17, p.faint, DWRITE_FONT_WEIGHT_NORMAL, 1);
-            c.Text(r.items.empty() ? Tr(L"Tap to add a reminder") : Tr(L"New Reminder"), D2D1::RectF(kPad + 26, y, W - kPad, y + kReminderRow), 13.5f, p.faint);
-            hit(D2D1::RectF(kPad - 4, y, W - kPad, y + kReminderRow), L"add");
+            c.Text(r.items.empty() ? Tr(L"Tap to add a reminder") : Tr(L"New Reminder"), D2D1::RectF(kPad + 26, y, fw - kPad, y + kReminderRow), 13.5f,
+                   p.faint);
+            hit(D2D1::RectF(kPad - 4, y, fw - kPad, y + kReminderRow), L"add");
         }
     }
     c.Unclip();
     if (limit > 0) {
         float thumb = std::max(18.f, view * view / (view + limit));
         float y = kReminderTop + (view - thumb) * scroll / limit;
-        c.Fill(D2D1::RectF(W - 7, y, W - 5, y + thumb), 1, p.faint);
+        c.Fill(D2D1::RectF(fw - 7, y, fw - 5, y + thumb), 1, p.faint);
     }
 }
 
 // A photo filling the card; without one, how to choose a folder.
-void PaintPhotos(Canvas& c, const WidgetContent& ph, const Pal& p, float W, float H)
+void PaintPhotos(Canvas& c, const WidgetContent& ph, const Pal& p, float fw, float fh)
 {
-    if (ph.image && !ph.image->empty()) {
-        c.Image(ph.imageKey, *ph.image, D2D1::RectF(0, 0, W, H)); // the widget masks its complete content once
+    if (ph.image && !ph.image->Empty()) {
+        c.Image(ph.imageKey, *ph.image, D2D1::RectF(0, 0, fw, fh)); // the widget masks its complete content once
         return;
     }
-    c.Glyph(L"\uE91B", D2D1::RectF(0, H / 2 - 46, W, H / 2 - 6), 30, p.sub);
-    c.Text(Tr(L"Photos"), D2D1::RectF(0, H / 2, W, H / 2 + 20), 14, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-    c.Text(Tr(L"Right-click to choose a photo folder"), D2D1::RectF(0, H / 2 + 20, W, H / 2 + 38), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
+    c.Glyph(L"\uE91B", D2D1::RectF(0, fh / 2 - 46, fw, fh / 2 - 6), 30, p.sub);
+    c.Text(Tr(L"Photos"), D2D1::RectF(0, fh / 2, fw, fh / 2 + 20), 14, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+    c.Text(Tr(L"Right-click to choose a photo folder"), D2D1::RectF(0, fh / 2 + 20, fw, fh / 2 + 38), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
 }
 
 // ---- weather -------------------------------------------------------------------
@@ -890,7 +892,7 @@ D2D1_COLOR_F TempColor(float t)
 
 // macOS's weather widget: the place, the temperature large, the sky and the day's high and low;
 // the medium one adds the next hours, the large one the next days with their spans.
-void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pal& p, float W, float H)
+void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pal& p, float fw, float fh)
 {
     const Weather& w = world.weather;
     const D2D1_COLOR_F text = p.text, sub = p.sub, faint = p.track;
@@ -898,28 +900,28 @@ void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pa
     const bool dark = ink == Ink::Dark;
     const float pad = 16;
     const std::wstring city = w.city.empty() ? (world.city.empty() ? Tr(L"Weather") : world.city) : w.city;
-    c.Text(city, D2D1::RectF(pad, 12, W - pad - (size == WidgetSize::Small ? 0 : 120), 32), 14.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(city, D2D1::RectF(pad, 12, fw - pad - (size == WidgetSize::Small ? 0 : 120), 32), 14.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     if (!w.ok) {
-        c.Text(w.error.empty() ? Tr(L"Fetching weather…") : w.error, D2D1::RectF(pad, H / 2 - 10, W - pad, H / 2 + 10), 13, sub, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-               size == WidgetSize::Small ? 0 : 1);
+        c.Text(w.error.empty() ? Tr(L"Fetching weather…") : w.error, D2D1::RectF(pad, fh / 2 - 10, fw - pad, fh / 2 + 10), 13, sub,
+               DWRITE_FONT_WEIGHT_SEMI_BOLD, size == WidgetSize::Small ? 0 : 1);
         return;
     }
-    c.Text(Degrees(w.temp), D2D1::RectF(pad - 2, 30, W / 2 + 40, 82), 44, text, DWRITE_FONT_WEIGHT_LIGHT);
+    c.Text(Degrees(w.temp), D2D1::RectF(pad - 2, 30, fw / 2 + 40, 82), 44, text, DWRITE_FONT_WEIGHT_LIGHT);
     const std::wstring range = TrFormat(L"H %s  L %s", Degrees(w.hi).c_str(), Degrees(w.lo).c_str());
     if (size == WidgetSize::Small) {
-        WeatherIcon(c, w.code, w.day, pad + 11, H - 62, 22, 0, ink);
-        c.Text(WeatherCondition(w.code), D2D1::RectF(pad, H - 48, W - pad, H - 30), 13, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        c.Text(range, D2D1::RectF(pad, H - 30, W - pad, H - 12), 12, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        WeatherIcon(c, w.code, w.day, pad + 11, fh - 62, 22, 0, ink);
+        c.Text(WeatherCondition(w.code), D2D1::RectF(pad, fh - 48, fw - pad, fh - 30), 13, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(range, D2D1::RectF(pad, fh - 30, fw - pad, fh - 12), 12, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         return;
     }
     // The sky and the day's span at the top right.
-    WeatherIcon(c, w.code, w.day, W - pad - 10, 24, 20, 0, ink);
-    c.Text(WeatherCondition(w.code), D2D1::RectF(W / 2, 40, W - pad, 58), 13, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
-    c.Text(range, D2D1::RectF(W / 2 - 20, 58, W - pad, 76), 12.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+    WeatherIcon(c, w.code, w.day, fw - pad - 10, 24, 20, 0, ink);
+    c.Text(WeatherCondition(w.code), D2D1::RectF(fw / 2, 40, fw - pad, 58), 13, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+    c.Text(range, D2D1::RectF(fw / 2 - 20, 58, fw - pad, 76), 12.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
     // The next hours.
-    const float hy = size == WidgetSize::Large ? 92.f : 90.f, colW = (W - 2 * pad) / 6;
+    const float hy = size == WidgetSize::Large ? 92.f : 90.f, colW = (fw - 2 * pad) / 6;
     if (size == WidgetSize::Large)
-        c.Line(pad, hy - 6, W - pad, hy - 6, faint);
+        c.Line(pad, hy - 6, fw - pad, hy - 6, faint);
     for (size_t i = 0; i < w.hours.size() && i < 6; ++i) {
         const WeatherHour& h = w.hours[i];
         float x0 = pad + colW * float(i), cx = x0 + colW / 2;
@@ -932,13 +934,13 @@ void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pa
         return;
     // The next days: each one's low, its span on the week's scale, its high.
     const float top = hy + 76;
-    c.Line(pad, top - 6, W - pad, top - 6, faint);
+    c.Line(pad, top - 6, fw - pad, top - 6, faint);
     const size_t n = std::min<size_t>(w.days.size(), 5);
     float weekLo = 1e9f, weekHi = -1e9f;
     for (size_t i = 0; i < n; ++i)
         weekLo = std::min(weekLo, w.days[i].lo), weekHi = std::max(weekHi, w.days[i].hi);
-    const float rowH = (H - 12 - top) / float(std::max<size_t>(n, 1));
-    const float barL = 170, barR = W - pad - 44, span = std::max(1.f, weekHi - weekLo);
+    const float rowH = (fh - 12 - top) / float(std::max<size_t>(n, 1));
+    const float barL = 170, barR = fw - pad - 44, span = std::max(1.f, weekHi - weekLo);
     for (size_t i = 0; i < n; ++i) {
         const WeatherDay& d = w.days[i];
         float y = top + rowH * float(i), cy = y + rowH / 2;
@@ -958,13 +960,13 @@ void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pa
             c.Circle(x, cy, 4.5f, dark ? Rgba(0xFFFFFF, 1) : Rgba(0x1C2333, 0.55f));
             c.Circle(x, cy, 3.2f, dark ? Rgba(0x1C2333, 0.9f) : Rgba(0xFFFFFF, 1));
         }
-        c.Text(Degrees(d.hi), D2D1::RectF(barR + 6, y, W - pad, y + rowH), 14, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+        c.Text(Degrees(d.hi), D2D1::RectF(barR + 6, y, fw - pad, y + rowH), 14, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
     }
 }
 
 // The material's face under the content and the ink over it. Faces cover the largest size: while
 // a widget resizes its viewport outgrows the size it lays out.
-Pal Face(Canvas& c, WidgetKind kind, WidgetMaterial material, const WidgetWorld& world, float H)
+Pal Face(Canvas& c, WidgetKind kind, WidgetMaterial material, const WidgetWorld& world, float fh)
 {
     if (material == WidgetMaterial::Glass)
         return GlassPal(c.theme);
@@ -984,7 +986,7 @@ Pal Face(Canvas& c, WidgetKind kind, WidgetMaterial material, const WidgetWorld&
         c.inkDark = 0;
         auto [top, bottom] = SkyFace(world.weather);
         c.Fill(all, 0, Rgba(bottom, 1));
-        c.Gradient(D2D1::RectF(0, 0, all.right, H), 0, Rgba(top, 1), Rgba(bottom, 1));
+        c.Gradient(D2D1::RectF(0, 0, all.right, fh), 0, Rgba(top, 1), Rgba(bottom, 1));
         Pal p = GlassPal(c.theme);
         p.icon = Ink::Light;
         return p;
@@ -1007,7 +1009,7 @@ bool WidgetSupports(WidgetKind kind, WidgetSize size)
     switch (kind) {
     case WidgetKind::Battery: return size == WidgetSize::Small;
     case WidgetKind::Bluetooth:
-    case WidgetKind::Network: return size != WidgetSize::Large;
+    case WidgetKind::Network:
     case WidgetKind::Clock:
     case WidgetKind::Digital:
     case WidgetKind::System: return size != WidgetSize::Large;
@@ -1018,21 +1020,21 @@ bool WidgetSupports(WidgetKind kind, WidgetSize size)
 void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial material, const WidgetContent& content, const WidgetWorld& world,
                  std::vector<WidgetHit>& hits)
 {
-    const float W = WidgetWidth(size), H = WidgetHeight(size);
-    const Pal p = Face(c, kind, material, world, H);
+    const float fw = WidgetWidth(size), fh = WidgetHeight(size);
+    const Pal p = Face(c, kind, material, world, fh);
     hits.clear();
     switch (kind) {
-    case WidgetKind::Clock: PaintClock(c, size, content, world, p, W, H); break;
-    case WidgetKind::Digital: PaintDigital(c, size, content, world, p, W, H); break;
-    case WidgetKind::Calendar: PaintCalendar(c, size, world, p, W, H); break;
-    case WidgetKind::Battery: PaintBattery(c, world, p, W, H); break;
-    case WidgetKind::System: PaintSystem(c, size, world, p, W, H); break;
-    case WidgetKind::Notes: PaintNotes(c, content, p, W, H, hits); break;
-    case WidgetKind::Reminders: PaintReminders(c, content, p, W, H, hits); break;
-    case WidgetKind::Photos: PaintPhotos(c, content, p, W, H); break;
-    case WidgetKind::Weather: PaintWeather(c, size, world, p, W, H); break;
-    case WidgetKind::Bluetooth: PaintBluetooth(c, size, world, p, W, H); break;
-    case WidgetKind::Network: PaintNetwork(c, size, world, p, W, H); break;
+    case WidgetKind::Clock: PaintClock(c, size, content, world, p, fw, fh); break;
+    case WidgetKind::Digital: PaintDigital(c, size, content, world, p, fw, fh); break;
+    case WidgetKind::Calendar: PaintCalendar(c, size, world, p, fw, fh); break;
+    case WidgetKind::Battery: PaintBattery(c, world, p, fw, fh); break;
+    case WidgetKind::System: PaintSystem(c, size, world, p, fw, fh); break;
+    case WidgetKind::Notes: PaintNotes(c, content, p, fw, fh, hits); break;
+    case WidgetKind::Reminders: PaintReminders(c, content, p, fw, fh, hits); break;
+    case WidgetKind::Photos: PaintPhotos(c, content, p, fw, fh); break;
+    case WidgetKind::Weather: PaintWeather(c, size, world, p, fw, fh); break;
+    case WidgetKind::Bluetooth: PaintBluetooth(c, size, world, p, fw, fh); break;
+    case WidgetKind::Network: PaintNetwork(c, size, world, p, fw, fh); break;
     }
 }
 

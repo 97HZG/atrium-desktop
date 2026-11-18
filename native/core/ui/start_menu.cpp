@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <ranges>
 #include <set>
 
 #pragma comment(lib, "imm32.lib")
@@ -79,7 +80,6 @@ const wchar_t kLetters[] = L"#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
 bool IsPath(const std::wstring& id) { return id.size() > 2 && id[1] == L':' && (id[2] == L'\\' || id[2] == L'/'); }
-bool Starts(const std::wstring& s, const wchar_t* prefix) { return s.starts_with(prefix); }
 int Index(const std::wstring& id, size_t prefix) { return int(wcstol(id.c_str() + prefix, nullptr, 10)); }
 float Mix(float a, float b, float t) { return a + (b - a) * t; }
 D2D1_RECT_F Mix(const D2D1_RECT_F& a, const D2D1_RECT_F& b, float t)
@@ -120,7 +120,7 @@ void Reorder(std::vector<StartTile>& tiles, const std::vector<std::wstring>& key
 {
     std::vector<StartTile> out;
     for (const std::wstring& key : keys)
-        if (auto it = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.id == key; }); it != tiles.end()) {
+        if (auto it = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.id == key; }); it != tiles.end()) {
             out.push_back(std::move(*it));
             tiles.erase(it);
         }
@@ -131,30 +131,12 @@ void Reorder(std::vector<StartTile>& tiles, const std::vector<std::wstring>& key
 
 StartTile* Find(std::vector<StartTile>& tiles, const std::wstring& id)
 {
-    auto it = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.id == id; });
+    auto it = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.id == id; });
     return it == tiles.end() ? nullptr : &*it;
 }
 
-enum MenuCommand {
-    kOpen = 1,
-    kPinBar,
-    kPinStart,
-    kRemove,
-    kOutOfFolder,
-    kRename,
-    kUngroup,
-    kReset,
-    kHide,
-    kUnhide,
-    kShowHidden,
-    kAdmin,
-    kLocation,
-    kSyncPins,
-    kSyncFolders,
-    kSyncBoth,
-    kSize,
-    /* + the menu's size */ kIcon = kSize + StartLayout::kSizes /* + the icons' size */
-};
+constexpr int kOpen = 1, kPinBar = 2, kPinStart = 3, kRemove = 4, kOutOfFolder = 5, kRename = 6, kUngroup = 7, kReset = 8, kHide = 9, kUnhide = 10,
+              kShowHidden = 11, kAdmin = 12, kLocation = 13, kSyncPins = 14, kSyncFolders = 15, kSyncBoth = 16, kSize = 17, kIcon = kSize + StartLayout::kSizes;
 
 } // namespace
 
@@ -162,14 +144,14 @@ StartMenu::StartMenu(HINSTANCE instance, TaskModel& tasks, AppCatalog& catalog)
     : surface_(instance, L"Atrium Start", true),
       tasks_(tasks),
       catalog_(catalog),
-      layout_(LoadStartLayout())
+      layout_(LoadStartLayout()),
+      cols_(kStartGrids[layout_.size].cols),
+      rows_(kStartGrids[layout_.size].rows),
+      grid_(layout_.size)
 {
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
     surface_.onDismiss = [this] { Close(false); }; // a press next to the menu
-    cols_ = kStartGrids[layout_.size].cols;
-    rows_ = kStartGrids[layout_.size].rows;
-    grid_ = layout_.size;
     Log(L"start: %d x %d tiles, %.0f DIP icons, %s", cols_, rows_, kStartIcons[layout_.icon].icon,
         layout_.custom ? L"arranged by the user" : L"the Windows start menu's pins");
 }
@@ -315,9 +297,9 @@ float StartMenu::ButtonSize() const { return std::min(44.f, barH_ - 12); }
 
 D2D1_RECT_F StartMenu::Cell(int slot) const
 {
-    const int per = PerPage(), page = slot / per, k = slot % per;
+    const int per = PerPage(), page = slot / per, k = slot % per, row = k / cols_;
     const float cw = CellW(), ch = CellH();
-    const float x = GridX() + float(k % cols_) * cw + float(page) * W(), y = kGridTop + float(k / cols_) * ch;
+    const float x = GridX() + float(k % cols_) * cw + float(page) * W(), y = kGridTop + float(row) * ch;
     return D2D1::RectF(x, y, x + cw, y + ch);
 }
 
@@ -344,10 +326,10 @@ D2D1_RECT_F StartMenu::IndexRect() const { return D2D1::RectF(10, kListTop + 2, 
 D2D1_RECT_F StartMenu::FolderCell(int slot) const
 {
     const D2D1_RECT_F f = FolderRect();
-    const int cols = FolderCols(), per = cols * FolderRows(), page = slot / per, k = slot % per;
+    const int cols = FolderCols(), per = cols * FolderRows(), page = slot / per, k = slot % per, row = k / cols;
     const float cw = CellW(), ch = CellH();
     const float x0 = (f.left + f.right - float(cols) * cw) / 2;
-    const float x = x0 + float(k % cols) * cw + float(page) * (f.right - f.left), y = f.top + kFolderHead + float(k / cols) * ch;
+    const float x = x0 + float(k % cols) * cw + float(page) * (f.right - f.left), y = f.top + kFolderHead + float(row) * ch;
     return D2D1::RectF(x, y, x + cw, y + ch);
 }
 
@@ -531,6 +513,7 @@ void StartMenu::SyncWindowsPins()
     if (!layout_.custom || !catalog_.Loaded() || pins_.empty())
         return; // no complete list of the Windows pins (the export can fail): nothing to compare
     std::vector<std::wstring> now;
+    now.reserve(pins_.size());
     for (const CatalogApp& p : pins_)
         now.push_back(p.id);
     if (!layout_.windowsPinsKnown) { // an arrangement from before: today's pins are its starting point
@@ -539,10 +522,10 @@ void StartMenu::SyncWindowsPins()
         SaveStartLayout(layout_);
         return;
     }
-    auto has = [](const std::vector<std::wstring>& list, const std::wstring& id) { return std::find(list.begin(), list.end(), id) != list.end(); };
+    auto has = [](const std::vector<std::wstring>& list, const std::wstring& id) { return std::ranges::find(list, id) != list.end(); };
     auto placed = [&](const std::wstring& id) {
         for (const StartTile& t : layout_.tiles)
-            if (t.id == id || std::any_of(t.apps.begin(), t.apps.end(), [&](const StartTile& a) { return a.id == id; }))
+            if (t.id == id || std::ranges::any_of(t.apps, [&](const StartTile& a) { return a.id == id; }))
                 return true;
         return false;
     };
@@ -600,7 +583,7 @@ void StartMenu::SyncFromWindows(bool pins, bool folders)
     Arrange([&](std::vector<StartTile>& tiles) {
         auto placed = [&](const std::wstring& id) {
             for (const StartTile& t : tiles)
-                if (t.id == id || std::any_of(t.apps.begin(), t.apps.end(), [&](const StartTile& a) { return a.id == id; }))
+                if (t.id == id || std::ranges::any_of(t.apps, [&](const StartTile& a) { return a.id == id; }))
                     return true;
             return false;
         };
@@ -613,9 +596,9 @@ void StartMenu::SyncFromWindows(bool pins, bool folders)
         for (const CatalogFolder& f : windowsFolders) {
             std::vector<StartTile> missing;
             for (const CatalogApp& a : f.apps)
-                if (!placed(a.id) && !Hidden(a.id) && std::none_of(missing.begin(), missing.end(), [&](const StartTile& m) { return m.id == a.id; }))
+                if (!placed(a.id) && !Hidden(a.id) && std::ranges::none_of(missing, [&](const StartTile& m) { return m.id == a.id; }))
                     missing.push_back({a.id, a.name, {}});
-            auto same = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.Folder() && t.name == f.name; });
+            auto same = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.Folder() && t.name == f.name; });
             if (same != tiles.end()) {
                 apps += missing.size();
                 same->apps.insert(same->apps.end(), missing.begin(), missing.end());
@@ -725,7 +708,7 @@ std::vector<StartMenu::Row> StartMenu::Results() const
         if (!Hidden(a.id) && AppCatalog::Matches(a, query_))
             apps.push_back(a);
     // Names that start with the query first, then the other matches.
-    std::stable_partition(apps.begin(), apps.end(), [&](const CatalogApp& a) {
+    std::ranges::stable_partition(apps, [&](const CatalogApp& a) {
         return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE, a.name.c_str(), int(std::min(a.name.size(), query_.size())), query_.c_str(),
                                int(query_.size()), nullptr, nullptr, 0) == CSTR_EQUAL;
     });
@@ -756,7 +739,7 @@ std::vector<StartMenu::Row> StartMenu::AllApps() const
     for (Entry& e : entries)
         if (!e.name)
             e.name = &e.row.app.name;
-    std::stable_sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+    std::ranges::stable_sort(entries, [](const Entry& a, const Entry& b) {
         if (a.letter != b.letter)
             return LetterRank(a.letter) < LetterRank(b.letter);
         return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE | SORT_DIGITSASNUMBERS, a.name->c_str(), int(a.name->size()), b.name->c_str(),
@@ -773,7 +756,7 @@ std::vector<StartMenu::Row> StartMenu::AllApps() const
     }
     // The hidden apps last, under a heading of their own.
     if (!hidden.empty()) {
-        std::stable_sort(hidden.begin(), hidden.end(), [](const CatalogApp& a, const CatalogApp& b) {
+        std::ranges::stable_sort(hidden, [](const CatalogApp& a, const CatalogApp& b) {
             return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE | SORT_DIGITSASNUMBERS, a.name.c_str(), int(a.name.size()), b.name.c_str(),
                                    int(b.name.size()), nullptr, nullptr, 0) == CSTR_LESS_THAN;
         });
@@ -820,7 +803,7 @@ void StartMenu::SetPage(int page)
     surface_.Invalidate();
 }
 
-bool StartMenu::Hidden(const std::wstring& id) const { return std::find(layout_.hidden.begin(), layout_.hidden.end(), id) != layout_.hidden.end(); }
+bool StartMenu::Hidden(const std::wstring& id) const { return std::ranges::find(layout_.hidden, id) != layout_.hidden.end(); }
 
 void StartMenu::SetHidden(const CatalogApp& app, bool hidden)
 {
@@ -863,7 +846,7 @@ bool StartMenu::OnStart(const std::wstring& id) const
     for (const Tile& t : tiles_) {
         if (!t.folder && t.key == id)
             return true;
-        if (t.folder && std::any_of(t.apps.begin(), t.apps.end(), [&](const CatalogApp& a) { return a.id == id; }))
+        if (t.folder && std::ranges::any_of(t.apps, [&](const CatalogApp& a) { return a.id == id; }))
             return true;
     }
     return false;
@@ -1103,7 +1086,7 @@ void StartMenu::DrawIcon(Canvas& c, const std::wstring& id, int px, D2D1_RECT_F 
     if (!cached)
         fetched = catalog_.Icon(id, px);
     const IconImage& icon = cached ? kNone : fetched;
-    if (cached || !icon.empty())
+    if (cached || !icon.Empty())
         c.Image(cacheKey, icon, r);
     else
         c.Fill(r, radius, c.theme.hover);
@@ -1145,7 +1128,8 @@ void StartMenu::PaintTileFace(Canvas& c, const Theme& t, const Tile& tile, D2D1_
         const float gap = 3, m = (icon - gap) / 2 - 2, pad = (icon - 2 * m - gap) / 2;
         const int px = IconPx();
         for (size_t k = 0; k < std::min<size_t>(4, tile.apps.size()); ++k) {
-            float x = ir.left + pad + float(k % 2) * (m + gap), y = ir.top + pad + float(k / 2) * (m + gap);
+            const size_t row = k / 2;
+            float x = ir.left + pad + float(k % 2) * (m + gap), y = ir.top + pad + float(row) * (m + gap);
             DrawIcon(c, tile.apps[k].id, px, D2D1::RectF(x, y, x + m, y + m), 4);
         }
     } else {
@@ -1310,7 +1294,8 @@ void StartMenu::PaintRows(Canvas& c, const Theme& t, const std::vector<Row>& row
             const float m = 10, gap = 2, pad = (kRowIcon - 2 * m - gap) / 2;
             const int px = int(std::lround(m * c.scale * 1.1f));
             for (size_t k = 0; k < std::min<size_t>(4, f.apps.size()); ++k) {
-                float x = ir.left + pad + float(k % 2) * (m + gap), yy = ir.top + pad + float(k / 2) * (m + gap);
+                const size_t line = k / 2;
+                float x = ir.left + pad + float(k % 2) * (m + gap), yy = ir.top + pad + float(line) * (m + gap);
                 DrawIcon(c, f.apps[k].id, px, D2D1::RectF(x, yy, x + m, yy + m), 3);
             }
             name = f.name;
@@ -1605,7 +1590,7 @@ void StartMenu::PaintShelf(Canvas& c, const Theme& t)
     if (ah > 0)
         c.Fill(acct, bh / 2, Alpha(pressed_ == L"account" ? t.press : t.hover, ah));
     D2D1_RECT_F pic = D2D1::RectF(acct.left + 8, cy - 14, acct.left + 36, cy + 14);
-    if (!avatar_.empty()) {
+    if (!avatar_.Empty()) {
         c.ImageCircle(L"avatar", avatar_, pic);
     } else {
         c.Circle((pic.left + pic.right) / 2, cy, 14, Alpha(t.accent, 0.9f));
@@ -1645,12 +1630,11 @@ std::wstring StartMenu::HitAt(POINT pt) const
     float s = surface_.Scale();
     float x = float(pt.x) / s, y = float(pt.y) / s;
     // Last painted is on top (the power card over the panel).
-    for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
-        const Hit& h = *it;
+    for (const auto& h : std::ranges::reverse_view(hits_)) {
         if (!In(h.rect, x, y))
             continue;
         // Rows scrolled out of the list are not clickable.
-        if ((Starts(h.id, L"row:") || Starts(h.id, L"head:")) && (y < kListTop || y > ListBottom()))
+        if ((h.id.starts_with(L"row:") || h.id.starts_with(L"head:")) && (y < kListTop || y > ListBottom()))
             continue;
         return h.id;
     }
@@ -1669,7 +1653,7 @@ void StartMenu::OpenFolder(int tile)
     const float mx = (card.left + card.right) / 2, my = (card.top + card.bottom) / 2;
     folderFrom_ = D2D1::RectF(mx - icon / 2, my - icon / 2, mx + icon / 2, my + icon / 2);
     const std::vector<int> order = Order();
-    if (auto it = std::find(order.begin(), order.end(), tile); it != order.end() && !Listing()) {
+    if (auto it = std::ranges::find(order, tile); it != order.end() && !Listing()) {
         D2D1_RECT_F cell = Cell(int(it - order.begin()));
         const float x = cell.left - float(page_) * W(), cx = x + CellW() / 2;
         if (x >= 0 && x + CellW() <= W())
@@ -1684,7 +1668,7 @@ void StartMenu::OpenFolder(int tile)
     folderPageShown_ = 0;
     naming_ = false;
     sel_ = -1;
-    std::erase_if(tilePos_, [](const auto& p) { return Starts(p.first, L"f|"); });
+    std::erase_if(tilePos_, [](const auto& p) { return p.first.starts_with(L"f|"); });
     surface_.Invalidate();
     Log(L"start: folder '%s' opened (%zu apps)", tiles_[size_t(tile)].name.c_str(), tiles_[size_t(tile)].apps.size());
 }
@@ -1698,7 +1682,7 @@ void StartMenu::CloseFolder()
         return;
     // Back into its tile (which may have moved meanwhile).
     const std::vector<int> order = Order();
-    if (auto it = std::find(order.begin(), order.end(), folder_); it != order.end() && !Listing()) {
+    if (auto it = std::ranges::find(order, folder_); it != order.end() && !Listing()) {
         D2D1_RECT_F cell = Cell(int(it - order.begin()));
         const float icon = IconSize();
         const float x = cell.left - float(page_) * W(), cx = x + CellW() / 2;
@@ -1774,13 +1758,13 @@ void StartMenu::BeginDrag()
     Drag d;
     d.on = true;
     D2D1_RECT_F cell{};
-    if (Starts(pressed_, L"tile:")) {
+    if (pressed_.starts_with(L"tile:")) {
         d.from = Index(pressed_, 5);
         if (d.from < 0 || d.from >= int(tiles_.size()))
             return;
         d.key = tiles_[size_t(d.from)].key;
         const std::vector<int> order = Order();
-        const int slot = int(std::find(order.begin(), order.end(), d.from) - order.begin());
+        const int slot = int(std::ranges::find(order, d.from) - order.begin());
         d.insert = slot;
         cell = Cell(slot);
         cell.left -= float(page_) * W();
@@ -1987,7 +1971,7 @@ void StartMenu::EndDrag(bool commit)
             if (StartTile* f = Find(tiles, folderKey)) {
                 std::vector<StartTile> apps;
                 for (const std::wstring& key : keys)
-                    if (auto it = std::find_if(f->apps.begin(), f->apps.end(), [&](const StartTile& a) { return a.id == key; }); it != f->apps.end())
+                    if (auto it = std::ranges::find_if(f->apps, [&](const StartTile& a) { return a.id == key; }); it != f->apps.end())
                         apps.push_back(*it);
                 if (apps.size() == f->apps.size())
                     f->apps = std::move(apps);
@@ -2072,7 +2056,7 @@ void StartMenu::RunPower(int index)
 
 void StartMenu::Activate(const std::wstring& id)
 {
-    if (Starts(id, L"tile:")) {
+    if (id.starts_with(L"tile:")) {
         const int i = Index(id, 5);
         if (i >= 0 && i < int(tiles_.size())) {
             if (tiles_[size_t(i)].folder)
@@ -2080,11 +2064,11 @@ void StartMenu::Activate(const std::wstring& id)
             else
                 Launch(tiles_[size_t(i)].app);
         }
-    } else if (Starts(id, L"fapp:")) {
+    } else if (id.starts_with(L"fapp:")) {
         const int i = Index(id, 5);
         if (folder_ >= 0 && i >= 0 && i < int(tiles_[size_t(folder_)].apps.size()))
             Launch(tiles_[size_t(folder_)].apps[size_t(i)]);
-    } else if (Starts(id, L"row:")) {
+    } else if (id.starts_with(L"row:")) {
         const auto& rows = RowsShown();
         const size_t i = size_t(Index(id, 4));
         if (i < rows.size() && !rows[i].letter) {
@@ -2105,15 +2089,15 @@ void StartMenu::Activate(const std::wstring& id)
         scroll_ = scrollTarget_ = 0;
         Restage();
         surface_.Invalidate();
-    } else if (Starts(id, L"page:")) {
+    } else if (id.starts_with(L"page:")) {
         SetPage(Index(id, 5));
-    } else if (Starts(id, L"fpage:")) {
+    } else if (id.starts_with(L"fpage:")) {
         folderPage_ = std::clamp(Index(id, 6), 0, FolderPages() - 1);
         surface_.Invalidate();
     } else if (id == L"ftitle") {
         StartNaming();
-    } else if (id == L"fcard" || id == L"resize" || id == L"azbar") {
-        // The folder's card itself, the grip: nothing to do on a click.
+    } else if (id == L"fcard" || id == L"resize" || id == L"azbar" || id == L"search") {
+        // The folder's card itself, the grip, the search field: nothing to do on a click.
     } else if (id == L"clear") {
         query_.clear();
         results_.clear();
@@ -2125,10 +2109,8 @@ void StartMenu::Activate(const std::wstring& id)
         powerSel_ = -1;
         powerMs_ = ClockMs();
         surface_.Invalidate();
-    } else if (Starts(id, L"pw:")) {
+    } else if (id.starts_with(L"pw:")) {
         RunPower(Index(id, 3));
-    } else if (id == L"search") {
-        // The field already has the keyboard.
     } else if (!id.empty() && onSystem) {
         Close(true);
         onSystem(id);
@@ -2143,7 +2125,7 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
     CatalogApp app;
     bool isApp = false, inFolder = false;
     std::wstring folderKey; // the folder the menu is for
-    if (Starts(id, L"tile:")) {
+    if (id.starts_with(L"tile:")) {
         const int i = Index(id, 5);
         if (i < 0 || i >= int(tiles_.size()))
             return;
@@ -2151,13 +2133,13 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
             folderKey = tiles_[size_t(i)].key;
         else
             app = tiles_[size_t(i)].app, isApp = true;
-    } else if (Starts(id, L"fapp:")) {
+    } else if (id.starts_with(L"fapp:")) {
         const int i = Index(id, 5);
         if (folder_ < 0 || i < 0 || i >= int(tiles_[size_t(folder_)].apps.size()))
             return;
         app = tiles_[size_t(folder_)].apps[size_t(i)];
         isApp = inFolder = true;
-    } else if (Starts(id, L"row:")) {
+    } else if (id.starts_with(L"row:")) {
         const auto& rows = RowsShown();
         const size_t i = size_t(Index(id, 4));
         if (i >= rows.size() || rows[i].letter)
@@ -2248,12 +2230,11 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
             case kHide: SetHidden(app, true); break;
             case kUnhide: SetHidden(app, false); break;
             case kOutOfFolder:
-                       // Next to its folder on the grid.
-                Arrange([&](std::vector<StartTile>& tiles) {
+                Arrange([&](std::vector<StartTile>& tiles) { // next to its folder on the grid
                     std::optional<StartTile> moved = Take(tiles, app.id);
                     if (!moved)
                         return;
-                    auto at = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.id == openKey; });
+                    auto at = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.id == openKey; });
                     tiles.insert(at == tiles.end() ? at : at + 1, std::move(*moved));
                 });
                 break;
@@ -2262,11 +2243,10 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
                 StartNaming();
                 break;
             case kUngroup:
-                       // Its apps take its place on the grid.
                 if (folder_ >= 0 && tiles_[size_t(folder_)].key == folderKey)
                     folder_ = -1;
-                Arrange([&](std::vector<StartTile>& tiles) {
-                    auto at = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.id == folderKey; });
+                Arrange([&](std::vector<StartTile>& tiles) { // its apps take its place on the grid
+                    auto at = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.id == folderKey; });
                     if (at == tiles.end())
                         return;
                     std::vector<StartTile> apps = std::move(at->apps);
@@ -2303,6 +2283,7 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
                 surface_.Invalidate();
                 Log(L"start: back to the Windows start menu's pins");
                 break;
+            default: break;
             }
         },
         [this] {
@@ -2342,7 +2323,7 @@ void StartMenu::MoveSelection(int dx, int dy)
                 selectable.push_back(i);
         if (selectable.empty())
             return;
-        int at = int(std::find(selectable.begin(), selectable.end(), sel_) - selectable.begin());
+        int at = int(std::ranges::find(selectable, sel_) - selectable.begin());
         if (sel_ < 0)
             at = !query_.empty() ? 0 : -1;
         int step = dy + dx;
@@ -2481,7 +2462,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     case WM_LBUTTONDOWN: {
         pressed_ = HitAt(pt);
-        if (powerOpen_ && pressed_ != L"power" && !Starts(pressed_, L"pw:"))
+        if (powerOpen_ && pressed_ != L"power" && !pressed_.starts_with(L"pw:"))
             powerOpen_ = false; // a press elsewhere folds the power card away
         if (naming_ && pressed_ != L"ftitle")
             FinishNaming(true);
@@ -2506,7 +2487,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             SetCapture(surface_.Hwnd());
             return true;
         }
-        if ((Starts(pressed_, L"tile:") && folder_ < 0) || (Starts(pressed_, L"fapp:") && folder_ >= 0 && !folderClosing_)) {
+        if ((pressed_.starts_with(L"tile:") && folder_ < 0) || (pressed_.starts_with(L"fapp:") && folder_ >= 0 && !folderClosing_)) {
             drag_.armed = true; // a tile can be carried away
             pressPt_ = pt;
             SetCapture(surface_.Hwnd());
@@ -2628,8 +2609,8 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
                 return true;
             }
             return false;
+        default: return false;
         }
-        return false;
     case WM_CHAR: {
         wchar_t ch = wchar_t(w);
         result = 0;
@@ -2699,8 +2680,8 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         }
         return true;
     }
+    default: return false;
     }
-    return false;
 }
 
 } // namespace atrium

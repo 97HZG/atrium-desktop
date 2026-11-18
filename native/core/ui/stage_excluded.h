@@ -1,3 +1,6 @@
+// Entries are executable names (wechat.exe), package prefixes (microsoft.screensketch_) or
+// complete app keys. An app is excluded when its key matches any of them; comparison is
+// case-insensitive. Excluded apps are left out of Stage Manager entirely.
 #pragma once
 
 #include <windows.h>
@@ -8,9 +11,6 @@
 
 namespace atrium {
 
-// Entries are executable names (wechat.exe), package prefixes (microsoft.screensketch_) or
-// complete app keys. An app is excluded when its key matches any of them; comparison is
-// case-insensitive. Excluded apps are left out of Stage Manager entirely.
 // Lowered as TaskModel lowers app keys (CharLowerBuffW), so a path with É matches its key.
 inline std::wstring LowerAppKey(std::wstring value)
 {
@@ -29,14 +29,10 @@ inline bool StageAppExcluded(const std::vector<std::wstring>& excluded, const st
     const std::wstring app = LowerAppKey(appKey);
     const size_t slash = app.find_last_of(L"\\/");
     const std::wstring file = slash == std::wstring::npos ? app : app.substr(slash + 1);
-    for (const std::wstring& raw : excluded) {
+    return std::ranges::any_of(excluded, [&](const std::wstring& raw) {
         const std::wstring entry = LowerAppKey(raw);
-        if (entry.empty())
-            continue;
-        if (app == entry || file == entry || app.starts_with(entry))
-            return true;
-    }
-    return false;
+        return !entry.empty() && (app == entry || file == entry || app.starts_with(entry));
+    });
 }
 
 // The Windows screenshot tools that must not be swallowed by the stage while they record or

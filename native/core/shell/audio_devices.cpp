@@ -256,7 +256,7 @@ std::vector<AudioApp> ListAudioApps(int iconPx)
                 a.active = a.active || state == AudioSessionStateActive;
             }
         });
-        std::stable_sort(list.begin(), list.end(), [](const AudioApp& a, const AudioApp& b) {
+        std::ranges::stable_sort(list, [](const AudioApp& a, const AudioApp& b) {
             bool sa = a.key == L"#system", sb = b.key == L"#system";
             if (sa != sb)
                 return sa;

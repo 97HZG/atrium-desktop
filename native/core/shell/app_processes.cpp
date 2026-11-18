@@ -18,10 +18,8 @@ bool SharedHost(const std::wstring& path)
 {
     const auto slash = path.find_last_of(L"\\/");
     const auto name = path.substr(slash == std::wstring::npos ? 0 : slash + 1);
-    for (const auto* host : {L"explorer.exe", L"ApplicationFrameHost.exe", L"RuntimeBroker.exe", L"dllhost.exe", L"svchost.exe"})
-        if (_wcsicmp(name.c_str(), host) == 0)
-            return true;
-    return false;
+    constexpr const wchar_t* kHosts[] = {L"explorer.exe", L"ApplicationFrameHost.exe", L"RuntimeBroker.exe", L"dllhost.exe", L"svchost.exe"};
+    return std::ranges::any_of(kHosts, [&](const wchar_t* host) { return _wcsicmp(name.c_str(), host) == 0; });
 }
 
 struct Process {
@@ -37,7 +35,7 @@ bool Matches(HANDLE process, const std::wstring& path, std::span<const AppProces
     wchar_t aumid[APPLICATION_USER_MODEL_ID_MAX_LENGTH]{};
     UINT32 length = ARRAYSIZE(aumid);
     const bool packaged = GetApplicationUserModelId(process, &length, aumid) == ERROR_SUCCESS;
-    return std::any_of(apps.begin(), apps.end(), [&](const AppProcessIdentity& app) {
+    return std::ranges::any_of(apps, [&](const AppProcessIdentity& app) {
         if (!CanTerminateApp(app))
             return false;
         if (packaged && !app.aumid.empty())
@@ -54,12 +52,12 @@ bool TerminateAppProcesses(std::span<const AppProcessIdentity> apps)
     DWORD session = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &session))
         return false;
-    Handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0), CloseHandle);
-    if (snapshot.get() == INVALID_HANDLE_VALUE) {
-        snapshot.release();
+    const HANDLE rawSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (rawSnapshot == INVALID_HANDLE_VALUE) {
         Log(L"tasks: process snapshot failed (%lu)", GetLastError());
         return false;
     }
+    Handle snapshot(rawSnapshot, CloseHandle);
     std::vector<Process> processes;
     PROCESSENTRY32W entry{};
     entry.dwSize = sizeof(entry);
@@ -94,7 +92,7 @@ bool TerminateAppProcesses(std::span<const AppProcessIdentity> apps)
         if (process.selected)
             folders.push_back(process.path.substr(0, process.path.find_last_of(L"\\/") + 1));
     auto inside = [&](const std::wstring& path) {
-        return std::any_of(folders.begin(), folders.end(), [&](const std::wstring& folder) {
+        return std::ranges::any_of(folders, [&](const std::wstring& folder) {
             return !folder.empty() && path.size() > folder.size() && _wcsnicmp(path.c_str(), folder.c_str(), folder.size()) == 0;
         });
     };

@@ -1,3 +1,4 @@
+// Locale tags and the printf tokens a translation must keep: shared by the runtime and its tests.
 #pragma once
 
 #include <optional>

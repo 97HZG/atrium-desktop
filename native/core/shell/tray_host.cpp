@@ -80,7 +80,7 @@ std::wstring KeyOf(HWND hwnd, UINT uid, const GUID* guid)
 
 std::wstring Lower(std::wstring s)
 {
-    std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
+    std::ranges::transform(s, s.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
     return s;
 }
 
@@ -135,11 +135,13 @@ const wchar_t* Name(tray::HostAction action)
 
 } // namespace
 
-TrayHost::TrayHost(HWND notify, UINT msg) : notify_(notify), msg_(msg)
+TrayHost::TrayHost(HWND notify, UINT msg)
+    : notify_(notify),
+      msg_(msg),
+      taskbarCreated_(RegisterWindowMessageW(L"TaskbarCreated")),
+      quit_(RegisterWindowMessageW(L"Atrium.TrayHost.Quit")),
+      hover_(RegisterWindowMessageW(L"Atrium.TrayHost.Hover"))
 {
-    taskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
-    quit_ = RegisterWindowMessageW(L"Atrium.TrayHost.Quit");
-    hover_ = RegisterWindowMessageW(L"Atrium.TrayHost.Hover");
     HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     thread_ = std::thread([this, ready] { Run(ready); });
     if (ready) {
@@ -282,7 +284,7 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
             {
                 std::lock_guard g(mutex_);
                 const ULONGLONG now = GetTickCount64();
-                const bool flashing = std::any_of(icons_.begin(), icons_.end(), [&](const auto& i) { return i.second.flashUntil > now; });
+                const bool flashing = std::ranges::any_of(icons_, [&](const auto& i) { return i.second.flashUntil > now; });
                 if (flashing != flashing_) {
                     flashing_ = flashing;
                     dirty_ = true; // a flash began or ended: the bar lights or dims the app
@@ -581,7 +583,7 @@ std::vector<HostIcon> TrayHost::Icons() const
     out.reserve(icons_.size());
     for (const auto& [key, icon] : icons_)
         out.push_back(icon);
-    std::sort(out.begin(), out.end(), [](const HostIcon& a, const HostIcon& b) { return a.added < b.added; });
+    std::ranges::sort(out, [](const HostIcon& a, const HostIcon& b) { return a.added < b.added; });
     return out;
 }
 

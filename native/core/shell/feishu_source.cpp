@@ -4,6 +4,7 @@
 
 #include "log.h"
 #include "shell/uia_client.h"
+#include "../posted.h"
 
 #include <tlhelp32.h>
 #include <uiautomation.h>
@@ -93,7 +94,7 @@ std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& 
             DWORD pid = 0;
             GetWindowThreadProcessId(h, &pid);
             if (c->procs->count(pid))
-                c->out.push_back({h, pid});
+                c->out.emplace_back(h, pid);
             else
                 c->unknown = true;
             return TRUE;
@@ -132,9 +133,8 @@ std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text
 
 } // namespace
 
-FeishuSource::FeishuSource(HWND notify, UINT msg) : notify_(notify), msg_(msg)
+FeishuSource::FeishuSource(HWND notify, UINT msg) : notify_(notify), msg_(msg), wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr))
 {
-    wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     thread_ = std::thread([this] { Run(); });
 }
 
@@ -159,13 +159,7 @@ void FeishuSource::Run()
         HRESULT hr = u->CreatePropertyCondition(UIA_ControlTypePropertyId, v, text.put());
         if (FAILED(hr))
             return hr;
-        cache = nullptr;
-        winrt::com_ptr<IUIAutomationCondition> raw;
-        if (FAILED(hr = u->CreateCacheRequest(cache.put())) || FAILED(hr = cache->AddProperty(UIA_NamePropertyId)) ||
-            FAILED(hr = cache->put_TreeScope(TreeScope_Element)) || FAILED(hr = u->get_RawViewCondition(raw.put())) ||
-            FAILED(hr = cache->put_TreeFilter(raw.get())))
-            return hr;
-        return cache->put_AutomationElementMode(AutomationElementMode_None);
+        return CreateRawCache(u, {UIA_NamePropertyId}, cache);
     });
     // Popups already handled, by window and text (a popup may be reused for the next message).
     std::map<HWND, std::wstring> seen;
@@ -211,7 +205,7 @@ void FeishuSource::Run()
                     now[h] = key;
                     if (!baseline || (old != seen.end() && (old->second.empty() || old->second == key)))
                         continue;
-                    auto* n = new Notice();
+                    auto n = std::make_unique<Notice>();
                     n->source = L"feishu";
                     n->app = Tr(L"Feishu");
                     n->appId = procs.at(pid);
@@ -220,9 +214,7 @@ void FeishuSource::Run()
                         n->body += (n->body.empty() ? L"" : L" ") + t[i];
                     if (!n->appId.empty())
                         n->action = L"app:" + n->appId;
-                    if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(n)))
-                        delete n;
-                    else
+                    if (PostOwned(notify_, msg_, 0, std::move(n)))
                         Log(L"feishu: new message popup");
                 }
                 seen = std::move(now);

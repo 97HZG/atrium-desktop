@@ -45,18 +45,6 @@ constexpr UINT kCoalesceMs = 30;
 constexpr UINT kWindowIconTimeoutMs = 100; // WM_GETICON on a possibly hung window
 constexpr ULONGLONG kRetryFailedIconMs = 10000;
 
-struct HandleCloser {
-    HANDLE h = nullptr;
-    explicit HandleCloser(HANDLE handle) : h(handle) {}
-    HandleCloser(const HandleCloser&) = delete;
-    HandleCloser& operator=(const HandleCloser&) = delete;
-    ~HandleCloser()
-    {
-        if (h)
-            CloseHandle(h);
-    }
-};
-
 // COM for the calling thread, balanced on scope exit. A thread that is already
 // initialised with another model (RPC_E_CHANGED_MODE) just carries on.
 struct ComScope {
@@ -128,7 +116,7 @@ std::wstring PackagedAumid(const std::wstring& exe)
     ReadFile(file, xml.data(), DWORD(xml.size()), &got, nullptr);
     CloseHandle(file);
     xml.resize(got);
-    std::string rel(relative.begin(), relative.end()); // manifest paths are ASCII in practice
+    const std::string rel = winrt::to_string(relative); // the manifest is UTF-8
     auto lowerA = [](std::string s) {
         for (char& ch : s)
             ch = char(tolower((unsigned char)ch));
@@ -239,9 +227,9 @@ std::wstring HostedUwpAumid(HWND frame, DWORD framePid)
             GetWindowThreadProcessId(child, &pid);
             if (!pid || pid == c->framePid)
                 return TRUE;
-            HandleCloser proc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
-            if (proc.h)
-                c->aumid = PackagedAumid(proc.h);
+            winrt::handle proc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+            if (proc)
+                c->aumid = PackagedAumid(proc.get());
             return c->aumid.empty() ? TRUE : FALSE;
         },
         reinterpret_cast<LPARAM>(&ctx));
@@ -263,7 +251,7 @@ bool IsWebApp(const std::wstring& aumid, const std::wstring& command)
 std::wstring LauncherOf(HANDLE process, DWORD pid, ULONGLONG created, const std::wstring& exePath)
 {
     using Query = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
-    static const auto query = reinterpret_cast<Query>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess"));
+    static const auto kQuery = reinterpret_cast<Query>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess"));
     struct Basic { // PROCESS_BASIC_INFORMATION
         LONG exitStatus;
         PVOID peb;
@@ -271,17 +259,17 @@ std::wstring LauncherOf(HANDLE process, DWORD pid, ULONGLONG created, const std:
         LONG priority;
         ULONG_PTR pid, parent;
     } info{};
-    if (!query || query(process, 0 /* ProcessBasicInformation */, &info, sizeof(info), nullptr) < 0 || !info.parent)
+    if (!kQuery || kQuery(process, 0 /* ProcessBasicInformation */, &info, sizeof(info), nullptr) < 0 || !info.parent)
         return {};
     const DWORD parentPid = DWORD(info.parent);
     DWORD session = 0, parentSession = 0;
     if (!ProcessIdToSessionId(pid, &session) || !ProcessIdToSessionId(parentPid, &parentSession) || session != parentSession)
         return {};
-    HandleCloser parent(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, parentPid));
+    winrt::handle parent(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, parentPid));
     FILETIME c{}, e{}, k{}, u{};
-    if (!parent.h || !GetProcessTimes(parent.h, &c, &e, &k, &u) || ((ULONGLONG(c.dwHighDateTime) << 32) | c.dwLowDateTime) > created)
+    if (!parent || !GetProcessTimes(parent.get(), &c, &e, &k, &u) || ((ULONGLONG(c.dwHighDateTime) << 32) | c.dwLowDateTime) > created)
         return {}; // that id is another, later process now
-    std::wstring launcher = ImagePath(parent.h);
+    std::wstring launcher = ImagePath(parent.get());
     const size_t slash = launcher.find_last_of(L'\\');
     if (slash == std::wstring::npos)
         return {};
@@ -310,7 +298,7 @@ WinInfo ComputeInfo(HWND h, DWORD pid, const wchar_t* cls)
     wi.pid = pid;
     std::wstring relaunch;
     bool frame = wcscmp(cls, L"ApplicationFrameWindow") == 0;
-    HandleCloser proc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    winrt::handle proc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (frame) {
         wi.aumid = HostedUwpAumid(h, pid);
         if (wi.aumid.empty())
@@ -318,20 +306,20 @@ WinInfo ComputeInfo(HWND h, DWORD pid, const wchar_t* cls)
         // exePath stays empty: it would be ApplicationFrameHost.exe for every app.
     } else {
         wi.aumid = WindowAumid(h, &relaunch);
-        if (proc.h) {
-            wi.exePath = ImagePath(proc.h);
+        if (proc) {
+            wi.exePath = ImagePath(proc.get());
             if (wi.aumid.empty())
-                wi.aumid = PackagedAumid(proc.h);
+                wi.aumid = PackagedAumid(proc.get());
         }
     }
-    if (proc.h) {
+    if (proc) {
         FILETIME c{}, e{}, k{}, u{};
-        if (GetProcessTimes(proc.h, &c, &e, &k, &u))
+        if (GetProcessTimes(proc.get(), &c, &e, &k, &u))
             wi.created = (static_cast<ULONGLONG>(c.dwHighDateTime) << 32) | c.dwLowDateTime;
     }
     wi.webApp = IsWebApp(wi.aumid, relaunch);
-    if (wi.aumid.empty() && proc.h && !wi.exePath.empty() && wi.created)
-        wi.launcher = LauncherOf(proc.h, pid, wi.created, wi.exePath);
+    if (wi.aumid.empty() && proc && !wi.exePath.empty() && wi.created)
+        wi.launcher = LauncherOf(proc.get(), pid, wi.created, wi.exePath);
     if (!wi.aumid.empty())
         wi.key = Lower(wi.aumid);
     else if (!wi.exePath.empty())
@@ -779,18 +767,22 @@ struct TaskModel::Impl {
     bool stop = false;
     std::thread worker;
 
-    static Impl* self;
+    static Impl* g_self;
 
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
     Impl(HWND window, std::function<void()> changed, std::function<bool(const std::wstring&)> opener)
         : ui(window),
           onChanged(std::move(changed)),
-          openExisting(std::move(opener))
+          openExisting(std::move(opener)),
+          shellHookMsg(RegisterWindowMessageW(L"SHELLHOOK")),
+          readyMsg(RegisterWindowMessageW(L"Atrium.TaskModel.Ready")),
+          shellHooked(RegisterShellHookWindow(window) != FALSE)
     {
-        self = this;
-        shellHookMsg = RegisterWindowMessageW(L"SHELLHOOK");
-        readyMsg = RegisterWindowMessageW(L"Atrium.TaskModel.Ready");
+        g_self = this;
+        if (!shellHooked)
+            Log(L"tasks: RegisterShellHookWindow failed (%lu); no flash notifications", GetLastError());
         worker = std::thread([this] { WorkerMain(); });
-
         struct Range {
             DWORD lo, hi;
         };
@@ -806,10 +798,6 @@ struct TaskModel::Impl {
             else
                 Log(L"tasks: SetWinEventHook(0x%X-0x%X) failed (%lu)", r.lo, r.hi, GetLastError());
         }
-        shellHooked = RegisterShellHookWindow(ui) != FALSE;
-        if (!shellHooked)
-            Log(L"tasks: RegisterShellHookWindow failed (%lu); no flash notifications", GetLastError());
-
         Rescan();
         Rebuild();
         ArmTimer(); // catches events that raced the initial scan
@@ -830,17 +818,17 @@ struct TaskModel::Impl {
         cv.notify_all();
         if (worker.joinable())
             worker.join();
-        self = nullptr;
+        g_self = nullptr;
     }
 
     // ---- events -------------------------------------------------------------
 
     static void CALLBACK WinEventProc(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD)
     {
-        if (!self || idObject != OBJID_WINDOW || idChild != CHILDID_SELF || !hwnd)
+        if (!g_self || idObject != OBJID_WINDOW || idChild != CHILDID_SELF || !hwnd)
             return;
         try {
-            self->OnEvent(event, hwnd);
+            g_self->OnEvent(event, hwnd);
         } catch (...) {
             Log(L"tasks: exception in WinEvent handler");
         }
@@ -939,17 +927,17 @@ struct TaskModel::Impl {
 
     void OnReady()
     {
-        std::vector<std::wstring> icons_;
-        std::vector<std::pair<std::wstring, std::wstring>> names_;
+        std::vector<std::wstring> doneIcons;
+        std::vector<std::pair<std::wstring, std::wstring>> doneNames;
         {
             std::lock_guard g(mutex);
-            icons_.swap(readyIcons);
-            names_.swap(readyNames);
+            doneIcons.swap(readyIcons);
+            doneNames.swap(readyNames);
         }
-        for (auto& key : icons_)
+        for (auto& key : doneIcons)
             if (meta.contains(key))
                 ++iconVersion[key];
-        for (auto& [key, name] : names_)
+        for (auto& [key, name] : doneNames)
             if (meta.contains(key))
                 names[key] = name;
         if (Rebuild()) {
@@ -1070,13 +1058,14 @@ struct TaskModel::Impl {
 
         // Most recently active first; never-activated windows keep z-order.
         std::vector<const ScanRec*> sorted;
+        sorted.reserve(scan.size());
         for (const ScanRec& r : scan)
             sorted.push_back(&r);
         auto activity = [&](HWND h) {
             auto it = lastActive.find(h);
             return it == lastActive.end() ? uint64_t(0) : it->second;
         };
-        std::stable_sort(sorted.begin(), sorted.end(), [&](const ScanRec* a, const ScanRec* b) {
+        std::ranges::stable_sort(sorted, [&](const ScanRec* a, const ScanRec* b) {
             uint64_t x = activity(a->hwnd), y = activity(b->hwnd);
             return x != y ? x > y : a->z < b->z;
         });
@@ -1106,8 +1095,8 @@ struct TaskModel::Impl {
             if (m.aumid.empty())
                 m.aumid = r->info.aumid;
             m.hwnds.push_back(r->hwnd);
-            if (std::none_of(m.processTargets.begin(), m.processTargets.end(),
-                             [&](const AppProcessIdentity& target) { return target.exePath == r->info.exePath && target.aumid == r->info.aumid; }))
+            if (std::ranges::none_of(m.processTargets,
+                                     [&](const AppProcessIdentity& target) { return target.exePath == r->info.exePath && target.aumid == r->info.aumid; }))
                 m.processTargets.push_back({r->info.exePath, r->info.aumid});
             if (it->second >= pinCount) {
                 running.insert(key);
@@ -1120,12 +1109,12 @@ struct TaskModel::Impl {
         // A window that flashed while hidden (WeChat, WeCom in the tray flash theirs for a message)
         // lights its app's item, found by its program.
         for (HWND h : attention) {
-            if (std::any_of(scan.begin(), scan.end(), [&](const ScanRec& r) { return r.hwnd == h; }))
+            if (std::ranges::any_of(scan, [&](const ScanRec& r) { return r.hwnd == h; }))
                 continue;
             DWORD pid = 0;
             GetWindowThreadProcessId(h, &pid);
-            HandleCloser proc(pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr);
-            const std::wstring exe = proc.h ? ImagePath(proc.h) : std::wstring();
+            winrt::handle proc(pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr);
+            const std::wstring exe = proc ? ImagePath(proc.get()) : std::wstring();
             if (exe.empty())
                 continue;
             for (TaskItem& t : out)
@@ -1146,10 +1135,10 @@ struct TaskModel::Impl {
         std::erase_if(order, [&](const std::wstring& k) { return !running.contains(k); });
         std::vector<std::wstring> fresh;
         for (const auto& k : running)
-            if (std::find(order.begin(), order.end(), k) == order.end())
+            if (std::ranges::find(order, k) == order.end())
                 fresh.push_back(k);
-        std::sort(fresh.begin(), fresh.end(),
-                  [&](const std::wstring& a, const std::wstring& b) { return firstSeen[a] != firstSeen[b] ? firstSeen[a] < firstSeen[b] : a < b; });
+        std::ranges::sort(fresh,
+                          [&](const std::wstring& a, const std::wstring& b) { return firstSeen[a] != firstSeen[b] ? firstSeen[a] < firstSeen[b] : a < b; });
         order.insert(order.end(), fresh.begin(), fresh.end());
 
         std::vector<TaskItem> result(out.begin(), out.begin() + std::ptrdiff_t(pinCount));
@@ -1181,7 +1170,7 @@ struct TaskModel::Impl {
                 j.aumid = m.aumid;
                 j.exePath = m.exePath;
                 j.pinPath = m.pinPath;
-                Enqueue(std::move(j));
+                Enqueue(j);
             }
         }
         meta = std::move(newMeta);
@@ -1299,7 +1288,7 @@ struct TaskModel::Impl {
     {
         {
             std::lock_guard g(mutex);
-            jobs.push_back(std::move(job));
+            jobs.push_back(job);
         }
         cv.notify_one();
     }
@@ -1393,7 +1382,7 @@ struct TaskModel::Impl {
     {
         std::vector<std::wstring> sources;
         auto add = [&](std::wstring s) {
-            if (!s.empty() && std::find(sources.begin(), sources.end(), s) == sources.end())
+            if (!s.empty() && std::ranges::find(sources, s) == sources.end())
                 sources.push_back(std::move(s));
         };
         add(job.pinPath); // a pin's shortcut carries the icon the user sees in Windows
@@ -1512,8 +1501,8 @@ struct TaskModel::Impl {
         for (BOOL ok = snap != INVALID_HANDLE_VALUE && Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe)) {
             if (_wcsicmp(pe.szExeFile, name) != 0)
                 continue;
-            HandleCloser p(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID));
-            found = p.h && _wcsicmp(ImagePath(p.h).c_str(), exe.c_str()) == 0;
+            winrt::handle p(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID));
+            found = p && _wcsicmp(ImagePath(p.get()).c_str(), exe.c_str()) == 0;
         }
         if (snap != INVALID_HANDLE_VALUE)
             CloseHandle(snap);
@@ -1665,7 +1654,7 @@ struct TaskModel::Impl {
             return;
         }
         HWND fg = ForegroundRoot();
-        bool inGroup = fg && std::find(windows.begin(), windows.end(), fg) != windows.end();
+        bool inGroup = fg && std::ranges::find(windows, fg) != windows.end();
         if (windows.size() == 1) {
             HWND w = windows[0];
             if (inGroup && !IsIconic(w))
@@ -1742,7 +1731,7 @@ struct TaskModel::Impl {
 
     void MoveRunning(const std::wstring& key, int to)
     {
-        auto it = std::find(order.begin(), order.end(), key);
+        auto it = std::ranges::find(order, key);
         if (it == order.end())
             return;
         order.erase(it);
@@ -1782,7 +1771,7 @@ struct TaskModel::Impl {
         ok = ok && SUCCEEDED(aam->ActivateForFile(aumid.c_str(), array.get(), L"open", &pid));
         if (ok)
             Log(L"tasks: opening %zu file(s) with %s", ids.size(), aumid.c_str());
-        for (auto id : ids)
+        for (auto* id : ids)
             CoTaskMemFree(id);
         if (!ok)
             Log(L"tasks: opening files with %s failed", aumid.c_str());
@@ -1790,7 +1779,7 @@ struct TaskModel::Impl {
     }
 };
 
-TaskModel::Impl* TaskModel::Impl::self = nullptr;
+TaskModel::Impl* TaskModel::Impl::g_self = nullptr;
 
 bool PinnedApp::AllowsMultipleWindows() const
 {
@@ -1872,8 +1861,8 @@ bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out,
 // ---- TaskModel: every entry point is exception-safe -----------------------------
 
 TaskModel::TaskModel(HWND uiWindow, std::function<void()> onChanged, const std::function<bool(const std::wstring&)>& openExisting)
+    : impl_(std::make_unique<Impl>(uiWindow, std::move(onChanged), openExisting))
 {
-    impl_ = std::make_unique<Impl>(uiWindow, std::move(onChanged), std::move(openExisting));
 }
 
 TaskModel::~TaskModel() = default;
@@ -1961,7 +1950,7 @@ void TaskModel::CloseAll(const std::wstring& key)
 bool TaskModel::CanTerminate(const std::wstring& key) const
 {
     const auto targets = impl_->TerminationTargets(key);
-    return std::any_of(targets.begin(), targets.end(), CanTerminateApp);
+    return std::ranges::any_of(targets, CanTerminateApp);
 }
 
 void TaskModel::Terminate(const std::wstring& key)

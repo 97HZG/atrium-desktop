@@ -155,7 +155,7 @@ private:
     void Bounce(const std::wstring& key);
     POINT LayoutPoint(POINT client) const;
     RECT EdgeZone() const;
-    std::wstring HitTest(POINT client) const;
+    std::wstring HitTest(POINT pt) const;
     // Copies scene state to the render thread; `bar` false: only the popups'
     // glass changed (the bar is not drawn again for it).
     void Publish(bool bar = true);
@@ -163,8 +163,8 @@ private:
     void HideTooltip();
     void ShowTooltip();      // above the hovered item, after a short delay
     std::wstring TooltipText(const std::wstring& key) const;
-    void BeginDrag(POINT client);
-    void UpdateDrag(POINT client);
+    void BeginDrag(POINT pt);
+    void UpdateDrag(POINT pt);
     void EndDrag(bool commit);
     friend struct BarDropTarget;
     std::wstring FileDragOver(POINT screen); // returns the app under the point

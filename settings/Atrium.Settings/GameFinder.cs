@@ -8,7 +8,7 @@ namespace Atrium.Settings;
 // Installed games, for Stage Manager to leave alone (the user picks which): Steam's and Epic's
 // libraries by their folders (an entry ending in a backslash: every program in it is the game's,
 // also after an update renames one), and the games Windows' Game Bar has seen, by program.
-internal static class GameFinder
+internal static partial class GameFinder
 {
     internal sealed record Game(string Title, string Entry, string Icon);
 
@@ -38,7 +38,7 @@ internal static class GameFinder
         string vdf = Path.Combine(steam, "steamapps", "libraryfolders.vdf");
         if (File.Exists(vdf))
         {
-            foreach (Match m in Regex.Matches(File.ReadAllText(vdf), "\"path\"\\s+\"([^\"]+)\""))
+            foreach (Match m in LibraryPathRegex().Matches(File.ReadAllText(vdf)))
                 libraries.Add(m.Groups[1].Value.Replace(@"\\", @"\"));
         }
 
@@ -121,7 +121,11 @@ internal static class GameFinder
         return Path.GetFileNameWithoutExtension(exe);
     }
 
-    private static readonly Regex NotTheGame = new("crash|unins|setup|redist|vc_?redist|dxsetup|report|updat|helper|install|benchmark|prereq", RegexOptions.IgnoreCase);
+    [GeneratedRegex("\"path\"\\s+\"([^\"]+)\"")]
+    private static partial Regex LibraryPathRegex();
+
+    [GeneratedRegex("crash|unins|setup|redist|vc_?redist|dxsetup|report|updat|helper|install|benchmark|prereq", RegexOptions.IgnoreCase)]
+    private static partial Regex NotTheGameRegex();
 
     // The game's own program in its folder (for its icon): the largest one, not a tool beside it.
     internal static string MainProgram(string folder)
@@ -130,7 +134,7 @@ internal static class GameFinder
         {
             var options = new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 3, IgnoreInaccessible = true };
             return Directory.EnumerateFiles(folder, "*.exe", options)
-                .Where(f => !NotTheGame.IsMatch(Path.GetFileName(f)))
+                .Where(f => !NotTheGameRegex().IsMatch(Path.GetFileName(f)))
                 .Select(f => new FileInfo(f))
                 .OrderByDescending(f => f.Length)
                 .FirstOrDefault()?.FullName ?? "";

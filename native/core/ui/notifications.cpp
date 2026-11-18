@@ -146,7 +146,7 @@ float Notifications::CardHeight() const { return 16 + 16 + 6 + 20 + 4 + 36 + 14;
 void Notifications::ClearPreparedUpdate()
 {
     std::erase_if(notices_, [](const Notice& n) { return n.source == L"atrium-update"; });
-    std::erase_if(popupIds_, [&](uint64_t id) { return std::none_of(notices_.begin(), notices_.end(), [&](const Notice& n) { return n.id == id; }); });
+    std::erase_if(popupIds_, [&](uint64_t id) { return std::ranges::none_of(notices_, [&](const Notice& n) { return n.id == id; }); });
     Changed();
 }
 
@@ -203,7 +203,7 @@ void Notifications::Post(Notice n, bool silent)
     if (notices_.size() > kMaxNotices) {
         notices_.resize(kMaxNotices);
         // The oldest went: so do their places in a stack held back meanwhile.
-        std::erase_if(popupIds_, [&](uint64_t id) { return std::none_of(notices_.begin(), notices_.end(), [&](const Notice& o) { return o.id == id; }); });
+        std::erase_if(popupIds_, [&](uint64_t id) { return std::ranges::none_of(notices_, [&](const Notice& o) { return o.id == id; }); });
     }
     Log(L"notify: posted %llu from %s (%s)", n.id, n.app.c_str(), n.source.c_str());
 
@@ -219,7 +219,7 @@ void Notifications::Post(Notice n, bool silent)
         Changed();
         return;
     }
-    if (auto old = std::find(popupIds_.begin(), popupIds_.end(), n.id); old != popupIds_.end()) {
+    if (auto old = std::ranges::find(popupIds_, n.id); old != popupIds_.end()) {
         ShiftStack(Mode::Popup, size_t(old - popupIds_.begin()), -1);
         popupIds_.erase(old);
     }
@@ -300,7 +300,7 @@ void Notifications::Clear()
 
 void Notifications::Remove(uint64_t id)
 {
-    bool inPopup = std::find(popupIds_.begin(), popupIds_.end(), id) != popupIds_.end();
+    bool inPopup = std::ranges::find(popupIds_, id) != popupIds_.end();
     if (popup_.surface->Visible() && inPopup) {
         // Fades and drifts away; the cards behind move up once it is gone.
         KillTimer(popup_.surface->Hwnd(), kPopupTimer);
@@ -313,13 +313,14 @@ void Notifications::Remove(uint64_t id)
     std::erase(popupIds_, id);
     if (popupIds_.empty())
         HidePopup(L"last card closed");
-    if (center_.surface->Visible() && std::any_of(notices_.begin(), notices_.end(), [&](const Notice& n) { return n.id == id; })) {
+    if (center_.surface->Visible() && std::ranges::any_of(notices_, [&](const Notice& n) { return n.id == id; })) {
         leaving_.try_emplace(id, ClockMs()); // slides out; the others close up
         SetTimer(center_.surface->Hwnd(), kSweepTimer, UINT(kLeaveMs + 20), nullptr);
         center_.surface->Invalidate();
-    } else {
-        std::erase_if(notices_, [&](const Notice& n) { return n.id == id; });
+        Changed();
+        return;
     }
+    std::erase_if(notices_, [&](const Notice& n) { return n.id == id; });
     Changed();
 }
 
@@ -332,7 +333,7 @@ void Notifications::Sweep()
             uint64_t id = it->first;
             for (Mode mode : {Mode::Popup, Mode::Center}) {
                 auto shown = Shown(mode);
-                if (auto at = std::find_if(shown.begin(), shown.end(), [&](const Notice* n) { return n->id == id; }); at != shown.end())
+                if (auto at = std::ranges::find_if(shown, [&](const Notice* n) { return n->id == id; }); at != shown.end())
                     ShiftStack(mode, size_t(at - shown.begin()), -1);
             }
             std::erase_if(notices_, [&](const Notice& n) { return n.id == id; });
@@ -361,10 +362,10 @@ void Notifications::Sweep()
 
 void Notifications::Activate(uint64_t id)
 {
-    auto it = std::find_if(notices_.begin(), notices_.end(), [&](const Notice& n) { return n.id == id; });
+    auto it = std::ranges::find_if(notices_, [&](const Notice& n) { return n.id == id; });
     if (it == notices_.end())
         return;
-    Notice n = *it;
+    const Notice& n = *it;
     bool ok = onActivate ? onActivate(n) : false;
     Log(L"notify: activated %llu action '%s' %s", n.id, n.action.c_str(), ok ? L"ok" : L"failed");
     HidePopup(L"activated");
@@ -393,12 +394,12 @@ std::vector<const Notice*> Notifications::Shown(Mode mode) const
     if (mode == Mode::Center) {
         for (const auto& n : notices_)
             out.push_back(&n);
-    } else {
-        for (uint64_t id : popupIds_)
-            for (const auto& n : notices_)
-                if (n.id == id)
-                    out.push_back(&n);
+        return out;
     }
+    for (uint64_t id : popupIds_)
+        for (const auto& n : notices_)
+            if (n.id == id)
+                out.push_back(&n);
     return out;
 }
 
@@ -856,7 +857,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
         }
     }
     for (auto it = v.cards.begin(); it != v.cards.end();) // forget cards that are gone
-        it = std::any_of(shown.begin(), shown.end(), [&](const Notice* n) { return n->id == it->first; }) ? std::next(it) : v.cards.erase(it);
+        it = std::ranges::any_of(shown, [&](const Notice* n) { return n->id == it->first; }) ? std::next(it) : v.cards.erase(it);
 
     // Back to front: the newest card is drawn last, on top. Each card is a
     // piece of glass; a fading card's glass shrinks away with it, and glass
@@ -1011,10 +1012,10 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
         float s = v.surface->Scale(), x = float(p.x) / s, y = float(p.y) / s;
         // Close buttons sit on top of their cards: they are tested first.
         for (const Hit& h : v.hits)
-            if (h.id.rfind(L"close:", 0) == 0 && In(h.rect, x, y) && (v.hover == h.id || v.hover == L"card:" + h.id.substr(6)))
+            if (h.id.starts_with(L"close:") && In(h.rect, x, y) && (v.hover == h.id || v.hover == L"card:" + h.id.substr(6)))
                 return h.id;
         for (const Hit& h : v.hits)
-            if (h.id.rfind(L"close:", 0) != 0 && In(h.rect, x, y))
+            if (!h.id.starts_with(L"close:") && In(h.rect, x, y))
                 return h.id;
         return std::wstring();
     };
@@ -1073,7 +1074,7 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
             SetTimer(v.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
         v.surface->Invalidate();
         return true;
-    case WM_LBUTTONDOWN: {
+    case WM_LBUTTONDOWN:
         v.pressed = hitAt(pt);
         if (!v.pressed.empty()) {
             // The glass under the card gives way, and a soft light spreads from the press.
@@ -1086,7 +1087,6 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
         }
         v.surface->Invalidate();
         return true;
-    }
     case WM_LBUTTONUP: {
         std::wstring h = hitAt(pt);
         bool same = !h.empty() && h == v.pressed;
@@ -1101,8 +1101,7 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
         int delta = GET_WHEEL_DELTA_WPARAM(w);
         size_t shownCount = Shown(mode).size();
         if (!corner_ && (mode == Mode::Popup || (!expanded_ && shownCount > 1))) {
-            // Over a stack: the wheel goes through it, staying a stack
-            // (down: older cards come to the front).
+            // Over a stack: the wheel goes through it, staying a stack (down: older cards come to the front).
             PushStack(v, shownCount, delta);
             return true;
         }
@@ -1119,6 +1118,7 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
             return true;
         }
         return false;
+    default: break;
     }
     (void)result;
     return false;

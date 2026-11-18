@@ -1,3 +1,6 @@
+// Launches from the bar that join the stage once their window arrives, not whichever app
+// opens next. Several can wait at once (A, then B, added before either window shows); each
+// lasts ten seconds, ends when its window has joined, and all end when the stage changes.
 #pragma once
 
 #include <cstdint>
@@ -6,9 +9,6 @@
 
 namespace atrium {
 
-// Launches from the bar that join the stage once their window arrives, not whichever app
-// opens next. Several can wait at once (A, then B, added before either window shows); each
-// lasts ten seconds, ends when its window has joined, and all end when the stage changes.
 class StageOpenIntent {
 public:
     void Arm(const std::wstring& app, uint64_t now) { apps_[app] = now + 10000; }

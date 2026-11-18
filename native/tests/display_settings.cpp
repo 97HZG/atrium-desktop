@@ -4,6 +4,7 @@
 #include "motion.h"
 
 #include <winrt/Windows.Foundation.h>
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 
@@ -119,7 +120,7 @@ void CheckSettings()
 void CheckDisplays()
 {
     HMONITOR primary = MonitorFromPoint(POINT{}, MONITOR_DEFAULTTOPRIMARY);
-    auto external = reinterpret_cast<HMONITOR>(INT_PTR(2));
+    auto* external = reinterpret_cast<HMONITOR>(INT_PTR(2));
     std::vector<DisplayInfo> displays{{primary, L"primary", {0, 0, 1920, 1080}, {0, 0, 1920, 1040}, true},
                                       {external, L"external", {-2560, -200, 0, 1240}, {-2560, -200, 0, 1200}, false}};
     Require(ResolveDisplay(displays, L"external") == external, "select an external display with negative coordinates");
@@ -176,10 +177,9 @@ void CheckFullscreenCoverage()
     };
     const Window fullscreen{primary, screen}, normal{primary, {100, 100, 900, 700}}, other{external, {-2400, 0, -1000, 900}};
     auto covered = [&](std::initializer_list<Window> windows) {
-        for (const Window& window : windows)
-            if (WindowCoverOnMonitor(window.monitor, window.frame, window.maximized, primary, screen).value_or(false))
-                return true;
-        return false;
+        return std::ranges::any_of(windows, [&](const Window& window) {
+            return WindowCoverOnMonitor(window.monitor, window.frame, window.maximized, primary, screen).value_or(false);
+        });
     };
     Require(covered({fullscreen}), "focused full-screen app hides its bar");
     Require(covered({other, fullscreen}), "focus on another monitor must not reveal the full-screen monitor's bar");

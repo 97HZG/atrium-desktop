@@ -16,6 +16,8 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <SelfContained>true</SelfContained>
     <Nullable>enable</Nullable>
+    <!-- CsWinRT generates the marshalling for collections bound to XAML (CsWinRT1030). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <AtriumDevelopment Condition="'$(AtriumDevelopment)' == ''">true</AtriumDevelopment>
     <DefineConstants Condition="'$(AtriumDevelopment)' == 'true'">$(DefineConstants);ATRIUM_DEVELOPMENT</DefineConstants>

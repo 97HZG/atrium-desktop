@@ -99,7 +99,7 @@ MonitorCapture::MonitorCapture(const Gpu& gpu, HMONITOR monitor, HANDLE frameEve
 
 MonitorCapture::~MonitorCapture()
 {
-    Release();
+    MonitorCapture::Release();
     if (pool_)
         pool_.FrameArrived(token_);
     if (session_)
@@ -157,7 +157,8 @@ std::unique_ptr<DuplicationCapture> DuplicationCapture::Create(const Gpu& gpu, H
     // GPU the process runs on); it must be on the device's adapter.
     winrt::com_ptr<IDXGIDevice> dxgi = gpu.device.as<IDXGIDevice>();
     winrt::com_ptr<IDXGIAdapter> mine;
-    if (FAILED(why = dxgi->GetAdapter(mine.put())))
+    why = dxgi->GetAdapter(mine.put());
+    if (FAILED(why))
         return nullptr;
     DXGI_ADAPTER_DESC md{};
     mine->GetDesc(&md);

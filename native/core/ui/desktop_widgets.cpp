@@ -6,6 +6,7 @@
 #include "log.h"
 #include "motion.h"
 #include "settings.h"
+#include "../posted.h"
 
 #include <dwmapi.h>
 #include <imm.h>
@@ -39,10 +40,10 @@ constexpr UINT_PTR kTickTimer = 1, kGlideTimer = 3, kSafetyTimer = 4, kCaretTime
 constexpr UINT kCaretMs = 530, kSaveMs = 800;
 constexpr ULONGLONG kPhotoMs = 10 * 60 * 1000; // a new photo every ten minutes
 constexpr const wchar_t* kHostClass = L"AtriumWidgetsHost";
-constexpr UINT WM_WIDGET_REMOVE = WM_APP + 1;  // lParam Widget*: removed once its own message is done
-constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2; // a burst of window events, one restack
-constexpr UINT WM_WIDGET_PHOTO = WM_APP + 3;   // lParam PhotoRead*: a photo was read
-constexpr UINT WM_WIDGET_WEATHER = WM_APP + 4; // a new forecast (WeatherSource::Latest)
+constexpr UINT WM_WIDGET_REMOVE = WM_APP + 1;    // lParam Widget*: removed once its own message is done
+constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2;   // a burst of window events, one restack
+constexpr UINT WM_WIDGET_PHOTO = WM_APP + 3;     // lParam PhotoRead*: a photo was read
+constexpr UINT WM_WIDGET_WEATHER = WM_APP + 4;   // a new forecast (WeatherSource::Latest)
 constexpr UINT WM_WIDGET_BLUETOOTH = WM_APP + 5; // the Bluetooth batteries changed (BluetoothBatteries::Latest)
 
 DesktopWidgets* g_widgets = nullptr; // the WinEvent hook's way back
@@ -152,7 +153,7 @@ void ListPhotos(const std::wstring& dir, std::vector<std::wstring>& out, int dep
         if (dot == std::wstring::npos)
             continue;
         std::wstring ext = name.substr(dot);
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+        std::ranges::transform(ext, ext.begin(), ::towlower);
         for (const wchar_t* e : {L".jpg", L".jpeg", L".png", L".bmp", L".gif", L".webp", L".heic", L".tif", L".tiff"})
             if (ext == e) {
                 out.push_back(dir + L"\\" + name);
@@ -248,23 +249,26 @@ struct PhotoRead {
 };
 } // namespace
 
-DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
+DesktopWidgets::DesktopWidgets(HINSTANCE instance)
+    : instance_(instance),
+      host_([instance] {
+          WNDCLASSEXW wc{sizeof(wc)};
+          wc.lpfnWndProc = HostProc;
+          wc.hInstance = instance;
+          wc.lpszClassName = kHostClass;
+          RegisterClassExW(&wc);
+        // A hidden top-level window: timers, display changes, the menu's owner.
+          return CreateWindowExW(WS_EX_TOOLWINDOW, kHostClass, L"Atrium Widgets", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
+      }()),
+      weather_(std::make_unique<WeatherSource>(host_, WM_WIDGET_WEATHER)),
+      bluetooth_(std::make_unique<BluetoothBatteries>(host_, WM_WIDGET_BLUETOOTH)),
+      network_(std::make_unique<NetworkMonitor>())
 {
     g_widgets = this;
-    WNDCLASSEXW wc{sizeof(wc)};
-    wc.lpfnWndProc = HostProc;
-    wc.hInstance = instance;
-    wc.lpszClassName = kHostClass;
-    RegisterClassExW(&wc);
-    // A hidden top-level window: timers, display changes, the menu's owner.
-    host_ = CreateWindowExW(WS_EX_TOOLWINDOW, kHostClass, L"Atrium Widgets", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
     SetWindowLongPtrW(host_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     world_.city = LocalCity();
     world_.lunar = &lunar_;
-    weather_ = std::make_unique<WeatherSource>(host_, WM_WIDGET_WEATHER);
     world_.weather = weather_->Latest(); // the last one, until the first fetch
-    bluetooth_ = std::make_unique<BluetoothBatteries>(host_, WM_WIDGET_BLUETOOTH);
-    network_ = std::make_unique<NetworkMonitor>();
     world_.network = network_.get();
 }
 
@@ -432,7 +436,12 @@ RECT DesktopWidgets::CellRect(int col, int row, WidgetSize size) const
 
 bool DesktopWidgets::Fits(int col, int row, WidgetSize size, const Widget* except) const
 {
-    return !(col < 0 || row < 0 || col + WidgetCols(size) > Cols() || row + WidgetRows(size) > Rows());
+    if (col < 0 || row < 0 || col + WidgetCols(size) > Cols() || row + WidgetRows(size) > Rows())
+        return false;
+    return std::ranges::none_of(widgets_, [&](const auto& w) {
+        return w.get() != except && col < w->col + WidgetCols(w->size) && w->col < col + WidgetCols(size) && row < w->row + WidgetRows(w->size) &&
+               w->row < row + WidgetRows(size);
+    });
 }
 
 bool DesktopWidgets::FreeCellNear(float col, float row, WidgetSize size, const Widget* except, int& outCol, int& outRow) const
@@ -463,7 +472,7 @@ void DesktopWidgets::Load()
             s = WidgetSize::Small;
         if (!Fits(c, r, s, nullptr) && !FreeCellNear(float(c), float(r), s, nullptr, c, r))
             return false; // no room left on this screen
-        Create(k, s, c, r).content = std::move(content);
+        Create(k, s, c, r).content = content;
         return true;
     };
     if (!text.empty()) {
@@ -492,7 +501,7 @@ void DesktopWidgets::Load()
                         content.items.push_back({std::wstring(io.GetNamedString(L"text", L"")), io.GetNamedBoolean(L"done", false)});
                     }
                 if (!add(k, ParseSize(std::wstring(e.GetNamedString(L"size", L"small"))), int(e.GetNamedNumber(L"col", 0)), int(e.GetNamedNumber(L"row", 0)),
-                         std::move(content)))
+                         content))
                     unplaced_.emplace_back(e.Stringify());
             }
         } else {
@@ -567,7 +576,7 @@ DesktopWidgets::Widget& DesktopWidgets::Create(WidgetKind kind, WidgetSize size,
 
 bool DesktopWidgets::Has(const Widget* w) const
 {
-    return std::any_of(widgets_.begin(), widgets_.end(), [&](const auto& p) { return p.get() == w; });
+    return std::ranges::any_of(widgets_, [&](const auto& p) { return p.get() == w; });
 }
 
 void DesktopWidgets::Build()
@@ -683,7 +692,7 @@ void DesktopWidgets::Remove(Widget& w)
 
 void DesktopWidgets::RemoveNow(Widget& w)
 {
-    auto it = std::find_if(widgets_.begin(), widgets_.end(), [&](const auto& p) { return p.get() == &w; });
+    auto it = std::ranges::find_if(widgets_, [&](const auto& p) { return p.get() == &w; });
     if (it == widgets_.end())
         return;
     std::unique_ptr<Widget> gone = std::move(*it);
@@ -788,10 +797,6 @@ void DesktopWidgets::Restack()
     if (!enabled_ || widgets_.empty())
         return;
     zMoving_ = true;
-    struct Done {
-        bool& flag;
-        ~Done() { flag = false; }
-    } done{zMoving_};
     // Find the lowest visible application on this screen.
     struct Scan {
         const DesktopWidgets* self;
@@ -832,7 +837,7 @@ void DesktopWidgets::Restack()
             found = true;
             break;
         }
-        bool widget = std::any_of(widgets_.begin(), widgets_.end(), [&](const auto& w) { return w->surface && w->surface->Hwnd() == h; });
+        bool widget = std::ranges::any_of(widgets_, [&](const auto& w) { return w->surface && w->surface->Hwnd() == h; });
         if (!widget)
             above = h;
     }
@@ -860,6 +865,7 @@ void DesktopWidgets::Restack()
         SetWindowPos(w->surface->Hwnd(), after, 0, 0, 0, 0, flags);
         after = w->surface->Hwnd();
     }
+    zMoving_ = false;
 }
 
 LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -895,12 +901,8 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         case WM_DISPLAYCHANGE:
         case WM_DPICHANGED:
-            if (self->enabled_)
-                for (auto& wd : self->widgets_)
-                    self->Place(*wd, false);
-            return 0;
         case WM_SETTINGCHANGE:
-            if (w == SPI_SETWORKAREA && self->enabled_)
+            if ((m != WM_SETTINGCHANGE || w == SPI_SETWORKAREA) && self->enabled_)
                 for (auto& wd : self->widgets_)
                     self->Place(*wd, false);
             return 0;
@@ -911,7 +913,7 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         case WM_WIDGET_PHOTO: {
-            std::unique_ptr<PhotoRead> read(reinterpret_cast<PhotoRead*>(l));
+            auto read = TakePosted<PhotoRead>(l);
             auto* wd = static_cast<Widget*>(read->widget);
             if (!self->Has(wd) || read->gen != wd->photoGen || !wd->surface)
                 return 0; // removed, or a newer photo is on its way
@@ -919,7 +921,7 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             if (!c.imageKey.empty())
                 wd->surface->ForgetImage(c.imageKey);
             c.photo = read->path;
-            c.image = read->image.empty() ? nullptr : std::make_shared<const IconImage>(std::move(read->image));
+            c.image = read->image.Empty() ? nullptr : std::make_shared<const IconImage>(std::move(read->image));
             c.imageKey = L"photo:" + std::to_wstring(read->gen);
             wd->photoAt = GetTickCount64();
             wd->surface->Invalidate();
@@ -942,6 +944,7 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             self->world_.city = LocalCity();
             self->Tick();
             return 0;
+        default: break;
         }
     }
     return DefWindowProcW(h, m, w, l);
@@ -960,11 +963,11 @@ void DesktopWidgets::Tick()
         SampleSystem();
     ULONGLONG now = GetTickCount64();
     // The forecast is fetched while a weather widget is on the desktop.
-    weather_->SetActive(std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Weather; }));
+    weather_->SetActive(std::ranges::any_of(widgets_, [](const auto& w) { return w->kind == WidgetKind::Weather; }));
     // The Bluetooth batteries are read while a Bluetooth widget is.
-    bluetooth_->SetActive(std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Bluetooth; }));
+    bluetooth_->SetActive(std::ranges::any_of(widgets_, [](const auto& w) { return w->kind == WidgetKind::Bluetooth; }));
     // The link's rates and the minute of them behind them, once a second while a network widget is up.
-    const bool watching = std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Network; });
+    const bool watching = std::ranges::any_of(widgets_, [](const auto& w) { return w->kind == WidgetKind::Network; });
     network_->SetActive(watching);
     if (watching)
         network_->Sample();
@@ -1051,17 +1054,16 @@ void DesktopWidgets::LoadPhoto(Widget& w, bool another)
             std::vector<std::wstring> all;
             ListPhotos(folder, all);
             if (all.size() > 1)
-                all.erase(std::remove(all.begin(), all.end(), current), all.end());
+                std::erase(all, current);
             path.clear();
             if (!all.empty()) {
                 std::mt19937 rng{std::random_device{}()};
                 path = all[std::uniform_int_distribution<size_t>(0, all.size() - 1)(rng)];
             }
         }
-        auto* read = new PhotoRead{widget, gen, path, path.empty() ? IconImage{} : ReadPhoto(path, pw, ph)};
+        auto read = std::make_unique<PhotoRead>(PhotoRead{widget, gen, path, path.empty() ? IconImage{} : ReadPhoto(path, pw, ph)});
         CoUninitialize();
-        if (!PostMessageW(host, WM_WIDGET_PHOTO, 0, reinterpret_cast<LPARAM>(read)))
-            delete read;
+        PostOwned(host, WM_WIDGET_PHOTO, 0, std::move(read));
     }).detach();
 }
 
@@ -1206,8 +1208,8 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
     case WM_KEYDOWN: return w.content.editing && Key(w, m, wp);
     case WM_KILLFOCUS: EndEdit(w); return false;
     case WM_IME_STARTCOMPOSITION: PlaceImeWindow(w); return false; // the input method's own window
+    default: return false;
     }
-    return false;
 }
 
 void DesktopWidgets::Activate(Widget& w)
@@ -1225,8 +1227,8 @@ void DesktopWidgets::Activate(Widget& w)
         if (onCalendar)
             onCalendar();
         break;
-    case WidgetKind::Battery: open = world_.status.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep"; break;
     case WidgetKind::System: open = L"taskmgr.exe"; break;
+    case WidgetKind::Battery: open = world_.status.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep"; break;
     case WidgetKind::Bluetooth:
         open = L"ms-settings:bluetooth"; // Bluetooth & devices: each device with its battery
         break;
@@ -1335,9 +1337,9 @@ void DesktopWidgets::Insert(Widget& w, const std::wstring& s)
     std::wstring& text = w.kind == WidgetKind::Notes ? c.text : c.items[size_t(c.item)].text;
     std::wstring add = s;
     if (w.kind == WidgetKind::Reminders) // one line
-        std::replace_if(add.begin(), add.end(), [](wchar_t ch) { return ch == L'\r' || ch == L'\n'; }, L' ');
+        std::ranges::replace_if(add, [](wchar_t ch) { return ch == L'\r' || ch == L'\n'; }, L' ');
     else
-        add.erase(std::remove(add.begin(), add.end(), L'\r'), add.end());
+        std::erase(add, L'\r');
     c.caret = std::min(c.caret, text.size());
     text.insert(c.caret, add);
     c.caret += add.size();
@@ -1434,7 +1436,7 @@ bool DesktopWidgets::Key(Widget& w, UINT m, WPARAM wp)
 // The input method's composition and candidates next to the caret.
 void DesktopWidgets::PlaceImeWindow(Widget& w)
 {
-    auto caret = std::find_if(w.hits.begin(), w.hits.end(), [](const WidgetHit& h) { return h.id == L"caret"; });
+    auto caret = std::ranges::find_if(w.hits, [](const WidgetHit& h) { return h.id == L"caret"; });
     if (caret == w.hits.end() || !w.surface)
         return;
     float s = w.surface->Scale();
@@ -1485,7 +1487,7 @@ void DesktopWidgets::Menu(Widget& w)
 {
     if (!menu)
         return;
-    enum { kSmall = 1, kMedium, kLarge, kRemove, kFolder, kNextPhoto, kClearDone, kAdd, kCities };
+    constexpr int kSmall = 1, kMedium = 2, kLarge = 3, kRemove = 4, kFolder = 5, kNextPhoto = 6, kClearDone = 7, kAdd = 8, kCities = 9;
     std::vector<MenuEntry> entries;
     auto size = [&](int id, WidgetSize s, const wchar_t* label) { entries.push_back({label, id, w.size == s, !WidgetSupports(w.kind, s)}); };
     size(kSmall, WidgetSize::Small, Tr(L"Small"));
@@ -1502,7 +1504,7 @@ void DesktopWidgets::Menu(Widget& w)
         entries.push_back({});
     }
     if (w.kind == WidgetKind::Reminders) {
-        bool anyDone = std::any_of(w.content.items.begin(), w.content.items.end(), [](const Reminder& r) { return r.done; });
+        bool anyDone = std::ranges::any_of(w.content.items, [](const Reminder& r) { return r.done; });
         entries.push_back({Tr(L"Clear completed"), kClearDone, false, !anyDone});
         entries.push_back({});
     }
@@ -1535,6 +1537,7 @@ void DesktopWidgets::Menu(Widget& w)
         case kRemove:
             Remove(w); // w is gone
             break;
+        default: break;
         }
     });
 }

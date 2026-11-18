@@ -59,7 +59,7 @@ void GlassMenu::Open(std::vector<MenuEntry> entries, POINT at, MenuPlace place, 
     onClosed_ = std::move(onClosed);
     hover_ = pressed_ = -1;
     hoverAnim_.clear();
-    marks_ = std::any_of(entries_.begin(), entries_.end(), [](const MenuEntry& e) { return e.checked || !e.icon.empty(); });
+    marks_ = std::ranges::any_of(entries_, [](const MenuEntry& e) { return e.checked || !e.icon.Empty(); });
 
     RECT probe{at.x, at.y, at.x + 1, at.y + 1};
     const float s = PopupScale(probe);
@@ -167,7 +167,7 @@ void GlassMenu::Paint(Canvas& c)
             c.Fill(row, plateR, t.press);
         const D2D1_COLOR_F ink = e.disabled ? t.faint : t.text;
         float cy = (row.top + row.bottom) / 2;
-        if (!e.icon.empty())
+        if (!e.icon.Empty())
             c.Image(L"menu|" + std::to_wstring(e.id), e.icon, D2D1::RectF(row.left + 10, cy - 8, row.left + 26, cy + 8), e.disabled ? 0.45f : 1);
         else if (e.checked)
             c.Glyph(L"\uE73E", D2D1::RectF(row.left + 8, cy - 9, row.left + 26, cy + 9), 12, ink);
@@ -263,6 +263,7 @@ bool GlassMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         else
             return false;
         return true;
+    default: break;
     }
     (void)result;
     return false;

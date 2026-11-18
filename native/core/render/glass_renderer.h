@@ -68,7 +68,7 @@ public:
     // topmost: the composition target's layer. A popup window has two: the
     // glass below (topmost = false) and its content drawn by Surface above.
     // overlay: whether Present draws a Direct2D overlay (the popups' glass does not).
-    GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost = true, bool overlay = true, bool alignedBackdrop = false);
+    GlassRenderer(Gpu gpu, HWND hwnd, int width, int height, bool topmost = true, bool overlay = true, bool alignedBackdrop = false);
     ~GlassRenderer();
     GlassRenderer(const GlassRenderer&) = delete;
     GlassRenderer& operator=(const GlassRenderer&) = delete;

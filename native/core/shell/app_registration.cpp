@@ -31,7 +31,7 @@ void RegisterApplication(const std::wstring& directory)
         GetFileAttributesW((directory + L"\\Settings\\Atrium.Settings.exe").c_str()) == INVALID_FILE_ATTRIBUTES)
         return; // a native-only development build is not an installed app
 
-    constexpr auto registration = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Atrium";
+    constexpr auto kRegistration = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Atrium";
     const std::pair<const wchar_t*, std::wstring> fields[] = {
         {L"DisplayName", L"Atrium"},
         {L"Publisher", L"Atrium contributors"},
@@ -46,7 +46,7 @@ void RegisterApplication(const std::wstring& directory)
         return key && RegGetValueW(key, nullptr, name, RRF_RT_REG_SZ, nullptr, value, &bytes) == ERROR_SUCCESS ? std::wstring(value) : std::wstring();
     };
     HKEY key = nullptr;
-    bool changed = RegOpenKeyExW(HKEY_CURRENT_USER, registration, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS;
+    bool changed = RegOpenKeyExW(HKEY_CURRENT_USER, kRegistration, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS;
     std::wstring previousDirectory = read(key, L"InstallLocation");
     if (key) {
         for (const auto& [name, value] : fields)
@@ -61,7 +61,7 @@ void RegisterApplication(const std::wstring& directory)
         key = nullptr;
     }
     if (changed) {
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, registration, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, kRegistration, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
             bool ok = true;
             for (const auto& [name, value] : fields)
                 ok &= RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), DWORD((value.size() + 1) * sizeof(wchar_t))) ==

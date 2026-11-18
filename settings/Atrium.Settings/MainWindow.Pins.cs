@@ -11,7 +11,7 @@ using Windows.Storage.Pickers;
 namespace Atrium.Settings;
 
 // One card of the pinned-apps list.
-public sealed class PinVm : INotifyPropertyChanged
+public sealed partial class PinVm : INotifyPropertyChanged
 {
     private readonly MainWindow _owner;
 
@@ -175,7 +175,8 @@ public sealed partial class MainWindow
             if (PinsList.ContainerFromItem(vm) is not DependencyObject container) return;
             var buttons = new List<Button>();
             Collect(container, buttons);
-            var target = buttons.FirstOrDefault(b => b.IsEnabled && AutomationProperties.GetName(b).StartsWith(verb)) ?? buttons.FirstOrDefault(b => b.IsEnabled);
+            var target = buttons.FirstOrDefault(b => b.IsEnabled && AutomationProperties.GetName(b).StartsWith(verb)) ??
+                buttons.FirstOrDefault(b => b.IsEnabled);
             target?.Focus(FocusState.Programmatic);
         });
     }

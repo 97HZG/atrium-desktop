@@ -28,13 +28,13 @@ private:
     HWND notify_;
     UINT msg_;
     bool alone_, numbers_;
-    int keyToken_ = 0;    // the shared hook's registration
     bool held_ = false;   // a Windows key is down and held back
     bool passed_ = false; // it went on to Windows (another key followed, or an elevated window is in front)
     bool used_ = false;   // a digit went with it: no start menu when it comes up
     DWORD digit_ = 0;     // the digit kept, until it comes up
     DWORD key_ = 0, scan_ = 0; // which one (VK_LWIN or VK_RWIN), as it came, to send it on
     bool extended_ = false;
+    int keyToken_ = 0; // the shared hook's registration
 };
 
 } // namespace atrium

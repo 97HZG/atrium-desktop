@@ -42,7 +42,7 @@ public:
 private:
     void Paint(Canvas& c);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
-    int RowAt(POINT client) const; // entry index, -1 for none
+    int RowAt(POINT pt) const; // entry index, -1 for none
     void Move(int step);           // keyboard selection
     void Pick(int index);
     D2D1_SIZE_F Size(float scale) const;

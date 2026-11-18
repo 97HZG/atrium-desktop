@@ -9,13 +9,13 @@
 
 namespace {
 
-int failures = 0;
+int g_failures = 0;
 
 void Check(bool ok, const char* what)
 {
     if (!ok) {
         std::fprintf(stderr, "FAIL: %s\n", what);
-        ++failures;
+        ++g_failures;
     }
 }
 
@@ -65,7 +65,6 @@ void CheckReconciliation()
 void CheckWorker()
 {
     using namespace atrium;
-    using namespace std::chrono_literals;
     std::mutex mutex;
     std::condition_variable changed;
     bool reading = false, release = false, ready = false;
@@ -94,20 +93,20 @@ void CheckWorker()
         });
     {
         std::unique_lock lock(mutex);
-        Check(changed.wait_for(lock, 3s, [&] { return reading; }), "startup disk query runs asynchronously");
+        Check(changed.wait_for(lock, std::chrono::seconds(3), [&] { return reading; }), "startup disk query runs asynchronously");
         Check(readerThread != std::this_thread::get_id(), "device reads run off the caller thread");
         monitor.Changed({DBT_DEVICEREMOVECOMPLETE, kE});
         Check(reads == 1, "Changed returns while the disk read is still blocked");
         release = true;
         changed.notify_all();
-        Check(changed.wait_for(lock, 3s, [&] { return reads >= 2; }), "events arriving during the startup read are retained");
+        Check(changed.wait_for(lock, std::chrono::seconds(3), [&] { return reads >= 2; }), "events arriving during the startup read are retained");
         Check(!ready, "failed enumeration does not claim the disks were unplugged");
     }
     Check(monitor.TakeRemoved().empty(), "failed enumeration keeps prior device state");
     monitor.Changed({DBT_DEVICEREMOVECOMPLETE, 0});
     {
         std::unique_lock lock(mutex);
-        Check(changed.wait_for(lock, 3s, [&] { return ready; }), "the UI is notified after a successful background reconciliation");
+        Check(changed.wait_for(lock, std::chrono::seconds(3), [&] { return ready; }), "the UI is notified after a successful background reconciliation");
     }
     const auto removed = monitor.TakeRemoved();
     Check(removed.size() == 1 && removed[0].letter == L'E' && removed[0].label == L"BACKUP", "background results retain the original disk identity and label");
@@ -151,8 +150,8 @@ int main(int argc, char** argv)
     CheckReconciliation();
     CheckWorker();
 
-    if (failures) {
-        std::fprintf(stderr, "%d usb volume check(s) failed\n", failures);
+    if (g_failures) {
+        std::fprintf(stderr, "%d usb volume check(s) failed\n", g_failures);
         return 1;
     }
     std::puts("usb volume checks passed");

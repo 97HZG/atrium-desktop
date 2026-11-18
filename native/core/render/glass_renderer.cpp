@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace atrium {
 
@@ -75,13 +76,13 @@ void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool op
 
 void GlassRenderer::Pop(bool open, float cx, float cy) { PopVisual(dcomp_.get(), visual_.get(), open, cx, cy); }
 
-GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost, bool overlay, bool alignedBackdrop)
-    : gpu_(gpu),
+GlassRenderer::GlassRenderer(Gpu gpu, HWND hwnd, int width, int height, bool topmost, bool overlay, bool alignedBackdrop)
+    : gpu_(std::move(gpu)),
       w_(width),
       h_(height),
-      alignedBackdrop_(alignedBackdrop)
+      alignedBackdrop_(alignedBackdrop),
+      sync_(overlay ? 1 : 0) // the bar draws its content over the glass; a popup's content is its own
 {
-    sync_ = overlay ? 1 : 0; // the bar draws its content over the glass; a popup's content is its own
     auto* dev = gpu_.device.get();
     Check(dev->CreateVertexShader(g_GlassVS, sizeof(g_GlassVS), nullptr, vs_.put()));
     Check(dev->CreatePixelShader(g_GlassPS, sizeof(g_GlassPS), nullptr, ps_.put()));
@@ -141,7 +142,7 @@ GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, b
     Check(gpu_.factory->CreateSwapChainForComposition(dev, &desc, nullptr, swap_.put()));
     auto paced = swap_.as<IDXGISwapChain2>();
     Check(paced->SetMaximumFrameLatency(1));
-    waitable_ = paced->GetFrameLatencyWaitableObject();
+    waitable_ = paced->GetFrameLatencyWaitableObject(); // NOLINT(cppcoreguidelines-prefer-member-initializer): made with the swap chain
 
     auto dxgi = gpu_.device.as<IDXGIDevice>();
     Check(DCompositionCreateDevice(dxgi.get(), IID_PPV_ARGS(dcomp_.put())));
@@ -477,8 +478,7 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
     ctx->PSSetShaderResources(0, 1, &srv);
     ID3D11SamplerState* s = sampler_.get();
     ctx->PSSetSamplers(0, 1, &s);
-    for (size_t k = 0; k < shapes.size(); ++k) {
-        GlassParams p = shapes[k];
+    for (auto p : shapes) {
         bool basic = p.partCount < 0.5f && p.tailHeight <= 0 && p.waveHeight <= 0;
         ctx->PSSetShader(basic ? basicPs_.get() : ps_.get(), nullptr, 0);
         p.sizeX = float(w_);

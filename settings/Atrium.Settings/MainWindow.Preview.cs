@@ -44,7 +44,8 @@ public sealed partial class MainWindow
         _readout[0].Value.Text = $"{s.Height:0} px";
         _readout[0].Note.Text = Loc.F("Icon {0:0} px", s.IconSize);
         _readout[1].Value.Text = $"{r:0} px";
-        _readout[1].Note.Text = s.CornerRadius > r ? Loc.F("Set to {0:0}, at most half the height", s.CornerRadius) : capsule ? Loc.T("G3 continuous capsule outline") : Loc.T("G3 continuous corners");
+        _readout[1].Note.Text = s.CornerRadius > r ? Loc.F("Set to {0:0}, at most half the height", s.CornerRadius)
+            : capsule ? Loc.T("G3 continuous capsule outline") : Loc.T("G3 continuous corners");
         _readout[2].Value.Text = s.AutoWidth ? Loc.T("Auto") : $"{s.Width:0} px";
         _readout[2].Note.Text = s.AutoWidth ? Loc.F("Up to {0:0} px", s.Width) : Loc.T("Fixed width");
         _readout[3].Value.Text = capsule ? Loc.T("Capsule") : r < 1 ? Loc.T("Square") : Loc.T("Rounded rectangle");
@@ -62,30 +63,30 @@ public sealed partial class MainWindow
         if (ContinuousCorners.Original(NotifyStage) is not ImageBrush) NotifyStage.Background = PhotoBrush();
         var s = CurrentSettings;
         double radius = Math.Min(Math.Clamp(s.CornerRadius, 8, Math.Max(8, s.Height / 2)), CardH / 2);
-        double W = NotifyStage.ActualWidth, H = NotifyStage.ActualHeight;
-        if (W < CardW + 48 || H < CardH + 60) { W = Math.Max(W, CardW + 48); H = Math.Max(H, CardH + 60); }
+        double w = NotifyStage.ActualWidth, h = NotifyStage.ActualHeight;
+        if (w < CardW + 48 || h < CardH + 60) { w = Math.Max(w, CardW + 48); h = Math.Max(h, CardH + 60); }
         var (corner, left, bottom) = NotifyCorner(s.NotifyPlacement);
         // Over the bar, right-aligned with it (the bell's popup); or a corner of the screen, the
         // newest card at the corner and the one before it beside it in the column.
         // At a corner the bar is shown smaller: the column has the room beside and above it.
         // At a corner the picture is the whole screen, smaller: the cards at the bar's scale, so that
         // where they stand (which corner, over the bar or at the top) shows at a glance.
-        var bar = ShowNotifyBar(W, H, corner);
+        var bar = ShowNotifyBar(w, h, corner);
         double k = corner ? bar.S : 1;
         _notifyCardScale = k;
         double cw = CardW * k, ch = CardH * k, peek = CardPeek * k, edge = 18;
-        double barRight = Math.Min(bar.BarX + bar.BarW, W - 16);
+        double barRight = Math.Min(bar.BarX + bar.BarW, w - 16);
         double bottomY = bar.BarY - 12 * bar.S - ch;
-        var front = corner ? new GlassTile(left ? edge : W - edge - cw, bottom ? bottomY : edge, cw, ch, radius * k)
+        var front = corner ? new GlassTile(left ? edge : w - edge - cw, bottom ? bottomY : edge, cw, ch, radius * k)
             : new GlassTile(barRight - CardW, bottomY, CardW, CardH, radius);
         var back = corner ? new GlassTile(front.X, bottom ? front.Y - peek - ch : front.Y + ch + peek, cw, ch, radius * k)
             : new GlassTile(front.X + CardInset, front.Y - CardPeek, CardW - 2 * CardInset, CardH, radius);
         ScaleNotifyText(NotifyFrontText, k);
         ScaleNotifyText(NotifyBackText, k);
 
-        NotifyCards.Width = W;
-        NotifyCards.Height = H;
-        NotifyPreviewClip.Rect = new Rect(0, 0, W, H);
+        NotifyCards.Width = w;
+        NotifyCards.Height = h;
+        NotifyPreviewClip.Rect = new Rect(0, 0, w, h);
         if (!_notifyPreviewReady)
         {
             ElementCompositionPreview.GetElementVisual(NotifyCards).Opacity = 0;
@@ -93,13 +94,13 @@ public sealed partial class MainWindow
         }
         var backCard = NotifyBackCard;
         var frontCard = NotifyFrontCard;
-        const double pad = GlassSpec.InsetDip;
-        backCard.Width = back.W + 2 * pad; backCard.Height = back.H + 2 * pad;
-        frontCard.Width = front.W + 2 * pad; frontCard.Height = front.H + 2 * pad;
+        const double Pad = GlassSpec.InsetDip;
+        backCard.Width = back.W + 2 * Pad; backCard.Height = back.H + 2 * Pad;
+        frontCard.Width = front.W + 2 * Pad; frontCard.Height = front.H + 2 * Pad;
         UpdateNotifyText(s);
         NotifyBackText.Visibility = corner ? Visibility.Visible : Visibility.Collapsed;
-        Canvas.SetLeft(backCard, back.X - pad); Canvas.SetTop(backCard, back.Y - pad);
-        Canvas.SetLeft(frontCard, front.X - pad); Canvas.SetTop(frontCard, front.Y - pad);
+        Canvas.SetLeft(backCard, back.X - Pad); Canvas.SetTop(backCard, back.Y - Pad);
+        Canvas.SetLeft(frontCard, front.X - Pad); Canvas.SetTop(frontCard, front.Y - Pad);
         _notifyEntrancePending |= animate;
         if (_notifyEntrancePending && _notifyPreviewRendered)
         {
@@ -116,7 +117,7 @@ public sealed partial class MainWindow
         NotifyCaption.Text = Loc.F(caption, s.NotifyTimeout);
 
         // Their glass: rendered over the picture where they rest; each card carries its own piece.
-        PostTiles(NotifyCards, W, H, 1, new[] { back, front }, null, f =>
+        PostTiles(NotifyCards, w, h, 1, [back, front], null, f =>
         {
             NotifyBackImage.Source = f.Overlay(0);
             NotifyFrontImage.Source = f.Overlay(1);
@@ -165,11 +166,11 @@ public sealed partial class MainWindow
         }
     }
 
-    private void ResizeNotifyBar(BarGeometry L, float from)
+    private void ResizeNotifyBar(BarGeometry bar, float from)
     {
         var visual = ElementCompositionPreview.GetElementVisual(NotifyBar);
         var compositor = visual.Compositor;
-        visual.CenterPoint = new Vector3((float)(L.BarX + L.BarW / 2), (float)(L.BarY + L.BarH), 0); // its bottom stays
+        visual.CenterPoint = new Vector3((float)(bar.BarX + bar.BarW / 2), (float)(bar.BarY + bar.BarH), 0); // its bottom stays
         var scale = compositor.CreateVector3KeyFrameAnimation();
         var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0f), new Vector2(0f, 1f));
         scale.InsertKeyFrame(0, new Vector3(from, from, 1));
@@ -193,9 +194,9 @@ public sealed partial class MainWindow
         NotifyBar.Height = h;
         NotifyBar.Clip = new RectangleGeometry { Rect = new Rect(0, 0, w, h) };
         double scale = Math.Min(1.0, (w - 48) / (HeroReferenceW + 2 * GlassSpec.InsetDip)) * (small ? SmallNotifyBar : 1);
-        var L = BarLayout(CurrentSettings, w, h, scale, false);
-        var tile = new GlassTile(L.BarX, L.BarY, L.BarW, L.BarH, L.Radius);
-        PostTiles(NotifyBar, w, h, scale, new[] { tile }, null, f =>
+        var bar = BarLayout(CurrentSettings, w, h, scale, false);
+        var tile = new GlassTile(bar.BarX, bar.BarY, bar.BarW, bar.BarH, bar.Radius);
+        PostTiles(NotifyBar, w, h, scale, [tile], null, f =>
         {
             var glass = f.Overlays![0];
             _notifyBarGlass.Source = f.Overlay(0);
@@ -204,7 +205,7 @@ public sealed partial class MainWindow
             Canvas.SetLeft(_notifyBarGlass, tile.X + tile.W / 2 - _notifyBarGlass.Width / 2);
             Canvas.SetTop(_notifyBarGlass, tile.Y + tile.H / 2 - _notifyBarGlass.Height / 2);
             bool dark = CurrentSettings.TextColor == "dark" || (CurrentSettings.TextColor == "auto" && glass.Luma > 0.5f);
-            int running = CurrentSettings.ShowRunning && L.N > _previewPins.Length ? _previewPins.Length : -1;
+            int running = CurrentSettings.ShowRunning && bar.N > _previewPins.Length ? _previewPins.Length : -1;
             for (int i = 0; i < MaxPreviewApps; i++)
             {
                 var vm = i < _previewPins.Length ? _previewPins[i] : _previewRunning;
@@ -212,14 +213,14 @@ public sealed partial class MainWindow
             }
             var clock = DateTime.Now;
             _notifyFace.SetClock(clock.ToString(CurrentSettings.ShowClockSeconds ? "H:mm:ss" : "H:mm"), clock.ToString("yyyy/M/d"));
-            _notifyFace.Layout(L, dark, L.N, running, 2, 1, 0, 0, StatusLook.Current());
+            _notifyFace.Layout(bar, dark, bar.N, running, 2, 1, 0, 0, StatusLook.Current());
             // Its new size has come: it grows or shrinks there from the size it had, on the
             // compositor (one picture, scaled: nothing is drawn again meanwhile).
             if (_notifyBarScale > 0 && Math.Abs(_notifyBarScale - scale) > 0.001)
-                ResizeNotifyBar(L, (float)(_notifyBarScale / scale));
+                ResizeNotifyBar(bar, (float)(_notifyBarScale / scale));
             _notifyBarScale = scale;
         }, overlays: true, scaled: true);
-        return L;
+        return bar;
     }
 
     private void UpdateNotifyText(BarSettings settings)
@@ -351,9 +352,9 @@ public sealed partial class MainWindow
 
     private static (double Value, double Velocity) PopSample(double time)
     {
-        const double response = 0.36, damping = 0.62; // motion::kPop
-        double w = 2 * Math.PI / response, wd = w * Math.Sqrt(1 - damping * damping);
-        return (Motion.Spring(time, response, damping), Math.Exp(-damping * w * time) * w * w / wd * Math.Sin(wd * time));
+        const double Response = 0.36, Damping = 0.62; // motion::kPop
+        double w = 2 * Math.PI / Response, wd = w * Math.Sqrt(1 - Damping * Damping);
+        return (Motion.Spring(time, Response, Damping), Math.Exp(-Damping * w * time) * w * w / wd * Math.Sin(wd * time));
     }
 
     private static (double Value, double Velocity) ApproachSample(double time, double rate)
@@ -418,8 +419,8 @@ public sealed partial class MainWindow
 
     // The new layout against the shown one: the same widget in the same place stays; one of the same
     // kind elsewhere (moved, resized) glides there; the others pop in or shrink away, as on the desktop.
-    private void PlaceMapCards(List<GlassTile> tiles, List<(string Kind, string Size, string[] Cities)> faces, List<(string Kind, string Size, int Col, int Row)> cells,
-                               TileFrame frame, double pad)
+    private void PlaceMapCards(List<GlassTile> tiles, List<(string Kind, string Size, IReadOnlyList<string> Cities)> faces,
+                               List<(string Kind, string Size, int Col, int Row)> cells, TileFrame frame, double pad)
     {
         var old = new List<MapCard>(_mapCards);
         var next = new MapCard?[tiles.Count];
@@ -566,9 +567,9 @@ public sealed partial class MainWindow
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
                 EnableRaisingEvents = true,
             };
-            void changed(object _1, FileSystemEventArgs _2) => DispatcherQueue.TryEnqueue(() => { if (_page == 4) ShowWidgetMap(); });
-            _widgetWatcher.Changed += changed;
-            _widgetWatcher.Created += changed;
+            void OnChanged(object _1, FileSystemEventArgs _2) => DispatcherQueue.TryEnqueue(() => { if (_page == 4) ShowWidgetMap(); });
+            _widgetWatcher.Changed += OnChanged;
+            _widgetWatcher.Created += OnChanged;
             _widgetWatcher.Renamed += (_, _) => DispatcherQueue.TryEnqueue(() => { if (_page == 4) ShowWidgetMap(); });
         }
 
@@ -576,17 +577,17 @@ public sealed partial class MainWindow
         var displays = DesktopDisplay.Read();
         var display = displays.First(d => d.Id == CurrentSettings.DesktopDisplay ||
             (d.Primary && !displays.Any(other => other.Id == CurrentSettings.DesktopDisplay)));
-        double W = display.WorkWidth / display.Scale, H = display.WorkHeight / display.Scale;
-        int cols = Math.Max(1, (int)((W - 2 * WMargin + WGap) / (WCell + WGap)));
-        int rows = Math.Max(1, (int)((H - 2 * WMargin - 90 + WGap) / (WCell + WGap)));
+        double workW = display.WorkWidth / display.Scale, workH = display.WorkHeight / display.Scale;
+        int cols = Math.Max(1, (int)((workW - 2 * WMargin + WGap) / (WCell + WGap)));
+        int rows = Math.Max(1, (int)((workH - 2 * WMargin - 90 + WGap) / (WCell + WGap)));
         double stageW = WidgetStage.ActualWidth > 0 ? WidgetStage.ActualWidth : 760;
-        WidgetStage.Height = Math.Clamp(Math.Round(stageW * H / W), 220, 560);
-        double k = stageW / W, kh = WidgetStage.Height / H;
+        WidgetStage.Height = Math.Clamp(Math.Round(stageW * workH / workW), 220, 560);
+        double k = stageW / workW, kh = WidgetStage.Height / workH;
         if (ContinuousCorners.Original(WidgetStage) is not ImageBrush) WidgetStage.Background = PhotoBrush();
 
         // The tiles where the core puts them, then the bar at the bottom for scale; all glass.
         var tiles = new List<GlassTile>();
-        var faces = new List<(string Kind, string Size, string[] Cities)>();
+        var faces = new List<(string Kind, string Size, IReadOnlyList<string> Cities)>();
         var cells = new List<(string Kind, string Size, int Col, int Row)>();
         foreach (var (kind, size, col, row, cities) in ReadWidgets())
         {
@@ -595,7 +596,7 @@ public sealed partial class MainWindow
             double w = wc * WCell + (wc - 1) * WGap, h = wr * WCell + (wr - 1) * WGap;
             int visualCol = CurrentSettings.WidgetsOnRight ? cols - col - wc : col;
             bool fromRight = 2 * visualCol + wc >= cols;
-            double left = fromRight ? W - WMargin - (cols - visualCol - wc) * (WCell + WGap) - w : WMargin + visualCol * (WCell + WGap);
+            double left = fromRight ? workW - WMargin - (cols - visualCol - wc) * (WCell + WGap) - w : WMargin + visualCol * (WCell + WGap);
             double top = WMargin + row * (WCell + WGap);
             tiles.Add(new GlassTile(left * k, top * kh, w * k, h * kh, 22 * Math.Min(k, kh)));
             faces.Add((kind, size, cities));
@@ -608,7 +609,7 @@ public sealed partial class MainWindow
         int photoGeneration = Photo.Generation;
         var placed = new List<(string Kind, string Size, int Col, int Row)>(cells);
         // Each widget carries its own piece of glass, so that it can come, go and move over the picture.
-        PostTiles(WidgetMap, stageW, stageH, kk, tiles.Append(bar).ToArray(), null, frame =>
+        PostTiles(WidgetMap, stageW, stageH, kk, [.. tiles, bar], null, frame =>
         {
             frame.Apply(WidgetStage);
             // Match the bitmap's completed viewport during subsequent resizes.
@@ -633,7 +634,7 @@ public sealed partial class MainWindow
         WidgetMap.Opacity = CurrentSettings.Widgets ? 1 : 0.5;
     }
 
-    private static IEnumerable<(string Kind, string Size, int Col, int Row, string[] Cities)> ReadWidgets()
+    private static IEnumerable<(string Kind, string Size, int Col, int Row, IReadOnlyList<string> Cities)> ReadWidgets()
     {
         JsonNode? root = null;
         try { root = JsonNode.Parse(File.ReadAllText(WidgetsPath)); }
@@ -646,7 +647,7 @@ public sealed partial class MainWindow
             if (e is not JsonObject o) continue;
             string kind = (string?)o["kind"] ?? "", size = (string?)o["size"] ?? "small";
             int col = (int?)(double?)o["col"] ?? 0, row = (int?)(double?)o["row"] ?? 0;
-            string[] cities = o["cities"] is JsonArray a ? [.. a.Select(c => c is JsonValue v && v.TryGetValue(out string? s) ? s : "")] : [];
+            IReadOnlyList<string> cities = o["cities"] is JsonArray a ? [.. a.Select(c => c is JsonValue v && v.TryGetValue(out string? s) ? s : "")] : [];
             if (kind.Length > 0) yield return (kind, size, col, row, cities);
         }
     }

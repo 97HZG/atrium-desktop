@@ -166,11 +166,11 @@ internal static class GlassRenderer
     private static void Row(Backdrop bg, byte[] dst, int stride, int dstX, int dstY, bool overlay, int winX, int winY, int winW, int winH,
                             GlassSpec p, int ly)
     {
-        float W = winW, H = winH, inset = p.Inset;
-        float bx = W * 0.5f - inset, by = (H - p.RiseInset) * 0.5f - inset;
+        float w = winW, h = winH, inset = p.Inset;
+        float bx = w * 0.5f - inset, by = (h - p.RiseInset) * 0.5f - inset;
         float r = MathF.Min(p.Radius, MathF.Min(bx, by));
         var corner = CornerProfile.For(bx * 2, by * 2, r);
-        float py = ly + 0.5f, cy = py - (H + p.RiseInset) * 0.5f;
+        float py = ly + 0.5f, cy = py - (h + p.RiseInset) * 0.5f;
         float shadowK = 1f / MathF.Max(inset * 0.35f, 1f);
         float edge = MathF.Max(p.Edge, 1f);
         float blurStep = MathF.Pow(2f, p.BlurLod) * 0.75f;
@@ -182,7 +182,7 @@ internal static class GlassRenderer
 
         for (int lx = xs; lx < xe; lx++)
         {
-            float px = lx + 0.5f, cx = px - W * 0.5f;
+            float px = lx + 0.5f, cx = px - w * 0.5f;
             float y = WaveY(cx, cy, by, p);
             float d = Sd(cx, y, bx, by, r);
             float ds = Sd(cx, WaveY(cx, cy - inset * 0.25f, by, p), bx, by, r);
@@ -202,10 +202,10 @@ internal static class GlassRenderer
                 continue;
             }
 
-            const float e = 1f;
-            float yr = WaveY(cx + e, cy, by, p), yl = WaveY(cx - e, cy, by, p);
-            float yd = WaveY(cx, cy + e, by, p), yu = WaveY(cx, cy - e, by, p);
-            float gx = Sd(cx + e, yr, bx, by, r) - Sd(cx - e, yl, bx, by, r);
+            const float Eps = 1f;
+            float yr = WaveY(cx + Eps, cy, by, p), yl = WaveY(cx - Eps, cy, by, p);
+            float yd = WaveY(cx, cy + Eps, by, p), yu = WaveY(cx, cy - Eps, by, p);
+            float gx = Sd(cx + Eps, yr, bx, by, r) - Sd(cx - Eps, yl, bx, by, r);
             float gy = Sd(cx, yd, bx, by, r) - Sd(cx, yu, bx, by, r);
             float gl = MathF.Sqrt(gx * gx + gy * gy);
             float nx = 0, ny = 0;
@@ -216,8 +216,8 @@ internal static class GlassRenderer
             if (p.WaveHeight > 0 && d >= -2)
             {
                 // The deformed outline needs the implicit field's screen-space gradient.
-                float ex = corner.Edge(MathF.Abs(cx + e) - bx + corner.Reach, MathF.Abs(yr) - by + corner.Reach) -
-                           corner.Edge(MathF.Abs(cx - e) - bx + corner.Reach, MathF.Abs(yl) - by + corner.Reach);
+                float ex = corner.Edge(MathF.Abs(cx + Eps) - bx + corner.Reach, MathF.Abs(yr) - by + corner.Reach) -
+                           corner.Edge(MathF.Abs(cx - Eps) - bx + corner.Reach, MathF.Abs(yl) - by + corner.Reach);
                 float ey = corner.Edge(MathF.Abs(cx) - bx + corner.Reach, MathF.Abs(yd) - by + corner.Reach) -
                            corner.Edge(MathF.Abs(cx) - bx + corner.Reach, MathF.Abs(yu) - by + corner.Reach);
                 aa = MathF.Max((MathF.Abs(ex) + MathF.Abs(ey)) / 2, 1e-3f);

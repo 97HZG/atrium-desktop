@@ -4,7 +4,10 @@ $ErrorActionPreference = 'Stop'
 $root = $ProjectRoot
 $errors = [System.Collections.Generic.List[string]]::new()
 if (-not ('Atrium.Settings.LocalizationValidation' -as [type])) {
-    Add-Type -Path (Join-Path $PSScriptRoot '../settings/Atrium.Settings/LocalizationValidation.cs')
+    # The project's implicit usings and nullable context, which Add-Type does not have.
+    $prelude = "#nullable enable`nglobal using System;`nglobal using System.Collections.Generic;`nglobal using System.Linq;`n"
+    $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../settings/Atrium.Settings/LocalizationValidation.cs') -Raw -Encoding utf8
+    Add-Type -TypeDefinition ($prelude + $source)
 }
 
 function Read-Json([string]$path) {

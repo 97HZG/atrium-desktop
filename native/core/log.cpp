@@ -49,6 +49,9 @@ public:
         cv_.notify_one();
     }
 
+    Writer(const Writer&) = delete;
+    Writer& operator=(const Writer&) = delete;
+
 private:
     Writer() : thread_([this] { Run(); }) {}
     ~Writer()

@@ -42,9 +42,13 @@ INPUT Key(DWORD vk, DWORD scan, bool extended)
 
 } // namespace
 
-WinKey::WinKey(HWND notify, UINT msg, bool alone, bool numbers) : notify_(notify), msg_(msg), alone_(alone), numbers_(numbers)
+WinKey::WinKey(HWND notify, UINT msg, bool alone, bool numbers)
+    : notify_(notify),
+      msg_(msg),
+      alone_(alone),
+      numbers_(numbers),
+      keyToken_(KeyboardHook::Instance().Add(&WinKey::OnKey, this))
 {
-    keyToken_ = KeyboardHook::Instance().Add(&WinKey::OnKey, this);
     Log(L"winkey: watching the Windows key (%s%s%s)", alone_ ? L"start menu" : L"", alone_ && numbers_ ? L", " : L"", numbers_ ? L"Win + digits" : L"");
 }
 

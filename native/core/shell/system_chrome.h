@@ -25,10 +25,14 @@ inline constexpr wchar_t kQuietProfileOff[] = L"Microsoft.QuietHoursProfile.Unre
 // short of alarms-only lets priority notifications through: a "priority only"
 // profile still shows e.g. the AutoPlay toast for a newly inserted drive, which
 // reads as the setting not hiding system banners at all.
-enum class QuietAction { none, hide, restore };
+enum class QuietAction {
+    None,
+    Hide,
+    Restore,
+};
 
 struct QuietPlan {
-    QuietAction action = QuietAction::none;
+    QuietAction action = QuietAction::None;
     std::wstring profile; // hide: alarms-only; restore: the profile to put back
     bool owns = false;    // the change is Atrium's, to undo when the setting goes off
 };
@@ -41,13 +45,13 @@ inline QuietPlan PlanQuiet(const std::wstring& current, bool hide, bool ours, co
         // already selected (by Atrium or by the user).
         if (current.empty() || current == kQuietProfile)
             return plan;
-        plan.action = QuietAction::hide;
+        plan.action = QuietAction::Hide;
         plan.profile = kQuietProfile;
         plan.owns = true;
         return plan;
     }
     if (ours) {
-        plan.action = QuietAction::restore;
+        plan.action = QuietAction::Restore;
         plan.profile = before.empty() ? kQuietProfileOff : before;
     }
     return plan;
@@ -57,6 +61,8 @@ class SystemChrome {
 public:
     SystemChrome();
     ~SystemChrome(); // puts everything back
+    SystemChrome(const SystemChrome&) = delete;
+    SystemChrome& operator=(const SystemChrome&) = delete;
 
     void SetTaskbarHidden(bool hidden);
     void SetBannersHidden(bool hidden);

@@ -1,3 +1,4 @@
+// The screen edge the bar sits on and the geometry that follows from it.
 #pragma once
 
 #include <windows.h>

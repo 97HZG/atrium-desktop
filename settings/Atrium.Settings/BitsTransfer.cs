@@ -3,14 +3,14 @@ using System.Runtime.InteropServices;
 namespace Atrium.Settings;
 
 // Windows owns the transfer. Releasing these COM proxies never cancels the job.
-internal sealed class BitsTransfer : IDisposable
+internal sealed partial class BitsTransfer : IDisposable
 {
     internal enum State { Queued, Connecting, Transferring, Suspended, Error, TransientError, Transferred, Acknowledged, Cancelled }
     [StructLayout(LayoutKind.Sequential)]
     internal struct Progress { public ulong Total, Transferred; public uint FilesTotal, FilesTransferred; }
-    private readonly IJob job;
+    private readonly IJob _job;
     internal Guid Id { get; }
-    private BitsTransfer(Guid id, IJob job) { Id = id; this.job = job; }
+    private BitsTransfer(Guid id, IJob job) { Id = id; _job = job; }
 
     private static IManager Manager() => (IManager)Activator.CreateInstance(
         Type.GetTypeFromCLSID(new Guid("4991d34b-80a1-4291-83b6-3328366b9097"), true)!)!;
@@ -30,19 +30,19 @@ internal sealed class BitsTransfer : IDisposable
         finally { Marshal.FinalReleaseComObject(manager); }
     }
 
-    internal State CurrentState { get { job.GetState(out var state); return state; } }
-    internal Progress CurrentProgress { get { job.GetProgress(out var progress); return progress; } }
-    internal void Add(Uri source, string target) => job.AddFile(source.AbsoluteUri, target);
+    internal State CurrentState { get { _job.GetState(out var state); return state; } }
+    internal Progress CurrentProgress { get { _job.GetProgress(out var progress); return progress; } }
+    internal void Add(Uri source, string target) => _job.AddFile(source.AbsoluteUri, target);
     internal void OnTransferred(string program)
     {
-        job.SetNotifyCmdLine(program, $"\"{program}\" --finish-update");
-        job.SetNotifyFlags(3); // transferred or permanent error; transient errors retry in BITS
-        job.SetMinimumRetryDelay(30);
+        _job.SetNotifyCmdLine(program, $"\"{program}\" --finish-update");
+        _job.SetNotifyFlags(3); // transferred or permanent error; transient errors retry in BITS
+        _job.SetMinimumRetryDelay(30);
     }
-    internal void Resume() => job.Resume();
-    internal void Complete() => job.Complete();
-    internal void Cancel() => job.Cancel();
-    public void Dispose() => Marshal.FinalReleaseComObject(job);
+    internal void Resume() => _job.Resume();
+    internal void Complete() => _job.Complete();
+    internal void Cancel() => _job.Cancel();
+    public void Dispose() => Marshal.FinalReleaseComObject(_job);
 
     [ComImport, Guid("5ce34c0d-0dc9-4c1f-897c-daa1b78cee7c"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IManager

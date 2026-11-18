@@ -71,7 +71,7 @@ std::vector<BluetoothDevice> ListBluetooth()
             try {
                 if (auto dev = Bluetooth::BluetoothDevice::FromIdAsync(d.Id()).get())
                     b.connected = dev.ConnectionStatus() == Bluetooth::BluetoothConnectionStatus::Connected;
-            } catch (...) {
+            } catch (const winrt::hresult_error&) {
             }
             if (!b.name.empty() && names.insert(b.name).second)
                 out.push_back(b);
@@ -83,7 +83,7 @@ std::vector<BluetoothDevice> ListBluetooth()
             try {
                 if (auto dev = Bluetooth::BluetoothLEDevice::FromIdAsync(d.Id()).get())
                     b.connected = dev.ConnectionStatus() == Bluetooth::BluetoothConnectionStatus::Connected;
-            } catch (...) {
+            } catch (const winrt::hresult_error&) {
             }
             if (!b.name.empty() && names.insert(b.name).second)
                 out.push_back(b);
@@ -91,7 +91,7 @@ std::vector<BluetoothDevice> ListBluetooth()
     } catch (...) {
         Log(L"radios: listing Bluetooth devices failed");
     }
-    std::stable_sort(out.begin(), out.end(), [](const BluetoothDevice& a, const BluetoothDevice& b) { return a.connected > b.connected; });
+    std::ranges::stable_sort(out, [](const BluetoothDevice& a, const BluetoothDevice& b) { return a.connected > b.connected; });
     return out;
 }
 

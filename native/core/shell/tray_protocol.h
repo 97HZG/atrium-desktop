@@ -22,8 +22,11 @@ inline std::vector<UINT> CallbackSequence(HostAction action, UINT version)
     const bool v3 = version >= 3, v4 = version >= 4;
     switch (action) {
     case HostAction::HoverIn: return {WM_MOUSEMOVE};
-    case HostAction::PopupOpen: return v4 ? std::vector<UINT>{NIN_POPUPOPEN} : std::vector<UINT>{};
-    case HostAction::PopupClose: return v4 ? std::vector<UINT>{NIN_POPUPCLOSE} : std::vector<UINT>{};
+    case HostAction::PopupOpen:
+    case HostAction::PopupClose:
+        if (!v4)
+            return {};
+        return {action == HostAction::PopupOpen ? UINT(NIN_POPUPOPEN) : UINT(NIN_POPUPCLOSE)};
     case HostAction::Right:
         if (v3)
             return {WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_CONTEXTMENU};

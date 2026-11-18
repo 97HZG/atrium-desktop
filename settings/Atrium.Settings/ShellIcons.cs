@@ -40,7 +40,7 @@ internal static class ShellIcons
                 var key = new PropertyKey { Format = new Guid("b9b4b3fc-2b51-4a42-b5d8-324146afcf25"), Id = 2 };
                 if (store.GetValue(ref key, out var value) != 0) return link;
                 try { return value.Type == 31 ? ExecutableForIcon(Marshal.PtrToStringUni(value.Text) ?? link) : link; }
-                finally { PropVariantClear(ref value); }
+                finally { _ = PropVariantClear(ref value); }
             }
             finally { Marshal.ReleaseComObject(store); }
         });
@@ -86,7 +86,8 @@ internal static class ShellIcons
     [DllImport("ole32.dll")] private static extern void CoUninitialize();
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
-    [DllImport("gdi32.dll")] private static extern int GetDIBits(IntPtr dc, IntPtr bitmap, uint start, uint lines, byte[] bits, ref BitmapInfoHeader info, uint usage);
+    [DllImport("gdi32.dll")]
+    private static extern int GetDIBits(IntPtr dc, IntPtr bitmap, uint start, uint lines, byte[] bits, ref BitmapInfoHeader info, uint usage);
 
     private const int SIIGBF_BIGGERSIZEOK = 0x1, SIIGBF_ICONONLY = 0x4;
 
@@ -125,8 +126,11 @@ internal static class ShellIcons
         try
         {
             var size = new Size { Cx = px, Cy = px };
-            if (factory.GetImage(size, SIIGBF_ICONONLY, out nint hbitmap) != 0 && factory.GetImage(size, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, out hbitmap) != 0)
+            if (factory.GetImage(size, SIIGBF_ICONONLY, out nint hbitmap) != 0 &&
+                factory.GetImage(size, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, out hbitmap) != 0)
+            {
                 return null;
+            }
             try
             {
                 return ReadBitmap(hbitmap);
@@ -149,7 +153,7 @@ internal static class ShellIcons
         byte[] pixels = new byte[bm.Width * bm.Height * 4];
         nint dc = GetDC(IntPtr.Zero);
         int lines = GetDIBits(dc, bitmap, 0, (uint)bm.Height, pixels, ref header, 0);
-        ReleaseDC(IntPtr.Zero, dc);
+        _ = ReleaseDC(IntPtr.Zero, dc);
         if (lines == 0) return null;
         // Executable artwork can use straight alpha; XAML's bitmap buffer expects
         // premultiplied BGRA, as the native taskbar does. Otherwise its edges glow white.
@@ -161,7 +165,9 @@ internal static class ShellIcons
             straight |= pixels[i] > a || pixels[i + 1] > a || pixels[i + 2] > a;
         }
         if (!hasAlpha)
+        {
             for (int i = 3; i < pixels.Length; i += 4) pixels[i] = 255;
+        }
         else if (straight)
         {
             for (int i = 0; i < pixels.Length; i += 4)

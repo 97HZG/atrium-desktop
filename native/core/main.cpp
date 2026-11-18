@@ -37,6 +37,7 @@
 #include "ui/stage_manager.h"
 #include "ui/start_menu.h"
 #include "ui/tray_panel.h"
+#include "posted.h"
 
 #include <windows.h>
 #include <dbt.h>
@@ -81,26 +82,26 @@ constexpr UINT kStatusMs = 3000;
 constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
-    kCmdSettings = 100,
-    kCmdToggle,
-    kCmdExit,
-    kCmdNewWindow,
-    kCmdPin,
-    kCmdUnpin,
-    kCmdClose,
-    kCmdOpenLocation,
-    kCmdDesktop,
-    kCmdTaskManager,
-    kCmdTerminate,
-    kCmdTerminateConfirm,
-    kCmdWidgets,
-    kCmdStage,
-    kCmdWidgetsModule,
-    kCmdStageAdd,
-    kCmdRunAs,
-    kCmdProperties,
-    kCmdRecent = 2000 // + index into the recent list (its length is bounded)
+    CmdSettings = 100,
+    CmdToggle,
+    CmdExit,
+    CmdNewWindow,
+    CmdPin,
+    CmdUnpin,
+    CmdClose,
+    CmdOpenLocation,
+    CmdDesktop,
+    CmdTaskManager,
+    CmdTerminate,
+    CmdTerminateConfirm,
+    CmdWidgets,
+    CmdStage,
+    CmdWidgetsModule,
+    CmdStageAdd,
+    CmdRunAs,
+    CmdProperties,
 };
+constexpr int kCmdRecent = 2000; // + index into the recent list (its length is bounded)
 
 struct App {
     HINSTANCE instance = nullptr;
@@ -170,11 +171,11 @@ void OnImeSample(ImeWatcher::Sample& sample)
 {
     if (!g_app.imeOn || !g_app.imeWatcher)
         return;
-    ImeStatus status = std::move(sample.status);
+    ImeStatus status = sample.status;
     status.caps = status.upper = g_app.imeWatcher->CapsLock();
     const bool changed = g_app.imeWatch.Update(sample.foreground, status);
-    const ImeStatus& shown = g_app.imeWatch.state();
-    if (shown.empty())
+    const ImeStatus& shown = g_app.imeWatch.State();
+    if (shown.Empty())
         return;
     const std::wstring glyph = ImeGlyph(shown);
     ForBars([&](Bar& bar) { bar.SetIme(glyph); });
@@ -417,30 +418,30 @@ MenuPlace BarMenuPlace(bool centered)
 
 void ShowMenu(POINT pt)
 {
-    std::vector<MenuEntry> entries = {
-        {Tr(L"Appearance Settings…"), kCmdSettings}, {}, {Tr(L"Show Desktop"), kCmdDesktop}, {Tr(L"Task Manager"), kCmdTaskManager}};
+    std::vector<MenuEntry> entries = {{Tr(L"Appearance Settings…"), CmdSettings}, {}, {Tr(L"Show Desktop"), CmdDesktop}, {Tr(L"Task Manager"), CmdTaskManager}};
     if (g_app.widgetsOn)
-        entries.push_back({Tr(L"Add Widgets…"), kCmdWidgets});
+        entries.push_back({Tr(L"Add Widgets…"), CmdWidgets});
     // The three modules, each on its own.
     entries.push_back({});
-    entries.push_back({Tr(L"Taskbar"), kCmdToggle, g_app.barOn.value_or(true)});
-    entries.push_back({Tr(L"Desktop Widgets"), kCmdWidgetsModule, g_app.widgetsOn});
-    entries.push_back({Tr(L"Stage Manager"), kCmdStage, g_app.stage->Enabled()});
+    entries.push_back({Tr(L"Taskbar"), CmdToggle, g_app.barOn.value_or(true)});
+    entries.push_back({Tr(L"Desktop Widgets"), CmdWidgetsModule, g_app.widgetsOn});
+    entries.push_back({Tr(L"Stage Manager"), CmdStage, g_app.stage->Enabled()});
     entries.push_back({});
-    entries.push_back({Tr(L"Quit Atrium"), kCmdExit});
+    entries.push_back({Tr(L"Quit Atrium"), CmdExit});
     g_app.menu->Open(std::move(entries), pt, BarMenuPlace(false), [](int cmd) {
         switch (cmd) {
-        case kCmdSettings: OpenSettings(); break;
-        case kCmdWidgets: OpenSettings(L"widgets"); break;
-        case kCmdToggle: SetBarModule(!g_app.barOn.value_or(true)); break;
-        case kCmdWidgetsModule: SetWidgetsModule(!g_app.widgetsOn); break;
-        case kCmdDesktop: SendWinShortcut('D'); break;
-        case kCmdStage: {
+        case CmdSettings: OpenSettings(); break;
+        case CmdWidgets: OpenSettings(L"widgets"); break;
+        case CmdToggle: SetBarModule(!g_app.barOn.value_or(true)); break;
+        case CmdWidgetsModule: SetWidgetsModule(!g_app.widgetsOn); break;
+        case CmdDesktop: SendWinShortcut('D'); break;
+        case CmdStage: {
             SetStageManager(!g_app.stage->Enabled());
             break;
         }
-        case kCmdTaskManager: ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL); break;
-        case kCmdExit: DestroyWindow(g_app.host); break;
+        case CmdTaskManager: ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL); break;
+        case CmdExit: DestroyWindow(g_app.host); break;
+        default: break;
         }
     });
 }
@@ -474,7 +475,7 @@ const TrayIcon* TrayIconOf(const Notice& n)
             stem.resize(stem.size() - 4);
         std::wstring tip = lower(TrayModel::Title(icon.tip));
         for (const std::wstring& name : names) {
-            bool tipNames = tip.rfind(name, 0) == 0 && (tip.size() == name.size() || !iswalnum(tip[name.size()]));
+            bool tipNames = tip.starts_with(name) && (tip.size() == name.size() || !iswalnum(tip[name.size()]));
             if ((!icon.exe.empty() && stem == name) || tipNames)
                 return &icon;
         }
@@ -595,10 +596,10 @@ void ApplySettings(const Settings& s)
     g_app.imeOn = s.imeStatus;
     if (g_app.imeOn && !g_app.imeWatcher) {
         g_app.imeWatcher = std::make_unique<ImeWatcher>(g_app.host, WM_IME_STATE);
-        g_app.imeWatch.reset();
+        g_app.imeWatch.Reset();
     } else if (!g_app.imeOn && g_app.imeWatcher) {
         g_app.imeWatcher.reset();
-        g_app.imeWatch.reset();
+        g_app.imeWatch.Reset();
         ForBars([](Bar& bar) { bar.SetIme(L""); });
     }
     g_app.desktopDisplay = s.desktopDisplay;
@@ -815,19 +816,16 @@ bool IsWorkspaceFile(const std::wstring& path)
     if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash))
         return false;
     const wchar_t* extension = path.c_str() + dot;
-    static const wchar_t* const kinds[] = {L".code-workspace",  L".sln",      L".slnx",        L".vcxproj", L".uvprojx", L".workspace",
-                                           L".sublime-project", L".uproject", L".xcworkspace", L".pro",     L".csproj"};
-    for (const wchar_t* kind : kinds)
-        if (_wcsicmp(extension, kind) == 0)
-            return true;
-    return false;
+    static const wchar_t* const kProjectKinds[] = {L".code-workspace",  L".sln",      L".slnx",        L".vcxproj", L".uvprojx", L".workspace",
+                                                   L".sublime-project", L".uproject", L".xcworkspace", L".pro",     L".csproj"};
+    return std::ranges::any_of(kProjectKinds, [&](const wchar_t* kind) { return _wcsicmp(extension, kind) == 0; });
 }
 
 void ShowItemMenu(const std::wstring& key, POINT pt)
 {
     const ULONGLONG startedAt = GetTickCount64();
     std::vector<TaskItem> items = ActiveBar().Items();
-    auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
+    auto it = std::ranges::find_if(items, [&](const TaskItem& t) { return t.key == key; });
     if (it == items.end())
         return;
     PinnedApp pin = g_app.tasks->PinFor(key);
@@ -857,11 +855,11 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
         }
         if (std::shared_ptr<const JumpListData> jump = LoadJumpList(appId, pin.path)) {
             if (!jump->pinned.empty())
-                sections.push_back({L"Pinned", jump->pinned});
+                sections.emplace_back(L"Pinned", jump->pinned);
             for (const JumpCategory& category : jump->categories)
-                sections.push_back({category.title, category.items});
+                sections.emplace_back(category.title, category.items);
             if (!jump->recent.empty())
-                sections.push_back({L"Recent", jump->recent});
+                sections.emplace_back(L"Recent", jump->recent);
         } else {
             // No jump list file: the shell's own document lists are the next best thing.
             std::vector<ShellRecent> places, workspaces, files;
@@ -897,20 +895,20 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                 return items;
             };
             if (!places.empty())
-                sections.push_back({L"Folders", toItems(places)});
+                sections.emplace_back(L"Folders", toItems(places));
             if (!workspaces.empty())
-                sections.push_back({L"Workspaces", toItems(workspaces)});
+                sections.emplace_back(L"Workspaces", toItems(workspaces));
             if (!files.empty())
-                sections.push_back({L"Recent", toItems(files)});
+                sections.emplace_back(L"Recent", toItems(files));
         }
     }
 
     std::vector<MenuEntry> entries = {{it->name, 0, false, false, true}, {L"", 0}};
-    entries.push_back({it->windows.empty() || !it->multipleWindows ? Tr(L"Open") : Tr(L"Open New Window"), kCmdNewWindow});
+    entries.push_back({it->windows.empty() || !it->multipleWindows ? Tr(L"Open") : Tr(L"Open New Window"), CmdNewWindow});
     // Always offered for managed apps: with Stage on it adds to the current group; with Stage off
     // it opens the app. Excluded apps keep only their ordinary Open row.
     if (g_app.stage && !g_app.stage->Excluded(key))
-        entries.push_back({Tr(L"Open / Add to Current Group"), kCmdStageAdd});
+        entries.push_back({Tr(L"Open / Add to Current Group"), CmdStageAdd});
     size_t command = 0;
     for (auto& [title, rows] : sections) {
         if (rows.empty())
@@ -932,29 +930,29 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
         GetTickCount64() - startedAt);
     const bool canRunAs = windowsEntries && !appPath.empty() && appPath.find(L"\\WindowsApps\\") == std::wstring::npos;
     if (canRunAs)
-        entries.push_back({Tr(L"Run as administrator"), kCmdRunAs});
+        entries.push_back({Tr(L"Run as administrator"), CmdRunAs});
     std::wstring location = g_app.tasks->FileLocation(key);
     if (!location.empty())
-        entries.push_back({Tr(L"Open File Location"), kCmdOpenLocation});
-    entries.push_back({it->pinned ? Tr(L"Unpin from Atrium") : Tr(L"Pin to Atrium"), int(it->pinned ? kCmdUnpin : kCmdPin)});
+        entries.push_back({Tr(L"Open File Location"), CmdOpenLocation});
+    entries.push_back({it->pinned ? Tr(L"Unpin from Atrium") : Tr(L"Pin to Atrium"), int(it->pinned ? CmdUnpin : CmdPin)});
     if (windowsEntries && !appPath.empty())
-        entries.push_back({Tr(L"Properties"), kCmdProperties});
+        entries.push_back({Tr(L"Properties"), CmdProperties});
     if (!it->windows.empty())
-        entries.push_back({it->windows.size() > 1 ? Tr(L"Close All Windows") : Tr(L"Close Window"), kCmdClose});
-    entries.push_back({Tr(L"Close Program"), kCmdTerminate, false, !g_app.tasks->CanTerminate(key)});
+        entries.push_back({it->windows.size() > 1 ? Tr(L"Close All Windows") : Tr(L"Close Window"), CmdClose});
+    entries.push_back({Tr(L"Close Program"), CmdTerminate, false, !g_app.tasks->CanTerminate(key)});
     int pinIndex = it->pinIndex;
     auto windows = it->windows;
     std::wstring name = it->name;
     g_app.menu->Open(std::move(entries), pt, BarMenuPlace(true), [key, location, pinIndex, windows, name, pt, appPath, listed](int cmd) {
         switch (cmd) {
-        case kCmdNewWindow: g_app.tasks->Launch(key); break;
-        case kCmdStageAdd:
+        case CmdNewWindow: g_app.tasks->Launch(key); break;
+        case CmdStageAdd:
             if (g_app.stage && g_app.stage->Enabled())
                 g_app.stage->OpenInCurrentGroup(key);
             else
                 g_app.tasks->Activate(key); // no group to add to: the same row opens the app
             break;
-        case kCmdPin: {
+        case CmdPin: {
             PinnedApp pin = g_app.tasks->PinFor(key);
             g_app.server->Modify([&](Settings& s) {
                 auto pins = s.pins.value_or(std::vector<PinnedApp>{});
@@ -963,7 +961,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
             });
             break;
         }
-        case kCmdUnpin:
+        case CmdUnpin:
             g_app.server->Modify([&](Settings& s) {
                 auto pins = s.pins.value_or(std::vector<PinnedApp>{});
                 if (pinIndex >= 0 && pinIndex < int(pins.size()))
@@ -971,29 +969,29 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                 s.pins = std::move(pins);
             });
             break;
-        case kCmdClose:
+        case CmdClose:
             for (HWND window : windows)
                 TaskModel::CloseWindow(window);
             break;
-        case kCmdTerminate: {
+        case CmdTerminate: {
             // Ending the processes loses what is not saved: asked once more, in place.
             std::vector<MenuEntry> confirm = {{TrFormat(L"Force close “%s”? Unsaved content will be lost", name.c_str()), 0, false, false, true},
                                               {L"", 0},
-                                              {Tr(L"Force close"), kCmdTerminateConfirm},
+                                              {Tr(L"Force close"), CmdTerminateConfirm},
                                               {Tr(L"Cancel"), 0}};
             g_app.menu->Open(std::move(confirm), pt, BarMenuPlace(true), [key](int answer) {
-                if (answer == kCmdTerminateConfirm)
+                if (answer == CmdTerminateConfirm)
                     g_app.tasks->Terminate(key);
             });
             break;
         }
-        case kCmdOpenLocation:
+        case CmdOpenLocation:
             if (PIDLIST_ABSOLUTE id = ILCreateFromPathW(location.c_str())) {
                 SHOpenFolderAndSelectItems(id, 0, nullptr, 0);
                 ILFree(id);
             }
             break;
-        case kCmdRunAs:
+        case CmdRunAs:
             if (!appPath.empty()) {
                 // Elevation is the shell's "runas" verb; no context menu is needed for it.
                 const HINSTANCE opened = ShellExecuteW(nullptr, L"runas", appPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -1001,7 +999,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                     Log(L"menu: runas '%s' failed (%ld)", appPath.c_str(), GetLastError());
             }
             break;
-        case kCmdProperties: ShowShellProperties(g_app.host, appPath); break;
+        case CmdProperties: ShowShellProperties(g_app.host, appPath); break;
         default:
             if (cmd >= kCmdRecent && size_t(cmd - kCmdRecent) < listed.size()) {
                 const JumpItem& item = listed[size_t(cmd - kCmdRecent)];
@@ -1032,7 +1030,7 @@ void ShowOverflow(const std::vector<std::wstring>& keys, RECT anchor)
     std::vector<MenuEntry> entries;
     const int px = int(std::lround(16 * PopupScale(anchor)));
     for (size_t i = 0; i < keys.size(); ++i) {
-        auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == keys[i]; });
+        auto it = std::ranges::find_if(items, [&](const TaskItem& t) { return t.key == keys[i]; });
         std::wstring name = it != items.end() ? it->name : keys[i];
         if (it != items.end() && !it->windows.empty())
             name += it->windows.size() > 1 ? L"  \u00B7 " + std::to_wstring(it->windows.size()) : L"  \u00B7";
@@ -1051,7 +1049,7 @@ void ShowOverflow(const std::vector<std::wstring>& keys, RECT anchor)
 void Reorder(const std::wstring& key, int to)
 {
     std::vector<TaskItem> items = ActiveBar().Items();
-    auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
+    auto it = std::ranges::find_if(items, [&](const TaskItem& t) { return t.key == key; });
     if (it == items.end())
         return;
     TaskItem dragged = *it;
@@ -1131,8 +1129,8 @@ void ConfigureBar(Bar& bar)
         if (g_app.imeWatcher)
             g_app.imeWatcher->Toggle();
     };
-    if (!g_app.imeWatch.state().empty())
-        bar.SetIme(ImeGlyph(g_app.imeWatch.state()));
+    if (!g_app.imeWatch.State().Empty())
+        bar.SetIme(ImeGlyph(g_app.imeWatch.State()));
     bar.keepShown = [&bar] {
         return g_app.activeBar == &bar && (g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible() ||
                                            g_app.notes->CenterVisible() || g_app.menu->Visible());
@@ -1186,7 +1184,7 @@ std::vector<TaskItem> BarItems()
             continue;
         exe = AppExecutable(exe);
         CharLowerBuffW(exe.data(), DWORD(exe.size()));
-        t.attention = std::find(flashing.begin(), flashing.end(), exe) != flashing.end();
+        t.attention = std::ranges::find(flashing, exe) != flashing.end();
     }
     return items;
 }
@@ -1216,8 +1214,7 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
     });
     if (settings.bar && settings.dockDisplayMode == L"all")
         for (const DisplayInfo& display : displays) {
-            if (display.primary ||
-                std::any_of(g_app.secondaryBars.begin(), g_app.secondaryBars.end(), [&](const auto& bar) { return bar->DisplayOverride() == display.id; }))
+            if (display.primary || std::ranges::any_of(g_app.secondaryBars, [&](const auto& bar) { return bar->DisplayOverride() == display.id; }))
                 continue;
             auto bar = std::make_unique<Bar>(g_app.instance, g_app.capturable, display.id);
             ConfigureBar(*bar);
@@ -1278,12 +1275,13 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         case NIN_SELECT:
         case NIN_KEYSELECT:
         case WM_LBUTTONDBLCLK: OpenSettings(); return 0;
+        default: break;
         }
         return 0;
     case WM_OPEN_SETTINGS: OpenSettings(); return 0;
     case WM_IME_STATE: {
         // A finished read from the watcher's thread (see ImeWatcher::Run).
-        std::unique_ptr<ImeWatcher::Sample> sample(reinterpret_cast<ImeWatcher::Sample*>(l));
+        auto sample = TakePosted<ImeWatcher::Sample>(l);
         if (sample)
             OnImeSample(*sample);
         return 0;
@@ -1323,20 +1321,19 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_NOTICE:
-        if (auto* n = reinterpret_cast<Notice*>(l)) {
+        if (auto n = TakePosted<Notice>(l)) {
             // Only from sources still turned on (a notice may arrive just after).
-            const Messenger m = MessengerOfNotice(n->source, n->app, n->appId);
+            const Messenger messenger = MessengerOfNotice(n->source, n->app, n->appId);
             bool on = n->source == L"atrium" ? g_app.barOn.value_or(true) :
                       n->source == L"wechat" ? bool(g_app.wechat) :
                       n->source == L"feishu" ? bool(g_app.feishu) :
                                                bool(g_app.listener);
-            on = on && (m != Messenger::None ? MessengerOn(m) : n->source != L"windows" || g_app.displaySettings.notifyListener);
+            on = on && (messenger != Messenger::None ? MessengerOn(messenger) : n->source != L"windows" || g_app.displaySettings.notifyListener);
             if (g_app.notes && on) {
                 g_app.notes->Post(*n);
                 if (n->unread)
-                    g_app.alerts.Noticed(m, GetTickCount64()); // its flash needs no plain card
+                    g_app.alerts.Noticed(messenger, GetTickCount64()); // its flash needs no plain card
             }
-            delete n;
         }
         return 0;
     case WM_CATALOG:
@@ -1345,7 +1342,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_VOLUME: UpdateStatus(); return 0;
     case WM_STATUS: {
-        std::unique_ptr<SystemStatus> status(reinterpret_cast<SystemStatus*>(l));
+        auto status = TakePosted<SystemStatus>(l);
         status->brightness = g_app.brightness;
         g_app.lastStatus = *status;
         ForBars([&](Bar& bar) { bar.SetStatus(*status); });
@@ -1444,10 +1441,10 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             // A tray icon began or stopped flashing: the bar lights or dims its app.
             static std::vector<std::wstring> lastFlashing;
             std::vector<std::wstring> flashing = g_app.tray ? g_app.tray->Flashing() : std::vector<std::wstring>{};
-            std::sort(flashing.begin(), flashing.end());
+            std::ranges::sort(flashing);
             if (flashing != lastFlashing && g_app.tasks) {
                 for (const std::wstring& exe : flashing)
-                    if (!std::binary_search(lastFlashing.begin(), lastFlashing.end(), exe))
+                    if (!std::ranges::binary_search(lastFlashing, exe))
                         MessengerFlashed(exe); // QQ, WeChat in the tray: the icon began to flash
                 lastFlashing = std::move(flashing);
                 const auto items = BarItems();
@@ -1481,9 +1478,9 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (w == kMessengerTimer) {
             KillTimer(h, kMessengerTimer);
             bool waiting = false;
-            for (Messenger m : g_app.alerts.Due(GetTickCount64(), &waiting)) {
-                Log(L"notify: %s flashed with no card: a plain one", InfoOf(m).key);
-                PostMessengerCard(m);
+            for (Messenger due : g_app.alerts.Due(GetTickCount64(), &waiting)) {
+                Log(L"notify: %s flashed with no card: a plain one", InfoOf(due).key);
+                PostMessengerCard(due);
             }
             if (waiting)
                 SetTimer(h, kMessengerTimer, 500, nullptr);
@@ -1589,6 +1586,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         RemoveTrayIcon();
         PostQuitMessage(0);
         return 0;
+    default: break;
     }
     return DefWindowProcW(h, m, w, l);
 }
@@ -1609,7 +1607,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     for (int i = 1; startupArguments && i + 1 < argumentCount; ++i)
         if (wcscmp(startupArguments[i], L"--ready-event") == 0 && std::wstring_view(startupArguments[i + 1]).starts_with(L"Local\\Atrium.Update.Core."))
             g_readyEvent = startupArguments[i + 1];
-    LocalFree(startupArguments);
+    LocalFree(static_cast<HLOCAL>(startupArguments));
     if (wcscmp(cmdLine, L"--uninstall") == 0) {
         if (MessageBoxW(nullptr, Tr(L"Uninstall Atrium? Your personal settings and desktop widget layout will be kept."), L"Atrium",
                         MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND) != IDYES)
@@ -1832,7 +1830,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.start->onPin = [](const PinnedApp& pin) {
         g_app.server->Modify([&](Settings& s) {
             auto pins = s.pins.value_or(std::vector<PinnedApp>{});
-            if (std::find(pins.begin(), pins.end(), pin) == pins.end() && pins.size() < 64)
+            if (std::ranges::find(pins, pin) == pins.end() && pins.size() < 64)
                 pins.push_back(pin);
             s.pins = std::move(pins);
         });

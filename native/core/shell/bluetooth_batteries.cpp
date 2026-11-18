@@ -31,8 +31,6 @@ struct Container {
     bool keyboard = false, mouse = false;
 };
 
-bool StartsWith(const std::wstring& s, const wchar_t* prefix) { return s.starts_with(prefix); }
-
 template<typename T> bool Property(HDEVINFO set, SP_DEVINFO_DATA& d, const DEVPROPKEY& key, T& out)
 {
     DEVPROPTYPE type = 0;
@@ -56,18 +54,18 @@ std::wstring Text(HDEVINFO set, SP_DEVINFO_DATA& d, const DEVPROPKEY& key)
 BluetoothKind KindOf(const Container& c)
 {
     const std::wstring& k = c.category;
-    if (StartsWith(k, L"Communication.Headset") || StartsWith(k, L"Multimedia.Headphone") || StartsWith(k, L"Multimedia.Speaker") ||
+    if (k.starts_with(L"Communication.Headset") || k.starts_with(L"Multimedia.Headphone") || k.starts_with(L"Multimedia.Speaker") ||
         k.find(L"Audio") != std::wstring::npos)
         return BluetoothKind::Headset;
-    if (StartsWith(k, L"Input.Gaming"))
+    if (k.starts_with(L"Input.Gaming"))
         return BluetoothKind::Gamepad;
-    if (StartsWith(k, L"Input.Pen"))
+    if (k.starts_with(L"Input.Pen"))
         return BluetoothKind::Pen;
-    if (StartsWith(k, L"Communication.Phone"))
+    if (k.starts_with(L"Communication.Phone"))
         return BluetoothKind::Phone;
-    if (StartsWith(k, L"Input.Keyboard") || c.keyboard)
+    if (k.starts_with(L"Input.Keyboard") || c.keyboard)
         return BluetoothKind::Keyboard;
-    if (StartsWith(k, L"Input.Mouse") || StartsWith(k, L"Input.Touchpad") || c.mouse)
+    if (k.starts_with(L"Input.Mouse") || k.starts_with(L"Input.Touchpad") || c.mouse)
         return BluetoothKind::Mouse;
     return BluetoothKind::Other;
 }
@@ -90,8 +88,8 @@ std::vector<BluetoothBattery> ReadBluetoothBatteries()
         if (!Property(set, d, DEVPKEY_Device_ContainerId, container) || !SetupDiGetDeviceInstanceIdW(set, &d, id, MAX_DEVICE_ID_LEN, nullptr))
             continue;
         const std::wstring instance = id;
-        const bool bluetooth = StartsWith(instance, L"BTHENUM\\") || StartsWith(instance, L"BTHLE\\") || StartsWith(instance, L"BTHLEDEVICE\\");
-        if (!bluetooth && !StartsWith(instance, L"HID\\"))
+        const bool bluetooth = instance.starts_with(L"BTHENUM\\") || instance.starts_with(L"BTHLE\\") || instance.starts_with(L"BTHLEDEVICE\\");
+        if (!bluetooth && !instance.starts_with(L"HID\\"))
             continue;
         Container& c = containers[container];
         if (bluetooth) {
@@ -99,7 +97,7 @@ std::vector<BluetoothBattery> ReadBluetoothBatteries()
             if (Property(set, d, kBatteryLevel, level) && level <= 100)
                 c.percent = std::max(c.percent, int(level));
         }
-        if (StartsWith(instance, L"BTHENUM\\DEV_") || StartsWith(instance, L"BTHLE\\DEV_")) {
+        if (instance.starts_with(L"BTHENUM\\DEV_") || instance.starts_with(L"BTHLE\\DEV_")) {
             c.device = true;
             DEVPROP_BOOLEAN on = DEVPROP_FALSE;
             c.connected = Property(set, d, kConnected, on) && on == DEVPROP_TRUE;
@@ -115,7 +113,7 @@ std::vector<BluetoothBattery> ReadBluetoothBatteries()
     for (auto& [guid, c] : containers)
         if (c.device && c.connected && c.percent >= 0 && !c.name.empty())
             out.push_back({c.name, KindOf(c), c.percent});
-    std::sort(out.begin(), out.end(), [](const BluetoothBattery& a, const BluetoothBattery& b) { return a.name < b.name; });
+    std::ranges::sort(out, [](const BluetoothBattery& a, const BluetoothBattery& b) { return a.name < b.name; });
     return out;
 }
 

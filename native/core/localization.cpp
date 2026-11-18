@@ -76,7 +76,7 @@ std::filesystem::path LocaleDir()
     // The portable build has <exe>/locales; a development build from
     // native/build/... finds the repository's locales by walking up.
     for (int i = 0; i < 8 && !dir.empty(); ++i) {
-        const std::filesystem::path candidate = dir / L"locales";
+        std::filesystem::path candidate = dir / L"locales";
         std::error_code error;
         if (std::filesystem::exists(candidate / L"manifest.json", error))
             return candidate;
@@ -213,7 +213,7 @@ bool SetLanguage(const std::wstring& setting)
     return changed;
 }
 
-bool LanguageIsEnglish() { return g_active.load()->tag.rfind(L"zh", 0) != 0; }
+bool LanguageIsEnglish() { return !g_active.load()->tag.starts_with(L"zh"); }
 
 std::wstring LanguageTag() { return g_active.load()->tag; }
 

@@ -47,7 +47,7 @@ private:
     void Paint(Canvas& c);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
     void Place();
-    std::wstring HitAt(POINT client) const;
+    std::wstring HitAt(POINT pt) const;
     void Activate(const std::wstring& id, bool right);
     float Hover(Canvas& c, const std::wstring& id, bool on);
     D2D1_SIZE_F Size() const; // content, DIP

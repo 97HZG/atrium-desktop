@@ -38,7 +38,7 @@ public sealed partial class MainWindow
     private const double StageBarH = 34, StageBarRoom = 56, StageWinGap = 30;
 
     private List<int> _stageFront = [0];
-    private readonly List<List<int>> _stageStrip = [new() { 1, 2 }, new() { 3 }, new() { 4 }];
+    private readonly List<List<int>> _stageStrip = [[1, 2], [3], [4]];
     private readonly Dictionary<string, Grid> _stageCards = [];
     private readonly Dictionary<string, Visual> _stageTilts = [];
     // The apps' windows and icons as pictures (assets/stage, made by --export-stage-art from the
@@ -89,7 +89,9 @@ public sealed partial class MainWindow
                     await image.SetSourceAsync(stream);
                     _stageArt[name] = image;
                 }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException or FileNotFoundException or System.Runtime.InteropServices.COMException) { }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or FileNotFoundException
+                    or System.Runtime.InteropServices.COMException)
+                { }
             }
         }
     }
@@ -120,14 +122,15 @@ public sealed partial class MainWindow
             StagePreview.PointerMoved += OnStagePointerMoved;
             StagePreview.PointerExited += (_, _) => StageHideSoon();
         }
-        double W = Math.Max(StagePreview.ActualWidth, 420), H = Math.Max(StagePreview.ActualHeight, 300);
-        StageCanvas.Width = W;
-        StageCanvas.Height = H;
+        double w = Math.Max(StagePreview.ActualWidth, 420), h = Math.Max(StagePreview.ActualHeight, 300);
+        StageCanvas.Width = w;
+        StageCanvas.Height = h;
         bool on = CurrentSettings.StageManager;
         string side = CurrentSettings.StageOnRight ? Loc.T("Right") : Loc.T("Left");
-        StageCaption.Text = !on ? Loc.T("Stage Manager is off: windows stack on the desktop as usual")
-            : CurrentSettings.StageAutoHide ? Loc.F("Rest the pointer at the preview's {0} edge to slide the cards out; click to bring one forward, Shift-click to add it to this group", side)
-            : Loc.F("Click a card on the {0} to bring it forward; Shift-click to add it to the current group", side);
+        string format = CurrentSettings.StageAutoHide
+            ? "Rest the pointer at the preview's {0} edge to slide the cards out; click to bring one forward, Shift-click to add it to this group"
+            : "Click a card on the {0} to bring it forward; Shift-click to add it to the current group";
+        StageCaption.Text = !on ? Loc.T("Stage Manager is off: windows stack on the desktop as usual") : Loc.F(format, side);
         StageReplay.IsEnabled = on;
 
         StageCanvas.Children.Clear();
@@ -142,11 +145,17 @@ public sealed partial class MainWindow
         _stageBuilt = true;
 
         // The bar along the bottom, the apps on it.
-        var bar = StageBarTile(W, H);
+        var bar = StageBarTile(w, h);
         _stageBarGlass = new Image { Stretch = Stretch.Fill };
         _stageBar = new Grid { Width = bar.W + 2 * GlassSpec.InsetDip, Height = bar.H + 2 * GlassSpec.InsetDip, IsHitTestVisible = false };
         _stageBar.Children.Add(_stageBarGlass);
-        var icons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 9, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var icons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 9,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
         for (int a = 0; a < StageApps.Length; a++) icons.Children.Add(StageIcon(a, 22));
         _stageBar.Children.Add(icons);
         Canvas.SetLeft(_stageBar, bar.X - GlassSpec.InsetDip);
@@ -155,12 +164,12 @@ public sealed partial class MainWindow
 
         if (on)
         {
-            _stageCenter = StageCenter(_stageFront, W, H);
+            _stageCenter = StageCenter(_stageFront, w, h);
             StageCanvas.Children.Add(_stageCenter);
-            _stageLayer = new Canvas { Width = W, Height = H };
+            _stageLayer = new Canvas { Width = w, Height = h };
             ElementCompositionPreview.SetIsTranslationEnabled(_stageLayer, true);
             for (int i = 0; i < _stageStrip.Count; i++)
-                _stageLayer.Children.Add(StageCard(_stageStrip[i], StageBox(i, _stageStrip.Count, W, H)));
+                _stageLayer.Children.Add(StageCard(_stageStrip[i], StageBox(i, _stageStrip.Count, w, h)));
             StageCanvas.Children.Add(_stageLayer);
             if (animate) StageAppear(_stageCenter, 0.96f);
             if (CurrentSettings.StageAutoHide)
@@ -178,42 +187,42 @@ public sealed partial class MainWindow
         {
             // Off: every window where it was, one over the other.
             _stageLayer = null;
-            _stageCenter = StageCascade(W, H);
+            _stageCenter = StageCascade(w, h);
             StageCanvas.Children.Add(_stageCenter);
             if (animate) StageAppear(_stageCenter, 0.98f);
         }
-        StageRenderGlass(W, H);
+        StageRenderGlass(w, h);
     }
 
-    private GlassTile StageBarTile(double W, double H)
+    private static GlassTile StageBarTile(double width, double height)
     {
-        double w = Math.Min(W * 0.52, 480);
-        return new GlassTile((W - w) / 2, H - 10 - StageBarH, w, StageBarH, StageBarH / 2);
+        double w = Math.Min(width * 0.52, 480);
+        return new GlassTile((width - w) / 2, height - 10 - StageBarH, w, StageBarH, StageBarH / 2);
     }
 
-    private Rect StageBox(int i, int n, double W, double H)
+    private Rect StageBox(int i, int n, double w, double h)
     {
         double slot = StageBoxH + StageSlotGap, used = n * slot - StageSlotGap;
-        double top = Math.Max(16, (H - StageBarRoom - used) / 2);
-        double x = CurrentSettings.StageOnRight ? W - StageEdge - StageBoxW : StageEdge;
+        double top = Math.Max(16, (h - StageBarRoom - used) / 2);
+        double x = CurrentSettings.StageOnRight ? w - StageEdge - StageBoxW : StageEdge;
         return new Rect(x, top + i * slot, StageBoxW, StageBoxH);
     }
 
     // The room of the app in front: beside the strip, above the bar.
-    private Rect StageRoom(double W, double H)
+    private Rect StageRoom(double w, double h)
     {
         double strip = StageEdge + StageBoxW + StageWinGap;
         double left = CurrentSettings.StageOnRight ? StageWinGap : strip;
-        double right = CurrentSettings.StageOnRight ? W - strip : W - StageWinGap;
-        return new Rect(left, 22, Math.Max(40, right - left), Math.Max(40, H - StageBarRoom - 22 - 12));
+        double right = CurrentSettings.StageOnRight ? w - strip : w - StageWinGap;
+        return new Rect(left, 22, Math.Max(40, right - left), Math.Max(40, h - StageBarRoom - 22 - 12));
     }
 
     // ---- The bar's glass (the strip has none) ----
 
-    private void StageRenderGlass(double W, double H)
+    private void StageRenderGlass(double w, double h)
     {
         int photoGeneration = Photo.Generation;
-        PostTiles(StageCanvas, W, H, 1, new List<GlassTile> { StageBarTile(W, H) }, null, f =>
+        PostTiles(StageCanvas, w, h, 1, [StageBarTile(w, h)], null, f =>
         {
             _stageBarGlass?.Source = f.Overlay(0);
             Ready("stage", photoGeneration);
@@ -255,9 +264,9 @@ public sealed partial class MainWindow
     private void OnStagePointerMoved(object sender, PointerRoutedEventArgs e)
     {
         if (!CurrentSettings.StageManager || !CurrentSettings.StageAutoHide || _stageLayer == null) return;
-        double x = e.GetCurrentPoint(StageCanvas).Position.X, W = StageCanvas.Width, reach = StageEdge + StageBoxW + StageMargin;
-        bool atEdge = CurrentSettings.StageOnRight ? x >= W - 12 : x <= 12;
-        bool inStrip = CurrentSettings.StageOnRight ? x >= W - reach : x <= reach;
+        double x = e.GetCurrentPoint(StageCanvas).Position.X, w = StageCanvas.Width, reach = StageEdge + StageBoxW + StageMargin;
+        bool atEdge = CurrentSettings.StageOnRight ? x >= w - 12 : x <= 12;
+        bool inStrip = CurrentSettings.StageOnRight ? x >= w - reach : x <= reach;
         if (atEdge && !_stageOut) StageReveal(true, true);
         if (!_stageOut) return;
         if (inStrip) { _stageHideId++; _stageHidePending = false; }
@@ -418,7 +427,7 @@ public sealed partial class MainWindow
         return StageIconLive(app, size);
     }
 
-    private static FrameworkElement StageIconLive(int app, double size)
+    private static Viewbox StageIconLive(int app, double size)
     {
         var c = new Canvas { Width = 64, Height = 64 };
         void Put(UIElement e, double x, double y)
@@ -441,7 +450,13 @@ public sealed partial class MainWindow
             case 0: // 备忘录: ruled paper under a yellow band
                 {
                     Put(Plate(Vertical(Rgb(0xFFFFFF), Rgb(0xF1F1F4))), 0, 0);
-                    Put(new Border { Width = 64, Height = 21, CornerRadius = new CornerRadius(14.5, 14.5, 0, 0), Background = Vertical(Rgb(0xFFE14D), Rgb(0xFFC300)) }, 0, 0);
+                    Put(new Border
+                    {
+                        Width = 64,
+                        Height = 21,
+                        CornerRadius = new CornerRadius(14.5, 14.5, 0, 0),
+                        Background = Vertical(Rgb(0xFFE14D), Rgb(0xFFC300)),
+                    }, 0, 0);
                     Put(new Line
                     {
                         X1 = 7,
@@ -454,14 +469,36 @@ public sealed partial class MainWindow
                     }, 0, 21.5);
                     foreach (double y in new[] { 32.0, 41, 50 })
                         Put(new Rectangle { Width = 46, Height = 1.3, Fill = new SolidColorBrush(Rgb(0xD5D5DB)) }, 9, y);
-                    Put(new Rectangle { Width = 30, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = new SolidColorBrush(Rgb(0x8E8E93)), Opacity = 0.55 }, 10, 27);
-                    Put(new Rectangle { Width = 22, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = new SolidColorBrush(Rgb(0x8E8E93)), Opacity = 0.55 }, 10, 36);
+                    Put(new Rectangle
+                    {
+                        Width = 30,
+                        Height = 3,
+                        RadiusX = 1.5,
+                        RadiusY = 1.5,
+                        Fill = new SolidColorBrush(Rgb(0x8E8E93)),
+                        Opacity = 0.55,
+                    }, 10, 27);
+                    Put(new Rectangle
+                    {
+                        Width = 22,
+                        Height = 3,
+                        RadiusX = 1.5,
+                        RadiusY = 1.5,
+                        Fill = new SolidColorBrush(Rgb(0x8E8E93)),
+                        Opacity = 0.55,
+                    }, 10, 36);
                     break;
                 }
             case 1: // 邮件: a white envelope on blue
                 {
                     Put(Plate(Vertical(Rgb(0x5AC8FA), Rgb(0x1468F0))), 0, 0);
-                    Put(new Border { Width = 42, Height = 29, CornerRadius = new CornerRadius(4.5), Background = Vertical(Rgb(0xFFFFFF), Rgb(0xE9F1FF)) }, 11, 18);
+                    Put(new Border
+                    {
+                        Width = 42,
+                        Height = 29,
+                        CornerRadius = new CornerRadius(4.5),
+                        Background = Vertical(Rgb(0xFFFFFF), Rgb(0xE9F1FF)),
+                    }, 11, 18);
                     Put(new Polyline
                     {
                         Points = { new Point(12.5, 20), new Point(32, 35), new Point(51.5, 20) },
@@ -565,7 +602,7 @@ public sealed partial class MainWindow
         return StageWindowLive(app, w, h, radius);
     }
 
-    private static FrameworkElement StageWindowLive(StageApp app, double w, double h, double radius)
+    private static Viewbox StageWindowLive(StageApp app, double w, double h, double radius)
     {
         int index = Array.IndexOf(StageApps, app);
         var bg = app.Dark ? Rgb(0x1C1C1E) : Colors.White;
@@ -576,7 +613,14 @@ public sealed partial class MainWindow
         var titleBar = new Grid { Padding = new Thickness(9, 0, 10, 0), Background = new SolidColorBrush(app.Dark ? Rgb(0x2A2A2D) : Rgb(0xF6F6F8)) };
         var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         name.Children.Add(StageIconLive(index, 14));
-        name.Children.Add(new TextBlock { Text = Loc.T(app.Name), FontSize = 10, Foreground = new SolidColorBrush(faint), IsTextScaleFactorEnabled = false, VerticalAlignment = VerticalAlignment.Center });
+        name.Children.Add(new TextBlock
+        {
+            Text = Loc.T(app.Name),
+            FontSize = 10,
+            Foreground = new SolidColorBrush(faint),
+            IsTextScaleFactorEnabled = false,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
         titleBar.Children.Add(name);
         titleBar.Children.Add(new TextBlock
         {
@@ -615,7 +659,14 @@ public sealed partial class MainWindow
     };
 
     private static Border Bar(double w, double h, Color c, double r = 3) =>
-        new() { Width = w, Height = h, CornerRadius = new CornerRadius(r), Background = new SolidColorBrush(c), HorizontalAlignment = HorizontalAlignment.Left };
+        new()
+        {
+            Width = w,
+            Height = h,
+            CornerRadius = new CornerRadius(r),
+            Background = new SolidColorBrush(c),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
 
     // What each app shows under its title bar (174 DIP high).
     private static FrameworkElement StageContent(int app)
@@ -662,7 +713,12 @@ public sealed partial class MainWindow
                     var mails = new StackPanel { Spacing = 0 };
                     for (int i = 0; i < 4; i++)
                     {
-                        var row = new Grid { Padding = new Thickness(7, 6, 6, 6), ColumnSpacing = 6, Background = new SolidColorBrush(i == 0 ? Rgb(0x1E7BFF) : Colors.Transparent) };
+                        var row = new Grid
+                        {
+                            Padding = new Thickness(7, 6, 6, 6),
+                            ColumnSpacing = 6,
+                            Background = new SolidColorBrush(i == 0 ? Rgb(0x1E7BFF) : Colors.Transparent),
+                        };
                         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
                         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                         uint[] avatars = [0xFF9500, 0x34C759, 0xAF52DE, 0x5AC8FA];
@@ -689,7 +745,14 @@ public sealed partial class MainWindow
                     g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
                     for (int r = 0; r < 5; r++) g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
                     for (int col = 0; col < 7; col++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    var month = new TextBlock { Text = Loc.T("Nov"), FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Rgb(0x1C1C1E)), IsTextScaleFactorEnabled = false };
+                    var month = new TextBlock
+                    {
+                        Text = Loc.T("Nov"),
+                        FontSize = 11,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(Rgb(0x1C1C1E)),
+                        IsTextScaleFactorEnabled = false,
+                    };
                     Grid.SetColumnSpan(month, 7);
                     g.Children.Add(month);
                     for (int d = 0; d < 35; d++)
@@ -779,9 +842,9 @@ public sealed partial class MainWindow
     }
 
     // The front window of the set in front, preview DIP.
-    private Rect StageFront(int count, double W, double H)
+    private Rect StageFront(int count, double w, double h)
     {
-        var room = StageRoom(W, H);
+        var room = StageRoom(w, h);
         double step = 18, n = Math.Min(count, 3);
         double fw = Math.Min(room.Width - step * (n - 1), (room.Height - step * (n - 1)) * 1.6), fh = fw / 1.6;
         double x0 = (room.Width - fw - step * (n - 1)) / 2, y0 = (room.Height - fh - step * (n - 1)) / 2;
@@ -789,9 +852,9 @@ public sealed partial class MainWindow
     }
 
     // The set in front: its windows in the room beside the strip, the most recent in front.
-    private Grid StageCenter(List<int> set, double W, double H)
+    private Grid StageCenter(List<int> set, double width, double height)
     {
-        var room = StageRoom(W, H);
+        var room = StageRoom(width, height);
         double step = 18, n = Math.Min(set.Count, 3);
         double fw = Math.Min(room.Width - step * (n - 1), (room.Height - step * (n - 1)) * 1.6), fh = fw / 1.6;
         var grid = new Grid { Width = room.Width, Height = room.Height, IsHitTestVisible = false };
@@ -812,9 +875,9 @@ public sealed partial class MainWindow
     }
 
     // Stage Manager off: every app's window in a loose cascade.
-    private Grid StageCascade(double W, double H)
+    private Grid StageCascade(double width, double height)
     {
-        var room = new Rect(40, 22, Math.Max(40, W - 80), Math.Max(40, H - StageBarRoom - 34));
+        var room = new Rect(40, 22, Math.Max(40, width - 80), Math.Max(40, height - StageBarRoom - 34));
         int n = StageApps.Length;
         double step = 26, fw = Math.Min(room.Width - step * (n - 1), (room.Height - 12 * (n - 1)) * 1.6), fh = fw / 1.6;
         var grid = new Grid { Width = room.Width, Height = room.Height, IsHitTestVisible = false };
@@ -838,7 +901,7 @@ public sealed partial class MainWindow
     private void StagePick(List<int> picked, bool add)
     {
         if (!CurrentSettings.StageManager || !_stageBuilt || _stageLayer == null) return;
-        double W = StageCanvas.Width, H = StageCanvas.Height;
+        double w = StageCanvas.Width, h = StageCanvas.Height;
         var oldFront = _stageFront;
         int at = _stageStrip.IndexOf(picked);
         if (at < 0) return;
@@ -859,11 +922,11 @@ public sealed partial class MainWindow
         // tree that is ready (none of their first frames goes to layout).
         var go = new List<Action>();
         var oldCenter = _stageCenter;
-        _stageCenter = StageCenter(_stageFront, W, H);
+        _stageCenter = StageCenter(_stageFront, w, h);
         StageCanvas.Children.Insert(Math.Min(1, StageCanvas.Children.Count), _stageCenter);
         ElementCompositionPreview.GetElementVisual(_stageCenter).Opacity = 0;
-        var room = StageRoom(W, H);
-        var front = StageFront(_stageFront.Count, W, H);
+        var room = StageRoom(w, h);
+        var front = StageFront(_stageFront.Count, w, h);
         string oldKey = StageKey(oldFront);
         if (oldCenter != null)
         {
@@ -873,8 +936,8 @@ public sealed partial class MainWindow
             }
             else
             {
-                var from = StageFront(oldFront.Count, W, H);
-                var to = StageBox(0, _stageStrip.Count, W, H);
+                var from = StageFront(oldFront.Count, w, h);
+                var to = StageBox(0, _stageStrip.Count, w, h);
                 double fw = Math.Min(to.Width, to.Height * 1.6);
                 float k = (float)(fw / from.Width);
                 var pivot = new Vector3((float)(from.X + from.Width / 2 - room.X), (float)(from.Y + from.Height / 2 - room.Y), 0);
@@ -890,7 +953,8 @@ public sealed partial class MainWindow
                     inner.CenterPoint = pivot;
                     var turn = inner.Compositor.CreateScalarKeyFrameAnimation();
                     turn.Duration = TimeSpan.FromMilliseconds(460);
-                    turn.InsertKeyFrame(1, (float)(StageSide * StageTilt), inner.Compositor.CreateCubicBezierEasingFunction(new Vector2(0.65f, 0f), new Vector2(0.35f, 1f)));
+                    turn.InsertKeyFrame(1, (float)(StageSide * StageTilt),
+                        inner.Compositor.CreateCubicBezierEasingFunction(new Vector2(0.65f, 0f), new Vector2(0.35f, 1f)));
                     go.Add(() => inner.StartAnimation("RotationAngleInDegrees", turn));
                 }
                 go.Add(() => StageFly(oldCenter, pivot, k,
@@ -922,7 +986,7 @@ public sealed partial class MainWindow
         for (int i = 0; i < _stageStrip.Count; i++)
         {
             string key = StageKey(_stageStrip[i]);
-            var box = StageBox(i, _stageStrip.Count, W, H);
+            var box = StageBox(i, _stageStrip.Count, w, h);
             if (_stageCards.TryGetValue(key, out var card))
             {
                 double fromY = Canvas.GetTop(card), toY = box.Y - StageMargin;

@@ -16,7 +16,7 @@ using Windows.UI;
 
 namespace Atrium.Settings;
 
-public sealed partial class MainWindow : Window
+public sealed partial class MainWindow : Window, IDisposable
 {
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
     private delegate IntPtr SubclassProc(IntPtr hwnd, uint message, UIntPtr wparam, IntPtr lparam, UIntPtr id, UIntPtr data);
@@ -30,7 +30,7 @@ public sealed partial class MainWindow : Window
     private sealed record SliderDef(string Group, string Title, double Min, double Max, double Step, string Unit,
         Func<BarSettings, double> Get, Action<BarSettings, double> Set, bool Material);
 
-    private SliderDef[] Sliders =>
+    private static SliderDef[] Sliders =>
     [
         new("clarity", Loc.T("Transparency"), 0, 100, 1, "%",
             s => s.Transparency * 100, (s, v) => s.Transparency = v / 100, true),
@@ -72,7 +72,8 @@ public sealed partial class MainWindow : Window
 
     private static string[] PageTitles =>
     [
-        Loc.T("Material"), Loc.T("Shape"), Loc.T("Taskbar"), Loc.T("Notifications"), Loc.T("Widgets"), Loc.T("Stage Manager"), Loc.T("Displays"), Loc.T("System"), Loc.T("Design language"), Loc.T("About"),
+        Loc.T("Material"), Loc.T("Shape"), Loc.T("Taskbar"), Loc.T("Notifications"), Loc.T("Widgets"),
+        Loc.T("Stage Manager"), Loc.T("Displays"), Loc.T("System"), Loc.T("Design language"), Loc.T("About"),
         Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), Loc.T("Input method"), // the bar's parts, listed under it
     ];
     private readonly CoreClient _client = new();
@@ -149,15 +150,12 @@ public sealed partial class MainWindow : Window
         SetWindowSubclass(hwnd, _updateMessage, 1, UIntPtr.Zero);
         Closed += (_, _) =>
         {
-            _client.Dispose();
+            Dispose();
             RemoveWindowSubclass(hwnd, _updateMessage, 1);
             _updateCheck?.Cancel();
             _updatesClosed = true;
             _downloadTimer?.Stop();
             _reconnectTimer?.Stop();
-            _coreProcess?.Dispose();
-            _widgetWatcher?.Dispose();
-            _settingsWatcher?.Dispose();
             StopDesignAnimations();
             _renderWorker?.Stop();
             _swatchWorker?.Stop();
@@ -168,10 +166,16 @@ public sealed partial class MainWindow : Window
             StopModules();
         };
 
-        _mains = new FrameworkElement[] { MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainStage, MainDisplays, MainSystem, DesignStack, MainAbout,
-                                          MainStart, MainTray, MainStatus, MainClock, MainIme };
-        _sides = new FrameworkElement?[] { SideMaterial, SideShape, SideDock, SideNotify, SideWidgets, SideStage, null, null, null, null,
-                                           SideStart, SideTray, SideStatus, SideClock, SideIme };
+        _mains =
+        [
+            MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainStage, MainDisplays, MainSystem, DesignStack, MainAbout,
+            MainStart, MainTray, MainStatus, MainClock, MainIme,
+        ];
+        _sides =
+        [
+            SideMaterial, SideShape, SideDock, SideNotify, SideWidgets, SideStage, null, null, null, null,
+            SideStart, SideTray, SideStatus, SideClock, SideIme,
+        ];
         InitDisplays();
         LoupeSwitch.IsOn = true;
         BuildRows();
@@ -232,6 +236,14 @@ public sealed partial class MainWindow : Window
         _client.Dispose();
     }
 
+    public void Dispose()
+    {
+        _client.Dispose();
+        _coreProcess?.Dispose();
+        _widgetWatcher?.Dispose();
+        _settingsWatcher?.Dispose();
+    }
+
     // ---- Pages ----
 
     // The navigation's items name their pages (Tag): the bar's parts sit under it, numbered after the others.
@@ -242,7 +254,7 @@ public sealed partial class MainWindow : Window
 
     private void SelectPage(int page)
     {
-        foreach (var item in Nav.Items)
+        foreach (object? item in Nav.Items)
             if (item is ListViewItem { Tag: string tag } li && tag == page.ToString()) { Nav.SelectedItem = li; return; }
     }
 
@@ -723,7 +735,9 @@ public sealed partial class MainWindow : Window
         if (!_coreChanging)
         {
             StatusMessage.Text = connected ? Loc.T("Running") : _client.ConnectionError ??
-            (_coreProcess != null && !_coreProcess.HasExited ? Loc.T("The core is still running; the settings connection closed") : Loc.T("Closed; Windows' taskbar is back"));
+                (_coreProcess != null && !_coreProcess.HasExited
+                    ? Loc.T("The core is still running; the settings connection closed")
+                    : Loc.T("Closed; Windows' taskbar is back"));
         }
     }
 
@@ -822,9 +836,9 @@ public sealed partial class MainWindow : Window
             NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
             EnableRaisingEvents = true,
         };
-        void changed(object _1, FileSystemEventArgs _2) => DispatcherQueue.TryEnqueue(ReloadExternal);
-        _settingsWatcher.Changed += changed;
-        _settingsWatcher.Created += changed;
+        void OnChanged(object _1, FileSystemEventArgs _2) => DispatcherQueue.TryEnqueue(ReloadExternal);
+        _settingsWatcher.Changed += OnChanged;
+        _settingsWatcher.Created += OnChanged;
         _settingsWatcher.Renamed += (_, _) => DispatcherQueue.TryEnqueue(ReloadExternal);
     }
 
@@ -858,7 +872,15 @@ public sealed partial class MainWindow : Window
         foreach (var (d, card) in _rows)
             card.SetValue(d.Get(CurrentSettings));
         (CurrentSettings.Preset switch { "liquid" => PresetLiquid, "frosted" => PresetFrosted, _ => PresetCustom }).IsChecked = true;
-        (Photo.Selected switch { "wallpaper" => BgWallpaper, "paper" => BgPaper, "geometry" => BgGeometry, "layers" => BgLayers, _ => BgSpecimen }).IsChecked = true;
+        var bg = Photo.Selected switch
+        {
+            "wallpaper" => BgWallpaper,
+            "paper" => BgPaper,
+            "geometry" => BgGeometry,
+            "layers" => BgLayers,
+            _ => BgSpecimen,
+        };
+        bg.IsChecked = true;
         ClockSwitch.IsOn = CurrentSettings.ShowClock;
         ClockSecondsSwitch.IsOn = CurrentSettings.ShowClockSeconds;
         UpdateClockOptions();
@@ -869,7 +891,14 @@ public sealed partial class MainWindow : Window
         StartCenteredSwitch.IsOn = CurrentSettings.StartCentered;
         StartWithBarSwitch.IsOn = CurrentSettings.StartWithBar;
         (CurrentSettings.StartSize switch { "small" => StartSmall, "large" => StartLarge, "xlarge" => StartXLarge, _ => StartMedium }).IsChecked = true;
-        (CurrentSettings.StartIcon switch { "small" => StartIconSmall, "large" => StartIconLarge, "xlarge" => StartIconXLarge, _ => StartIconMedium }).IsChecked = true;
+        var startIcon = CurrentSettings.StartIcon switch
+        {
+            "small" => StartIconSmall,
+            "large" => StartIconLarge,
+            "xlarge" => StartIconXLarge,
+            _ => StartIconMedium,
+        };
+        startIcon.IsChecked = true;
         StatusSwitch.IsOn = CurrentSettings.ShowStatus;
         NotificationsSwitch.IsOn = CurrentSettings.ShowNotifications;
         DesktopSwitch.IsOn = CurrentSettings.ShowDesktop;
@@ -887,7 +916,14 @@ public sealed partial class MainWindow : Window
         if (notifyCorner) _notifyCorner = CurrentSettings.NotifyPlacement;
         (notifyCorner ? NotifyAtCorner : NotifyAtDock).IsChecked = true;
         NotifyCornerRow.Visibility = notifyCorner ? Visibility.Visible : Visibility.Collapsed;
-        (_notifyCorner switch { "topLeft" => NotifyTopLeft, "bottomLeft" => NotifyBottomLeft, "bottomRight" => NotifyBottomRight, _ => NotifyTopRight }).IsChecked = true;
+        var cornerChoice = _notifyCorner switch
+        {
+            "topLeft" => NotifyTopLeft,
+            "bottomLeft" => NotifyBottomLeft,
+            "bottomRight" => NotifyBottomRight,
+            _ => NotifyTopRight,
+        };
+        cornerChoice.IsChecked = true;
         RefreshSources();
         BarSwitch.IsOn = CurrentSettings.Bar;
         UpdateBarModule();
@@ -1093,8 +1129,6 @@ public sealed partial class MainWindow : Window
         Changed();
     }
 
-
-
     // The bar module: off, its own options and the notification cards have nothing to act on.
     private void OnBarToggled(object sender, RoutedEventArgs e)
     {
@@ -1171,7 +1205,6 @@ public sealed partial class MainWindow : Window
         if (_page == 5) ShowStagePreview(true);
     }
 
-
     private void OnStartupToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
@@ -1231,8 +1264,6 @@ public sealed partial class MainWindow : Window
         CurrentSettings.StageMinimize = StageMinimizeSwitch.IsOn;
         Changed();
     }
-
-
 
     private void OnWinKeyToggled(object sender, RoutedEventArgs e)
     {
@@ -1439,7 +1470,10 @@ public sealed partial class MainWindow : Window
             CurrentSettings.NotifyPlacement = d.NotifyPlacement;
         }
         if (group is "clarity" or "edge" or "light")
-            CurrentSettings.Preset = CurrentSettings.SameMaterial(BarSettings.Liquid()) ? "liquid" : CurrentSettings.SameMaterial(BarSettings.Frosted()) ? "frosted" : "custom";
+        {
+            CurrentSettings.Preset = CurrentSettings.SameMaterial(BarSettings.Liquid()) ? "liquid"
+                : CurrentSettings.SameMaterial(BarSettings.Frosted()) ? "frosted" : "custom";
+        }
         LoadIntoControls();
         Changed();
     }
@@ -1489,7 +1523,9 @@ public sealed partial class MainWindow : Window
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
                 {
                     _restartUpdate = null;
-                    UpdateStatus.Text = error is UnauthorizedAccessException ? Loc.T("The installation folder is not writable; the update was not installed") : Loc.F("Could not restart for the update: {0}", error.Message);
+                    UpdateStatus.Text = error is UnauthorizedAccessException
+                        ? Loc.T("The installation folder is not writable; the update was not installed")
+                        : Loc.F("Could not restart for the update: {0}", error.Message);
                     return;
                 }
             }

@@ -1,3 +1,4 @@
+// Tray icon click routing, fallback order and classic toolbar mouse gestures.
 #pragma once
 #include <cstdint>
 #include <cstddef>
@@ -7,7 +8,7 @@ namespace atrium::tray {
 enum class Action { Left, Right, Double, DoubleContinuation };
 enum class Route { Invoke, ContextMenu, LegacyDefault, Toolbar };
 enum class Outcome { Observed, AcceptedUnconfirmed, Unavailable };
-inline constexpr int32_t providerTimeout = static_cast<int32_t>(0x80131505u); // UIA_E_TIMEOUT
+inline constexpr int32_t kProviderTimeout = static_cast<int32_t>(0x80131505u); // UIA_E_TIMEOUT
 struct Attempt {
     Route route;
     int32_t status;
@@ -67,7 +68,7 @@ template<class Invoke, class Observe> DispatchResult Dispatch(Action action, boo
     }
     for (Route route : routes) {
         const int32_t status = invoke(route);
-        const bool uncertain = status >= 0 || status == providerTimeout;
+        const bool uncertain = status >= 0 || status == kProviderTimeout;
         const bool observed = observe(uncertain);
         result.attempts.push_back({route, status, observed});
         if (observed) {

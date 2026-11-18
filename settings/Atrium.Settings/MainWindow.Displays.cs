@@ -49,7 +49,14 @@ public sealed partial class MainWindow
 
     private void LoadDisplayControls()
     {
-        (CurrentSettings.DockDisplayMode switch { "follow" => DockDisplayFollow, "fixed" => DockDisplayFixed, "all" => DockDisplayAll, _ => DockDisplayPrimary }).IsChecked = true;
+        var mode = CurrentSettings.DockDisplayMode switch
+        {
+            "follow" => DockDisplayFollow,
+            "fixed" => DockDisplayFixed,
+            "all" => DockDisplayAll,
+            _ => DockDisplayPrimary,
+        };
+        mode.IsChecked = true;
         DisplayDelay.SetValue(CurrentSettings.DockDisplayDelay);
         TaskbarAppsPicker.SelectedIndex = CurrentSettings.TaskbarApps switch { "primaryAndWindow" => 1, "window" => 2, _ => 0 };
         TaskbarRightPrimaryOnlySwitch.IsOn = CurrentSettings.TaskbarRightPrimaryOnly;

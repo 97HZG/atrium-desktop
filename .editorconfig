@@ -95,6 +95,8 @@ dotnet_diagnostic.IDE0072.severity = none
 dotnet_diagnostic.IDE0046.severity = none
 dotnet_diagnostic.IDE0048.severity = none
 dotnet_diagnostic.SYSLIB1054.severity = none
+# Built-in COM interop: the app is neither trimmed nor AOT-compiled.
+dotnet_diagnostic.SYSLIB1096.severity = none
 dotnet_diagnostic.IDE0045.severity = none
 dotnet_diagnostic.IDE0022.severity = none
 dotnet_diagnostic.IDE0061.severity = none

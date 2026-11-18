@@ -79,11 +79,11 @@ const wchar_t* MethodName(Method m)
 Result Match(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<Program>& programs)
 {
     Result out;
-    out.aliases.resize(records.size(), none);
+    out.aliases.resize(records.size(), kNone);
     out.sharedPlace.resize(records.size(), false);
     std::vector<size_t> sorted(records.size());
     std::iota(sorted.begin(), sorted.end(), 0);
-    std::stable_sort(sorted.begin(), sorted.end(), [&](size_t a, size_t b) {
+    std::ranges::stable_sort(sorted, [&](size_t a, size_t b) {
         if (records[a].order != records[b].order)
             return records[a].order < records[b].order;
         return records[a].id < records[b].id;
@@ -128,10 +128,10 @@ Result Match(const std::vector<Button>& buttons, const std::vector<Record>& reco
     // Mutual unique best name. Equal scores never silently select the first executable.
     for (int threshold : {100, 80}) {
         for (size_t b = 0; b < buttons.size(); ++b) {
-            if (out.items[b].record != none)
+            if (out.items[b].record != kNone)
                 continue;
             int best = threshold - 1;
-            size_t chosen = none;
+            size_t chosen = kNone;
             bool tied = false;
             for (size_t r : live) {
                 if (used[r])
@@ -142,11 +142,11 @@ Result Match(const std::vector<Button>& buttons, const std::vector<Record>& reco
                 else if (score == best)
                     tied = true;
             }
-            if (chosen == none || tied)
+            if (chosen == kNone || tied)
                 continue;
             bool contested = false;
             for (size_t other = 0; other < buttons.size(); ++other)
-                if (other != b && out.items[other].record == none && Score(buttons[other].tip, records[chosen].names, records[chosen].firstTitle) >= best)
+                if (other != b && out.items[other].record == kNone && Score(buttons[other].tip, records[chosen].names, records[chosen].firstTitle) >= best)
                     contested = true;
             if (!contested)
                 assign(b, chosen, Method::Name);
@@ -167,17 +167,17 @@ Result Match(const std::vector<Button>& buttons, const std::vector<Record>& reco
         bool agrees = true;
         for (size_t i = 0; i < bs.size(); ++i) {
             const size_t b = bs[i], r = rs[i];
-            if (records[r].order == none || (i && records[r].order == records[rs[i - 1]].order) || (out.items[b].record != none && out.items[b].record != r) ||
-                (used[r] && out.items[b].record != r))
+            if (records[r].order == kNone || (i && records[r].order == records[rs[i - 1]].order) ||
+                (out.items[b].record != kNone && out.items[b].record != r) || (used[r] && out.items[b].record != r))
                 agrees = false;
         }
         if (agrees)
             for (size_t i = 0; i < bs.size(); ++i)
-                if (out.items[bs[i]].record == none)
+                if (out.items[bs[i]].record == kNone)
                     assign(bs[i], rs[i], Method::Order);
     }
     for (auto& item : out.items) {
-        if (item.record != none)
+        if (item.record != kNone)
             continue;
         int best = 79;
         bool tied = false;
@@ -189,14 +189,14 @@ Result Match(const std::vector<Button>& buttons, const std::vector<Record>& reco
                 tied = true;
         }
         if (tied)
-            item.program = none;
-        if (item.program != none)
+            item.program = kNone;
+        if (item.program != kNone)
             item.method = Method::Running;
     }
     // Identity-only deduplication. Neither exe, name, nor geometry proves two icons are one.
     for (size_t r : live)
         if (!used[r])
-            out.items.push_back({none, r, none, Method::Record});
+            out.items.push_back({kNone, r, kNone, Method::Record});
     return out;
 }
 } // namespace atrium::tray

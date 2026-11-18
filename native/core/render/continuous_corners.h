@@ -85,8 +85,8 @@ inline ID2D1Bitmap* ContinuousMask(ID2D1RenderTarget* target, float width, float
     auto properties = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
     if (FAILED(target->CreateBitmap(D2D1::SizeU(w, h), pixels.data(), w, &properties, bitmap.put())))
         return nullptr;
-    constexpr size_t budget = 4 * 1024 * 1024;
-    while (!cache.empty() && (bytes + pixels.size() > budget || cache.size() >= 64)) {
+    constexpr size_t kBudget = 4 * 1024 * 1024;
+    while (!cache.empty() && (bytes + pixels.size() > kBudget || cache.size() >= 64)) {
         bytes -= cache.front().bytes;
         cache.erase(cache.begin());
     }

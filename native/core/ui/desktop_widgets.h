@@ -69,7 +69,7 @@ private:
     int VisualCol(int col, WidgetSize size) const;
     bool FromRight(int col, WidgetSize size) const;        // placed from the right edge
     RECT CellRect(int col, int row, WidgetSize size) const; // screen px
-    bool Fits(int col, int row, WidgetSize size, const Widget* except) const;
+    bool Fits(int col, int row, WidgetSize size, const Widget* except) const; // on the grid, over no widget but `except`
     bool FreeCellNear(float col, float row, WidgetSize size, const Widget* except, int& outCol, int& outRow) const;
     void Place(Widget& w, bool glide);
     void Glide();

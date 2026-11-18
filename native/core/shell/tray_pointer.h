@@ -1,3 +1,4 @@
+// Physical right-click fallback for tray buttons with user-input cancellation.
 #pragma once
 
 #include <windows.h>
@@ -29,23 +30,27 @@ inline bool RightClickInputs(POINT point, RECT desktop, std::array<INPUT, 3>& in
     return true;
 }
 
-enum class PointerClick { sent, unavailable, cancelled };
+enum class PointerClick {
+    Sent,
+    Unavailable,
+    Cancelled,
+};
 
 // Desktop supplies Win32/UIA in production and an isolated desktop in tests.
-// Returning cancelled must not fall through to another invocation route.
+// Returning Cancelled must not fall through to another invocation route.
 template<class Desktop> PointerClick RightClick(Desktop& desktop)
 {
     POINT original{}, target{};
     if (!desktop.Cursor(original) || desktop.Interacting())
-        return PointerClick::cancelled;
+        return PointerClick::Cancelled;
     const bool available = desktop.Target(target);
     POINT beforeMove{};
     if (!desktop.Cursor(beforeMove) || !SamePoint(beforeMove, original) || desktop.Interacting())
-        return PointerClick::cancelled;
+        return PointerClick::Cancelled;
     if (!available)
-        return PointerClick::unavailable;
+        return PointerClick::Unavailable;
     if (!desktop.Move(target))
-        return PointerClick::unavailable;
+        return PointerClick::Unavailable;
     auto stationary = [&] {
         POINT now{};
         return desktop.Cursor(now) && SamePoint(now, target) && !desktop.Interacting();
@@ -56,23 +61,23 @@ template<class Desktop> PointerClick RightClick(Desktop& desktop)
     };
     desktop.Wait(60);
     if (!stationary())
-        return PointerClick::cancelled; // leave the user's new position alone
+        return PointerClick::Cancelled; // leave the user's new position alone
     POINT currentTarget{};
     const bool valid = desktop.Target(currentTarget) && SamePoint(currentTarget, target) && desktop.TargetAt(target);
     // UIA hit-testing can take time. Recheck physical input after it returns.
     if (!stationary())
-        return PointerClick::cancelled;
+        return PointerClick::Cancelled;
     if (!valid) {
         restore();
-        return PointerClick::unavailable;
+        return PointerClick::Unavailable;
     }
     const bool sent = desktop.Send(target);
     if (sent)
         desktop.Wait(180); // let the application establish its menu first
     else if (!stationary())
-        return PointerClick::cancelled;
+        return PointerClick::Cancelled;
     restore();
-    return sent ? PointerClick::sent : PointerClick::unavailable;
+    return sent ? PointerClick::Sent : PointerClick::Unavailable;
 }
 
 } // namespace atrium::tray

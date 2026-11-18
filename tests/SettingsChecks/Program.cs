@@ -71,7 +71,8 @@ Require(!new BarSettings().ShowDesktop && BarSettings.FromJson(JsonNode.Parse(""
 Require(new BarSettings().TrayHost && BarSettings.FromJson([], new()).TrayHost, "Atrium hosts the tray icons unless turned off.");
 {
     var old = BarSettings.FromJson([], new());
-    var chosen = BarSettings.FromJson(JsonNode.Parse("""{"attentionLight":false,"attentionBounce":true,"startCentered":true,"startWithBar":true}""")!.AsObject(), new());
+    var chosen = BarSettings.FromJson(
+        JsonNode.Parse("""{"attentionLight":false,"attentionBounce":true,"startCentered":true,"startWithBar":true}""")!.AsObject(), new());
     Require(old.AttentionLight && !old.AttentionBounce && !old.StartCentered && !old.StartWithBar,
         "Old files light apps asking for attention, without hops, the start menu at the left, alone.");
     Require(!chosen.AttentionLight && chosen.AttentionBounce && chosen.StartCentered && chosen.StartWithBar && !chosen.SameAs(old) &&
@@ -102,10 +103,14 @@ Require(BarSettings.FromJson([], new()).NotifyPlacement == "dock", "Existing use
 Require(BarSettings.FromJson([], new()).Language == "auto", "Old files must follow the system language.");
 settings.Language = "en";
 Require(BarSettings.FromJson(settings.ToJson(), new()).Language == "en", "The interface language must survive a round trip.");
-Require(BarSettings.FromJson(JsonNode.Parse("""{"language":"bad tag"}""")!.AsObject(), settings).Language == "auto", "Invalid languages must follow the system.");
-Require(BarSettings.FromJson(JsonNode.Parse("""{"language":false}""")!.AsObject(), settings).Language == "en", "Malformed languages must retain the current value.");
-Require(BarSettings.FromJson(JsonNode.Parse("""{"notifyPlacement":"bad"}""")!.AsObject(), new()).NotifyPlacement == "dock", "Invalid notification placement must normalize.");
-Require(BarSettings.FromJson(JsonNode.Parse("""{"notifyPlacement":false}""")!.AsObject(), settings).NotifyPlacement == "topRight", "Malformed notification placement must retain the current value.");
+Require(BarSettings.FromJson(JsonNode.Parse("""{"language":"bad tag"}""")!.AsObject(), settings).Language == "auto",
+    "Invalid languages must follow the system.");
+Require(BarSettings.FromJson(JsonNode.Parse("""{"language":false}""")!.AsObject(), settings).Language == "en",
+    "Malformed languages must retain the current value.");
+Require(BarSettings.FromJson(JsonNode.Parse("""{"notifyPlacement":"bad"}""")!.AsObject(), new()).NotifyPlacement == "dock",
+    "Invalid notification placement must normalize.");
+Require(BarSettings.FromJson(JsonNode.Parse("""{"notifyPlacement":false}""")!.AsObject(), settings).NotifyPlacement == "topRight",
+    "Malformed notification placement must retain the current value.");
 foreach (string mode in new[] { "follow", "primary", "fixed", "all" })
 {
     settings.DockDisplayMode = mode;
@@ -117,11 +122,13 @@ foreach (string mode in new[] { "all", "primaryAndWindow", "window" })
     Require(BarSettings.FromJson(settings.ToJson(), new()).TaskbarApps == mode, "Every task distribution mode must be retained.");
 }
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"dockDisplayMode":"bad","taskbarApps":"bad","dockDisplayDelay":99999}""")!.AsObject(), new());
-Require(parsed.DockDisplayMode == "primary" && parsed.TaskbarApps == "all" && parsed.DockDisplayDelay == 2000, "Invalid values must normalize like the native core.");
+Require(parsed.DockDisplayMode == "primary" && parsed.TaskbarApps == "all" && parsed.DockDisplayDelay == 2000,
+    "Invalid values must normalize like the native core.");
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"dockDisplayDelay":-1}""")!.AsObject(), new());
 Require(parsed.DockDisplayDelay == 100, "Delay must have a lower bound.");
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"dockDisplayDelay":"bad","desktopDisplay":false}""")!.AsObject(), settings);
-Require(parsed.DockDisplayDelay == settings.DockDisplayDelay && parsed.DesktopDisplay == settings.DesktopDisplay, "Malformed values must retain the current settings.");
+Require(parsed.DockDisplayDelay == settings.DockDisplayDelay && parsed.DesktopDisplay == settings.DesktopDisplay,
+    "Malformed values must retain the current settings.");
 var original = settings.Clone();
 settings.ApplyMaterial(BarSettings.Frosted());
 Require(settings.DockDisplayMode == original.DockDisplayMode && settings.DockDisplay == original.DockDisplay &&

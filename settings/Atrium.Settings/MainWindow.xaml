@@ -58,21 +58,51 @@
 
             <ListView x:Name="Nav" SelectionMode="Single" SelectionChanged="OnNavChanged"
                       AutomationProperties.Name="Navigation" VerticalAlignment="Top" ItemContainerStyle="{StaticResource NavItemStyle}">
-                <ListViewItem Tag="0" AutomationProperties.Name="Material"><local:NavLabel Glyph="&#xE790;" Text="Material" /></ListViewItem>
-                <ListViewItem Tag="1" AutomationProperties.Name="Shape"><local:NavLabel Glyph="&#xE7C9;" Text="Shape" /></ListViewItem>
-                <ListViewItem Tag="2" AutomationProperties.Name="Taskbar"><local:NavLabel Glyph="&#xE718;" Text="Taskbar" /></ListViewItem>
-                <ListViewItem Tag="10" AutomationProperties.Name="Start menu"><local:NavLabel Glyph="&#xE8FC;" Text="Start menu" Sub="True" /></ListViewItem>
-                <ListViewItem Tag="11" AutomationProperties.Name="Tray"><local:NavLabel Glyph="&#xE70E;" Text="Tray" Sub="True" /></ListViewItem>
-                <ListViewItem Tag="14" AutomationProperties.Name="Input method"><local:NavLabel Glyph="&#xE765;" Text="Input method" Sub="True" /></ListViewItem>
-                <ListViewItem Tag="12" AutomationProperties.Name="Status bar"><local:NavLabel Glyph="&#xE701;" Text="Status bar" Sub="True" /></ListViewItem>
-                <ListViewItem Tag="13" AutomationProperties.Name="Time"><local:NavLabel Glyph="&#xE823;" Text="Time" Sub="True" /></ListViewItem>
-                <ListViewItem Tag="3" AutomationProperties.Name="Notifications"><local:NavLabel Glyph="&#xEA8F;" Text="Notifications" Sub="True" /></ListViewItem>
-                <ListViewItem Tag="4" AutomationProperties.Name="Widgets"><local:NavLabel Glyph="&#xE8A9;" Text="Widgets" /></ListViewItem>
-                <ListViewItem Tag="5" AutomationProperties.Name="Stage Manager"><local:NavLabel Glyph="&#xE7C4;" Text="Stage Manager" /></ListViewItem>
-                <ListViewItem Tag="6" AutomationProperties.Name="Displays"><local:NavLabel Glyph="&#xE7F4;" Text="Displays" /></ListViewItem>
-                <ListViewItem Tag="7" AutomationProperties.Name="System"><local:NavLabel Glyph="&#xE770;" Text="System" /></ListViewItem>
-                <ListViewItem Tag="8" AutomationProperties.Name="Design language" Margin="0,18,0,2"><local:NavLabel Glyph="&#xE8D2;" Text="Design language" /></ListViewItem>
-                <ListViewItem Tag="9" AutomationProperties.Name="About"><local:NavLabel Glyph="&#xE946;" Text="About" /></ListViewItem>
+                <ListViewItem Tag="0" AutomationProperties.Name="Material">
+                    <local:NavLabel Glyph="&#xE790;" Text="Material" />
+                </ListViewItem>
+                <ListViewItem Tag="1" AutomationProperties.Name="Shape">
+                    <local:NavLabel Glyph="&#xE7C9;" Text="Shape" />
+                </ListViewItem>
+                <ListViewItem Tag="2" AutomationProperties.Name="Taskbar">
+                    <local:NavLabel Glyph="&#xE718;" Text="Taskbar" />
+                </ListViewItem>
+                <ListViewItem Tag="10" AutomationProperties.Name="Start menu">
+                    <local:NavLabel Glyph="&#xE8FC;" Text="Start menu" Sub="True" />
+                </ListViewItem>
+                <ListViewItem Tag="11" AutomationProperties.Name="Tray">
+                    <local:NavLabel Glyph="&#xE70E;" Text="Tray" Sub="True" />
+                </ListViewItem>
+                <ListViewItem Tag="14" AutomationProperties.Name="Input method">
+                    <local:NavLabel Glyph="&#xE765;" Text="Input method" Sub="True" />
+                </ListViewItem>
+                <ListViewItem Tag="12" AutomationProperties.Name="Status bar">
+                    <local:NavLabel Glyph="&#xE701;" Text="Status bar" Sub="True" />
+                </ListViewItem>
+                <ListViewItem Tag="13" AutomationProperties.Name="Time">
+                    <local:NavLabel Glyph="&#xE823;" Text="Time" Sub="True" />
+                </ListViewItem>
+                <ListViewItem Tag="3" AutomationProperties.Name="Notifications">
+                    <local:NavLabel Glyph="&#xEA8F;" Text="Notifications" Sub="True" />
+                </ListViewItem>
+                <ListViewItem Tag="4" AutomationProperties.Name="Widgets">
+                    <local:NavLabel Glyph="&#xE8A9;" Text="Widgets" />
+                </ListViewItem>
+                <ListViewItem Tag="5" AutomationProperties.Name="Stage Manager">
+                    <local:NavLabel Glyph="&#xE7C4;" Text="Stage Manager" />
+                </ListViewItem>
+                <ListViewItem Tag="6" AutomationProperties.Name="Displays">
+                    <local:NavLabel Glyph="&#xE7F4;" Text="Displays" />
+                </ListViewItem>
+                <ListViewItem Tag="7" AutomationProperties.Name="System">
+                    <local:NavLabel Glyph="&#xE770;" Text="System" />
+                </ListViewItem>
+                <ListViewItem Tag="8" AutomationProperties.Name="Design language" Margin="0,18,0,2">
+                    <local:NavLabel Glyph="&#xE8D2;" Text="Design language" />
+                </ListViewItem>
+                <ListViewItem Tag="9" AutomationProperties.Name="About">
+                    <local:NavLabel Glyph="&#xE946;" Text="About" />
+                </ListViewItem>
             </ListView>
 
             <StackPanel Grid.Row="1" Spacing="4" Margin="10,0,6,0">
@@ -117,7 +147,8 @@
                                         Margin="0,16,16,0" CornerRadius="16" BorderThickness="2" BorderBrush="#B3FFFFFF" Background="#FFCBD3DD">
                                     <Grid>
                                         <Canvas x:Name="LoupeCanvas" />
-                                        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8" CornerRadius="6" Padding="6,2,6,3" Background="#80000000">
+                                        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8" CornerRadius="6" Padding="6,2,6,3"
+                                                Background="#80000000">
                                             <TextBlock x:Name="LoupeLabel" Text="5× magnifier" FontSize="11" Foreground="#E6FFFFFF" />
                                         </Border>
                                     </Grid>
@@ -132,12 +163,17 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <local:SegmentTrack>
-                                    <RadioButton x:Name="BgSpecimen" GroupName="herobg" Content="Flow" Tag="flow" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
-                                    <RadioButton x:Name="BgPaper" GroupName="herobg" Content="Paper" Tag="paper" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
-                                    <RadioButton x:Name="BgGeometry" GroupName="herobg" Content="Geometry" Tag="geometry" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
-                                    <RadioButton x:Name="BgLayers" GroupName="herobg" Content="Layers" Tag="layers" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
-                                    <RadioButton x:Name="BgWallpaper" GroupName="herobg" Content="My wallpaper" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
-                                </local:SegmentTrack>
+                                <RadioButton x:Name="BgSpecimen" GroupName="herobg" Content="Flow" Tag="flow" Style="{StaticResource SegmentStyle}"
+                                             Checked="OnHeroBackgroundChecked" />
+                                <RadioButton x:Name="BgPaper" GroupName="herobg" Content="Paper" Tag="paper" Style="{StaticResource SegmentStyle}"
+                                             Checked="OnHeroBackgroundChecked" />
+                                <RadioButton x:Name="BgGeometry" GroupName="herobg" Content="Geometry" Tag="geometry" Style="{StaticResource SegmentStyle}"
+                                             Checked="OnHeroBackgroundChecked" />
+                                <RadioButton x:Name="BgLayers" GroupName="herobg" Content="Layers" Tag="layers" Style="{StaticResource SegmentStyle}"
+                                             Checked="OnHeroBackgroundChecked" />
+                                <RadioButton x:Name="BgWallpaper" GroupName="herobg" Content="My wallpaper" Tag="wallpaper"
+                                             Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
+                            </local:SegmentTrack>
                             <StackPanel x:Name="LoupeToggle" Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                                 <TextBlock Text="Magnifier" Style="{StaticResource RowNoteStyle}" VerticalAlignment="Center" />
                                 <ToggleSwitch x:Name="LoupeSwitch" Style="{StaticResource SwitchStyle}" Toggled="OnLoupeToggled"
@@ -181,7 +217,8 @@
                         <StackPanel>
                             <Grid>
                                 <TextBlock Text="Texture" Style="{StaticResource SectionStyle}" />
-                                <Button Style="{StaticResource ResetButtonStyle}" Tag="clarity" Click="OnGroupReset" AutomationProperties.Name="Restore material defaults" />
+                                <Button Style="{StaticResource ResetButtonStyle}" Tag="clarity" Click="OnGroupReset"
+                                        AutomationProperties.Name="Restore material defaults" />
                             </Grid>
                             <local:ResponsiveGrid x:Name="ClarityTiles" MinCellWidth="220" Gap="12" StretchLastRow="True">
                                 <!-- The tint, after the sliders (BuildRows puts them first) -->
@@ -246,41 +283,45 @@
                                     </ListView.ItemsPanel>
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="local:PinVm">
-                                                <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent" Loaded="OnLocalizeTemplate">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <FontIcon Glyph="&#xE76F;" FontSize="14" VerticalAlignment="Center" Foreground="{ThemeResource InkTertiaryBrush}" />
-                                                    <Grid Grid.Column="1" Width="40" Height="40" VerticalAlignment="Center">
-                                                        <FontIcon Glyph="&#xECAA;" FontSize="20" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}"
-                                                                  Foreground="{ThemeResource InkSecondaryBrush}" />
-                                                        <Image Source="{x:Bind Icon, Mode=OneWay}" Width="36" Height="36" />
-                                                    </Grid>
-                                                    <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{x:Bind Title}" Style="{StaticResource RowTitleStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-                                                        <ComboBox SelectedIndex="{x:Bind LaunchMode, Mode=TwoWay}" Width="146" Margin="0,0,8,0"
-                                                                  AutomationProperties.Name="{x:Bind LaunchName}">
-                                                            <ComboBoxItem Content="Open existing window" Margin="0,0,0,4" />
-                                                            <ComboBoxItem Content="Allow multiple windows" />
-                                                        </ComboBox>
-                                                        <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveUp}" IsEnabled="{x:Bind CanUp, Mode=OneWay}"
-                                                                AutomationProperties.Name="{x:Bind UpName}" ToolTipService.ToolTip="Move up">
-                                                            <FontIcon Glyph="&#xE70E;" FontSize="13" />
-                                                        </Button>
-                                                        <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveDown}" IsEnabled="{x:Bind CanDown, Mode=OneWay}"
-                                                                AutomationProperties.Name="{x:Bind DownName}" ToolTipService.ToolTip="Move down">
-                                                            <FontIcon Glyph="&#xE70D;" FontSize="13" />
-                                                        </Button>
-                                                        <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind Remove}"
-                                                                AutomationProperties.Name="{x:Bind RemoveName}" ToolTipService.ToolTip="Remove">
-                                                            <FontIcon Glyph="&#xE711;" FontSize="12" />
-                                                        </Button>
-                                                    </StackPanel>
+                                            <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent" Loaded="OnLocalizeTemplate">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <FontIcon Glyph="&#xE76F;" FontSize="14" VerticalAlignment="Center"
+                                                          Foreground="{ThemeResource InkTertiaryBrush}" />
+                                                <Grid Grid.Column="1" Width="40" Height="40" VerticalAlignment="Center">
+                                                    <FontIcon Glyph="&#xECAA;" FontSize="20" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}"
+                                                              Foreground="{ThemeResource InkSecondaryBrush}" />
+                                                    <Image Source="{x:Bind Icon, Mode=OneWay}" Width="36" Height="36" />
                                                 </Grid>
-                                            </DataTemplate>
+                                                <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{x:Bind Title}"
+                                                           Style="{StaticResource RowTitleStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                                                    <ComboBox SelectedIndex="{x:Bind LaunchMode, Mode=TwoWay}" Width="146" Margin="0,0,8,0"
+                                                              AutomationProperties.Name="{x:Bind LaunchName}">
+                                                        <ComboBoxItem Content="Open existing window" Margin="0,0,0,4" />
+                                                        <ComboBoxItem Content="Allow multiple windows" />
+                                                    </ComboBox>
+                                                    <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveUp}"
+                                                            IsEnabled="{x:Bind CanUp, Mode=OneWay}" AutomationProperties.Name="{x:Bind UpName}"
+                                                            ToolTipService.ToolTip="Move up">
+                                                        <FontIcon Glyph="&#xE70E;" FontSize="13" />
+                                                    </Button>
+                                                    <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveDown}"
+                                                            IsEnabled="{x:Bind CanDown, Mode=OneWay}" AutomationProperties.Name="{x:Bind DownName}"
+                                                            ToolTipService.ToolTip="Move down">
+                                                        <FontIcon Glyph="&#xE70D;" FontSize="13" />
+                                                    </Button>
+                                                    <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind Remove}"
+                                                            AutomationProperties.Name="{x:Bind RemoveName}" ToolTipService.ToolTip="Remove">
+                                                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                    </Button>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
                                     </ListView.ItemTemplate>
                                 </ListView>
                                 <StackPanel x:Name="PinsEmpty" Visibility="Collapsed" Padding="24,36,24,36" Spacing="6" HorizontalAlignment="Center">
@@ -307,10 +348,17 @@
                                             <Image x:Name="NotifyBackImage" Stretch="Fill" />
                                             <Canvas x:Name="NotifyBackText" Width="384" Height="112" IsHitTestVisible="False" Visibility="Collapsed">
                                                 <Ellipse Canvas.Left="20" Canvas.Top="20.5" Width="7" Height="7" Fill="#0A84FF" />
-                                                <TextBlock x:Name="NotifyBackApp" Text="Calendar" Canvas.Left="32" Canvas.Top="15" Width="182" FontSize="12" FontFamily="{StaticResource TitleFont}" IsTextScaleFactorEnabled="False" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock x:Name="NotifyBackTime" Text="Just now" Canvas.Left="214" Canvas.Top="15" Width="120" FontSize="12" FontFamily="{StaticResource EmphasisFont}" IsTextScaleFactorEnabled="False" TextAlignment="Right" />
-                                                <TextBlock x:Name="NotifyBackTitle" Text="Calendar reminder" Canvas.Left="20" Canvas.Top="37" Width="344" FontSize="14" FontFamily="{StaticResource TitleFont}" IsTextScaleFactorEnabled="False" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock x:Name="NotifyBackBody" Canvas.Left="20" Canvas.Top="61" Width="344" FontSize="13" FontFamily="{StaticResource TextFont}" IsTextScaleFactorEnabled="False" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock x:Name="NotifyBackApp" Text="Calendar" Canvas.Left="32" Canvas.Top="15" Width="182" FontSize="12"
+                                                           FontFamily="{StaticResource TitleFont}" IsTextScaleFactorEnabled="False"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock x:Name="NotifyBackTime" Text="Just now" Canvas.Left="214" Canvas.Top="15" Width="120" FontSize="12"
+                                                           FontFamily="{StaticResource EmphasisFont}" IsTextScaleFactorEnabled="False" TextAlignment="Right" />
+                                                <TextBlock x:Name="NotifyBackTitle" Text="Calendar reminder" Canvas.Left="20" Canvas.Top="37" Width="344"
+                                                           FontSize="14" FontFamily="{StaticResource TitleFont}" IsTextScaleFactorEnabled="False"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock x:Name="NotifyBackBody" Canvas.Left="20" Canvas.Top="61" Width="344" FontSize="13"
+                                                           FontFamily="{StaticResource TextFont}" IsTextScaleFactorEnabled="False" TextWrapping="Wrap"
+                                                           MaxLines="2" TextTrimming="CharacterEllipsis" />
                                             </Canvas>
                                         </Grid>
                                     </Border>
@@ -319,10 +367,17 @@
                                             <Image x:Name="NotifyFrontImage" Stretch="Fill" />
                                             <Canvas x:Name="NotifyFrontText" Width="384" Height="112" IsHitTestVisible="False">
                                                 <Ellipse Canvas.Left="20" Canvas.Top="20.5" Width="7" Height="7" Fill="#0A84FF" />
-                                                <TextBlock x:Name="NotifyFrontApp" Text="WeChat" Canvas.Left="32" Canvas.Top="15" Width="182" FontSize="12" FontFamily="{StaticResource TitleFont}" IsTextScaleFactorEnabled="False" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock x:Name="NotifyFrontTime" Text="Just now" Canvas.Left="214" Canvas.Top="15" Width="120" FontSize="12" FontFamily="{StaticResource EmphasisFont}" IsTextScaleFactorEnabled="False" TextAlignment="Right" />
-                                                <TextBlock x:Name="NotifyFrontTitle" Text="Lin Chen" Canvas.Left="20" Canvas.Top="37" Width="344" FontSize="14" FontFamily="{StaticResource TitleFont}" IsTextScaleFactorEnabled="False" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock x:Name="NotifyFrontBody" Canvas.Left="20" Canvas.Top="61" Width="344" FontSize="13" FontFamily="{StaticResource TextFont}" IsTextScaleFactorEnabled="False" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock x:Name="NotifyFrontApp" Text="WeChat" Canvas.Left="32" Canvas.Top="15" Width="182" FontSize="12"
+                                                           FontFamily="{StaticResource TitleFont}" IsTextScaleFactorEnabled="False"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock x:Name="NotifyFrontTime" Text="Just now" Canvas.Left="214" Canvas.Top="15" Width="120" FontSize="12"
+                                                           FontFamily="{StaticResource EmphasisFont}" IsTextScaleFactorEnabled="False" TextAlignment="Right" />
+                                                <TextBlock x:Name="NotifyFrontTitle" Text="Lin Chen" Canvas.Left="20" Canvas.Top="37" Width="344" FontSize="14"
+                                                           FontFamily="{StaticResource TitleFont}" IsTextScaleFactorEnabled="False"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock x:Name="NotifyFrontBody" Canvas.Left="20" Canvas.Top="61" Width="344" FontSize="13"
+                                                           FontFamily="{StaticResource TextFont}" IsTextScaleFactorEnabled="False" TextWrapping="Wrap"
+                                                           MaxLines="2" TextTrimming="CharacterEllipsis" />
                                             </Canvas>
                                         </Grid>
                                     </Border>
@@ -332,21 +387,23 @@
                         </Border>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <TextBlock x:Name="NotifyCaption" Style="{StaticResource FootnoteStyle}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="4,0,0,0" />
+                            <TextBlock x:Name="NotifyCaption" Style="{StaticResource FootnoteStyle}" TextWrapping="Wrap" VerticalAlignment="Center"
+                                       Margin="4,0,0,0" />
                             <Button Grid.Column="1" Content="Show again" Click="OnReplayNotify" HorizontalAlignment="Right" />
                         </Grid>
                         <!-- Where cards come from: the chat apps one by one, then every other app -->
                         <StackPanel Margin="0,14,0,0">
                             <TextBlock Text="Sources" Style="{StaticResource SectionStyle}" Margin="4,0,0,10" />
                             <Border Style="{StaticResource GroupStyle}">
-                                <ListView x:Name="SourcesList" SelectionMode="None" IsItemClickEnabled="False" ItemContainerStyle="{StaticResource PinItemStyle}"
-                                          AutomationProperties.Name="Sources" Padding="0,4,0,4">
+                                <ListView x:Name="SourcesList" SelectionMode="None" IsItemClickEnabled="False"
+                                          ItemContainerStyle="{StaticResource PinItemStyle}" AutomationProperties.Name="Sources" Padding="0,4,0,4">
                                     <ListView.ItemsPanel>
                                         <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
                                     </ListView.ItemsPanel>
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="local:SourceVm">
-                                            <Grid Padding="14,8,14,8" ColumnSpacing="14" MinHeight="60" Background="Transparent" ToolTipService.ToolTip="{x:Bind Note}">
+                                            <Grid Padding="14,8,14,8" ColumnSpacing="14" MinHeight="60" Background="Transparent"
+                                                  ToolTipService.ToolTip="{x:Bind Note}">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
@@ -357,8 +414,8 @@
                                                               Foreground="{ThemeResource InkSecondaryBrush}" />
                                                     <Image Source="{x:Bind Icon, Mode=OneWay}" Width="36" Height="36" />
                                                 </Grid>
-                                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Title, Mode=OneWay}" Style="{StaticResource RowTitleStyle}"
-                                                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Title, Mode=OneWay}"
+                                                           Style="{StaticResource RowTitleStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                                 <ToggleSwitch Grid.Column="2" Style="{StaticResource SwitchStyle}" IsOn="{x:Bind IsOn, Mode=TwoWay}"
                                                               AutomationProperties.Name="{x:Bind Title, Mode=OneWay}" />
                                             </Grid>
@@ -428,13 +485,20 @@
                             <Grid>
                                 <TextBlock Text="Add widgets" Style="{StaticResource SectionStyle}" />
                                 <local:SegmentTrack x:Name="WidgetCategories" HorizontalAlignment="Right" Margin="0,0,0,8">
-                                    <RadioButton GroupName="widgetcategory" Content="All" Tag="All" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" IsChecked="True" />
-                                    <RadioButton GroupName="widgetcategory" Content="Clock" Tag="Clock" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
-                                    <RadioButton GroupName="widgetcategory" Content="Weather" Tag="Weather" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
-                                    <RadioButton GroupName="widgetcategory" Content="Calendar" Tag="Calendar" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
-                                    <RadioButton GroupName="widgetcategory" Content="Productivity" Tag="Productivity" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
-                                    <RadioButton GroupName="widgetcategory" Content="Photos" Tag="Photos" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
-                                    <RadioButton GroupName="widgetcategory" Content="System" Tag="System" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="All" Tag="All" Style="{StaticResource SegmentStyle}"
+                                                 Checked="OnWidgetCategoryChecked" IsChecked="True" />
+                                    <RadioButton GroupName="widgetcategory" Content="Clock" Tag="Clock" Style="{StaticResource SegmentStyle}"
+                                                 Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="Weather" Tag="Weather" Style="{StaticResource SegmentStyle}"
+                                                 Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="Calendar" Tag="Calendar" Style="{StaticResource SegmentStyle}"
+                                                 Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="Productivity" Tag="Productivity" Style="{StaticResource SegmentStyle}"
+                                                 Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="Photos" Tag="Photos" Style="{StaticResource SegmentStyle}"
+                                                 Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="System" Tag="System" Style="{StaticResource SegmentStyle}"
+                                                 Checked="OnWidgetCategoryChecked" />
                                 </local:SegmentTrack>
                             </Grid>
                             <StackPanel x:Name="WidgetGallery" Spacing="18" />
@@ -457,7 +521,8 @@
                         <!-- The apps Stage Manager leaves alone (stageExcluded), shown as the pinned apps are -->
                         <StackPanel Margin="0,14,0,0">
                             <Grid Margin="0,0,0,10">
-                                <TextBlock Text="Excluded from Stage Manager" Style="{StaticResource SectionStyle}" Margin="4,0,0,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Excluded from Stage Manager" Style="{StaticResource SectionStyle}" Margin="4,0,0,0"
+                                           VerticalAlignment="Center" />
                                 <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
                                     <Button x:Name="ExcludedDefaultsButton" Content="Restore defaults" Click="OnStageExcludedDefaults" />
                                     <Button Content="Find games…" Click="OnFindGames"
@@ -475,7 +540,8 @@
                                         </ListView.ItemsPanel>
                                         <ListView.ItemTemplate>
                                             <DataTemplate x:DataType="local:ExcludedVm">
-                                                <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent" Loaded="OnLocalizeTemplate">
+                                                <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent"
+                                                      Loaded="OnLocalizeTemplate">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="*" />
@@ -486,10 +552,11 @@
                                                                   Foreground="{ThemeResource InkSecondaryBrush}" />
                                                         <Image Source="{x:Bind Icon, Mode=OneWay}" Width="36" Height="36" />
                                                     </Grid>
-                                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Title, Mode=OneWay}" Style="{StaticResource RowTitleStyle}"
-                                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                                    <Button Grid.Column="2" Style="{StaticResource IconButtonStyle}" Click="{x:Bind Remove}" VerticalAlignment="Center"
-                                                            AutomationProperties.Name="{x:Bind RemoveName}" ToolTipService.ToolTip="Remove">
+                                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Title, Mode=OneWay}"
+                                                               Style="{StaticResource RowTitleStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                    <Button Grid.Column="2" Style="{StaticResource IconButtonStyle}" Click="{x:Bind Remove}"
+                                                            VerticalAlignment="Center" AutomationProperties.Name="{x:Bind RemoveName}"
+                                                            ToolTipService.ToolTip="Remove">
                                                         <FontIcon Glyph="&#xE711;" FontSize="12" />
                                                     </Button>
                                                 </Grid>
@@ -528,18 +595,24 @@
                         <Border Style="{StaticResource TileStyle}">
                             <StackPanel Spacing="16">
                                 <TextBlock Text="Taskbar display mode" Style="{StaticResource SectionStyle}" />
-                                <RadioButton x:Name="DockDisplayFollow" Content="Summon at the pointer's display" Tag="follow" GroupName="dockdisplay" Checked="OnDisplayModeChecked" />
-                                <RadioButton x:Name="DockDisplayPrimary" Content="Only on the primary display" Tag="primary" GroupName="dockdisplay" Checked="OnDisplayModeChecked" />
-                                <RadioButton x:Name="DockDisplayFixed" Content="Fix to a display" Tag="fixed" GroupName="dockdisplay" Checked="OnDisplayModeChecked" />
-                                <ComboBox x:Name="DockDisplayPicker" DisplayMemberPath="Name" HorizontalAlignment="Stretch" AutomationProperties.Name="Taskbar display" SelectionChanged="OnDockDisplayChanged" />
-                                <RadioButton x:Name="DockDisplayAll" Content="Show the taskbar on all displays" Tag="all" GroupName="dockdisplay" Checked="OnDisplayModeChecked" />
+                                <RadioButton x:Name="DockDisplayFollow" Content="Summon at the pointer's display" Tag="follow" GroupName="dockdisplay"
+                                             Checked="OnDisplayModeChecked" />
+                                <RadioButton x:Name="DockDisplayPrimary" Content="Only on the primary display" Tag="primary" GroupName="dockdisplay"
+                                             Checked="OnDisplayModeChecked" />
+                                <RadioButton x:Name="DockDisplayFixed" Content="Fix to a display" Tag="fixed" GroupName="dockdisplay"
+                                             Checked="OnDisplayModeChecked" />
+                                <ComboBox x:Name="DockDisplayPicker" DisplayMemberPath="Name" HorizontalAlignment="Stretch"
+                                          AutomationProperties.Name="Taskbar display" SelectionChanged="OnDockDisplayChanged" />
+                                <RadioButton x:Name="DockDisplayAll" Content="Show the taskbar on all displays" Tag="all" GroupName="dockdisplay"
+                                             Checked="OnDisplayModeChecked" />
                                 <local:SliderTile x:Name="DisplayDelay" />
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource TileStyle}">
                             <StackPanel Spacing="12">
                                 <TextBlock Text="When using multiple displays, show my taskbar apps on" Style="{StaticResource RowTitleStyle}" />
-                                <ComboBox x:Name="TaskbarAppsPicker" HorizontalAlignment="Stretch" AutomationProperties.Name="Taskbar apps on multiple displays" SelectionChanged="OnTaskbarAppsChanged">
+                                <ComboBox x:Name="TaskbarAppsPicker" HorizontalAlignment="Stretch" AutomationProperties.Name="Taskbar apps on multiple displays"
+                                          SelectionChanged="OnTaskbarAppsChanged">
                                     <ComboBoxItem Content="All taskbars" />
                                     <ComboBoxItem Content="Main taskbar and taskbars with open windows" />
                                     <ComboBoxItem Content="Taskbars with open windows" />
@@ -551,7 +624,8 @@
                         <Border Style="{StaticResource TileStyle}">
                             <StackPanel Spacing="12">
                                 <TextBlock Text="Desktop display" Style="{StaticResource SectionStyle}" />
-                                <ComboBox x:Name="DesktopDisplayPicker" DisplayMemberPath="Name" HorizontalAlignment="Stretch" AutomationProperties.Name="Widgets and Stage Manager display" SelectionChanged="OnDesktopDisplayChanged" />
+                                <ComboBox x:Name="DesktopDisplayPicker" DisplayMemberPath="Name" HorizontalAlignment="Stretch"
+                                          AutomationProperties.Name="Widgets and Stage Manager display" SelectionChanged="OnDesktopDisplayChanged" />
                             </StackPanel>
                         </Border>
                         <TextBlock x:Name="DisplayFallback" Style="{StaticResource FootnoteStyle}" TextWrapping="Wrap" />
@@ -575,13 +649,18 @@
                         <local:ResponsiveGrid MinCellWidth="280" Gap="12" StretchLastRow="True">
                             <local:ToggleTile x:Name="StartupSwitch" Title="Start with Windows" SwitchName="Start with Windows" Toggled="OnStartupToggled"
                                               Note="Start Atrium when you sign in to Windows." />
-                            <local:ToggleTile x:Name="HideTaskbarSwitch" Title="Hide the system taskbar" SwitchName="Hide the system taskbar" Toggled="OnHideTaskbarToggled"
+                            <local:ToggleTile x:Name="HideTaskbarSwitch" Title="Hide the system taskbar" SwitchName="Hide the system taskbar"
+                                              Toggled="OnHideTaskbarToggled"
                                               Note="Keep only the Atrium bar. Windows' taskbar returns when this is turned off or Atrium quits; system shortcuts such as the Windows key keep working." />
-                            <local:ToggleTile x:Name="HideBannersSwitch" Title="Hide system banners" SwitchName="Hide system banners" Toggled="OnHideBannersToggled"
+                            <local:ToggleTile x:Name="HideBannersSwitch" Title="Hide system banners" SwitchName="Hide system banners"
+                                              Toggled="OnHideBannersToggled"
                                               Note="Turns on Windows' Do Not Disturb; notifications still appear as Atrium cards. Restored when turned off or Atrium quits." />
-                            <local:ToggleTile x:Name="WinKeySwitch" Title="Win key opens Start menu" SwitchName="Win key opens Start menu" Toggled="OnWinKeyToggled" />
-                            <local:ToggleTile x:Name="WinNumbersSwitch" Title="Win + number opens apps" SwitchName="Win + number opens apps" Toggled="OnWinNumbersToggled" />
-                            <local:ToggleTile x:Name="RemoteVisibleSwitch" Title="Remote control compatibility" SwitchName="Remote control compatibility" Toggled="OnRemoteVisibleToggled" />
+                            <local:ToggleTile x:Name="WinKeySwitch" Title="Win key opens Start menu" SwitchName="Win key opens Start menu"
+                                              Toggled="OnWinKeyToggled" />
+                            <local:ToggleTile x:Name="WinNumbersSwitch" Title="Win + number opens apps" SwitchName="Win + number opens apps"
+                                              Toggled="OnWinNumbersToggled" />
+                            <local:ToggleTile x:Name="RemoteVisibleSwitch" Title="Remote control compatibility" SwitchName="Remote control compatibility"
+                                              Toggled="OnRemoteVisibleToggled" />
                         </local:ResponsiveGrid>
                     </StackPanel>
 
@@ -600,7 +679,8 @@
                                     <TextBlock Style="{StaticResource RowNoteStyle}" Margin="0,6,0,0"
                                                Text="A native glass desktop for Windows 11: a floating taskbar and desktop widgets with real-time refraction" />
                                     <TextBlock Style="{StaticResource RowNoteStyle}" Margin="0,6,0,0">
-                                        <Hyperlink NavigateUri="https://github.com/wynter-yaxley/atrium-desktop" UnderlineStyle="None">github.com/wynter-yaxley/atrium-desktop</Hyperlink>
+                                        <Hyperlink NavigateUri="https://github.com/wynter-yaxley/atrium-desktop"
+                                                   UnderlineStyle="None">github.com/wynter-yaxley/atrium-desktop</Hyperlink>
                                     </TextBlock>
                                 </StackPanel>
                             </Grid>
@@ -663,14 +743,16 @@
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="Edge" Style="{StaticResource SectionStyle}" />
-                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="edge" Click="OnGroupReset" AutomationProperties.Name="Restore edge defaults" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="edge" Click="OnGroupReset"
+                                            AutomationProperties.Name="Restore edge defaults" />
                                 </Grid>
                                 <StackPanel x:Name="EdgeRows" />
                             </StackPanel>
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="Lighting" Style="{StaticResource SectionStyle}" />
-                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="light" Click="OnGroupReset" AutomationProperties.Name="Restore light defaults" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="light" Click="OnGroupReset"
+                                            AutomationProperties.Name="Restore light defaults" />
                                 </Grid>
                                 <StackPanel x:Name="LightRows" />
                             </StackPanel>
@@ -682,30 +764,37 @@
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="Dimensions" Style="{StaticResource SectionStyle}" />
-                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="size" Click="OnGroupReset" AutomationProperties.Name="Restore size defaults" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="size" Click="OnGroupReset"
+                                            AutomationProperties.Name="Restore size defaults" />
                                 </Grid>
                                 <StackPanel x:Name="SizeRows" />
-                                <local:ToggleTile x:Name="HoverRiseSwitch" Title="Rise with the pointer" SwitchName="Rise under pointer" Toggled="OnHoverRiseToggled" Flat="True"
+                                <local:ToggleTile x:Name="HoverRiseSwitch" Title="Rise with the pointer" SwitchName="Rise under pointer"
+                                                  Toggled="OnHoverRiseToggled" Flat="True"
                                                   Note="With the pointer on the bar, the glass rises with the magnification wave." />
-                                <local:ToggleTile x:Name="RiseNearSwitch" Title="Rise early above the bar" SwitchName="Rise early with the pointer above the bar" Toggled="OnRiseNearToggled" Flat="True"
+                                <local:ToggleTile x:Name="RiseNearSwitch" Title="Rise early above the bar"
+                                                  SwitchName="Rise early with the pointer above the bar" Toggled="OnRiseNearToggled" Flat="True"
                                                   Note="With the pointer just above the bar (not yet on it), the glass rises to meet it. Set the range under “Early response above the bar” below." />
-                                <local:ToggleTile x:Name="MagnifyNearSwitch" Title="Magnify icons early above the bar" SwitchName="Magnify icons early with the pointer above the bar" Toggled="OnMagnifyNearToggled" Flat="True"
+                                <local:ToggleTile x:Name="MagnifyNearSwitch" Title="Magnify icons early above the bar"
+                                                  SwitchName="Magnify icons early with the pointer above the bar" Toggled="OnMagnifyNearToggled" Flat="True"
                                                   Note="Likewise, the icons magnify early. This works on its own, without “Rise with the pointer”." />
                             </StackPanel>
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="Early response" Style="{StaticResource SectionStyle}" />
-                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="near" Click="OnGroupReset" AutomationProperties.Name="Restore the early response defaults" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="near" Click="OnGroupReset"
+                                            AutomationProperties.Name="Restore the early response defaults" />
                                 </Grid>
                                 <StackPanel x:Name="NearRows" />
                             </StackPanel>
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="Width" Style="{StaticResource SectionStyle}" />
-                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="width" Click="OnGroupReset" AutomationProperties.Name="Restore width defaults" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="width" Click="OnGroupReset"
+                                            AutomationProperties.Name="Restore width defaults" />
                                 </Grid>
                                 <StackPanel x:Name="WidthRows">
-                                    <local:ToggleTile x:Name="AutoWidthSwitch" Title="Automatic width" SwitchName="Automatic width" Toggled="OnAutoWidthToggled" Flat="True"
+                                    <local:ToggleTile x:Name="AutoWidthSwitch" Title="Automatic width" SwitchName="Automatic width" Toggled="OnAutoWidthToggled"
+                                                      Flat="True"
                                                       Note="The glass bar grows with its content, like a capsule around its items; off, it is fixed at Maximum width." />
                                 </StackPanel>
                             </StackPanel>
@@ -720,38 +809,49 @@
                             </StackPanel>
                             <StackPanel x:Name="DockContent">
                                 <TextBlock Text="Show on the bar" Style="{StaticResource SectionStyle}" />
-                                <local:ToggleTile x:Name="RunningSwitch" Title="Running apps" SwitchName="Show running apps" Toggled="OnRunningToggled" Flat="True"
-                                                  Note="After pinned apps, other running apps appear with a small dot below." />
+                                <local:ToggleTile x:Name="RunningSwitch" Title="Running apps" SwitchName="Show running apps" Toggled="OnRunningToggled"
+                                                  Flat="True" Note="After pinned apps, other running apps appear with a small dot below." />
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Text color" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                            <RadioButton x:Name="TextAuto" GroupName="ink" Content="Auto" Tag="auto" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
-                                            <RadioButton x:Name="TextLight" GroupName="ink" Content="Light" Tag="light" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
-                                            <RadioButton x:Name="TextDark" GroupName="ink" Content="Dark" Tag="dark" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
-                                        </local:SegmentTrack>
+                                        <RadioButton x:Name="TextAuto" GroupName="ink" Content="Auto" Tag="auto" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnTextColorChecked" />
+                                        <RadioButton x:Name="TextLight" GroupName="ink" Content="Light" Tag="light" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnTextColorChecked" />
+                                        <RadioButton x:Name="TextDark" GroupName="ink" Content="Dark" Tag="dark" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnTextColorChecked" />
+                                    </local:SegmentTrack>
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Visibility" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                            <RadioButton x:Name="HideNever" GroupName="autohide" Content="Visible" Tag="never" Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
-                                            <RadioButton x:Name="HideFullscreen" GroupName="autohide" Content="Full screen" Tag="fullscreen" Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
-                                            <RadioButton x:Name="HideAlways" GroupName="autohide" Content="Always hidden" Tag="always" Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
-                                        </local:SegmentTrack>
+                                        <RadioButton x:Name="HideNever" GroupName="autohide" Content="Visible" Tag="never" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnAutoHideChecked" />
+                                        <RadioButton x:Name="HideFullscreen" GroupName="autohide" Content="Full screen" Tag="fullscreen"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
+                                        <RadioButton x:Name="HideAlways" GroupName="autohide" Content="Always hidden" Tag="always"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
+                                    </local:SegmentTrack>
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Position" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                            <RadioButton x:Name="EdgeBottom" GroupName="baredge" Content="Bottom" Tag="bottom" Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
-                                            <RadioButton x:Name="EdgeTop" GroupName="baredge" Content="Top" Tag="top" Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
-                                            <RadioButton x:Name="EdgeLeft" GroupName="baredge" Content="Left side" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
-                                            <RadioButton x:Name="EdgeRight" GroupName="baredge" Content="Right side" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
-                                        </local:SegmentTrack>
+                                        <RadioButton x:Name="EdgeBottom" GroupName="baredge" Content="Bottom" Tag="bottom" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnBarEdgeChecked" />
+                                        <RadioButton x:Name="EdgeTop" GroupName="baredge" Content="Top" Tag="top" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnBarEdgeChecked" />
+                                        <RadioButton x:Name="EdgeLeft" GroupName="baredge" Content="Left side" Tag="left" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnBarEdgeChecked" />
+                                        <RadioButton x:Name="EdgeRight" GroupName="baredge" Content="Right side" Tag="right"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnBarEdgeChecked" />
+                                    </local:SegmentTrack>
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel x:Name="DockLayout">
                                 <Grid>
                                     <TextBlock Text="Icons and position" Style="{StaticResource SectionStyle}" />
-                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="dock" Click="OnGroupReset" AutomationProperties.Name="Restore icon and position defaults" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="dock" Click="OnGroupReset"
+                                            AutomationProperties.Name="Restore icon and position defaults" />
                                 </Grid>
                                 <StackPanel x:Name="DockRows" />
                             </StackPanel>
@@ -764,26 +864,38 @@
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Size" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                        <RadioButton x:Name="StartSmall" GroupName="startsize" Content="Small" Tag="small" Style="{StaticResource SegmentStyle}" Checked="OnStartSizeChecked" />
-                                        <RadioButton x:Name="StartMedium" GroupName="startsize" Content="Medium" Tag="medium" Style="{StaticResource SegmentStyle}" Checked="OnStartSizeChecked" />
-                                        <RadioButton x:Name="StartLarge" GroupName="startsize" Content="Large" Tag="large" Style="{StaticResource SegmentStyle}" Checked="OnStartSizeChecked" />
-                                        <RadioButton x:Name="StartXLarge" GroupName="startsize" Content="Huge" Tag="xlarge" Style="{StaticResource SegmentStyle}" Checked="OnStartSizeChecked" />
+                                        <RadioButton x:Name="StartSmall" GroupName="startsize" Content="Small" Tag="small" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnStartSizeChecked" />
+                                        <RadioButton x:Name="StartMedium" GroupName="startsize" Content="Medium" Tag="medium"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStartSizeChecked" />
+                                        <RadioButton x:Name="StartLarge" GroupName="startsize" Content="Large" Tag="large" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnStartSizeChecked" />
+                                        <RadioButton x:Name="StartXLarge" GroupName="startsize" Content="Huge" Tag="xlarge"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStartSizeChecked" />
                                     </local:SegmentTrack>
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Icon size" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                        <RadioButton x:Name="StartIconSmall" GroupName="starticonsize" Content="Small" Tag="small" Style="{StaticResource SegmentStyle}" Checked="OnStartIconSizeChecked" />
-                                        <RadioButton x:Name="StartIconMedium" GroupName="starticonsize" Content="Medium" Tag="medium" Style="{StaticResource SegmentStyle}" Checked="OnStartIconSizeChecked" />
-                                        <RadioButton x:Name="StartIconLarge" GroupName="starticonsize" Content="Large" Tag="large" Style="{StaticResource SegmentStyle}" Checked="OnStartIconSizeChecked" />
-                                        <RadioButton x:Name="StartIconXLarge" GroupName="starticonsize" Content="Huge" Tag="xlarge" Style="{StaticResource SegmentStyle}" Checked="OnStartIconSizeChecked" />
+                                        <RadioButton x:Name="StartIconSmall" GroupName="starticonsize" Content="Small" Tag="small"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStartIconSizeChecked" />
+                                        <RadioButton x:Name="StartIconMedium" GroupName="starticonsize" Content="Medium" Tag="medium"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStartIconSizeChecked" />
+                                        <RadioButton x:Name="StartIconLarge" GroupName="starticonsize" Content="Large" Tag="large"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStartIconSizeChecked" />
+                                        <RadioButton x:Name="StartIconXLarge" GroupName="starticonsize" Content="Huge" Tag="xlarge"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStartIconSizeChecked" />
                                     </local:SegmentTrack>
                                 </StackPanel>
-                                <local:ToggleTile x:Name="StartStatusSwitch" Title="Status bar" SwitchName="Status in the Start menu" Toggled="OnBarContentToggled" Flat="True" />
-                                <local:ToggleTile x:Name="StartTraySwitch" Title="Tray button" SwitchName="Tray button in the Start menu" Toggled="OnBarContentToggled" Flat="True" />
-                                <local:ToggleTile x:Name="StartCenteredSwitch" Title="Center on screen" SwitchName="Start menu in the center" Toggled="OnBarContentToggled" Flat="True"
+                                <local:ToggleTile x:Name="StartStatusSwitch" Title="Status bar" SwitchName="Status in the Start menu"
+                                                  Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="StartTraySwitch" Title="Tray button" SwitchName="Tray button in the Start menu"
+                                                  Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="StartCenteredSwitch" Title="Center on screen" SwitchName="Start menu in the center"
+                                                  Toggled="OnBarContentToggled" Flat="True"
                                                   Note="The start menu opens in the middle of the screen instead of at the left." />
-                                <local:ToggleTile x:Name="StartWithBarSwitch" Title="Win key shows the taskbar" SwitchName="Win key shows the taskbar too" Toggled="OnBarContentToggled" Flat="True"
+                                <local:ToggleTile x:Name="StartWithBarSwitch" Title="Win key shows the taskbar" SwitchName="Win key shows the taskbar too"
+                                                  Toggled="OnBarContentToggled" Flat="True"
                                                   Note="When the taskbar is hidden, the Windows key brings it up with the start menu. Needs Win key opens Start menu." />
                             </StackPanel>
                         </StackPanel>
@@ -792,8 +904,10 @@
                         <StackPanel x:Name="SideTray" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="Tray" Style="{StaticResource SectionStyle}" />
-                                <local:ToggleTile x:Name="TraySwitch" Title="Show on the taskbar" SwitchName="Show system tray" Toggled="OnBarContentToggled" Flat="True" />
-                                <local:ToggleTile x:Name="TrayHostSwitch" Title="Host tray icons" SwitchName="Host tray icons" Toggled="OnBarContentToggled" Flat="True"
+                                <local:ToggleTile x:Name="TraySwitch" Title="Show on the taskbar" SwitchName="Show system tray" Toggled="OnBarContentToggled"
+                                                  Flat="True" />
+                                <local:ToggleTile x:Name="TrayHostSwitch" Title="Host tray icons" SwitchName="Host tray icons" Toggled="OnBarContentToggled"
+                                                  Flat="True"
                                                   Note="Apps hand their tray icons to Atrium: the pictures stay live, and clicks, double clicks and right clicks work as in the Windows tray. When off, Atrium reads the icons back from the Windows tray." />
                             </StackPanel>
                         </StackPanel>
@@ -802,7 +916,8 @@
                         <StackPanel x:Name="SideIme" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="Input method" Style="{StaticResource SectionStyle}" />
-                                <local:ToggleTile x:Name="ImeStatusSwitch" Title="Show on the taskbar" SwitchName="Show input method" Toggled="OnImeStatusToggled" Flat="True" />
+                                <local:ToggleTile x:Name="ImeStatusSwitch" Title="Show on the taskbar" SwitchName="Show input method"
+                                                  Toggled="OnImeStatusToggled" Flat="True" />
                             </StackPanel>
                         </StackPanel>
 
@@ -810,12 +925,15 @@
                         <StackPanel x:Name="SideStatus" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="Status bar" Style="{StaticResource SectionStyle}" />
-                                <local:ToggleTile x:Name="StatusSwitch" Title="Show on the taskbar" SwitchName="Show status" Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="StatusSwitch" Title="Show on the taskbar" SwitchName="Show status" Toggled="OnBarContentToggled"
+                                                  Flat="True" />
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Icon" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                        <RadioButton x:Name="StatusRing" GroupName="statusstyle" Content="Ring" Tag="ring" Style="{StaticResource SegmentStyle}" Checked="OnStatusStyleChecked" />
-                                        <RadioButton x:Name="StatusIcons" GroupName="statusstyle" Content="Icons" Tag="icons" Style="{StaticResource SegmentStyle}" Checked="OnStatusStyleChecked" />
+                                        <RadioButton x:Name="StatusRing" GroupName="statusstyle" Content="Ring" Tag="ring" Style="{StaticResource SegmentStyle}"
+                                                     Checked="OnStatusStyleChecked" />
+                                        <RadioButton x:Name="StatusIcons" GroupName="statusstyle" Content="Icons" Tag="icons"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStatusStyleChecked" />
                                     </local:SegmentTrack>
                                 </StackPanel>
                             </StackPanel>
@@ -825,8 +943,11 @@
                         <StackPanel x:Name="SideClock" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="Time" Style="{StaticResource SectionStyle}" />
-                                <local:ToggleTile x:Name="ClockSwitch" Title="Clock and date" SwitchName="Show clock and date" Toggled="OnClockToggled" Flat="True" />
-                                <local:ToggleTile x:Name="ClockSecondsSwitch" Title="Show seconds" Note="Seconds after the minutes, placed as the system's time format has them." SwitchName="Clock shows seconds" Toggled="OnClockSecondsToggled" Flat="True" />
+                                <local:ToggleTile x:Name="ClockSwitch" Title="Clock and date" SwitchName="Show clock and date" Toggled="OnClockToggled"
+                                                  Flat="True" />
+                                <local:ToggleTile x:Name="ClockSecondsSwitch" Title="Show seconds"
+                                                  Note="Seconds after the minutes, placed as the system's time format has them."
+                                                  SwitchName="Clock shows seconds" Toggled="OnClockSecondsToggled" Flat="True" />
                             </StackPanel>
                         </StackPanel>
 
@@ -834,37 +955,48 @@
                         <StackPanel x:Name="SideNotify" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="Taskbar" Style="{StaticResource SectionStyle}" />
-                                <local:ToggleTile x:Name="NotificationsSwitch" Title="Notifications button" SwitchName="Show notifications button" Toggled="OnBarContentToggled" Flat="True" />
-                                <local:ToggleTile x:Name="DesktopSwitch" Title="Show Desktop button" SwitchName="Show Desktop button" Toggled="OnBarContentToggled" Flat="True"
+                                <local:ToggleTile x:Name="NotificationsSwitch" Title="Notifications button" SwitchName="Show notifications button"
+                                                  Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="DesktopSwitch" Title="Show Desktop button" SwitchName="Show Desktop button"
+                                                  Toggled="OnBarContentToggled" Flat="True"
                                                   Note="A thin line at the taskbar's right end, as on the Windows taskbar: click it to show the desktop, click again to bring the windows back." />
-                                <local:ToggleTile x:Name="AttentionLightSwitch" Title="Highlight new messages" SwitchName="Highlight apps with new messages" Toggled="OnBarContentToggled" Flat="True"
+                                <local:ToggleTile x:Name="AttentionLightSwitch" Title="Highlight new messages" SwitchName="Highlight apps with new messages"
+                                                  Toggled="OnBarContentToggled" Flat="True"
                                                   Note="An app with a new message has its icon lit white until it is opened; hidden while the pointer is on it." />
-                                <local:ToggleTile x:Name="AttentionBounceSwitch" Title="Bounce on new messages" SwitchName="Bounce apps with new messages" Toggled="OnBarContentToggled" Flat="True"
-                                                  Note="An app with a new message hops a few times on the taskbar." />
+                                <local:ToggleTile x:Name="AttentionBounceSwitch" Title="Bounce on new messages" SwitchName="Bounce apps with new messages"
+                                                  Toggled="OnBarContentToggled" Flat="True" Note="An app with a new message hops a few times on the taskbar." />
                             </StackPanel>
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="Popup" Style="{StaticResource SectionStyle}" />
-                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="notify" Click="OnGroupReset" AutomationProperties.Name="Restore popup defaults" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="notify" Click="OnGroupReset"
+                                            AutomationProperties.Name="Restore popup defaults" />
                                 </Grid>
                                 <StackPanel x:Name="NotifyRows">
                                     <StackPanel Style="{StaticResource FlatRowStyle}">
                                         <TextBlock Text="Notification position" Style="{StaticResource RowTitleStyle}" />
                                         <local:SegmentTrack>
-                                            <RadioButton x:Name="NotifyAtDock" GroupName="notifyplacement" Content="Follow taskbar" Tag="dock" Style="{StaticResource SegmentStyle}" Checked="OnNotifyPlacementChecked" />
-                                            <RadioButton x:Name="NotifyAtCorner" GroupName="notifyplacement" Content="Screen corner" Tag="corner" Style="{StaticResource SegmentStyle}" Checked="OnNotifyPlacementChecked" />
+                                            <RadioButton x:Name="NotifyAtDock" GroupName="notifyplacement" Content="Follow taskbar" Tag="dock"
+                                                         Style="{StaticResource SegmentStyle}" Checked="OnNotifyPlacementChecked" />
+                                            <RadioButton x:Name="NotifyAtCorner" GroupName="notifyplacement" Content="Screen corner" Tag="corner"
+                                                         Style="{StaticResource SegmentStyle}" Checked="OnNotifyPlacementChecked" />
                                         </local:SegmentTrack>
                                     </StackPanel>
                                     <StackPanel x:Name="NotifyCornerRow" Style="{StaticResource FlatRowStyle}" Visibility="Collapsed">
                                         <TextBlock Text="Corner of the main screen" Style="{StaticResource RowTitleStyle}" />
                                         <local:SegmentTrack>
-                                            <RadioButton x:Name="NotifyTopLeft" GroupName="notifycorner" Content="Top left" Tag="topLeft" Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
-                                            <RadioButton x:Name="NotifyTopRight" GroupName="notifycorner" Content="Top right" Tag="topRight" Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
-                                            <RadioButton x:Name="NotifyBottomLeft" GroupName="notifycorner" Content="Bottom left" Tag="bottomLeft" Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
-                                            <RadioButton x:Name="NotifyBottomRight" GroupName="notifycorner" Content="Bottom right" Tag="bottomRight" Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
+                                            <RadioButton x:Name="NotifyTopLeft" GroupName="notifycorner" Content="Top left" Tag="topLeft"
+                                                         Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
+                                            <RadioButton x:Name="NotifyTopRight" GroupName="notifycorner" Content="Top right" Tag="topRight"
+                                                         Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
+                                            <RadioButton x:Name="NotifyBottomLeft" GroupName="notifycorner" Content="Bottom left" Tag="bottomLeft"
+                                                         Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
+                                            <RadioButton x:Name="NotifyBottomRight" GroupName="notifycorner" Content="Bottom right" Tag="bottomRight"
+                                                         Style="{StaticResource SegmentStyle}" Checked="OnNotifyCornerChecked" />
                                         </local:SegmentTrack>
                                     </StackPanel>
-                                    <local:ToggleTile x:Name="HideBodySwitch" Title="Hide notification content" SwitchName="Hide notification content" Toggled="OnHideBodyToggled" Flat="True"
+                                    <local:ToggleTile x:Name="HideBodySwitch" Title="Hide notification content" SwitchName="Hide notification content"
+                                                      Toggled="OnHideBodyToggled" Flat="True"
                                                       Note="Cards show only the app and the title; the notification window is also excluded from screen capture and sharing." />
                                 </StackPanel>
                             </StackPanel>
@@ -879,32 +1011,40 @@
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Recent apps" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                            <RadioButton x:Name="StageLeft" GroupName="stageside" Content="Left side" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnStageSideChecked" />
-                                            <RadioButton x:Name="StageRight" GroupName="stageside" Content="Right side" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnStageSideChecked" />
-                                        </local:SegmentTrack>
+                                        <RadioButton x:Name="StageLeft" GroupName="stageside" Content="Left side" Tag="left"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStageSideChecked" />
+                                        <RadioButton x:Name="StageRight" GroupName="stageside" Content="Right side" Tag="right"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStageSideChecked" />
+                                    </local:SegmentTrack>
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Visibility" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                            <RadioButton x:Name="StageAlways" GroupName="stagemode" Content="Visible" Tag="always" Style="{StaticResource SegmentStyle}" Checked="OnStageModeChecked" />
-                                            <RadioButton x:Name="StageAutoHide" GroupName="stagemode" Content="Show on hover" Tag="hover" Style="{StaticResource SegmentStyle}" Checked="OnStageModeChecked" />
-                                        </local:SegmentTrack>
+                                        <RadioButton x:Name="StageAlways" GroupName="stagemode" Content="Visible" Tag="always"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStageModeChecked" />
+                                        <RadioButton x:Name="StageAutoHide" GroupName="stagemode" Content="Show on hover" Tag="hover"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnStageModeChecked" />
+                                    </local:SegmentTrack>
                                 </StackPanel>
-                                <local:ToggleTile x:Name="StageMinimizeSwitch" Title="Minimize to Stage Manager" SwitchName="Minimize to Stage Manager" Toggled="OnStageMinimizeToggled" Flat="True" />
+                                <local:ToggleTile x:Name="StageMinimizeSwitch" Title="Minimize to Stage Manager" SwitchName="Minimize to Stage Manager"
+                                                  Toggled="OnStageMinimizeToggled" Flat="True" />
                             </StackPanel>
                             <StackPanel>
                                 <TextBlock Text="Actions" Style="{StaticResource SectionStyle}" />
                                 <StackPanel Style="{StaticResource FlatRowStyle}" Spacing="2">
                                     <TextBlock Text="Click a card" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="Bring to the front; the app that was in front moves to the side." Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap" />
+                                    <TextBlock Text="Bring to the front; the app that was in front moves to the side." Style="{StaticResource RowNoteStyle}"
+                                               TextWrapping="Wrap" />
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}" Spacing="2">
                                     <TextBlock Text="Shift + click" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="Add to the current group; they are put away and brought back together." Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap" />
+                                    <TextBlock Text="Add to the current group; they are put away and brought back together."
+                                               Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}" Spacing="2">
                                     <TextBlock Text="Pointer at the screen edge" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="Cards slide in from the edge above the windows and go back when the pointer leaves." Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap" />
+                                    <TextBlock Text="Cards slide in from the edge above the windows and go back when the pointer leaves."
+                                               Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}" Spacing="2">
                                     <TextBlock Text="Close or quit" Style="{StaticResource RowTitleStyle}" />
@@ -917,29 +1057,36 @@
                         <StackPanel x:Name="SideWidgets" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="Desktop" Style="{StaticResource SectionStyle}" />
-                                <local:ToggleTile x:Name="WidgetsSwitch" Title="Desktop Widgets" SwitchName="Desktop Widgets" Toggled="OnWidgetsToggled" Flat="True"
-                                                  Note="Drag to move, drag the lower corner to resize, right-click to remove." />
+                                <local:ToggleTile x:Name="WidgetsSwitch" Title="Desktop Widgets" SwitchName="Desktop Widgets" Toggled="OnWidgetsToggled"
+                                                  Flat="True" Note="Drag to move, drag the lower corner to resize, right-click to remove." />
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Align to the edge" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                            <RadioButton x:Name="WidgetsLeft" GroupName="widgetside" Content="Left side" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
-                                            <RadioButton x:Name="WidgetsRight" GroupName="widgetside" Content="Right side" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
-                                        </local:SegmentTrack>
+                                        <RadioButton x:Name="WidgetsLeft" GroupName="widgetside" Content="Left side" Tag="left"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
+                                        <RadioButton x:Name="WidgetsRight" GroupName="widgetside" Content="Right side" Tag="right"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
+                                    </local:SegmentTrack>
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Material" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                            <RadioButton x:Name="MaterialGlass" GroupName="widgetmaterial" Content="Follow taskbar" Tag="glass" Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
-                                            <RadioButton x:Name="MaterialDusk" GroupName="widgetmaterial" Content="Dusk" Tag="dusk" Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
-                                            <RadioButton x:Name="MaterialColor" GroupName="widgetmaterial" Content="Color" Tag="color" Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
-                                        </local:SegmentTrack>
+                                        <RadioButton x:Name="MaterialGlass" GroupName="widgetmaterial" Content="Follow taskbar" Tag="glass"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
+                                        <RadioButton x:Name="MaterialDusk" GroupName="widgetmaterial" Content="Dusk" Tag="dusk"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
+                                        <RadioButton x:Name="MaterialColor" GroupName="widgetmaterial" Content="Color" Tag="color"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
+                                    </local:SegmentTrack>
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Glass reflects" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
-                                            <RadioButton x:Name="BackdropDesktop" GroupName="backdrop" Content="Live" Tag="desktop" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
-                                            <RadioButton x:Name="BackdropWallpaper" GroupName="backdrop" Content="Wallpaper" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
-                                        </local:SegmentTrack>
+                                        <RadioButton x:Name="BackdropDesktop" GroupName="backdrop" Content="Live" Tag="desktop"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
+                                        <RadioButton x:Name="BackdropWallpaper" GroupName="backdrop" Content="Wallpaper" Tag="wallpaper"
+                                                     Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
+                                    </local:SegmentTrack>
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>

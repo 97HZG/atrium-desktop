@@ -8,14 +8,14 @@ namespace atrium {
 
 inline double ClockMs()
 {
-    static const LARGE_INTEGER freq = [] {
+    static const LARGE_INTEGER kFreq = [] {
         LARGE_INTEGER f;
         QueryPerformanceFrequency(&f);
         return f;
     }();
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
-    return double(now.QuadPart) * 1000.0 / double(freq.QuadPart);
+    return double(now.QuadPart) * 1000.0 / double(kFreq.QuadPart);
 }
 
 } // namespace atrium

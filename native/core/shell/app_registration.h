@@ -1,3 +1,4 @@
+// Atrium's Installed apps registry entry and Start menu shortcut.
 #pragma once
 
 #include <string>

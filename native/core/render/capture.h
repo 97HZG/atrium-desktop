@@ -23,6 +23,9 @@ namespace atrium {
 
 class BackdropSource {
 public:
+    BackdropSource() = default;
+    BackdropSource(const BackdropSource&) = delete;
+    BackdropSource& operator=(const BackdropSource&) = delete;
     virtual ~BackdropSource() = default;
     // The newest frame since the last call, or null; valid until Release().
     virtual ID3D11Texture2D* Acquire() = 0;

@@ -1,3 +1,4 @@
+// IconImage: what the icon and picture readers hand to the painters.
 #pragma once
 
 #include <cstdint>
@@ -10,7 +11,7 @@ struct IconImage {
     int width = 0;
     int height = 0;
     std::vector<uint8_t> bgra;
-    bool empty() const { return bgra.empty(); }
+    bool Empty() const { return bgra.empty(); }
 };
 
 } // namespace atrium
