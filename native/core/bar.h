@@ -64,17 +64,12 @@ public:
     const std::vector<TaskItem>& Items() const { return items_; }
     void SetVisible(bool visible);
     bool Visible() const { return visible_; }
-    // On screen now: module on and not slid away for auto-hide.
-    bool ShownOnScreen() const { return visible_ && !slidOut_; }
-    // This bar's monitor.
-    HMONITOR Monitor() const { return hmonitor_; }
     // Unread notifications, shown as a badge on the bell.
     void SetUnread(int count);
     // Network, battery and volume for the status icon.
     void SetStatus(const SystemStatus& status);
-    // An input method announcement (issue #56): the status entry's connection
-    // symbol steps aside for `glyph` (中/a/A), holds it, and comes back.
-    void AnnounceIme(const std::wstring& glyph);
+    // The foreground window's input (中/a/A) in the input method entry; empty: not known.
+    void SetIme(const std::wstring& glyph);
     // The app at `index` (0-based, in bar order) as a click on it would (Win + digit).
     void ActivateIndex(int index);
     // An auto-hidden bar comes up (the Windows key's start menu, startWithBar); it goes again as
@@ -105,6 +100,7 @@ public:
     std::function<void(RECT anchor)> onTrayClick;   // the tray entry (Atrium's tray panel)
     std::function<void()> onDesktopClick;           // the Show Desktop slot at the bar's right end
     std::function<void(RECT anchor)> onStatusClick; // the status icon (Wi-Fi, battery: the control centre)
+    std::function<void()> onImeClick;               // the input method entry: Chinese/English, or the next language
     std::function<void(int notches)> onStatusWheel; // the wheel over the status icon (volume)
     // The overflow entry: apps that did not fit, in bar order.
     std::function<void(const std::vector<std::wstring>& keys, RECT anchor)> onOverflow;

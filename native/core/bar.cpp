@@ -9,7 +9,6 @@
 #include "render/capture.h"
 #include "render/desktop_backdrop.h"
 #include "render/glass_renderer.h"
-#include "render/ime_swap.h"
 #include "render/ui_font.h"
 #include "ui/surface.h"
 
@@ -44,6 +43,7 @@ constexpr wchar_t kClockKey[] = L"#clock";
 constexpr wchar_t kStartKey[] = L"#start";
 constexpr wchar_t kNotifyKey[] = L"#notify";
 constexpr wchar_t kTrayKey[] = L"#tray";
+constexpr wchar_t kImeKey[] = L"#ime";
 constexpr wchar_t kStatusKey[] = L"#status";
 constexpr wchar_t kMoreKey[] = L"#more";
 constexpr wchar_t kDesktopKey[] = L"#desktop";
@@ -717,6 +717,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
                 onDesktopClick();
             else if (key == kStatusKey && onStatusClick)
                 onStatusClick(anchor);
+            else if (key == kImeKey && onImeClick)
+                onImeClick();
             else if (key == kMoreKey && onOverflow)
                 onOverflow(hidden_, anchor);
         } else if (launch ? bool(onLaunch) : bool(onActivate)) {
@@ -1008,6 +1010,7 @@ void Bar::Relayout()
     const bool showRight = !st.taskbarRightPrimaryOnly || primary;
     const bool showClock = showRight && st.showClock;
     const bool showTray = showRight && st.showTray;
+    const bool showIme = showRight && st.imeStatus;
     const bool showStatus = showRight && st.showStatus;
     const bool showNotifications = showRight && st.showNotifications;
     const bool showDesktop = showRight && st.showDesktop;
@@ -1038,14 +1041,14 @@ void Bar::Relayout()
         clockW = int(std::ceil(span)) + Px(22, s);
     }
 
-    // Left to right: [logo] [apps ... (overflow)] | [tray] [status] [clock] [bell].
+    // Left to right: [logo] [apps ... (overflow)] | [tray] [input method] [status] [clock] [bell].
     // The logo, the overflow entry, the tray and the bell use the same plates
     // as the apps; so does the status ring (battery or volume, Wi-Fi).
     // The status entry as three icons (statusStyle) is wider than a plate by about an icon.
     const int statusExtra = st.statusStyle == L"icons" ? int(std::lround(icon * 1.3f)) : 0;
     // Show Desktop: a narrow slot at the bar's right end, a thin line in it, as the system taskbar's.
     const int deskW = showDesktop ? std::max(Px(10, s), int(std::lround(icon * 0.45))) : 0;
-    const int rightCount = int(showTray) + int(showStatus) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
+    const int rightCount = int(showTray) + int(showIme) + int(showStatus) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
     const int groupGap = rightCount ? sepGap : 0;
     const int total = int(items_.size());
     int n = total;
@@ -1056,8 +1059,8 @@ void Bar::Relayout()
         int w = 2 * padFor(p) + p + 2 * g;               // logo and the air after it
         w += slots ? slots * p + (slots - 1) * g : 0;    // apps
         if (rightCount)
-            w += 2 * sepGap + p * (int(showTray) + int(showStatus) + int(showNotifications)) + (showStatus ? statusExtra : 0) + clockW +
-                 deskW + (rightCount - 1) * g;
+            w += 2 * sepGap + p * (int(showTray) + int(showIme) + int(showStatus) + int(showNotifications)) + (showStatus ? statusExtra : 0) + clockW + deskW +
+                 (rightCount - 1) * g;
         return std::max(w, barH * 2);
     };
     // The magnified bar stretches by up to (mag - 1) * range on top of its width.
@@ -1201,6 +1204,7 @@ void Bar::Relayout()
     const int bellLeft = rightSlot(plate, showNotifications);
     const int clockLeft = rightSlot(clockW, clockW != 0), clockRight = clockLeft + clockW;
     const int statusLeft = rightSlot(statusW, showStatus), statusRight = statusLeft + statusW;
+    const int imeLeft = rightSlot(plate, showIme);
     const int trayLeft = rightSlot(plate, showTray);
     const int rightLeft = rightCount ? cursor + gap : insetX + barW - pad;
     const int appsMin = startLeft + plate + 2 * gap;
@@ -1266,6 +1270,10 @@ void Bar::Relayout()
         scene.extras.push_back(entry(kTrayKey, trayLeft, L"\uE70E"));
         hits_.push_back({kTrayKey, RECT{trayLeft - gap / 2, hitTop, trayLeft + plate + gap / 2, hitBottom}});
     }
+    if (showIme) {
+        scene.extras.push_back(entry(kImeKey, imeLeft, L""));
+        hits_.push_back({kImeKey, RECT{imeLeft - gap / 2, hitTop, imeLeft + plate + gap / 2, hitBottom}});
+    }
     if (showStatus) {
         SceneItem status = entry(kStatusKey, statusLeft, L"");
         status.plate = D2D1::RectF(float(statusLeft), plateTop, float(statusRight), plateTop + float(plate));
@@ -1296,13 +1304,10 @@ void Bar::Relayout()
     }
     if (!scene.hoverKey.empty() && std::none_of(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
-    // The input method announcement is timed state, not layout: it rides
-    // through a rebuild instead of vanishing mid-swap.
+    // The input method glyph is the foreground window's, not layout: it rides through a rebuild.
     scene.imeGlyph = scene_.imeGlyph;
-    scene.imeMs = scene_.imeMs;
     scene.imePrevGlyph = scene_.imePrevGlyph;
-    scene.imePrevAlpha = scene_.imePrevAlpha;
-    scene.imeContinued = scene_.imeContinued;
+    scene.imeMs = scene_.imeMs;
     scene_ = std::move(scene);
 
     // The window only changes when the bar's size does (not on every drag move).
@@ -1729,25 +1734,13 @@ void Bar::SetStatus(const SystemStatus& status)
     UpdateTooltips();
 }
 
-void Bar::AnnounceIme(const std::wstring& glyph)
+void Bar::SetIme(const std::wstring& glyph)
 {
-    if (glyph.empty())
+    if (glyph == scene_.imeGlyph)
         return;
-    // A switch while the previous glyph is still on screen crossfades from it
-    // instead of restarting the handshake, whose first step would flash the
-    // connection symbol back between the two glyphs.
-    const double now = ClockMs();
-    const double elapsed = now - scene_.imeMs;
-    // The swap may itself be a continued one: its symbol is already away from
-    // the start, so the normal timeline's showing test would miss it and the
-    // symbol would flash back between rapid changes.
-    const ImeSwapFrame current = scene_.imeGlyph.empty() ? ImeSwapFrame{} : ImeSwapAt(elapsed, scene_.imeContinued);
-    const bool continued = scene_.imeMs > 0 && current.out > 0.5f && current.in > 0.003f;
-    scene_.imeContinued = continued;
-    scene_.imePrevGlyph = continued ? scene_.imeGlyph : std::wstring();
-    scene_.imePrevAlpha = continued ? current.in : 0.f;
+    scene_.imePrevGlyph = scene_.imeGlyph;
     scene_.imeGlyph = glyph;
-    scene_.imeMs = now;
+    scene_.imeMs = ClockMs();
     Publish(); // content only: the glass does not change
 }
 
@@ -1789,6 +1782,8 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
         return unread_ ? TrFormat(L"%d unread notifications", int(unread_)) : Tr(L"Notifications");
     if (key == kTrayKey)
         return Tr(L"Tray");
+    if (key == kImeKey)
+        return Tr(L"Input method");
     if (key == kDesktopKey)
         return Tr(L"Show Desktop");
     if (key == kStatusKey) {

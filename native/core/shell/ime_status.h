@@ -16,12 +16,18 @@
 namespace atrium {
 
 // The WM_IME_CONTROL sub-messages the public imm.h leaves out (immdev.h's
-// set): asking the foreground thread's default IME window for its state.
+// set): asking the foreground thread's default IME window for its state, and setting its mode.
 #ifndef IMC_GETOPENSTATUS
 #define IMC_GETOPENSTATUS 0x0005
 #endif
 #ifndef IMC_GETCONVERSIONMODE
 #define IMC_GETCONVERSIONMODE 0x0001
+#endif
+#ifndef IMC_SETOPENSTATUS
+#define IMC_SETOPENSTATUS 0x0006
+#endif
+#ifndef IMC_SETCONVERSIONMODE
+#define IMC_SETCONVERSIONMODE 0x0002
 #endif
 
 struct ImeStatus {
@@ -107,6 +113,9 @@ public:
     // CapsLock's latch, kept from the keyboard hook: a background thread's
     // GetKeyState can stay stale, while the low-level hook sees every press.
     bool CapsLock() const { return caps_.load(); }
+    // The input method entry's click, done on the worker: an IME between Chinese and English (its
+    // native mode), else the next input language, for the window in front; then a read.
+    void Toggle();
 
 private:
     static void CALLBACK OnWinEvent(HWINEVENTHOOK hook, DWORD event, HWND window, LONG object, LONG child, DWORD thread, DWORD time);
@@ -121,6 +130,7 @@ private:
     int keyToken_ = 0;       // the shared keyboard hook's registration
     HANDLE wake_ = nullptr;  // the worker reads after a burst of events
     std::atomic<bool> stop_{false};
+    std::atomic<bool> toggle_{false}; // a click waits for the worker
     std::atomic<bool> caps_{false}; // the latch (hook thread writes, the UI thread reads)
     bool capsDown_ = false; // the key is held: its repeat does not flip the latch again
     std::thread thread_;

@@ -147,39 +147,23 @@ template<class Action> void ForBars(Action action)
         action(*bar);
 }
 
-// A settled input method change shows in the status icon of the bar on the
-// foreground window's display. While the bar is hidden there is nothing to
-// show it (the bottom bubble is a separate change).
-void AnnounceIme(HWND foreground, const ImeStatus& status)
-{
-    const HMONITOR monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
-    Bar* bar = g_app.bar && g_app.bar->Monitor() == monitor ? g_app.bar.get() : nullptr;
-    if (!bar)
-        for (const auto& secondary : g_app.secondaryBars)
-            if (secondary->Monitor() == monitor) {
-                bar = secondary.get();
-                break;
-            }
-    if (bar && bar->ShownOnScreen())
-        bar->AnnounceIme(ImeGlyph(status));
-}
-
-// A finished read from the watcher's worker thread: the case is filled in here
-// (the latch comes from the keyboard hook; Shift's key-down is global), then a
-// settled change announces in the status icon of the bar on that display.
+// A finished read from the watcher's worker thread: the glyph of the window in front goes to every
+// bar's input method entry. The case is CapsLock's latch from the keyboard hook; a Shift held for a
+// capital is typing, not a state.
 void OnImeSample(ImeWatcher::Sample& sample)
 {
     if (!g_app.imeOn || !g_app.imeWatcher)
         return;
     ImeStatus status = std::move(sample.status);
-    const bool caps = g_app.imeWatcher->CapsLock();
-    status.caps = caps;
-    status.upper = caps != ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
-    if (!g_app.imeWatch.Update(sample.foreground, status))
-        return;
+    status.caps = status.upper = g_app.imeWatcher->CapsLock();
+    const bool changed = g_app.imeWatch.Update(sample.foreground, status);
     const ImeStatus& shown = g_app.imeWatch.state();
-    AnnounceIme(sample.foreground, shown);
-    Log(L"ime: %s in the status icon (layout %08lX)", ImeGlyph(shown).c_str(), shown.layout);
+    if (shown.empty())
+        return;
+    const std::wstring glyph = ImeGlyph(shown);
+    ForBars([&](Bar& bar) { bar.SetIme(glyph); });
+    if (changed)
+        Log(L"ime: %s (layout %08lX)", glyph.c_str(), shown.layout);
 }
 
 void ConfigureBar(Bar& bar);
@@ -608,6 +592,7 @@ void ApplySettings(const Settings& s)
     } else if (!g_app.imeOn && g_app.imeWatcher) {
         g_app.imeWatcher.reset();
         g_app.imeWatch.reset();
+        ForBars([](Bar& bar) { bar.SetIme(L""); });
     }
     g_app.desktopDisplay = s.desktopDisplay;
     g_app.displaySettings = s;
@@ -1141,6 +1126,12 @@ void ConfigureBar(Bar& bar)
     bar.onTrayClick = ToggleTray;
     bar.onDesktopClick = [] { SendWinShortcut('D'); }; // the system's Show Desktop: a second click brings the windows back
     bar.onStatusClick = ToggleControl;
+    bar.onImeClick = [] {
+        if (g_app.imeWatcher)
+            g_app.imeWatcher->Toggle();
+    };
+    if (!g_app.imeWatch.state().empty())
+        bar.SetIme(ImeGlyph(g_app.imeWatch.state()));
     bar.keepShown = [&bar] {
         return g_app.activeBar == &bar && (g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() ||
             g_app.calendar->Visible() || g_app.notes->CenterVisible() || g_app.menu->Visible());

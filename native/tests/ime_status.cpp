@@ -1,4 +1,3 @@
-#include "render/ime_swap.h"
 #include "shell/ime_status.h"
 
 #include <iostream>
@@ -84,19 +83,6 @@ void CheckCarryForward()
     Require(!other.open && !other.native, "a different layout is not carried into");
 }
 
-void CheckSwap()
-{
-    const ImeSwapFrame start = ImeSwapAt(0);
-    Require(start.running && start.out == 0 && start.in == 0, "a swap starts with the symbol");
-    const ImeSwapFrame middle = ImeSwapAt(200);
-    Require(middle.out == 1 && middle.in > 0 && middle.in < 1, "the glyph fades in over the symbol");
-    Require(ImeSwapShowing(300) && !ImeSwapShowing(50), "the glyph is showing after the out phase");
-    const ImeSwapFrame done = ImeSwapAt(2000);
-    Require(!done.running && done.out == 0 && done.in == 0, "the symbol comes back at the end");
-    const ImeSwapFrame continued = ImeSwapAt(30, true);
-    Require(continued.prev > 0 && continued.in > 0 && continued.out == 1, "a continued swap crossfades the glyphs");
-}
-
 } // namespace
 
 int main()
@@ -106,7 +92,6 @@ int main()
         CheckNews();
         CheckWatch();
         CheckCarryForward();
-        CheckSwap();
         std::cout << "ime status checks passed\n";
         return 0;
     } catch (const std::exception& error) {

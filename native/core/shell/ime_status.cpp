@@ -28,6 +28,24 @@ HWND FocusWindow(HWND foreground)
     return foreground;
 }
 
+// The entry's click: an IME on its native script goes to English, otherwise (off, or English) to its
+// script; a keyboard without an IME goes to the next input language. The IME window takes a sent
+// control message only (a posted one is dropped), hence the worker.
+void Switch(HWND window, const ImeStatus& now)
+{
+    HWND ime = now.ime ? ImmGetDefaultIMEWnd(window) : nullptr;
+    if (!ime) {
+        PostMessageW(window, WM_INPUTLANGCHANGEREQUEST, 0, LPARAM(HKL_NEXT));
+        return;
+    }
+    const bool native = now.Latin();
+    DWORD_PTR ignored = 0;
+    if (native && !now.open)
+        SendMessageTimeoutW(ime, WM_IME_CONTROL, IMC_SETOPENSTATUS, TRUE, SMTO_ABORTIFHUNG | SMTO_BLOCK, 120, &ignored);
+    SendMessageTimeoutW(ime, WM_IME_CONTROL, IMC_SETCONVERSIONMODE, (native ? IME_CMODE_NATIVE : 0) | (now.fullShape ? IME_CMODE_FULLSHAPE : 0),
+                        SMTO_ABORTIFHUNG | SMTO_BLOCK, 120, &ignored);
+}
+
 } // namespace
 
 std::wstring LanguageGlyph(LANGID langid)
@@ -128,6 +146,12 @@ ImeWatcher::~ImeWatcher()
     g_watcher = nullptr;
 }
 
+void ImeWatcher::Toggle()
+{
+    toggle_ = true;
+    Wake();
+}
+
 void ImeWatcher::Wake()
 {
     if (wake_)
@@ -149,10 +173,14 @@ void ImeWatcher::Run()
         HWND foreground = GetForegroundWindow();
         if (!foreground)
             continue;
-        HWND focus = FocusWindow(foreground);
+        HWND focus = FocusWindow(foreground), asked = focus;
         ImeStatus status = QueryImeStatus(focus);
         if (status.empty() && focus != foreground)
-            status = QueryImeStatus(foreground);
+            status = QueryImeStatus(asked = foreground);
+        if (toggle_.exchange(false) && status.reliable) {
+            Switch(asked, status);
+            status = QueryImeStatus(asked);
+        }
         if (foreground != GetForegroundWindow() || FocusWindow(foreground) != focus)
             continue; // the foreground moved while the IME was asked: not a state of anything
         if (!status.reliable && !status.empty() && !last.empty() && status.layout == last.layout)
