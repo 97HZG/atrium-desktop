@@ -18,6 +18,14 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
+      # Visual Studio's LLVM is 19, the runner's newer: the same clang-tidy and clang-format as the developers'.
+      - name: Pin clang-tidy and clang-format to 19
+        shell: pwsh
+        run: |
+          python -m pip install --quiet --target "$env:RUNNER_TEMP\llvm" clang-tidy==19.1.0 clang-format==19.1.5
+          # The binaries the wheels carry, not their Python launchers.
+          Get-ChildItem "$env:RUNNER_TEMP\llvm" -Recurse -Include clang-tidy.exe, clang-format.exe | Where-Object FullName -Match '\\data\\' |
+              ForEach-Object DirectoryName | Sort-Object -Unique | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Lint (text, native rules, clang-format, clang-tidy)
         shell: pwsh
         run: ./tools/lint.ps1 -Tidy ${{ github.event_name == 'pull_request' && format('-Base origin/{0}', github.base_ref) || '' }}

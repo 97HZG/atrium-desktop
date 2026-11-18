@@ -27,11 +27,13 @@ $Paths = @($Paths | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 
 function Rel([string]$path) { [IO.Path]::GetRelativePath($Root, $path).Replace('\', '/') }
 function Fail([string]$where, [string]$rule, [string]$why) { $errors.Add("${where}: ${rule}: $why") }
+# The LLVM tools of one major version: another clang-tidy brings other checks, another clang-format other layouts.
+$llvmMajor = 19
 function Llvm([string]$exe) {
-    $found = (Get-Command $exe -ErrorAction SilentlyContinue).Source
-    if ($found) { return $found }
     $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath 2>$null
-    @("$vs\VC\Tools\Llvm\x64\bin\$exe", "D:\Microsoft\VC\Tools\Llvm\x64\bin\$exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    $candidates = @((Get-Command $exe -All -ErrorAction SilentlyContinue).Source) +
+        @("$vs\VC\Tools\Llvm\x64\bin\$exe", "D:\Microsoft\VC\Tools\Llvm\x64\bin\$exe")
+    $candidates | Where-Object { $_ -and (Test-Path $_) -and (& $_ --version) -match "version $llvmMajor\." } | Select-Object -First 1
 }
 
 $files = @(git -C $Root ls-files --cached --others --exclude-standard | Where-Object { Test-Path (Join-Path $Root $_) })
@@ -180,7 +182,7 @@ $expected = $found[0].Version
 foreach ($f in $found | Where-Object Version -ne $expected) { Fail $f.File 'version' "$($f.Version), the project is $expected" }
 
 # --- clang-format: the whole native tree ----------------------------------------------------------------------
-if (-not $clangFormat) { $errors.Add('lint: clang-format not found') }
+if (-not $clangFormat) { $errors.Add("lint: clang-format $llvmMajor not found") }
 else {
     foreach ($m in & $clangFormat --dry-run "--style=file:$style" @sources 2>&1 | Select-String '^(.+?):(\d+):\d+: warning') {
         Fail "$(Rel $m.Matches[0].Groups[1].Value):$($m.Matches[0].Groups[2].Value)" 'format' 'run ./tools/lint.ps1 -Fix'
@@ -210,6 +212,7 @@ if ($Tidy) {
         })
     }
     $clangTidy = Llvm 'clang-tidy.exe'
+    if (-not $clangTidy) { throw "lint: clang-tidy $llvmMajor not found" }
     $output = $units | ForEach-Object -ThrottleLimit ([Environment]::ProcessorCount) -Parallel {
         & $using:clangTidy -p $using:build --quiet $_ 2>$null
     }
