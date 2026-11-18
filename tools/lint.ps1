@@ -9,6 +9,7 @@
 #   -Root <tree>                         check another checkout with these rules
 param(
     [string]$Root = (Split-Path -Parent $PSScriptRoot),
+    [string]$RulesRoot,
     [string]$Base,
     [string[]]$Paths,
     [int]$MaxLines = 0,
@@ -18,33 +19,104 @@ param(
     [switch]$UpdateBaseline
 )
 $ErrorActionPreference = 'Stop'
-$tools = $PSScriptRoot
+$rules = if ($RulesRoot) { $RulesRoot } else { $Root }
 $core = Join-Path $Root 'native/core'
-$baselinePath = Join-Path $tools 'lint-baseline.json'
+$baselinePath = Join-Path $Root 'tools/lint-baseline.json'
 $errors = [System.Collections.Generic.List[string]]::new()
 $counts = [ordered]@{}
 $Paths = @($Paths | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 
 function Rel([string]$path) { [IO.Path]::GetRelativePath($Root, $path).Replace('\', '/') }
 function Fail([string]$where, [string]$rule, [string]$why) { $errors.Add("${where}: ${rule}: $why") }
+function Tail([string[]]$lines, [int]$n = 15) {
+    if (-not $lines -or -not $lines.Count) { return '(no output)' }
+    ($lines | Select-Object -Last $n) -join "`n"
+}
+function Invoke-Tool([string]$Exe, [string[]]$ToolArgs, [switch]$AllowNonZero) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $global:LASTEXITCODE = -1
+        $lines = @(& $Exe @ToolArgs 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+    } catch {
+        throw "lint: $Exe failed: $_"
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    if ($code -ne 0 -and -not $AllowNonZero) {
+        throw "lint: $Exe $($ToolArgs -join ' ') failed (exit $code):`n$(Tail $lines)"
+    }
+    [pscustomobject]@{ ExitCode = $code; Lines = $lines }
+}
+function Test-Glob([string]$path, [string[]]$globs) {
+    $p = $path.Replace('\', '/') -replace '^\./', ''
+    foreach ($g in $globs) {
+        $rx = '^'
+        $i = 0
+        $n = $g.Replace('\', '/') -replace '^\./', ''
+        while ($i -lt $n.Length) {
+            if ($i + 2 -lt $n.Length -and $n.Substring($i, 3) -eq '**/') { $rx += '(?:.+/)?'; $i += 3 }
+            elseif ($i + 1 -lt $n.Length -and $n.Substring($i, 2) -eq '**') { $rx += '.*'; $i += 2 }
+            elseif ($n[$i] -eq '*') { $rx += '[^/]*'; $i++ }
+            elseif ($n[$i] -eq '?') { $rx += '[^/]'; $i++ }
+            else { $rx += [regex]::Escape($n[$i]); $i++ }
+        }
+        if ($p -match "$rx`$") { return $true }
+    }
+    $false
+}
 # The LLVM tools of one major version: another clang-tidy brings other checks, another clang-format other layouts.
 $llvmMajor = 19
 function Llvm([string]$exe) {
-    $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath 2>$null
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    $vs = if (Test-Path $vswhere) { & $vswhere -latest -products * -property installationPath 2>$null } else { $null }
     $candidates = @((Get-Command $exe -All -ErrorAction SilentlyContinue).Source) +
-        @("$vs\VC\Tools\Llvm\x64\bin\$exe", "D:\Microsoft\VC\Tools\Llvm\x64\bin\$exe")
+        $(if ($vs) { @("$vs\VC\Tools\Llvm\x64\bin\$exe") } else { @() })
     $candidates | Where-Object { $_ -and (Test-Path $_) -and (& $_ --version) -match "version $llvmMajor\." } | Select-Object -First 1
 }
 
-$files = @(git -C $Root ls-files --cached --others --exclude-standard | Where-Object { Test-Path (Join-Path $Root $_) })
+$diffStatus = @()
+$diffNumstat = @()
+if ($Base) {
+    Invoke-Tool 'git' @('-C', $Root, 'rev-parse', '--verify', "$Base^{commit}") | Out-Null
+    $mergeBase = @((Invoke-Tool 'git' @('-C', $Root, 'merge-base', $Base, 'HEAD')).Lines)[0].Trim()
+    $prevIndex = $env:GIT_INDEX_FILE
+    $realIndex = if ($prevIndex) { $prevIndex } else {
+        @((Invoke-Tool 'git' @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-path', 'index')).Lines)[0].Trim()
+    }
+    $tmpIndex = Join-Path ([IO.Path]::GetTempPath()) "atrium-lint-$([Guid]::NewGuid().ToString('N')).index"
+    try {
+        if (Test-Path $realIndex) { Copy-Item $realIndex $tmpIndex -Force }
+        $env:GIT_INDEX_FILE = $tmpIndex
+        $untracked = @((Invoke-Tool 'git' @('-C', $Root, '-c', 'core.quotepath=false', 'ls-files', '--others', '--exclude-standard')).Lines)
+        if ($untracked) { Invoke-Tool 'git' (@('-C', $Root, 'add', '-N', '--') + $untracked) | Out-Null }
+        $diffStatus = @((Invoke-Tool 'git' @('-C', $Root, '-c', 'core.quotepath=false', 'diff', '--name-status', '-M', $mergeBase, '--', '.')).Lines)
+        $diffNumstat = @((Invoke-Tool 'git' @('-C', $Root, '-c', 'core.quotepath=false', 'diff', '--numstat', $mergeBase, '--', '.')).Lines)
+    } finally {
+        $env:GIT_INDEX_FILE = $prevIndex
+        Remove-Item $tmpIndex, "$tmpIndex.lock" -ErrorAction SilentlyContinue
+    }
+}
+
+$files = @((Invoke-Tool 'git' @('-C', $Root, '-c', 'core.quotepath=false', 'ls-files', '--cached', '--others', '--exclude-standard')).Lines |
+    Where-Object { Test-Path (Join-Path $Root $_) })
 $native = @($files | Where-Object { $_ -match '^native/(core|tests)/.*\.(cpp|h|hlsl)$' })
 $projects = @($files | Where-Object { $_ -match '\.csproj$' } | ForEach-Object { Join-Path $Root $_ })
 $clangFormat = Llvm 'clang-format.exe'
-$style = Join-Path $tools '..\.clang-format'
+$style = Join-Path $rules '.clang-format'
 $sources = @($native | ForEach-Object { Join-Path $Root $_ })
 if ($Fix) {
-    if ($clangFormat) { & $clangFormat -i "--style=file:$style" @sources }
-    if ($DotNet) { $projects | ForEach-Object { dotnet format $_ | Out-Null } }
+    if ($clangFormat -and $sources) {
+        $rsp = [IO.Path]::GetTempFileName()
+        try {
+            [IO.File]::WriteAllLines($rsp, $sources)
+            Invoke-Tool $clangFormat @('-i', "--style=file:$style", "--files=$rsp") | Out-Null
+        } finally {
+            Remove-Item $rsp -ErrorAction SilentlyContinue
+        }
+    }
+    if ($DotNet) { $projects | ForEach-Object { Invoke-Tool 'dotnet' @('format', $_) | Out-Null } }
 }
 
 # --- Text: every source and configuration file ---------------------------------------------------------------
@@ -102,7 +174,7 @@ foreach ($rel in $files | Where-Object { $_ -match '\.xaml$' }) {
 # --- Native: layers, banned and ratcheted constructs ----------------------------------------------------------
 # Who may include whom. Root headers are either foundation (anyone) or composition (root only).
 $foundation = 'bar_edge.h', 'clock.h', 'icon_image.h', 'localization.h', 'localization_format.h', 'log.h', 'motion.h', 'notice.h', 'posted.h', 'resource.h',
-    'settings.h', 'status.h'
+    'settings.h', 'status.h', 'win32_path.h'
 $layers = @{ render = @(); shell = @(); ui = @('render', 'shell') }
 # Configuration macros set before the headers that read them; any other value is a constexpr.
 $configMacros = 'SECURITY_WIN32', 'WIN32_LEAN_AND_MEAN', 'NOMINMAX', 'IDI_ATRIUM'
@@ -183,28 +255,48 @@ foreach ($f in $found | Where-Object Version -ne $expected) { Fail $f.File 'vers
 
 # --- clang-format: the whole native tree ----------------------------------------------------------------------
 if (-not $clangFormat) { $errors.Add("lint: clang-format $llvmMajor not found") }
-else {
-    foreach ($m in & $clangFormat --dry-run "--style=file:$style" @sources 2>&1 | Select-String '^(.+?):(\d+):\d+: warning') {
-        Fail "$(Rel $m.Matches[0].Groups[1].Value):$($m.Matches[0].Groups[2].Value)" 'format' 'run ./tools/lint.ps1 -Fix'
+elseif ($sources) {
+    $rsp = [IO.Path]::GetTempFileName()
+    try {
+        [IO.File]::WriteAllLines($rsp, $sources)
+        $res = Invoke-Tool $clangFormat @('--dry-run', '--Werror', "--style=file:$style", "--files=$rsp") -AllowNonZero
+        $hits = 0
+        foreach ($line in $res.Lines) {
+            if ($line -match '^(.+?):(\d+):\d+: (?:warning|error): code should be clang-formatted') {
+                $hits++
+                Fail "$(Rel $Matches[1]):$($Matches[2])" 'format' 'run ./tools/lint.ps1 -Fix'
+            }
+        }
+        if ($res.ExitCode -ne 0 -and -not $hits) {
+            $errors.Add("tool-error: clang-format failed (exit $($res.ExitCode)): $(Tail $res.Lines)")
+        }
+    } finally {
+        Remove-Item $rsp -ErrorAction SilentlyContinue
     }
 }
 
 # --- clang-tidy: .clang-tidy over a Ninja build of the native tree --------------------------------------------
 if ($Tidy) {
     $build = Join-Path $Root 'native/build/tidy'
-    $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath 2>$null
-    if (-not $vs) { $vs = 'D:\Microsoft' }
-    foreach ($line in cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set") {
-        if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2]) }
+    if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vs = if (Test-Path $vswhere) { & $vswhere -latest -products * -property installationPath 2>$null } else { $null }
+        $vcvars = if ($vs) { Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat' } else { $null }
+        if (-not $vcvars -or -not (Test-Path $vcvars)) { throw 'lint: cl.exe not on PATH and Visual Studio vcvars64.bat not found' }
+        foreach ($line in (Invoke-Tool 'cmd' @('/c', "`"$vcvars`" >nul && set")).Lines) {
+            if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2]) }
+        }
     }
-    cmake -S (Join-Path $Root 'native') -B $build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON `
-        -DATRIUM_DEVELOPMENT=ON -DATRIUM_BUILD_TESTS=ON | Out-Null
-    cmake --build $build | Out-Null # the generated shader headers
-    if ($LASTEXITCODE) { $errors.Add('lint: the tidy build failed (cmake --build native/build/tidy)') }
+    Invoke-Tool 'cmake' @('-S', (Join-Path $Root 'native'), '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
+        '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON', '-DATRIUM_DEVELOPMENT=ON', '-DATRIUM_BUILD_TESTS=ON') | Out-Null
+    Invoke-Tool 'cmake' @('--build', $build) | Out-Null # the generated shader headers
     $units = @((Get-Content (Join-Path $build 'compile_commands.json') -Raw | ConvertFrom-Json).file |
-        Where-Object { $_ -match '[\\/]native[\\/](core|tests)[\\/]' } | Sort-Object -Unique)
+        Where-Object { $_ -match '[\\/]native[\\/](core|tests)[\\/].*\.cpp$' } | Sort-Object -Unique) # not core.rc: rc.exe's command is no compiler's
     if ($Base) {
-        $touched = @(git -C $Root diff --name-only $Base -- native | ForEach-Object { [IO.Path]::GetFileName($_) })
+        $touched = @($diffStatus | ForEach-Object {
+            $parts = $_ -split "`t"
+            if ($parts[0] -like 'R*') { $parts[1], $parts[2] } elseif ($parts[0] -like 'C*') { $parts[2] } else { $parts[1] }
+        } | Where-Object { $_ -like 'native/*' } | ForEach-Object { [IO.Path]::GetFileName($_) })
         $headers = @($touched | Where-Object { $_ -match '\.h$' })
         $units = @($units | Where-Object {
             $touched -contains [IO.Path]::GetFileName($_) -or
@@ -213,34 +305,62 @@ if ($Tidy) {
     }
     $clangTidy = Llvm 'clang-tidy.exe'
     if (-not $clangTidy) { throw "lint: clang-tidy $llvmMajor not found" }
-    $output = $units | ForEach-Object -ThrottleLimit ([Environment]::ProcessorCount) -Parallel {
-        & $using:clangTidy -p $using:build --quiet $_ 2>$null
+    $tidyConfig = Join-Path $rules '.clang-tidy'
+    $results = $units | ForEach-Object -ThrottleLimit ([Environment]::ProcessorCount) -Parallel {
+        $unit = $_
+        $errFile = [IO.Path]::GetTempFileName()
+        try {
+            $stdout = @(& $using:clangTidy -p $using:build "--config-file=$using:tidyConfig" --quiet $unit 2>$errFile | ForEach-Object { "$_" })
+            $exit = $LASTEXITCODE
+            $stderr = if (Test-Path $errFile) { [IO.File]::ReadAllLines($errFile) } else { @() }
+        } finally {
+            Remove-Item $errFile -ErrorAction SilentlyContinue
+        }
+        [pscustomobject]@{ Unit = $unit; Exit = $exit; Stdout = $stdout; Stderr = $stderr }
     }
     $seen = @{}
-    $current = $null
-    foreach ($line in $output) {
-        if ($line -match '^(.+?):(\d+):\d+: (?:warning|error): (.*) \[([\w.,-]+)\]$') {
-            $file, $row, $text, $check = $Matches[1..4]
-            $rel = Rel $file
-            $current = $null
-            if (-not $rel.StartsWith('native/core/') -and -not $rel.StartsWith('native/tests/')) { continue }
-            $where = "${rel}:$row"
-            if ($seen.ContainsKey("$where|$check")) { continue }
-            $seen["$where|$check"] = $true
-            # Long and tangled functions are ratcheted: they may only get shorter and simpler.
-            if ($check -eq 'readability-function-cognitive-complexity' -and $text -match "function '(.+)' has cognitive complexity of (\d+)") {
-                $counts["$($rel.Substring(7))|complexity|$($Matches[1])"] = [int]$Matches[2]
-            } elseif ($check -eq 'readability-function-cognitive-complexity' -and $text -match 'lambda has cognitive complexity of (\d+)') {
-                $key = "$($rel.Substring(7))|complexity|(lambda)" # the file's most tangled one
-                $counts[$key] = [Math]::Max([int]$counts[$key], [int]$Matches[1])
-            } elseif ($check -eq 'readability-function-size' -and $text -match "function '(.+)' exceeds") {
-                $current = "$($rel.Substring(7))|function-lines|$($Matches[1])"
-                $counts[$current] = 0
-            } else {
-                Fail $where $check $text
+    foreach ($r in $results) {
+        $unitRel = Rel $r.Unit
+        $allLines = @($r.Stdout) + @($r.Stderr)
+        if ($r.Exit -ne 0) {
+            $errors.Add("tool-error: clang-tidy failed on $unitRel (exit $($r.Exit)): $(Tail $allLines)")
+        }
+        # Catch compile/fatal errors anywhere (including system headers) before the native/ path filter.
+        foreach ($line in $allLines) {
+            if ($line -match '^(?:(.+?):(\d+):\d+: )?(fatal error: .*)$') {
+                $where = if ($Matches[1]) { "$(Rel $Matches[1]):$($Matches[2])" } else { $unitRel }
+                Fail $where 'clang-diagnostic-error' "$($Matches[3]) (in $unitRel)"
+            } elseif ($line -match '^(.+?):(\d+):\d+: error: (.*) \[(clang-diagnostic-[\w-]+)\]$') {
+                Fail "$(Rel $Matches[1]):$($Matches[2])" $Matches[4] "$($Matches[3]) (in $unitRel)"
             }
-        } elseif ($current -and $line -match 'note: (\d+) lines including') {
-            $counts[$current] = [int]$Matches[1]
+        }
+        $current = $null
+        foreach ($line in $r.Stdout) {
+            if ($line -match '^(.+?):(\d+):\d+: (?:warning|error): (.*) \[([\w.,-]+)\]$') {
+                $file, $row, $text, $check = $Matches[1..4]
+                $rel = Rel $file
+                $current = $null
+                if ($check -like 'clang-diagnostic-*' -and $line -match ': error: ') { continue }
+                if (-not $rel.StartsWith('native/core/') -and -not $rel.StartsWith('native/tests/')) { continue }
+                $where = "${rel}:$row"
+                if ($seen.ContainsKey("$where|$check")) { continue }
+                $seen["$where|$check"] = $true
+                # Long and tangled functions are ratcheted: they may only get shorter and simpler.
+                if ($check -eq 'readability-function-cognitive-complexity' -and $text -match "function '(.+)' has cognitive complexity of (\d+)") {
+                    $counts["$($rel.Substring(7))|complexity|$($Matches[1])"] = [int]$Matches[2]
+                } elseif ($check -eq 'readability-function-cognitive-complexity' -and $text -match 'lambda has cognitive complexity of (\d+)') {
+                    $key = "$($rel.Substring(7))|complexity|(lambda)" # the file's most tangled one
+                    $counts[$key] = [Math]::Max([int]$counts[$key], [int]$Matches[1])
+                } elseif ($check -eq 'readability-function-size' -and $text -match "function '(.+)' exceeds") {
+                    $current = "$($rel.Substring(7))|function-lines|$($Matches[1])"
+                    $counts[$current] = 0
+                } else {
+                    Fail $where $check $text
+                }
+            } elseif ($current -and $line -match 'note: (\d+) lines including') {
+                $counts[$current] = [int]$Matches[1]
+                $current = $null
+            }
         }
     }
 }
@@ -248,9 +368,23 @@ if ($Tidy) {
 # --- C#: the projects built with .editorconfig's style rules and the recommended analyzers as errors ----------
 if ($DotNet) {
     foreach ($project in $projects) {
-        foreach ($m in dotnet build $project -c Release -nologo 2>&1 | Select-String '^(.+?\.(?:cs|xaml))\((\d+),\d+\): error (\w+): (.*?)( \[.*)?$') {
-            $g = $m.Matches[0].Groups
-            Fail "$(Rel $g[1].Value):$($g[2].Value)" $g[3].Value $g[4].Value
+        $configs = if ($project -like '*Atrium.Settings.csproj') { @('', '-p:AtriumDevelopment=false') } else { @('') }
+        foreach ($cfg in $configs) {
+            $buildArgs = @('build', $project, '-c', 'Release', '-nologo') + $(if ($cfg) { @($cfg) } else { @() })
+            $res = Invoke-Tool 'dotnet' $buildArgs -AllowNonZero
+            $hits = 0
+            $unparsedError = $false
+            foreach ($line in $res.Lines) {
+                if ($line -match '^\s*(.+?\.(?:cs|xaml))\((\d+),\d+\): (?:[\w]+\s+)?error (\w+): (.*?)( \[.*)?$') {
+                    $hits++
+                    Fail "$(Rel $Matches[1]):$($Matches[2])" $Matches[3] $Matches[4]
+                } elseif ($line -match ': error | error [A-Z]+\d*:') {
+                    $unparsedError = $true
+                }
+            }
+            if ($res.ExitCode -ne 0 -and (-not $hits -or $unparsedError)) {
+                $errors.Add("tool-error: dotnet build $(Rel $project) failed (exit $($res.ExitCode)): $(Tail $res.Lines)")
+            }
         }
     }
 }
@@ -284,21 +418,25 @@ foreach ($key in $baseline.Keys) {
 
 # --- The change itself --------------------------------------------------------------------------------------------
 if ($Base) {
-    $changed = @(git -C $Root diff --name-only --diff-filter=AMR $Base -- .)
-    foreach ($path in $changed) {
-        if ($Paths -and -not ($Paths | Where-Object { $path -like $_ })) { Fail $path 'scope' "outside the allowed paths ($($Paths -join ', '))" }
+    foreach ($line in $diffStatus) {
+        $parts = $line -split "`t"
+        $status = $parts[0]
+        $checked = if ($status -like 'R*') { @($parts[1], $parts[2]) } elseif ($status -like 'C*') { @($parts[2]) } else { @($parts[1]) }
+        foreach ($path in $checked) {
+            if ($Paths -and -not (Test-Glob $path $Paths)) { Fail $path 'scope' "outside the allowed paths ($($Paths -join ', '))" }
+        }
     }
-    $numbers = git -C $Root diff --numstat $Base -- . | ForEach-Object { ($_ -split "`t")[0..1] -replace '-', '0' }
+    $numbers = $diffNumstat | ForEach-Object { ($_ -split "`t")[0..1] -replace '-', '0' }
     $total = ($numbers | ForEach-Object { [int]$_ } | Measure-Object -Sum).Sum
     if ($MaxLines -and $total -gt $MaxLines) { $errors.Add("diff: $total changed lines > budget $MaxLines") }
 }
 
 $problems = @($errors | Sort-Object -Unique)
-# A scoped change answers for its own files (and its diff), not for the rest of the tree.
+# A scoped change answers for its own files (and its diff), never silencing tree-wide or tool errors.
 if ($Paths) {
     $problems = @($problems | Where-Object {
         $file = if ($_ -match '^([^:]+?)(:\d+)?: ') { $Matches[1] } else { '' }
-        $_ -match '^diff: |: scope: ' -or ($Paths | Where-Object { $file -like $_ })
+        -not $file -or $_ -match '^(lint|diff|tool-error): |: (scope|version|clang-diagnostic-error|(?:CS|MC|WMC|RZ)\d+): ' -or (Test-Glob $file $Paths)
     })
 }
 $problems | ForEach-Object { Write-Output $_ }

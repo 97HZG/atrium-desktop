@@ -4,6 +4,7 @@
 #include "shell/shell_verbs.h"
 
 #include "log.h"
+#include "win32_path.h"
 
 #include <propsys.h>
 #include <tlhelp32.h>
@@ -56,9 +57,7 @@ std::wstring ShellAppIdOfProcess(const std::wstring& exePath)
         HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
         if (!process)
             continue;
-        wchar_t image[32768]{};
-        DWORD size = DWORD(std::size(image));
-        if (QueryFullProcessImageNameW(process, 0, image, &size) && _wcsicmp(image, exePath.c_str()) == 0) {
+        if (const std::wstring image = ProcessImagePath(process); !image.empty() && _wcsicmp(image.c_str(), exePath.c_str()) == 0) {
             wchar_t appId[256]{};
             UINT32 length = UINT32(std::size(appId));
             if (SUCCEEDED(GetApplicationUserModelId(process, &length, appId)) && length > 1)

@@ -5,6 +5,7 @@
 #include "log.h"
 #include "shell/uia_client.h"
 #include "../posted.h"
+#include "win32_path.h"
 
 #include <tlhelp32.h>
 #include <uiautomation.h>
@@ -42,15 +43,7 @@ std::map<DWORD, std::wstring> FeishuProcesses()
     for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
         if (_wcsicmp(pe.szExeFile, L"Feishu.exe") != 0 && _wcsicmp(pe.szExeFile, L"Lark.exe") != 0)
             continue;
-        std::wstring path;
-        if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID)) {
-            wchar_t buf[MAX_PATH * 2];
-            DWORD len = DWORD(std::size(buf));
-            if (QueryFullProcessImageNameW(p, 0, buf, &len))
-                path = buf;
-            CloseHandle(p);
-        }
-        out[pe.th32ProcessID] = path;
+        out[pe.th32ProcessID] = ProcessImagePath(pe.th32ProcessID);
     }
     CloseHandle(snap);
     return out;

@@ -4,6 +4,7 @@
 #include "log.h"
 #include "settings.h"
 #include "notice.h"
+#include "win32_path.h"
 
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.h>
@@ -53,13 +54,12 @@ std::optional<Version> ParseVersion(std::wstring_view tag)
 
 Version CurrentVersion()
 {
-    wchar_t exe[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    const std::wstring exe = ModulePath();
     DWORD unused = 0;
-    std::vector<BYTE> data(GetFileVersionInfoSizeW(exe, &unused));
+    std::vector<BYTE> data(GetFileVersionInfoSizeW(exe.c_str(), &unused));
     VS_FIXEDFILEINFO* info = nullptr;
     UINT size = 0;
-    if (data.empty() || !GetFileVersionInfoW(exe, 0, DWORD(data.size()), data.data()) ||
+    if (data.empty() || !GetFileVersionInfoW(exe.c_str(), 0, DWORD(data.size()), data.data()) ||
         !VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &size))
         throw winrt::hresult_error(E_FAIL, L"Missing application version");
     return {HIWORD(info->dwFileVersionMS), LOWORD(info->dwFileVersionMS), HIWORD(info->dwFileVersionLS), LOWORD(info->dwFileVersionLS)};
@@ -75,16 +75,17 @@ DWORD Delay(int64_t last, int64_t now)
 
 std::wstring ExeDirectory()
 {
-    wchar_t path[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, path, MAX_PATH);
-    std::wstring directory(path);
-    return directory.substr(0, directory.find_last_of(L'\\'));
+    const std::wstring path = ModulePath();
+    const size_t slash = path.find_last_of(L'\\');
+    return slash == std::wstring::npos ? std::wstring{} : path.substr(0, slash);
 }
 
 std::wstring UpdateCache()
 {
     using namespace winrt::Windows::Security::Cryptography;
-    std::wstring directory = ExeDirectory();
+    const std::wstring directory = ExeDirectory();
+    if (directory.empty())
+        return {};
     int count = LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, directory.data(), int(directory.size()), nullptr, 0, nullptr, nullptr, 0);
     std::wstring upper(size_t(count), L'\0');
     LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, directory.data(), int(directory.size()), upper.data(), count, nullptr, nullptr, 0);
@@ -104,7 +105,10 @@ std::wstring UpdateCache()
 
 void StartWorker(const std::wstring& arguments)
 {
-    std::wstring exe = ExeDirectory() + L"\\Settings\\Atrium.Settings.exe";
+    const std::wstring dir = ExeDirectory();
+    if (dir.empty())
+        return;
+    std::wstring exe = dir + L"\\Settings\\Atrium.Settings.exe";
     if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES)
         return; // native-only development build
     std::wstring command = L"\"" + exe + L"\" " + arguments;
@@ -157,7 +161,7 @@ UpdateChecker::UpdateChecker(HWND notify) : notify_(notify), stop_(CreateEventW(
 {
     if (!stop_)
         winrt::throw_last_error();
-    if (GetFileAttributesW((cache_ + L"\\download.json").c_str()) != INVALID_FILE_ATTRIBUTES)
+    if (!cache_.empty() && GetFileAttributesW((cache_ + L"\\download.json").c_str()) != INVALID_FILE_ATTRIBUTES)
         StartWorker(L"--resume-update");
     PostMessageW(notify_, WM_APP + 11, 0, 0);
     worker_ = std::thread([this] { Run(); });
@@ -172,6 +176,8 @@ UpdateChecker::~UpdateChecker()
 
 void UpdateChecker::Run()
 {
+    if (cache_.empty())
+        return;
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     try {
         const Version current = CurrentVersion();
@@ -215,6 +221,10 @@ void UpdateChecker::Run()
 
 void UpdateChecker::NotifyPrepared(const std::function<void(std::optional<Notice> card, bool silent)>& show)
 {
+    if (cache_.empty()) {
+        show(std::nullopt, false);
+        return;
+    }
     try {
         const auto text = ReadTextFile(cache_ + L"\\ready.json");
         if (text.empty()) {

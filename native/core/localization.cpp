@@ -1,5 +1,6 @@
 #include "localization.h"
 #include "localization_format.h"
+#include "win32_path.h"
 
 #include <windows.h>
 
@@ -68,8 +69,8 @@ std::string ReadFile(const std::filesystem::path& path)
 
 std::filesystem::path LocaleDir()
 {
-    wchar_t exe[MAX_PATH] = {};
-    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH))
+    const std::wstring exe = ModulePath();
+    if (exe.empty())
         return {};
     std::filesystem::path dir(exe);
     dir.remove_filename();

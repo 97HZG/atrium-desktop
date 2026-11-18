@@ -1,6 +1,7 @@
 #include "shell/app_processes.h"
 
 #include "log.h"
+#include "win32_path.h"
 
 #include <windows.h>
 #include <appmodel.h>
@@ -72,12 +73,8 @@ bool TerminateAppProcesses(std::span<const AppProcessIdentity> apps)
         Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, entry.th32ProcessID), CloseHandle);
         if (!process)
             continue;
-        std::wstring path(32768, L'\0');
-        DWORD length = DWORD(path.size());
-        if (!QueryFullProcessImageNameW(process.get(), 0, path.data(), &length))
-            continue;
-        path.resize(length);
-        if (SharedHost(path))
+        std::wstring path = ProcessImagePath(process.get());
+        if (path.empty() || SharedHost(path))
             continue;
         FILETIME created{}, exited{}, kernel{}, user{};
         if (!GetProcessTimes(process.get(), &created, &exited, &kernel, &user))

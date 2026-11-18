@@ -41,7 +41,6 @@
   "core/shell/app_catalog.cpp|catch-all": 3,
   "core/shell/app_catalog.cpp|complexity|JsonStringPairs": 54,
   "core/shell/app_catalog.cpp|try": 3,
-  "core/shell/app_processes.cpp|complexity|TerminateAppProcesses": 41,
   "core/shell/app_registration.cpp|complexity|RegisterApplication": 56,
   "core/shell/audio_devices.cpp|catch-all": 2,
   "core/shell/audio_devices.cpp|try": 2,

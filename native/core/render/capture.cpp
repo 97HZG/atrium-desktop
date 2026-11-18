@@ -1,6 +1,7 @@
 #include "capture.h"
 
 #include "../log.h"
+#include "../win32_path.h"
 
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
@@ -35,16 +36,16 @@ SetCompositionFn SetComposition()
 
 bool PreferPowerSavingGpu()
 {
-    wchar_t exe[MAX_PATH];
-    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH))
+    const std::wstring exe = ModulePath();
+    if (exe.empty())
         return false;
     const wchar_t* key = L"Software\\Microsoft\\DirectX\\UserGpuPreferences";
     DWORD size = 0;
-    if (RegGetValueW(HKEY_CURRENT_USER, key, exe, RRF_RT_REG_SZ, nullptr, nullptr, &size) == ERROR_SUCCESS)
+    if (RegGetValueW(HKEY_CURRENT_USER, key, exe.c_str(), RRF_RT_REG_SZ, nullptr, nullptr, &size) == ERROR_SUCCESS)
         return false; // the user chose already
     const wchar_t value[] = L"GpuPreference=1;";
-    LSTATUS e = RegSetKeyValueW(HKEY_CURRENT_USER, key, exe, REG_SZ, value, sizeof(value));
-    Log(L"capture: graphics preference \"power saving\" for %s %s", exe, e == ERROR_SUCCESS ? L"set (from the next start)" : L"could not be set");
+    LSTATUS e = RegSetKeyValueW(HKEY_CURRENT_USER, key, exe.c_str(), REG_SZ, value, sizeof(value));
+    Log(L"capture: graphics preference \"power saving\" for %s %s", exe.c_str(), e == ERROR_SUCCESS ? L"set (from the next start)" : L"could not be set");
     return e == ERROR_SUCCESS;
 }
 

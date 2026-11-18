@@ -5,6 +5,7 @@
 #include "log.h"
 #include "shell/uia_client.h"
 #include "../posted.h"
+#include "win32_path.h"
 
 #include <tlhelp32.h>
 #include <uiautomation.h>
@@ -79,20 +80,6 @@ Row Parse(const std::wstring& name)
             r.summary = l;
     }
     return r;
-}
-
-// WeChat's program, from one of its processes.
-std::wstring ProgramPath(DWORD pid)
-{
-    std::wstring path;
-    if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
-        wchar_t buf[MAX_PATH * 2];
-        DWORD len = DWORD(std::size(buf));
-        if (QueryFullProcessImageNameW(p, 0, buf, &len))
-            path = buf;
-        CloseHandle(p);
-    }
-    return path;
 }
 
 // WeChat's top-level Qt windows (the main window is one of them, shown,
@@ -190,7 +177,7 @@ void WeChatSource::Run()
                     PROCESSENTRY32W pe{sizeof(pe)};
                     for (BOOL ok = snap != INVALID_HANDLE_VALUE && Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe))
                         if (_wcsicmp(pe.szExeFile, L"Weixin.exe") == 0 || _wcsicmp(pe.szExeFile, L"WeChat.exe") == 0)
-                            procs.emplace_back(pe.th32ProcessID, ProgramPath(pe.th32ProcessID));
+                            procs.emplace_back(pe.th32ProcessID, ProcessImagePath(pe.th32ProcessID));
                     if (snap != INVALID_HANDLE_VALUE)
                         CloseHandle(snap);
                     listed = tick;

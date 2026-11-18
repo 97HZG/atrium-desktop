@@ -5,6 +5,7 @@
 
 #include "shell/shell_verbs.h"
 #include "log.h"
+#include "win32_path.h"
 
 #include <propsys.h>
 #include <shlobj.h>
@@ -425,13 +426,6 @@ struct FileIndex {
     std::map<std::wstring, std::wstring> byPath; // lower-case item path -> file hash
 };
 
-std::wstring Lower(std::wstring text)
-{
-    for (wchar_t& c : text)
-        c = wchar_t(towlower(c));
-    return text;
-}
-
 FileIndex& Index()
 {
     static FileIndex index;
@@ -455,7 +449,7 @@ void BuildIndex()
             for (const CustomCategory& category : ParseCustom(bytes))
                 for (const JumpItem& item : category.items)
                     if (!item.program.empty())
-                        byExe[Lower(item.program)] = hash;
+                        byExe[FoldCase(item.program)] = hash;
         } while (FindNextFileW(search, &found));
         FindClose(search);
     }
@@ -477,7 +471,7 @@ void BuildIndex()
                         continue;
                     path = resolved;
                 }
-                byPath[Lower(path)] = hash;
+                byPath[FoldCase(path)] = hash;
             }
         } while (FindNextFileW(search, &found));
         FindClose(search);
@@ -501,13 +495,13 @@ std::wstring FindIndexedHash(const std::wstring& appId, const std::wstring& exeP
     if (!index.ready)
         return {};
     if (!exePath.empty()) {
-        auto it = index.byExe.find(Lower(exePath));
+        auto it = index.byExe.find(FoldCase(exePath));
         if (it != index.byExe.end())
             return it->second;
     }
     if (!appId.empty()) {
         for (const ShellRecent& entry : ShellDocumentList(appId, 0 /*ADLT_RECENT*/, 16)) {
-            auto it = index.byPath.find(Lower(entry.path));
+            auto it = index.byPath.find(FoldCase(entry.path));
             if (it != index.byPath.end())
                 return it->second;
         }

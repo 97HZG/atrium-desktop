@@ -133,3 +133,8 @@ add_executable(win_key_tests win_key.cpp)
 target_include_directories(win_key_tests PRIVATE ../core)
 target_compile_definitions(win_key_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_test(NAME win_key COMMAND win_key_tests)
+
+add_executable(win32_path_tests win32_path.cpp)
+target_include_directories(win32_path_tests PRIVATE ../core)
+target_compile_definitions(win32_path_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME win32_path COMMAND win32_path_tests)
