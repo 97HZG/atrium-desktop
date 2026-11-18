@@ -22,7 +22,7 @@ namespace Atrium.Settings;
 // screen was rendered for, so the two never drift apart while a shape springs to another size.
 public sealed partial class MainWindow
 {
-    private ModuleScene? _startScene, _trayScene, _statusScene, _clockScene;
+    private ModuleScene? _startScene, _trayScene, _imeScene, _statusScene, _clockScene;
 
     private ModuleScene? SceneFor(int page) => page switch
     {
@@ -30,10 +30,11 @@ public sealed partial class MainWindow
         11 => _trayScene ??= new TrayScene(this),
         12 => _statusScene ??= new StatusScene(this),
         13 => _clockScene ??= new ClockScene(this),
+        14 => _imeScene ??= new ImeScene(this),
         _ => null,
     };
 
-    private IEnumerable<ModuleScene> Scenes() => new[] { _startScene, _trayScene, _statusScene, _clockScene }.OfType<ModuleScene>();
+    private IEnumerable<ModuleScene> Scenes() => new[] { _startScene, _trayScene, _imeScene, _statusScene, _clockScene }.OfType<ModuleScene>();
 
     // A page was opened: its scene comes in (the popup pops out of its entry), the others rest.
     private void EnterModulePage(int page)
@@ -575,7 +576,7 @@ public sealed partial class MainWindow
                 Radius = Mix(a.Radius, b.Radius), Icon = Mix(a.Icon, b.Icon), P = Mix(a.P, b.P), PlateR = Mix(a.PlateR, b.PlateR),
                 AppsLeft = Mix(a.AppsLeft, b.AppsLeft), Pitch = Mix(a.Pitch, b.Pitch), PlateY = Mix(a.PlateY, b.PlateY),
                 ClockX = Slot(a.ClockX, b.ClockX), ClockW = Mix(a.ClockW, b.ClockW), SepX = Slot(a.SepX, b.SepX), StartX = Mix(a.StartX, b.StartX),
-                TrayX = Slot(a.TrayX, b.TrayX), StatusX = Slot(a.StatusX, b.StatusX), BellX = Slot(a.BellX, b.BellX), StatusExtra = Mix(a.StatusExtra, b.StatusExtra),
+                TrayX = Slot(a.TrayX, b.TrayX), ImeX = Slot(a.ImeX, b.ImeX), StatusX = Slot(a.StatusX, b.StatusX), BellX = Slot(a.BellX, b.BellX), StatusExtra = Mix(a.StatusExtra, b.StatusExtra),
             };
         }
 
@@ -1020,6 +1021,54 @@ public sealed partial class MainWindow
             Put(_button, w - m - bw, footTop, bw, FooterH);
             Box(_system, w - m - bw, footTop, bw, FooterH);
             return moving;
+        }
+    }
+
+    // ---- The input method: its entry on the bar, stepping through the languages ----
+
+    private sealed class ImeScene : ModuleScene
+    {
+        private static readonly string[] Glyphs = { "中", "a", "A" };
+        private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _tick;
+        private int _index;
+        private string _prev = "";
+        private double _changed;
+
+        public ImeScene(MainWindow m) : base(m, m.ImeStage, m.ImeCanvas)
+        {
+            _tick = m.DispatcherQueue.CreateTimer();
+            _tick.Interval = TimeSpan.FromMilliseconds(1600);
+            _tick.Tick += (_, _) =>
+            {
+                _prev = Glyphs[_index];
+                _index = (_index + 1) % Glyphs.Length;
+                Now = _changed = Environment.TickCount64;
+                Kick();
+            };
+        }
+
+        protected override bool IsOpen => false;
+        protected override Size PopupSize => new(1, 0);
+        protected override Vector2 Anchor => new((float)(Bar!.ImeX >= 0 ? Bar.ImeX + Bar.P / 2 : BarRight), (float)PopupBottom);
+        protected override (GlassTile[] Tiles, object State) Pieces() => (Array.Empty<GlassTile>(), 0);
+        protected override void Ink(int piece, bool dark) { }
+
+        protected override void Entered()
+        {
+            _index = 0;
+            _prev = "";
+            _changed = 0;
+            Face.ShowIme(Glyphs[0]);
+            _tick.Start();
+        }
+
+        protected override void Left() => _tick.Stop();
+
+        protected override bool Arrange(object state, double dt)
+        {
+            double e = _prev.Length == 0 ? 1 : Motion.EaseOut((Now - _changed) / 180);
+            Face.ShowIme(Glyphs[_index], _prev, e);
+            return e < 1;
         }
     }
 

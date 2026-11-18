@@ -63,6 +63,7 @@
                 <ListViewItem Tag="2" AutomationProperties.Name="Taskbar"><local:NavLabel Glyph="&#xE718;" Text="Taskbar" /></ListViewItem>
                 <ListViewItem Tag="10" AutomationProperties.Name="Start menu"><local:NavLabel Glyph="&#xE8FC;" Text="Start menu" Sub="True" /></ListViewItem>
                 <ListViewItem Tag="11" AutomationProperties.Name="Tray"><local:NavLabel Glyph="&#xE70E;" Text="Tray" Sub="True" /></ListViewItem>
+                <ListViewItem Tag="14" AutomationProperties.Name="Input method"><local:NavLabel Glyph="&#xE765;" Text="Input method" Sub="True" /></ListViewItem>
                 <ListViewItem Tag="12" AutomationProperties.Name="Status bar"><local:NavLabel Glyph="&#xE701;" Text="Status bar" Sub="True" /></ListViewItem>
                 <ListViewItem Tag="13" AutomationProperties.Name="Time"><local:NavLabel Glyph="&#xE823;" Text="Time" Sub="True" /></ListViewItem>
                 <ListViewItem Tag="3" AutomationProperties.Name="Notifications"><local:NavLabel Glyph="&#xEA8F;" Text="Notifications" Sub="True" /></ListViewItem>
@@ -381,6 +382,14 @@
                         <Border x:Name="TrayStage" Height="520" CornerRadius="28" Background="#FFCBD3DD" SizeChanged="OnModuleStageSizeChanged">
                             <Grid>
                                 <Canvas x:Name="TrayCanvas" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                                <Border CornerRadius="28" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel x:Name="MainIme" Visibility="Collapsed" Spacing="10">
+                        <Border x:Name="ImeStage" Height="520" CornerRadius="28" Background="#FFCBD3DD" SizeChanged="OnModuleStageSizeChanged">
+                            <Grid>
+                                <Canvas x:Name="ImeCanvas" HorizontalAlignment="Left" VerticalAlignment="Top" />
                                 <Border CornerRadius="28" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
                             </Grid>
                         </Border>
@@ -789,6 +798,14 @@
                             </StackPanel>
                         </StackPanel>
 
+                        <!-- The input method -->
+                        <StackPanel x:Name="SideIme" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Input method" Style="{StaticResource SectionStyle}" />
+                                <local:ToggleTile x:Name="ImeStatusSwitch" Title="Show on the taskbar" SwitchName="Show input method" Toggled="OnImeStatusToggled" Flat="True" />
+                            </StackPanel>
+                        </StackPanel>
+
                         <!-- The status entry: shown, as a ring or as icons -->
                         <StackPanel x:Name="SideStatus" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
@@ -801,9 +818,6 @@
                                         <RadioButton x:Name="StatusIcons" GroupName="statusstyle" Content="Icons" Tag="icons" Style="{StaticResource SegmentStyle}" Checked="OnStatusStyleChecked" />
                                     </local:SegmentTrack>
                                 </StackPanel>
-                                <local:ToggleTile x:Name="ImeStatusSwitch" Title="Input method status"
-                                                  Note="The status icon shows the language the foreground window types in (中/あ/가, or a/A for Latin) and the CapsLock case."
-                                                  SwitchName="Input method status" Toggled="OnImeStatusToggled" Flat="True" />
                             </StackPanel>
                         </StackPanel>
 

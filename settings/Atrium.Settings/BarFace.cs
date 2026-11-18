@@ -34,6 +34,7 @@ internal sealed class BarFace
     private readonly Border _plate = new() { IsHitTestVisible = false };
     private readonly Rectangle _sep = new() { IsHitTestVisible = false }, _desk = new() { IsHitTestVisible = false };
     private readonly FontIcon _tray = Glyph("\uE70E"), _bell = Glyph("\uEA8F");
+    private readonly TextBlock _ime = Ime(), _imePrev = Ime();
     private readonly Border _badge = new() { IsHitTestVisible = false, Background = new SolidColorBrush(Color.FromArgb(255, 10, 133, 255)) };
     private readonly TextBlock _badgeText = new() { Text = "3", Foreground = new SolidColorBrush(Colors.White), HorizontalAlignment = HorizontalAlignment.Center,
                                                     VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center };
@@ -43,6 +44,8 @@ internal sealed class BarFace
     private (MainWindow.BarGeometry Geometry, bool Dark, int Apps, int Running, double Magnify, double Zoom, double X, double Y,
              StatusLook Status)? _layout;
     private (double X, double Y, double Size, bool Icons, Color Ink)? _statusAt;
+    private (double X, double Y, double Size, Color Ink)? _imeAt;
+    private (string Glyph, string Prev, double Fade) _imeState = ("中", "", 1);
 
     public BarFace(Canvas canvas, int maxIcons)
     {
@@ -67,7 +70,7 @@ internal sealed class BarFace
             _dots.Add(dot);
             canvas.Children.Add(dot);
         }
-        foreach (var e in new UIElement[] { _sep, _desk, _tray, _status, _statusIcons, _timeHalo, _dateHalo, _time, _date, _bell, _badge }) canvas.Children.Add(e);
+        foreach (var e in new UIElement[] { _sep, _desk, _tray, _imePrev, _ime, _status, _statusIcons, _timeHalo, _dateHalo, _time, _date, _bell, _badge }) canvas.Children.Add(e);
     }
 
     public IReadOnlyList<Image> Icons => _icons;
@@ -81,6 +84,20 @@ internal sealed class BarFace
         Canvas.SetLeft(icons ? _statusIcons : _status, x);
         Canvas.SetTop(icons ? _statusIcons : _status, y);
     }
+
+    public void ShowIme(string glyph, string prev = "", double fade = 1)
+    {
+        _imeState = (glyph, prev, fade);
+        if (_imeAt is not var (x, y, size, ink)) return;
+        StatusGlyph.Place(_imePrev, prev, x, y, size, size * 0.78, StatusGlyph.Fade(ink, 1 - fade));
+        StatusGlyph.Place(_ime, glyph, x, y, size, size * 0.78, StatusGlyph.Fade(ink, fade));
+    }
+
+    private static TextBlock Ime() => new()
+    {
+        Text = "中", TextAlignment = TextAlignment.Center, IsHitTestVisible = false, IsTextScaleFactorEnabled = false,
+        TextWrapping = TextWrapping.NoWrap, FontFamily = (FontFamily)Application.Current.Resources["TitleFont"],
+    };
 
     private static FontIcon Glyph(string glyph) => new()
     {
@@ -241,6 +258,15 @@ internal sealed class BarFace
         }
         Entry(_tray, L.TrayX);
         Entry(_bell, L.BellX);
+
+        _ime.Visibility = _imePrev.Visibility = Visibility.Collapsed;
+        _imeAt = null;
+        if (L.ImeX >= 0)
+        {
+            var (x, y, size) = Item(L.ImeX);
+            _imeAt = (x, y, size, inkColor);
+            ShowIme(_imeState.Glyph, _imeState.Prev, _imeState.Fade);
+        }
 
         // The bell's count: an accent disc, max(9, 46 % of the icon) across, on its upper right.
         _badge.Visibility = L.BellX < 0 ? Visibility.Collapsed : Visibility.Visible;

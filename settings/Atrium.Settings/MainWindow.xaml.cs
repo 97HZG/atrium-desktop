@@ -75,7 +75,7 @@ public sealed partial class MainWindow : Window
     private static string[] PageTitles => new[]
     {
         Loc.T("Material"), Loc.T("Shape"), Loc.T("Taskbar"), Loc.T("Notifications"), Loc.T("Widgets"), Loc.T("Stage Manager"), Loc.T("Displays"), Loc.T("System"), Loc.T("Design language"), Loc.T("About"),
-        Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), // the bar's parts, listed under it
+        Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), Loc.T("Input method"), // the bar's parts, listed under it
     };
     private readonly CoreClient _client = new();
     private readonly List<(SliderDef Def, SliderTile Tile)> _rows = new();
@@ -172,9 +172,9 @@ public sealed partial class MainWindow : Window
         };
 
         _mains = new FrameworkElement[] { MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainStage, MainDisplays, MainSystem, DesignStack, MainAbout,
-                                          MainStart, MainTray, MainStatus, MainClock };
+                                          MainStart, MainTray, MainStatus, MainClock, MainIme };
         _sides = new FrameworkElement?[] { SideMaterial, SideShape, SideDock, SideNotify, SideWidgets, SideStage, null, null, null, null,
-                                           SideStart, SideTray, SideStatus, SideClock };
+                                           SideStart, SideTray, SideStatus, SideClock, SideIme };
         InitDisplays();
         LoupeSwitch.IsOn = true;
         BuildRows();
@@ -200,7 +200,7 @@ public sealed partial class MainWindow : Window
         int page = startPage >= 0 ? startPage
             : Array.IndexOf(args, "--page") is int i && i >= 0 && i + 1 < args.Length
             ? args[i + 1] switch { "shape" => 1, "dock" => 2, "notify" => 3, "widgets" => 4, "stage" => 5, "displays" => 6, "system" => 7, "about" => 9,
-                                 "start" => 10, "tray" => 11, "status" => 12, "clock" => 13, _ => 0 } : 0;
+                                 "start" => 10, "tray" => 11, "status" => 12, "clock" => 13, "ime" => 14, _ => 0 } : 0;
         SelectPage(page);
         _ = ConnectAndLoadAsync();
         _ = CheckForUpdatesAsync(); // once per settings window; no resident polling
