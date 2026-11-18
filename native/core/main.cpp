@@ -1591,6 +1591,17 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
+// The guard of a copy that quits: it puts Windows' taskbar back as that copy ends.
+void WaitForGuard()
+{
+    if (HANDLE guard = OpenMutexW(SYNCHRONIZE, FALSE, kGuardMutex)) {
+        DWORD done = WaitForSingleObject(guard, 5000);
+        if (done == WAIT_OBJECT_0 || done == WAIT_ABANDONED)
+            ReleaseMutex(guard);
+        CloseHandle(guard);
+    }
+}
+
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
@@ -1638,13 +1649,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         DWORD wait = process ? WaitForSingleObject(process, 10000) : WAIT_FAILED;
         if (process)
             CloseHandle(process);
-        // And its guard, which runs from the same file (the updater moves the folder next).
-        if (HANDLE guard = OpenMutexW(SYNCHRONIZE, FALSE, kGuardMutex)) {
-            DWORD done = WaitForSingleObject(guard, 5000);
-            if (done == WAIT_OBJECT_0 || done == WAIT_ABANDONED)
-                ReleaseMutex(guard);
-            CloseHandle(guard);
-        }
+        WaitForGuard(); // it runs from the same file: the updater moves the folder next
         return wait == WAIT_OBJECT_0 ? 0 : 1;
     }
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
@@ -1670,13 +1675,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
                 replaced = WaitForSingleObject(process, 15000) == WAIT_OBJECT_0;
                 CloseHandle(process);
             }
-            // And its guard, which puts Windows' taskbar back as that copy ends.
-            if (HANDLE guard = OpenMutexW(SYNCHRONIZE, FALSE, kGuardMutex)) {
-                DWORD done = WaitForSingleObject(guard, 5000);
-                if (done == WAIT_OBJECT_0 || done == WAIT_ABANDONED)
-                    ReleaseMutex(guard);
-                CloseHandle(guard);
-            }
+            WaitForGuard();
         }
         CloseHandle(mutex);
         if (!replaced)
@@ -1865,6 +1864,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         g_app.chrome->RestoreForExit();
     g_app.stage->RestoreAll(); // the windows Stage Manager put away come back
     g_app.winKey.reset();
+    g_app.imeWatcher.reset(); // the keyboard hook's users go before it: a static, gone before g_app
     g_app.status.reset();
     g_app.preview->Close();
     bool renderingStopped = true;

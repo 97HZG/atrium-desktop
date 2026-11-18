@@ -115,6 +115,9 @@ std::wstring PlaceName(double lat, double lon)
 
 // Where the computer is: Windows' location service (when it lets desktop apps use it), else the
 // network's place. The network's city also names a Windows position that has no name.
+// A place on the globe: what a service or the cache says is only used if it is one (the URLs have room for no more).
+bool OnEarth(double lat, double lon) { return std::isfinite(lat) && std::isfinite(lon) && std::fabs(lat) <= 90 && std::fabs(lon) <= 180; }
+
 bool Locate(double& lat, double& lon, std::wstring& city)
 {
     namespace geo = winrt::Windows::Devices::Geolocation;
@@ -169,7 +172,8 @@ bool Locate(double& lat, double& lon, std::wstring& city)
                 continue;
             if (s.ok && !(s.okValue ? o.GetNamedString(s.ok, L"") == s.okValue : o.GetNamedBoolean(s.ok, false)))
                 continue;
-            if (!o.HasKey(s.lat) || !o.HasKey(s.lon) || o.GetNamedValue(s.lat).ValueType() != json::JsonValueType::Number)
+            if (!o.HasKey(s.lat) || !o.HasKey(s.lon) || o.GetNamedValue(s.lat).ValueType() != json::JsonValueType::Number ||
+                !OnEarth(o.GetNamedNumber(s.lat, 0), o.GetNamedNumber(s.lon, 0)))
                 continue;
             city = std::wstring(o.GetNamedString(s.city, L""));
             if (!located) {
@@ -263,9 +267,9 @@ bool FromJson(const json::JsonObject& o, Weather& w)
         w.lo = float(o.GetNamedNumber(L"lo", 0));
         w.code = int(o.GetNamedNumber(L"code", 0));
         w.day = o.GetNamedBoolean(L"day", true);
-        w.placed = o.HasKey(L"lat") && o.HasKey(L"lon");
         w.lat = o.GetNamedNumber(L"lat", 0);
         w.lon = o.GetNamedNumber(L"lon", 0);
+        w.placed = o.HasKey(L"lat") && o.HasKey(L"lon") && OnEarth(w.lat, w.lon);
         for (const auto& v : o.GetNamedArray(L"hours", json::JsonArray())) {
             auto x = v.GetObject();
             w.hours.push_back({std::wstring(x.GetNamedString(L"label", L"")), int(x.GetNamedNumber(L"code", 0)), x.GetNamedBoolean(L"day", true),

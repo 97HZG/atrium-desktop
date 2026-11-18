@@ -41,10 +41,11 @@ std::wstring FileStamp(const std::wstring& path)
     return std::to_wstring(a.ftLastWriteTime.dwLowDateTime) + L"." + std::to_wstring(a.nFileSizeLow);
 }
 
-// One monitor's wallpaper as Windows lays it out, drawn into `canvas`
-// (BGRA, `stride` bytes a row) at `target` (canvas px).
-bool Place(IWICImagingFactory* wic, const std::wstring& path, RECT target, DESKTOP_WALLPAPER_POSITION pos, uint8_t* canvas, int stride)
+// One monitor's wallpaper as Windows lays it out, drawn into `canvas` (BGRA, width x height) at
+// `target` (canvas px). Explorer's monitor rects can lag a display change: what falls off the canvas is left out.
+bool Place(IWICImagingFactory* wic, const std::wstring& path, RECT target, DESKTOP_WALLPAPER_POSITION pos, uint8_t* canvas, int width, int height)
 {
+    const int stride = width * 4;
     winrt::com_ptr<IWICBitmapDecoder> decoder;
     winrt::com_ptr<IWICBitmapFrameDecode> frame;
     winrt::com_ptr<IWICFormatConverter> converter;
@@ -79,7 +80,8 @@ bool Place(IWICImagingFactory* wic, const std::wstring& path, RECT target, DESKT
     }
     // Copies the picture placed at (dx, dy) of the target, clipped to it.
     auto blit = [&](int dx, int dy) {
-        int x0 = std::max(0, dx), y0 = std::max(0, dy), x1 = std::min(tw, dx + int(sw)), y1 = std::min(th, dy + int(sh));
+        int x0 = std::max({0, dx, int(-target.left)}), y0 = std::max({0, dy, int(-target.top)});
+        int x1 = std::min({tw, dx + int(sw), width - int(target.left)}), y1 = std::min({th, dy + int(sh), height - int(target.top)});
         if (x1 <= x0 || y1 <= y0)
             return true;
         WICRect rc{x0 - dx, y0 - dy, x1 - x0, y1 - y0};
@@ -182,11 +184,7 @@ void DesktopBackdrop::Update(const std::wstring& mode)
             }
         }
     }
-    std::unique_ptr<Picture> pic;
-    {
-        std::lock_guard g(pictureLock_);
-        pic = std::move(picture_);
-    }
+    std::unique_ptr<Picture> pic = TakePicture();
     if (pic && (mode_ == L"wallpaper" || !session_)) {
         D3D11_TEXTURE2D_DESC d{};
         if (texture_)
@@ -225,16 +223,27 @@ bool DesktopBackdrop::ChangedSince(unsigned version, const RECT& area) const
     return false;
 }
 
+DesktopBackdrop::Starting::Starting(HANDLE frameEvent)
+{
+    DuplicateHandle(GetCurrentProcess(), frameEvent, GetCurrentProcess(), &wake, 0, FALSE, DUPLICATE_SAME_ACCESS);
+}
+
+DesktopBackdrop::Starting::~Starting()
+{
+    if (wake)
+        CloseHandle(wake);
+}
+
 bool DesktopBackdrop::StartCapture()
 {
     if (!starting_) {
-        auto start = std::make_shared<Starting>();
+        auto start = std::make_shared<Starting>(frameEvent_);
         start->desktop = FindWindowW(L"Progman", nullptr);
         if (!start->desktop)
             return false;
         starting_ = start;
         startingSince_ = ClockMs();
-        std::thread([start, device = device_, ev = frameEvent_] {
+        std::thread([start, device = device_] {
             winrt::init_apartment(winrt::apartment_type::multi_threaded);
             Starting s;
             try {
@@ -242,7 +251,7 @@ bool DesktopBackdrop::StartCapture()
                 winrt::check_hresult(interop->CreateForWindow(start->desktop, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(s.item)));
                 s.size = s.item.Size();
                 s.pool = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(device, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, s.size);
-                s.pool.FrameArrived([ev](auto&&, auto&&) { SetEvent(ev); });
+                s.pool.FrameArrived([start](auto&&, auto&&) { SetEvent(start->wake); });
                 s.session = s.pool.CreateCaptureSession(s.item);
                 s.session.IsCursorCaptureEnabled(false);
                 try {
@@ -270,7 +279,7 @@ bool DesktopBackdrop::StartCapture()
                 start->error = s.error;
             }
             start->done = true;
-            SetEvent(ev); // the render thread looks again
+            SetEvent(start->wake); // the render thread looks again
         }).detach();
         return false;
     }
@@ -297,7 +306,7 @@ bool DesktopBackdrop::StartCapture()
     size_ = start->size;
     closed_ = false;
     HANDLE ev = frameEvent_;
-    item_.Closed([this, ev](auto&&, auto&&) {
+    closedRevoker_ = item_.Closed(winrt::auto_revoke, [this, ev](auto&&, auto&&) {
         closed_ = true;
         SetEvent(ev);
     });
@@ -307,11 +316,19 @@ bool DesktopBackdrop::StartCapture()
 
 void DesktopBackdrop::StopCapture()
 {
-    if (starting_) { // still starting: dropped when it is done
+    if (starting_) { // still starting: dropped when it is done, or now if it is done but not adopted
         std::lock_guard g(starting_->lock);
         starting_->abandoned = true;
+        if (starting_->session)
+            starting_->session.Close();
+        if (starting_->pool)
+            starting_->pool.Close(); // its handler holds `starting_`
+        starting_->session = nullptr;
+        starting_->pool = nullptr;
+        starting_->item = nullptr;
     }
     starting_.reset();
+    closedRevoker_.revoke();
     if (session_)
         session_.Close();
     if (pool_)
@@ -340,28 +357,53 @@ void DesktopBackdrop::Store(ID3D11Texture2D* frame)
     ++version_;
 }
 
+DesktopBackdrop::Wallpaper::Wallpaper(HANDLE frameEvent) : stop(CreateEventW(nullptr, TRUE, FALSE, nullptr)), done(CreateEventW(nullptr, TRUE, FALSE, nullptr))
+{
+    DuplicateHandle(GetCurrentProcess(), frameEvent, GetCurrentProcess(), &wake, 0, FALSE, DUPLICATE_SAME_ACCESS);
+}
+
+DesktopBackdrop::Wallpaper::~Wallpaper()
+{
+    for (HANDLE h : {stop, done, wake})
+        if (h)
+            CloseHandle(h);
+}
+
 void DesktopBackdrop::StartWallpaper()
 {
-    if (worker_.joinable())
+    if (wallpaper_)
         return;
-    stop_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    worker_ = std::thread([this] { WallpaperLoop(); });
+    wallpaper_ = std::make_shared<Wallpaper>(frameEvent_);
+    worker_ = std::thread([work = wallpaper_] {
+        WallpaperLoop(*work);
+        SetEvent(work->done);
+    });
     Log(L"render: widgets' backdrop: the wallpaper");
+}
+
+std::unique_ptr<DesktopBackdrop::Picture> DesktopBackdrop::TakePicture()
+{
+    if (!wallpaper_)
+        return nullptr;
+    std::lock_guard g(wallpaper_->lock);
+    return std::move(wallpaper_->picture);
 }
 
 void DesktopBackdrop::StopWallpaper()
 {
-    if (!worker_.joinable())
+    if (!wallpaper_)
         return;
-    SetEvent(stop_);
-    worker_.join();
-    CloseHandle(stop_);
-    stop_ = nullptr;
-    std::lock_guard g(pictureLock_);
-    picture_ = nullptr;
+    SetEvent(wallpaper_->stop);
+    if (WaitForSingleObject(wallpaper_->done, 1000) == WAIT_OBJECT_0) {
+        worker_.join();
+    } else {
+        Log(L"render: the wallpaper worker waits on Explorer; it ends on its own");
+        worker_.detach();
+    }
+    wallpaper_.reset();
 }
 
-void DesktopBackdrop::WallpaperLoop()
+void DesktopBackdrop::WallpaperLoop(Wallpaper& work)
 {
     SetThreadDescription(GetCurrentThread(), L"Atrium wallpaper");
     if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)))
@@ -427,10 +469,10 @@ void DesktopBackdrop::WallpaperLoop()
         // copy Windows made of it for the desktop. Else the glass would show the background colour,
         // black by default: a black taskbar in remote-control mode.
         auto place = [&](const std::wstring& path, RECT target) {
-            if (Place(wic.get(), path, target, pos, pic->pixels.data(), pic->width * 4))
+            if (Place(wic.get(), path, target, pos, pic->pixels.data(), pic->width, pic->height))
                 return true;
             const std::wstring transcoded = TranscodedWallpaper();
-            return path != transcoded && Place(wic.get(), transcoded, target, pos, pic->pixels.data(), pic->width * 4);
+            return path != transcoded && Place(wic.get(), transcoded, target, pos, pic->pixels.data(), pic->width, pic->height);
         };
         if (pos == DWPOS_SPAN && !screens.empty())
             ok = place(screens[0].path, local(virt));
@@ -449,11 +491,11 @@ void DesktopBackdrop::WallpaperLoop()
         Log(L"render: wallpaper composed %dx%d (%zu screens, position %d)%s", pic->width, pic->height, screens.size(), int(pos),
             ok ? L"" : L", a picture could not be read");
         {
-            std::lock_guard g(pictureLock_);
-            picture_ = std::move(pic);
+            std::lock_guard g(work.lock);
+            work.picture = std::move(pic);
         }
-        SetEvent(frameEvent_);
-    } while (WaitForSingleObject(stop_, kWallpaperPollMs) == WAIT_TIMEOUT);
+        SetEvent(work.wake);
+    } while (WaitForSingleObject(work.stop, kWallpaperPollMs) == WAIT_TIMEOUT);
     CoUninitialize();
 }
 

@@ -85,7 +85,7 @@ foreach ($rel in $files | Where-Object { $_ -match '\.xaml$' }) {
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $s = $lines[$i].Trim()
         if ($open) {
-            if ($s.EndsWith('/>')) { $open = $false } elseif ($s.EndsWith('>')) { $open = $false; $depth++ }
+            if ($s.EndsWith('/>') -or $s -match '</[\w:.]+>$') { $open = $false } elseif ($s.EndsWith('>')) { $open = $false; $depth++ }
             continue
         }
         if (-not $s.StartsWith('<') -or $s.StartsWith('<?')) { continue }
