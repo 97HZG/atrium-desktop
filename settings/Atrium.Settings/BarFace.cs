@@ -89,14 +89,24 @@ internal sealed class BarFace
     {
         _imeState = (glyph, prev, fade);
         if (_imeAt is not var (x, y, size, ink)) return;
-        StatusGlyph.Place(_imePrev, prev, x, y, size, size * 0.78, StatusGlyph.Fade(ink, 1 - fade));
-        StatusGlyph.Place(_ime, glyph, x, y, size, size * 0.78, StatusGlyph.Fade(ink, fade));
+        PlaceIme(_imePrev, prev, x, y, size, StatusGlyph.Fade(ink, 1 - fade));
+        PlaceIme(_ime, glyph, x, y, size, StatusGlyph.Fade(ink, fade));
+    }
+
+    // Centred by its ink, as on the bar: the tight box runs from the cap height to the baseline,
+    // and a lowercase letter reaches only MiSans's x-height (528 against 738 in 1000).
+    private static void PlaceIme(TextBlock t, string glyph, double x, double y, double size, Color color)
+    {
+        StatusGlyph.Place(t, glyph, x, y, size, size * 0.74, color);
+        t.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double lift = glyph.Length == 1 && char.IsLower(glyph[0]) ? (0.738 - 0.528) / 2 * t.FontSize : 0;
+        Canvas.SetTop(t, y + (size - t.DesiredSize.Height) / 2 - lift);
     }
 
     private static TextBlock Ime() => new()
     {
         Text = "中", TextAlignment = TextAlignment.Center, IsHitTestVisible = false, IsTextScaleFactorEnabled = false,
-        TextWrapping = TextWrapping.NoWrap, FontFamily = (FontFamily)Application.Current.Resources["TitleFont"],
+        TextWrapping = TextWrapping.NoWrap, TextLineBounds = TextLineBounds.Tight, FontFamily = (FontFamily)Application.Current.Resources["LightFont"],
     };
 
     private static FontIcon Glyph(string glyph) => new()

@@ -1,9 +1,10 @@
 # MiSans
 
-Atrium 的界面字体（D40）。这里是小米 MiSans 的三个字重，未经任何修改，作为 Atrium 的一部分随附：
+Atrium 的界面字体（D40）。这里是小米 MiSans 的四个字重，未经任何修改，作为 Atrium 的一部分随附：
 
 | 文件 | 字重（OS/2） | 在 Atrium 中的用途 |
 |---|---|---|
+| `MiSans-Light.otf` | 250 | 任务栏上的输入法字符 |
 | `MiSans-Medium.otf` | 380 | 正文（相当于常见字体的 Regular） |
 | `MiSans-Demibold.otf` | 450 | 强调、玻璃上的小字 |
 | `MiSans-Semibold.otf` | 520 | 标题、大号数字 |

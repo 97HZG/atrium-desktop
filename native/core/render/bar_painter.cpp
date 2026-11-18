@@ -537,14 +537,19 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     const D2D1_POINT_2F iconShift = VectorToArea(frame, cx - bx, -up);
     d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, iconAnchor) * D2D1::Matrix3x2F::Translation(iconShift.x, iconShift.y));
     if (it.key == L"#ime") {
-        if (IDWriteTextFormat* f = Format((iconArea.bottom - iconArea.top) * 0.78f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {
+        const float w = iconArea.right - iconArea.left, h = iconArea.bottom - iconArea.top;
+        if (IDWriteTextFormat* f = Format(h * 0.74f, DWRITE_FONT_WEIGHT_LIGHT)) {
             auto glyph = [&](const std::wstring& text, float alpha) {
-                if (text.empty() || alpha <= 0.003f)
+                winrt::com_ptr<IDWriteTextLayout> layout;
+                if (text.empty() || alpha <= 0.003f || FAILED(dwrite_->CreateTextLayout(text.c_str(), UINT32(text.size()), f, w, h, layout.put())))
                     return;
+                // Centred by its ink, as the tray's icons are: a lowercase "a" would sit below the middle of its line.
+                DWRITE_OVERHANG_METRICS over{};
+                layout->GetOverhangMetrics(&over);
                 D2D1_COLOR_F c = ink;
                 c.a *= alpha * m.appear;
                 brush->SetColor(c);
-                d2d->DrawText(text.c_str(), UINT32(text.size()), f, iconArea, brush);
+                d2d->DrawTextLayout(D2D1::Point2F(iconArea.left, iconArea.top + (over.top - over.bottom) / 2), layout.get(), brush);
             };
             const float e = motion::EaseOut(imeFade_);
             glyph(scene.imePrevGlyph, 1 - e);

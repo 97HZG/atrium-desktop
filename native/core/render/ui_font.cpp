@@ -63,7 +63,7 @@ const Face& TheFace()
         if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory5), reinterpret_cast<IUnknown**>(dw.put()))) ||
             FAILED(dw->CreateFontSetBuilder(builder.put())))
             return;
-        for (const wchar_t* name : {L"MiSans-Medium.otf", L"MiSans-Demibold.otf", L"MiSans-Semibold.otf"}) {
+        for (const wchar_t* name : {L"MiSans-Light.otf", L"MiSans-Medium.otf", L"MiSans-Demibold.otf", L"MiSans-Semibold.otf"}) {
             winrt::com_ptr<IDWriteFontFile> file;
             if (FAILED(dw->CreateFontFileReference((dir + name).c_str(), nullptr, file.put())) || FAILED(builder->AddFontFile(file.get()))) {
                 Log(L"font: %s unreadable in %s, using Segoe UI", name, dir.c_str());
@@ -96,9 +96,10 @@ HRESULT UiTextFormat(IDWriteFactory* dw, float px, DWRITE_FONT_WEIGHT weight, ID
     const Face& face = TheFace();
     if (!face.collection)
         return dw->CreateTextFormat(L"Segoe UI Variable Text", nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"", out);
-    DWRITE_FONT_WEIGHT w = weight <= DWRITE_FONT_WEIGHT_NORMAL     ? DWRITE_FONT_WEIGHT(380)
-                           : weight <= DWRITE_FONT_WEIGHT_MEDIUM ? DWRITE_FONT_WEIGHT(450)
-                                                                   : DWRITE_FONT_WEIGHT(520);
+    DWRITE_FONT_WEIGHT w = weight <= DWRITE_FONT_WEIGHT_LIGHT      ? DWRITE_FONT_WEIGHT(250)
+                           : weight <= DWRITE_FONT_WEIGHT_NORMAL  ? DWRITE_FONT_WEIGHT(380)
+                           : weight <= DWRITE_FONT_WEIGHT_MEDIUM  ? DWRITE_FONT_WEIGHT(450)
+                                                                  : DWRITE_FONT_WEIGHT(520);
     return dw->CreateTextFormat(L"MiSans", face.collection.get(), w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"zh-cn", out);
 }
 
