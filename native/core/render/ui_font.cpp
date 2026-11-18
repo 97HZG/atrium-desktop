@@ -96,10 +96,10 @@ HRESULT UiTextFormat(IDWriteFactory* dw, float px, DWRITE_FONT_WEIGHT weight, ID
     const Face& face = TheFace();
     if (!face.collection)
         return dw->CreateTextFormat(L"Segoe UI Variable Text", nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"", out);
-    DWRITE_FONT_WEIGHT w = weight <= DWRITE_FONT_WEIGHT_LIGHT      ? DWRITE_FONT_WEIGHT(250)
-                           : weight <= DWRITE_FONT_WEIGHT_NORMAL  ? DWRITE_FONT_WEIGHT(380)
-                           : weight <= DWRITE_FONT_WEIGHT_MEDIUM  ? DWRITE_FONT_WEIGHT(450)
-                                                                  : DWRITE_FONT_WEIGHT(520);
+    DWRITE_FONT_WEIGHT w = weight <= DWRITE_FONT_WEIGHT_LIGHT  ? DWRITE_FONT_WEIGHT(250) :
+                           weight <= DWRITE_FONT_WEIGHT_NORMAL ? DWRITE_FONT_WEIGHT(380) :
+                           weight <= DWRITE_FONT_WEIGHT_MEDIUM ? DWRITE_FONT_WEIGHT(450) :
+                                                                 DWRITE_FONT_WEIGHT(520);
     return dw->CreateTextFormat(L"MiSans", face.collection.get(), w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"zh-cn", out);
 }
 
