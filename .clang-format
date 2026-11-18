@@ -23,7 +23,7 @@ IndentCaseLabels: false
 BreakConstructorInitializers: BeforeColon
 PackConstructorInitializers: CurrentLine
 InsertNewlineAtEOF: true
-KeepEmptyLinesAtTheStartOfBlocks: true
+KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
 SpaceBeforeCpp11BracedList: false
 SpaceAfterTemplateKeyword: false
