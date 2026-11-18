@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '0 3 * * 1' # the whole tree, every unit, once a week
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,7 +31,10 @@ jobs:
               ForEach-Object DirectoryName | Sort-Object -Unique | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Lint (text, native rules, clang-format, clang-tidy)
         shell: pwsh
-        run: ./tools/lint.ps1 -Tidy ${{ github.event_name == 'pull_request' && format('-Base origin/{0}', github.base_ref) || '' }}
+        # A push or a pull request: what it changed (and the units including a changed header).
+        run: >-
+          ./tools/lint.ps1 -Tidy ${{ github.event_name == 'pull_request' && format('-Base origin/{0}', github.base_ref)
+          || github.event_name == 'push' && format('-Base {0}', github.event.before) || '' }}
       - name: Check localization tables
         shell: pwsh
         run: ./tools/check-localization.ps1

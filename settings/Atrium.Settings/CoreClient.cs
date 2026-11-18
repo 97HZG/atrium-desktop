@@ -36,7 +36,7 @@ internal sealed partial class CoreClient : IDisposable
 #if ATRIUM_DEVELOPMENT
             return true;
 #else
-            var exe = CoreExe();
+            string? exe = CoreExe();
             return Environment.GetCommandLineArgs().Contains("--development") ||
                 (exe != null && File.Exists(Path.Combine(Path.GetDirectoryName(exe)!, "development.txt")));
 #endif
