@@ -10,6 +10,7 @@
 
 #include <winrt/base.h>
 
+#include <algorithm>
 #include <map>
 #include <vector>
 
@@ -203,6 +204,16 @@ void WeChatSource::Run()
                         CloseHandle(snap);
                     listed = tick;
                     windows.SetProcesses(procs);
+                }
+                // WeChat in front is read by its user: nothing is read meanwhile (each read runs on its
+                // UI thread, and typing made one per key, #79); its list then is the next baseline.
+                DWORD front = 0;
+                GetWindowThreadProcessId(GetForegroundWindow(), &front);
+                if (std::any_of(procs.begin(), procs.end(), [&](const auto& p) { return p.first == front; })) {
+                    watch.Clear();
+                    baseline = false;
+                    WaitForUiaWake(wake_, 1000);
+                    continue;
                 }
                 watch.Prune();
                 std::vector<std::pair<std::wstring, Row>> rows;
