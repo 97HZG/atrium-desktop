@@ -1393,7 +1393,11 @@ struct TaskModel::Impl {
         add(job.pinPath); // a pin's shortcut carries the icon the user sees in Windows
         if (!job.aumid.empty())
             add(AppsFolderPath(job.aumid));
-        add(job.exePath);
+        // An exe without an icon of its own (a single-file app that sets its window's at run time)
+        // shows Windows' generic one: its windows' icon comes first then (#83).
+        const bool exeIcon = ExtractIconExW(job.exePath.c_str(), -1, nullptr, nullptr, 0) > 0;
+        if (exeIcon)
+            add(job.exePath);
 
         IconImage img;
         bool ok = false;
@@ -1409,6 +1413,8 @@ struct TaskModel::Impl {
                 ok = true;
             }
         }
+        if (!ok && !exeIcon && !job.exePath.empty())
+            ok = LoadShellImage(job.exePath, job.size, img);
         QueryPerformanceCounter(&t1);
         QueryPerformanceFrequency(&f);
         if (!ok)
