@@ -59,59 +59,27 @@ bool WinKey::OnKey(void* context, DWORD vk, DWORD scan, bool extended, bool down
     WinKey* self = static_cast<WinKey*>(context);
     if (!self || extraInfo == kAtriumSyntheticKey)
         return false; // Atrium's own replay: let it through
+    WinKeyState& s = self->state_;
     const bool win = vk == VK_LWIN || vk == VK_RWIN;
-    if (win && down) {
-        if (!self->held_) { // not the key's auto-repeat
-            self->held_ = true;
-            self->used_ = false;
-            self->key_ = vk;
-            self->scan_ = scan;
-            self->extended_ = extended;
-            self->passed_ = ForegroundElevated();
-        }
-        return !self->passed_; // held back
-    }
-    if (win) {
-        if (self->held_ && vk == self->key_) {
-            const bool held = !self->passed_;
-            self->held_ = false;
-            if (held) { // Windows never saw it go down
-                if (self->used_)
-                    return true;
-                if (self->alone_) { // no start menu of its own
-                    PostMessageW(self->notify_, self->msg_, 0, 0);
-                    return true;
-                }
-                // Only the digits are ours: Windows' start menu, as if never held.
-                INPUT keys[2] = {Key(self->key_, self->scan_, self->extended_), Key(self->key_, self->scan_, self->extended_)};
-                keys[1].ki.dwFlags |= KEYEVENTF_KEYUP;
-                SendInput(2, keys, sizeof(INPUT));
-                return true;
-            }
-        }
-        return false;
-    }
-    if (self->digit_ && vk == self->digit_) { // the kept digit: its repeats and its release
-        if (!down)
-            self->digit_ = 0;
-        return true;
-    }
-    if (down && self->held_ && !self->passed_) {
-        const bool digit = vk >= '0' && vk <= '9';
-        const bool modified = (GetAsyncKeyState(VK_SHIFT) | GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_MENU)) & 0x8000;
-        if (digit && self->numbers_ && !modified) {
-            self->used_ = true;
-            self->digit_ = vk;
-            PostMessageW(self->notify_, self->msg_, vk == '0' ? 10 : vk - '0', 0);
-            return true;
-        }
-        // Another key: a shortcut. The Windows key goes on to Windows first, then this key.
-        self->passed_ = true;
-        INPUT keys[2] = {Key(self->key_, self->scan_, self->extended_), Key(vk, scan, extended)};
+    const bool winAsync = s.held && s.passed && (vk != s.key || down) && (GetAsyncKeyState(int(s.key)) & 0x8000) != 0;
+    const ULONGLONG now = GetTickCount64();
+    const bool willReset = s.held && s.passed && (vk != s.key || down) && !winAsync;
+    const bool freshWin = win && down && (!s.held || willReset || (!s.passed && now - s.lastDownMs > 2000));
+    const bool elevated = freshWin ? ForegroundElevated() : false;
+    const bool mod =
+        !win && down && s.held && !s.passed && ((GetAsyncKeyState(VK_SHIFT) | GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_MENU)) & 0x8000) != 0;
+    const WinKeyAction action = StepWinKey(s, vk, scan, extended, down, now, winAsync, elevated, mod, self->alone_, self->numbers_);
+    if (action.notify)
+        PostMessageW(self->notify_, self->msg_, action.notifyParam, 0);
+    if (action.replayAlone) {
+        INPUT keys[2] = {Key(action.winVk, action.winScan, action.winExtended), Key(action.winVk, action.winScan, action.winExtended)};
+        keys[1].ki.dwFlags |= KEYEVENTF_KEYUP;
         SendInput(2, keys, sizeof(INPUT));
-        return true;
+    } else if (action.replayCombo) {
+        INPUT keys[2] = {Key(action.winVk, action.winScan, action.winExtended), Key(vk, scan, extended)};
+        SendInput(2, keys, sizeof(INPUT));
     }
-    return false;
+    return action.swallow;
 }
 
 } // namespace atrium

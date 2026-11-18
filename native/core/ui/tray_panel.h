@@ -9,6 +9,7 @@
 #include "shell/tray_model.h"
 #include "ui/surface.h"
 
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <optional>
@@ -16,6 +17,18 @@
 #include <vector>
 
 namespace atrium {
+
+inline bool TrayFollowCancelled(DWORD inputTime, DWORD clickInput, DWORD syntheticInput, bool syntheticInFlight, POINT anchor, POINT cursor,
+                                SIZE doubleClickRect, bool keyDown)
+{
+    if (inputTime == clickInput || inputTime == syntheticInput)
+        return false;
+    if (syntheticInFlight) // the model's own pointer fallback moves the cursor and presses the button
+        return false;
+    if (keyDown)
+        return true;
+    return std::abs(cursor.x - anchor.x) > doubleClickRect.cx / 2 || std::abs(cursor.y - anchor.y) > doubleClickRect.cy / 2;
+}
 
 class TrayPanel {
 public:

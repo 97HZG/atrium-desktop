@@ -15,19 +15,19 @@ namespace {
 
 ImeWatcher* g_watcher = nullptr; // one watcher, installed on the UI thread
 
-// CapsLock's latch as the system has it now. This thread's own queue may have
-// missed every toggle (it is not the foreground thread); the foreground
-// thread's queue knows. Attached for this one read, then detached again.
-bool ForegroundCapsLock()
+// CapsLock's latch as the system has it now. Skips hung windows and keeps `fallback` if AttachThreadInput fails (UIPI).
+bool ForegroundCapsLock(HWND foreground, bool fallback)
 {
-    const HWND foreground = GetForegroundWindow();
-    const DWORD foregroundThread = foreground ? GetWindowThreadProcessId(foreground, nullptr) : 0;
+    if (!foreground || IsHungAppWindow(foreground))
+        return fallback;
+    const DWORD foregroundThread = GetWindowThreadProcessId(foreground, nullptr);
     const DWORD current = GetCurrentThreadId();
-    bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-    if (foregroundThread && foregroundThread != current && AttachThreadInput(current, foregroundThread, TRUE)) {
-        caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-        AttachThreadInput(current, foregroundThread, FALSE);
-    }
+    if (!foregroundThread || foregroundThread == current)
+        return (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+    if (!AttachThreadInput(current, foregroundThread, TRUE))
+        return fallback;
+    const bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+    AttachThreadInput(current, foregroundThread, FALSE);
     return caps;
 }
 
@@ -47,13 +47,14 @@ HWND FocusWindow(HWND foreground)
 
 // The entry's click: an IME on its native script goes to English, otherwise (off, or English) to its
 // script; a keyboard without an IME goes to the next input language. The IME window takes a sent
-// control message only (a posted one is dropped), hence the worker.
-void Switch(HWND window, const ImeStatus& now)
+// control message only (a posted one is dropped), hence the worker. Returns true when switched
+// synchronously; false when a layout-change message was posted asynchronously.
+bool Switch(HWND window, const ImeStatus& now)
 {
     HWND ime = now.ime ? ImmGetDefaultIMEWnd(window) : nullptr;
     if (!ime) {
         PostMessageW(window, WM_INPUTLANGCHANGEREQUEST, 0, LPARAM(HKL_NEXT));
-        return;
+        return false;
     }
     const bool native = now.Latin();
     DWORD_PTR ignored = 0;
@@ -61,6 +62,7 @@ void Switch(HWND window, const ImeStatus& now)
         SendMessageTimeoutW(ime, WM_IME_CONTROL, IMC_SETOPENSTATUS, TRUE, SMTO_ABORTIFHUNG | SMTO_BLOCK, 120, &ignored);
     SendMessageTimeoutW(ime, WM_IME_CONTROL, IMC_SETCONVERSIONMODE, (native ? IME_CMODE_NATIVE : 0) | (now.fullShape ? IME_CMODE_FULLSHAPE : 0),
                         SMTO_ABORTIFHUNG | SMTO_BLOCK, 120, &ignored);
+    return true;
 }
 
 } // namespace
@@ -136,7 +138,7 @@ ImeWatcher::ImeWatcher(HWND window, UINT message)
     : window_(window),
       message_(message),
       wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
-      caps_(ForegroundCapsLock()), // the latch as it already is; every press then flips it
+      caps_(ForegroundCapsLock(GetForegroundWindow(), false)), // initial latch; resynced on foreground change
       foreground_(SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT)),
       // CHANGE is not watched: it fires for every composition and candidate
       // change, which would read the IME on every key of a sentence. Shift and
@@ -181,6 +183,7 @@ void ImeWatcher::Run()
 {
     SetThreadDescription(GetCurrentThread(), L"Atrium IME");
     ImeStatus last; // the last complete read: carried through a stalled one
+    HWND lastForeground = nullptr;
     while (!stop_) {
         WaitForSingleObject(wake_, INFINITE);
         if (stop_)
@@ -197,11 +200,16 @@ void ImeWatcher::Run()
         if (status.Empty() && focus != foreground)
             status = QueryImeStatus(asked = foreground);
         if (toggle_.exchange(false) && status.reliable) {
-            Switch(asked, status);
+            if (!Switch(asked, status))
+                std::this_thread::sleep_for(std::chrono::milliseconds(50)); // WM_INPUTLANGCHANGEREQUEST is posted; let the foreground thread process it
             status = QueryImeStatus(asked);
         }
         if (foreground != GetForegroundWindow() || FocusWindow(foreground) != focus)
             continue; // the foreground moved while the IME was asked: not a state of anything
+        if (foreground != lastForeground) {
+            lastForeground = foreground;
+            caps_ = ForegroundCapsLock(foreground, caps_.load());
+        }
         if (!status.reliable && !status.Empty() && !last.Empty() && status.layout == last.layout)
             ImeCarryForward(status, last);
         if (status.reliable && !status.Empty())
@@ -220,14 +228,21 @@ void CALLBACK ImeWatcher::OnWinEvent(HWINEVENTHOOK, DWORD event, HWND, LONG, LON
         g_watcher->Wake();
 }
 
+bool ImeShouldWakeOnKey(DWORD vk, bool down, bool switchModifierDown, bool syntheticReplay)
+{
+    if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT)
+        return true;
+    if (!down)
+        return vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL;
+    return vk == VK_CAPITAL || vk == VK_KANA || vk == VK_KANJI || (vk == VK_SPACE && (switchModifierDown || syntheticReplay));
+}
+
 bool ImeWatcher::OnKey(void* context, DWORD vk, DWORD /*scan*/, bool /*extended*/, bool down, bool /*injected*/, ULONG_PTR extraInfo)
 {
     auto* self = static_cast<ImeWatcher*>(context);
     if (!self)
         return false;
     if (vk == VK_CAPITAL) {
-        // The latch, kept here: every press flips it once (its repeat does
-        // not), whether or not the UI thread's GetKeyState would see it.
         if (!down) {
             self->capsDown_ = false;
         } else if (!self->capsDown_) {
@@ -235,16 +250,10 @@ bool ImeWatcher::OnKey(void* context, DWORD vk, DWORD /*scan*/, bool /*extended*
             self->caps_ = !self->caps_.load();
         }
     }
-    if (!down)
-        return false;
-    const bool caseKey = vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_CAPITAL;
-    const bool switchKey = vk == VK_SPACE && ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN) | GetAsyncKeyState(VK_CONTROL)) & 0x8000) != 0;
-    const bool imeKey = vk == VK_KANA || vk == VK_KANJI; // VK_HANGUL and VK_HANJA share these codes
     // Atrium's Win key hook replays the Space of Win+Space itself: the Win key
-    // is already up when the replay arrives, so the combination above no longer
-    // sees it.
-    const bool replay = vk == VK_SPACE && extraInfo == kAtriumSyntheticKey;
-    if (caseKey || switchKey || imeKey || replay)
+    // is already up when the replay arrives, so the combination check no longer sees it.
+    const bool mod = vk == VK_SPACE && down && ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN) | GetAsyncKeyState(VK_CONTROL)) & 0x8000) != 0;
+    if (ImeShouldWakeOnKey(vk, down, mod, extraInfo == kAtriumSyntheticKey))
         self->Wake();
     return false; // never swallow a key
 }

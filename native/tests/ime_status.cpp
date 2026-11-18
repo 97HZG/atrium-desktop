@@ -83,6 +83,23 @@ void CheckCarryForward()
     Require(!other.open && !other.native, "a different layout is not carried into");
 }
 
+void CheckWakeKeys()
+{
+    Require(ImeShouldWakeOnKey(VK_SHIFT, true, false, false), "Shift down wakes");
+    Require(ImeShouldWakeOnKey(VK_SHIFT, false, false, false), "Shift up wakes for Chinese IME toggle");
+    Require(ImeShouldWakeOnKey(VK_LSHIFT, false, false, false), "Left Shift up wakes");
+    Require(ImeShouldWakeOnKey(VK_RSHIFT, false, false, false), "Right Shift up wakes");
+    Require(!ImeShouldWakeOnKey(VK_CONTROL, true, false, false), "Ctrl down alone does not wake");
+    Require(ImeShouldWakeOnKey(VK_CONTROL, false, false, false), "Ctrl up wakes for IMEs that toggle on release");
+    Require(ImeShouldWakeOnKey(VK_CAPITAL, true, false, false), "CapsLock down wakes");
+    Require(!ImeShouldWakeOnKey(VK_CAPITAL, false, false, false), "CapsLock up does not wake");
+    Require(ImeShouldWakeOnKey(VK_KANA, true, false, false), "Kana/Hangul key down wakes");
+    Require(ImeShouldWakeOnKey(VK_SPACE, true, true, false), "Win/Ctrl+Space down wakes");
+    Require(ImeShouldWakeOnKey(VK_SPACE, true, false, true), "replayed Win+Space down wakes");
+    Require(!ImeShouldWakeOnKey(VK_SPACE, true, false, false), "plain Space does not wake");
+    Require(!ImeShouldWakeOnKey('A', true, false, false) && !ImeShouldWakeOnKey('A', false, false, false), "typing keys never wake");
+}
+
 } // namespace
 
 int main()
@@ -92,6 +109,7 @@ int main()
         CheckNews();
         CheckWatch();
         CheckCarryForward();
+        CheckWakeKeys();
         std::cout << "ime status checks passed\n";
         return 0;
     } catch (const std::exception& error) {

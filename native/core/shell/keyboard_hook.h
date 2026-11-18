@@ -9,6 +9,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -48,10 +49,13 @@ private:
     // Recursive: a handler may send keys (WinKey replays Win + a shortcut), and
     // the hook sees those on this same thread before the handler returns.
     std::recursive_mutex handlersMutex_;
+    std::mutex lifecycleMutex_; // serializes Add/Remove thread start and join; never taken in HookProc
     std::vector<Entry> handlers_;
     int nextToken_ = 1;
     std::thread thread_;
-    DWORD threadId_ = 0;
+    std::atomic<DWORD> threadId_{0};
+    std::mutex readyMutex_;
+    std::condition_variable readyCv_;
     std::atomic<bool> ready_{false};
     std::atomic<bool> stop_{false};
 };

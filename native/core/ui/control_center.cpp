@@ -177,6 +177,16 @@ void ControlCenter::Open(RECT anchor, RECT bar)
     Log(L"control: opened");
 }
 
+bool ControlCenter::ReleasePointer(bool releaseCapture)
+{
+    const bool had = !dragging_.empty() || !pressed_.empty();
+    dragging_.clear();
+    pressed_.clear();
+    if (releaseCapture && GetCapture() == surface_.Hwnd())
+        ReleaseCapture();
+    return had;
+}
+
 void ControlCenter::Close()
 {
     if (!surface_.Visible())
@@ -188,9 +198,7 @@ void ControlCenter::Close()
     radioPending_ = audioPending_ = scanPending_ = false;
     radioDevices_ = audioIcons_ = scanRescan_ = false;
     finder_.Stop();
-    if (!dragging_.empty())
-        ReleaseCapture();
-    dragging_.clear();
+    ReleasePointer();
     surface_.Hide();
     lastClosed_ = GetTickCount64();
 }
@@ -1192,7 +1200,7 @@ void ControlCenter::BrightnessChanged(int percent)
     surface_.Invalidate();
 }
 
-bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
+bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
 {
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     switch (m) {
@@ -1358,14 +1366,16 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
             tracking_ = TrackMouseEvent(&tme) != FALSE;
         }
-        if (dragging_.empty() && pressed_ == L"mute" && status_.audio && (w & MK_LBUTTON) && std::abs(pt.x - downX_) > int(4 * surface_.Scale())) {
+        if (dragging_.empty() && pressed_ == L"mute" && status_.audio && (w & MK_LBUTTON) && std::abs(pt.x - downX_) > int(4 * surface_.Scale()))
             // The symbol is part of the slider: a press there that moves drags it.
-            dragging_ = L"slider";
-            pressed_ = dragging_;
-        }
-        if (!dragging_.empty()) {
+            pressed_ = dragging_ = L"slider";
+        if (!dragging_.empty() && (w & MK_LBUTTON)) {
             SetSliderAt(dragging_, float(pt.x) / surface_.Scale());
             return true;
+        }
+        if (!dragging_.empty()) {
+            ReleasePointer();
+            surface_.Invalidate();
         }
         std::wstring h = HitAt(pt);
         if (h != hover_) {
@@ -1382,6 +1392,10 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         }
         surface_.Invalidate();
         return true;
+    case WM_CAPTURECHANGED:
+        if (reinterpret_cast<HWND>(l) != surface_.Hwnd() && ReleasePointer(false))
+            surface_.Invalidate();
+        return true;
     case WM_LBUTTONDOWN:
         if (const float y = float(pt.y) / surface_.Scale(); y < cardTop_ || y >= cardTop_ + shownH_) {
             Close(); // outside the glass (while it changes size): as a click outside
@@ -1396,30 +1410,18 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             // Mute on release in place; a drag from here moves the slider.
             downX_ = pt.x;
             SetCapture(surface_.Hwnd());
-        } else if (!pressed_.empty()) {
-            float s = surface_.Scale();
-            surface_.Ripple(float(pt.x) / s, float(pt.y) / s);
-        }
+        } else if (!pressed_.empty())
+            surface_.Ripple(float(pt.x) / surface_.Scale(), float(pt.y) / surface_.Scale());
         surface_.Invalidate();
         return true;
     case WM_LBUTTONUP: {
-        if (!dragging_.empty()) {
-            bool volume = dragging_ == L"slider";
-            dragging_.clear();
-            ReleaseCapture();
-            pressed_.clear();
-            if (volume && onChanged)
-                onChanged();
-            surface_.Invalidate();
-            return true;
-        }
-        if (GetCapture() == surface_.Hwnd())
-            ReleaseCapture();
-        std::wstring h = HitAt(pt);
-        bool same = !h.empty() && h == pressed_;
-        pressed_.clear();
+        const bool volume = dragging_ == L"slider", same = dragging_.empty() && !pressed_.empty() && HitAt(pt) == pressed_;
+        const std::wstring h = pressed_;
+        ReleasePointer();
         surface_.Invalidate();
-        if (same)
+        if (volume && onChanged)
+            onChanged();
+        else if (same)
             Activate(h);
         return true;
     }
@@ -1453,10 +1455,8 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             return true;
         }
         return false;
-    default: break;
+    default: return false;
     }
-    (void)result;
-    return false;
 }
 
 } // namespace atrium

@@ -87,6 +87,12 @@ POINT MenuPlace(POINT at, int w, int h)
     return POINT{left, top};
 }
 
+bool FollowCancelKeyDown()
+{
+    constexpr int kKeys[] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_RETURN, VK_ESCAPE, VK_SPACE};
+    return std::ranges::any_of(kKeys, [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; });
+}
+
 void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD)
 {
     if (event != EVENT_OBJECT_SHOW && event != EVENT_OBJECT_LOCATIONCHANGE)
@@ -96,8 +102,12 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
         return;
     }
     LASTINPUTINFO input{sizeof(input)};
-    // The panel's click, or the real click the model sent for it (a right click the shell took silently).
-    if (!GetLastInputInfo(&input) || (input.dwTime != g_follow.clickInput && input.dwTime != TrayModel::LastSyntheticInput())) {
+    POINT cursor{};
+    const SIZE dblClick{GetSystemMetrics(SM_CXDOUBLECLK), GetSystemMetrics(SM_CYDOUBLECLK)};
+    // The panel's click, or the real click the model sent for it; ignore small pointer jitter.
+    if (!GetLastInputInfo(&input) || !GetCursorPos(&cursor) ||
+        TrayFollowCancelled(input.dwTime, g_follow.clickInput, TrayModel::LastSyntheticInput(), TrayModel::SyntheticPointerInFlight(), g_follow.at, cursor,
+                            dblClick, FollowCancelKeyDown())) {
         StopFollow(); // a later user action must not have its menu moved by this click
         return;
     }

@@ -3,7 +3,6 @@
 #include "log.h"
 
 #include <algorithm>
-#include <chrono>
 
 namespace atrium {
 
@@ -11,7 +10,7 @@ namespace {
 
 constexpr UINT kRehookMs = 10000;
 
-KeyboardHook* g_hook = nullptr; // the hook procedure has no context of its own
+std::atomic<KeyboardHook*> g_hook{nullptr}; // the hook procedure has no context of its own
 
 } // namespace
 
@@ -24,14 +23,17 @@ KeyboardHook& KeyboardHook::Instance()
 KeyboardHook::~KeyboardHook()
 {
     stop_ = true;
-    if (threadId_)
-        PostThreadMessageW(threadId_, WM_QUIT, 0, 0);
+    if (const DWORD tid = threadId_.load())
+        PostThreadMessageW(tid, WM_QUIT, 0, 0);
     if (thread_.joinable())
         thread_.join();
+    g_hook = nullptr;
 }
 
 int KeyboardHook::Add(Handler handler, void* context)
 {
+    const std::lock_guard lifecycle(lifecycleMutex_);
+    bool started = false;
     int token = 0;
     {
         const std::lock_guard lock(handlersMutex_);
@@ -40,17 +42,20 @@ int KeyboardHook::Add(Handler handler, void* context)
         if (handlers_.size() == 1) {
             stop_ = false;
             ready_ = false;
+            started = true;
             thread_ = std::thread([this] { Run(); });
         }
     }
-    // The hook is in place before the caller returns (or failed and said so).
-    while (!ready_.load())
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (started) {
+        std::unique_lock lock(readyMutex_);
+        readyCv_.wait(lock, [this] { return ready_.load(); });
+    }
     return token;
 }
 
 void KeyboardHook::Remove(int token)
 {
+    const std::lock_guard lifecycle(lifecycleMutex_);
     std::thread finished;
     {
         const std::lock_guard lock(handlersMutex_);
@@ -58,8 +63,8 @@ void KeyboardHook::Remove(int token)
         if (!handlers_.empty())
             return;
         stop_ = true;
-        if (threadId_)
-            PostThreadMessageW(threadId_, WM_QUIT, 0, 0);
+        if (const DWORD tid = threadId_.load())
+            PostThreadMessageW(tid, WM_QUIT, 0, 0);
         finished = std::move(thread_);
     }
     if (finished.joinable())
@@ -78,7 +83,11 @@ void KeyboardHook::Run()
         Log(L"keyboard: one low-level hook on its own thread");
     else
         Log(L"keyboard: could not watch the keyboard (%lu)", GetLastError());
-    ready_ = true;
+    {
+        const std::lock_guard lock(readyMutex_);
+        ready_ = true;
+    }
+    readyCv_.notify_all();
     // Low-level hooks are called on this thread while it waits for messages:
     // it does nothing else, so a busy UI thread never delays a key. Windows
     // drops a hook that once answered too late without a word, so it is set
@@ -100,7 +109,7 @@ void KeyboardHook::Run()
 
 LRESULT CALLBACK KeyboardHook::HookProc(int code, WPARAM wparam, LPARAM lparam)
 {
-    KeyboardHook* self = g_hook;
+    KeyboardHook* self = g_hook.load();
     const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
     if (code != HC_ACTION || !self)
         return CallNextHookEx(nullptr, code, wparam, lparam);

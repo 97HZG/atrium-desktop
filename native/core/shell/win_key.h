@@ -14,6 +14,67 @@
 
 namespace atrium {
 
+struct WinKeyAction {
+    bool swallow = false, notify = false, replayAlone = false, replayCombo = false;
+    WPARAM notifyParam = 0;
+    DWORD winVk = 0, winScan = 0;
+    bool winExtended = false;
+};
+
+struct WinKeyState {
+    bool held = false, passed = false, used = false, extended = false;
+    DWORD digit = 0, key = 0, scan = 0;
+    ULONGLONG lastDownMs = 0;
+};
+
+// Pure state-machine step for WinKey::OnKey. `winAsyncDown` is queried only when `s.held && s.passed` (swallowed keys never set GetAsyncKeyState).
+inline WinKeyAction StepWinKey(WinKeyState& s, DWORD vk, DWORD scan, bool extended, bool down, ULONGLONG nowMs, bool winAsyncDown, bool elevated, bool modified,
+                               bool alone, bool numbers)
+{
+    const bool win = vk == VK_LWIN || vk == VK_RWIN;
+    if (s.held && s.passed && (vk != s.key || down) && !winAsyncDown)
+        s = WinKeyState{};
+    if (s.digit && vk != s.digit && (!s.held || (!win && down)))
+        s.digit = 0;
+    if (win && down) {
+        if (s.held && !s.passed && nowMs - s.lastDownMs > 2000)
+            s = WinKeyState{};
+        if (!s.held) {
+            s.held = true;
+            s.used = false;
+            s.key = vk;
+            s.scan = scan;
+            s.extended = extended;
+            s.passed = elevated;
+        }
+        s.lastDownMs = nowMs;
+        return {.swallow = !s.passed};
+    }
+    if (win) {
+        const bool held = s.held && vk == s.key && !s.passed;
+        if (s.held && vk == s.key)
+            s.held = false;
+        if (held && !s.used)
+            return alone ? WinKeyAction{.swallow = true, .notify = true} :
+                           WinKeyAction{.swallow = true, .replayAlone = true, .winVk = s.key, .winScan = s.scan, .winExtended = s.extended};
+        return {.swallow = held};
+    }
+    if (s.digit && vk == s.digit) {
+        if (!down)
+            s.digit = 0;
+        return {.swallow = true};
+    }
+    if (!down || !s.held || s.passed)
+        return {};
+    if (vk >= '0' && vk <= '9' && numbers && !modified) {
+        s.used = true;
+        s.digit = vk;
+        return {.swallow = true, .notify = true, .notifyParam = vk == '0' ? 10 : vk - '0'};
+    }
+    s.passed = true;
+    return {.swallow = true, .replayCombo = true, .winVk = s.key, .winScan = s.scan, .winExtended = s.extended};
+}
+
 class WinKey {
 public:
     // Posts `msg` to `notify`: wParam 0 when the Windows key was pressed alone
@@ -28,12 +89,7 @@ private:
     HWND notify_;
     UINT msg_;
     bool alone_, numbers_;
-    bool held_ = false;   // a Windows key is down and held back
-    bool passed_ = false; // it went on to Windows (another key followed, or an elevated window is in front)
-    bool used_ = false;   // a digit went with it: no start menu when it comes up
-    DWORD digit_ = 0;     // the digit kept, until it comes up
-    DWORD key_ = 0, scan_ = 0; // which one (VK_LWIN or VK_RWIN), as it came, to send it on
-    bool extended_ = false;
+    WinKeyState state_;
     int keyToken_ = 0; // the shared hook's registration
 };
 

@@ -53,7 +53,11 @@ void GlassMenu::Open(std::vector<MenuEntry> entries, POINT at, MenuPlace place, 
         if (closed)
             closed();
     }
+    for (size_t i = 0; i < entries_.size(); ++i)
+        if (!entries_[i].icon.Empty())
+            surface_.ForgetImage(L"menu|" + std::to_wstring(i));
     entries_ = std::move(entries);
+    rows_.assign(entries_.size(), D2D1::RectF(0, 0, 0, 0));
     scroll_ = 0;
     onPick_ = std::move(onPick);
     onClosed_ = std::move(onClosed);
@@ -168,7 +172,7 @@ void GlassMenu::Paint(Canvas& c)
         const D2D1_COLOR_F ink = e.disabled ? t.faint : t.text;
         float cy = (row.top + row.bottom) / 2;
         if (!e.icon.Empty())
-            c.Image(L"menu|" + std::to_wstring(e.id), e.icon, D2D1::RectF(row.left + 10, cy - 8, row.left + 26, cy + 8), e.disabled ? 0.45f : 1);
+            c.Image(L"menu|" + std::to_wstring(i), e.icon, D2D1::RectF(row.left + 10, cy - 8, row.left + 26, cy + 8), e.disabled ? 0.45f : 1);
         else if (e.checked)
             c.Glyph(L"\uE73E", D2D1::RectF(row.left + 8, cy - 9, row.left + 26, cy + 9), 12, ink);
         c.Text(e.text, D2D1::RectF(textLeft, row.top, row.right - 12, row.bottom), kTextPx, ink);
@@ -179,7 +183,7 @@ void GlassMenu::Paint(Canvas& c)
 int GlassMenu::RowAt(POINT pt) const
 {
     float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;
-    for (size_t i = 0; i < rows_.size(); ++i) {
+    for (size_t i = 0; i < rows_.size() && i < entries_.size(); ++i) {
         const D2D1_RECT_F& r = rows_[i];
         if (x >= r.left && x < r.right && y >= r.top && y < r.bottom && Choosable(entries_[i]))
             return int(i);
@@ -198,11 +202,15 @@ void GlassMenu::Move(int step)
         if (Choosable(entries_[size_t(i)])) {
             hover_ = i;
             // Keep it in view (rows_ are where the last frame drew them).
-            const D2D1_RECT_F& r = rows_[size_t(i)];
-            if (r.top < kPad)
-                scroll_ -= kPad - r.top;
-            else if (r.bottom > viewH_ - kPad)
-                scroll_ += r.bottom - (viewH_ - kPad);
+            if (size_t(i) < rows_.size()) {
+                const D2D1_RECT_F& r = rows_[size_t(i)];
+                if (r.bottom > r.top) {
+                    if (r.top < kPad)
+                        scroll_ -= kPad - r.top;
+                    else if (r.bottom > viewH_ - kPad)
+                        scroll_ += r.bottom - (viewH_ - kPad);
+                }
+            }
             surface_.Invalidate();
             return;
         }

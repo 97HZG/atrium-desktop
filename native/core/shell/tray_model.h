@@ -4,6 +4,7 @@
 #include "shell/task_model.h"
 #include "shell/tray_click.h"
 #include "shell/tray_host.h"
+#include "shell/tray_pointer.h"
 #include "shell/tray_target.h"
 
 #include <windows.h>
@@ -63,6 +64,8 @@ public:
     void OpenSystemTray(); // explicit asynchronous fallback
     // GetLastInputInfo time of the last real pointer click sent to a tray button (0: none).
     static DWORD LastSyntheticInput();
+    // True while the physical pointer right-click fallback is moving the cursor.
+    static bool SyntheticPointerInFlight() { return tray::g_pointerInFlight; }
     // Opens an existing background session; false when the app is not in the tray/running.
     bool OpenExisting(const std::wstring& exe);
     // The tray host (setting `trayHost`): the apps' icons as they send them, clicked with

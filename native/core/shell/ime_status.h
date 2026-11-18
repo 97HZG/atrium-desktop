@@ -84,6 +84,9 @@ std::wstring LanguageGlyph(LANGID langid);
 // letter says what a key would produce.
 std::wstring ImeGlyph(const ImeStatus& status);
 
+// Whether a key event from the hook should trigger an IME or CapsLock re-read.
+bool ImeShouldWakeOnKey(DWORD vk, bool down, bool switchModifierDown, bool syntheticReplay);
+
 // One read of the foreground window's state. GetKeyboardLayout answers at once;
 // the conversion state comes from the window's default IME window, which
 // belongs to the foreground thread and may be hung, so its two control
@@ -110,8 +113,8 @@ public:
     ImeWatcher(const ImeWatcher&) = delete;
     ImeWatcher& operator=(const ImeWatcher&) = delete;
 
-    // CapsLock's latch, kept from the keyboard hook: a background thread's
-    // GetKeyState can stay stale, while the low-level hook sees every press.
+    // CapsLock's latch: flipped by the hook on each press, read again from the foreground thread's
+    // queue when the foreground changes (a press the hook missed: the lock screen, UAC).
     bool CapsLock() const { return caps_.load(); }
     // The input method entry's click, done on the worker: an IME between Chinese and English (its
     // native mode), else the next input language, for the window in front; then a read.
@@ -128,8 +131,8 @@ private:
     HANDLE wake_ = nullptr; // the worker reads after a burst of events
     std::atomic<bool> stop_{false};
     std::atomic<bool> toggle_{false}; // a click waits for the worker
-    std::atomic<bool> caps_{false}; // the latch (hook thread writes, the UI thread reads)
-    bool capsDown_ = false; // the key is held: its repeat does not flip the latch again
+    std::atomic<bool> caps_{false}; // the latch (hook flips on VK_CAPITAL, worker resyncs on foreground change)
+    bool capsDown_ = false;         // ignores VK_CAPITAL auto-repeat
     HWINEVENTHOOK foreground_ = nullptr;
     HWINEVENTHOOK ime_ = nullptr;
     int keyToken_ = 0; // the shared keyboard hook's registration

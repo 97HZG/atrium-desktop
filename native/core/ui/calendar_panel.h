@@ -9,11 +9,27 @@
 #include "shell/lunar.h"
 #include "ui/surface.h"
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
 
 namespace atrium {
+
+inline constexpr const wchar_t* kCalendarWeekNames[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
+inline constexpr const wchar_t* kCalendarMonthsEn[] = {L"January", L"February", L"March",     L"April",   L"May",      L"June",
+                                                       L"July",    L"August",   L"September", L"October", L"November", L"December"};
+inline constexpr const wchar_t* kCalendarWeekShortEn[] = {L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat", L"Sun"};
+
+inline std::wstring CalendarCapsuleDate(int year, int month, int day, int weekday, int currentYear, bool english)
+{
+    const int wd = std::clamp(weekday, 0, 6);
+    if (english)
+        return std::wstring(kCalendarWeekShortEn[wd]) + L", " + kCalendarMonthsEn[std::clamp(month, 1, 12) - 1] + L" " + std::to_wstring(day) +
+               (year != currentYear ? L", " + std::to_wstring(year) : std::wstring());
+    return (year != currentYear ? std::to_wstring(year) + L"年" : std::wstring()) + std::to_wstring(month) + L"月" + std::to_wstring(day) + L"日 星期" +
+           kCalendarWeekNames[wd];
+}
 
 class CalendarPanel {
 public:

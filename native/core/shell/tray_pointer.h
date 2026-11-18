@@ -4,9 +4,13 @@
 #include <windows.h>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <memory>
 
 namespace atrium::tray {
+
+inline std::atomic<bool> g_pointerInFlight{false};
 
 inline bool SamePoint(POINT a, POINT b) { return a.x == b.x && a.y == b.y; }
 
@@ -40,6 +44,8 @@ enum class PointerClick {
 // Returning Cancelled must not fall through to another invocation route.
 template<class Desktop> PointerClick RightClick(Desktop& desktop)
 {
+    g_pointerInFlight = true;
+    std::unique_ptr<void, void (*)(void*)> flight(&g_pointerInFlight, [](void* p) { *static_cast<std::atomic<bool>*>(p) = false; });
     POINT original{}, target{};
     if (!desktop.Cursor(original) || desktop.Interacting())
         return PointerClick::Cancelled;
