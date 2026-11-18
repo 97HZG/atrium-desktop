@@ -2103,6 +2103,8 @@ bool Bar::RenderSession()
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
         RECT window{};        // where it was last drawn: a moved panel is drawn again at once
         unsigned desktopVersion = 0; // a widget: the desktop picture its backdrop came from
+        double desktopMs = -1e9;     // and when a new one came
+        bool inkOwed = false;        // its ink waits for the desktop to settle
         // Presents of an animation, logged when it ends (smoothness checks).
         double burstStart = 0, burstLast = 0, burstGap = 0;
         int burstFrames = 0;
@@ -2166,8 +2168,14 @@ bool Bar::RenderSession()
         gpu.context->CopyResource(lastFrame.get(), frame);
     };
     std::vector<GlassParams> gp;
+    // A widget's ink follows a desktop that keeps changing (a slideshow's fade, about a second) once it has
+    // settled: cell by cell all along, the widgets were painted at every frame of it, and the render thread
+    // (the bar's too) was held up to 50 ms.
+    constexpr double kDesktopSettleMs = 250;
+    bool inkDue = false;
     // Draws the panels; true while one of them animates.
     auto renderPanels = [&](const Snapshot& snap, ID3D11Texture2D* source, bool& lost) {
+        inkDue = false;
         // A menu or Stage Manager can remain on a different display from the Dock.
         std::erase_if(panelCaptures, [&](const auto& entry) {
             return std::none_of(snap.panels.begin(), snap.panels.end(), [&](const GlassPanel& p) {
@@ -2301,6 +2309,8 @@ bool Bar::RenderSession()
                     r.UpdateBackdrop(pic, p.window.left - desktop.Origin().x, p.window.top - desktop.Origin().y);
                     newDesktop = fresh;
                     ps.desktopVersion = desktop.Version();
+                    if (fresh)
+                        ps.desktopMs = now;
                 }
             } else if (auto extra = panelCaptures.find(MonitorFromRect(&p.window, MONITOR_DEFAULTTONEAREST)); extra != panelCaptures.end()) {
                 const auto& picture = extra->second;
@@ -2348,10 +2358,16 @@ bool Bar::RenderSession()
                 ps.dark = 2 * darkCells >= int(grid.dark.size());
                 if (!(grid == ps.grid)) {
                     ps.grid = grid;
-                    PublishInk(p.hwnd, grid);
-                    ps.ink = ps.dark ? 1 : 0;
-                    PostMessageW(p.hwnd, WM_GLASS_INK, WPARAM(ps.ink), 0);
+                    ps.inkOwed = true;
                 }
+            }
+            if (ps.inkOwed && ps.ink >= 0 && now - ps.desktopMs < kDesktopSettleMs) {
+                inkDue = true;
+            } else if (ps.inkOwed) {
+                ps.inkOwed = false;
+                PublishInk(p.hwnd, ps.grid);
+                ps.ink = ps.dark ? 1 : 0;
+                PostMessageW(p.hwnd, WM_GLASS_INK, WPARAM(ps.ink), 0);
             }
             if (p.pop != ps.pop) {
                 r.Pop(p.popOpen, p.popX, p.popY);
@@ -2439,7 +2455,7 @@ bool Bar::RenderSession()
         // clock (D45): one wake-up per composed frame, at the display's rate. A timeout would
         // be rounded up to 15.6 ms, and the popups' latency objects (no vsync) would spin.
         // Pending readbacks are polled soon.
-        bool owed = barOwed || std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.owed; });
+        bool owed = barOwed || inkDue || std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.owed; });
         bool paced = animating || panelsMoving || owed;
         bool readback = renderer.ReadbackPending() || std::any_of(panels.begin(), panels.end(), [](const auto& e) {
             return e.second.renderer && e.second.renderer->ReadbackPending();
