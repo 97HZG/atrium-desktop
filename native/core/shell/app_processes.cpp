@@ -47,10 +47,7 @@ bool Matches(HANDLE process, const std::wstring& path, std::span<const AppProces
 }
 } // namespace
 
-bool CanTerminateApp(const AppProcessIdentity& app)
-{
-    return (!app.exePath.empty() || !app.aumid.empty()) && !SharedHost(app.exePath);
-}
+bool CanTerminateApp(const AppProcessIdentity& app) { return (!app.exePath.empty() || !app.aumid.empty()) && !SharedHost(app.exePath); }
 
 bool TerminateAppProcesses(std::span<const AppProcessIdentity> apps)
 {
@@ -89,7 +86,7 @@ bool TerminateAppProcesses(std::span<const AppProcessIdentity> apps)
             continue;
         const bool selected = Matches(process.get(), path, apps);
         processes.push_back({std::move(process), path, entry.th32ProcessID, entry.th32ParentProcessID,
-            (ULONGLONG(created.dwHighDateTime) << 32) | created.dwLowDateTime, selected});
+                             (ULONGLONG(created.dwHighDateTime) << 32) | created.dwLowDateTime, selected});
     } while (Process32NextW(snapshot.get(), &entry));
     // The app's folders: its helpers are the processes it started from them.
     std::vector<std::wstring> folders;

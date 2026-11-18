@@ -91,6 +91,7 @@ constexpr float kReminderTop = 42, kReminderRow = 27, kReminderBottom = 14;
 float ReminderScrollMax(const WidgetContent& content, WidgetSize size);
 
 // Paints the content over the widget's glass (the face and the ink of `material` included).
-void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial material, const WidgetContent& content, const WidgetWorld& world, std::vector<WidgetHit>& hits);
+void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial material, const WidgetContent& content, const WidgetWorld& world,
+                 std::vector<WidgetHit>& hits);
 
 } // namespace atrium

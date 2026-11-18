@@ -38,16 +38,16 @@ std::string Get(const std::wstring& url, bool direct)
     if (!WinHttpCrackUrl(url.c_str(), 0, 0, &u))
         return {};
     std::string body;
-    HINTERNET session = WinHttpOpen(L"Atrium", direct ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
-                                    WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET session =
+        WinHttpOpen(L"Atrium", direct ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session)
         return {};
     WinHttpSetTimeouts(session, 8000, 8000, 8000, 8000);
     HINTERNET connect = WinHttpConnect(session, host, u.nPort, 0);
     std::wstring target = std::wstring(path) + extra;
     HINTERNET request = connect ? WinHttpOpenRequest(connect, L"GET", target.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                                     u.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0)
-                                : nullptr;
+                                                     u.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0) :
+                                  nullptr;
     DWORD status = 0, size = sizeof(status);
     if (request && WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
         WinHttpReceiveResponse(request, nullptr) &&
@@ -94,7 +94,8 @@ std::wstring PlaceName(double lat, double lon)
     if (!lastName.empty() && lastEnglish == english && std::fabs(lat - lastLat) < 0.03 && std::fabs(lon - lastLon) < 0.03)
         return lastName;
     wchar_t url[256];
-    swprintf_s(url, L"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.4f&longitude=%.4f&localityLanguage=%s", lat, lon, english ? L"en" : L"zh");
+    swprintf_s(url, L"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.4f&longitude=%.4f&localityLanguage=%s", lat, lon,
+               english ? L"en" : L"zh");
     json::JsonObject o{nullptr};
     if (!json::JsonObject::TryParse(winrt::to_hstring(GetAny(url)), o))
         return {};
@@ -151,10 +152,13 @@ bool Locate(double& lat, double& lon, std::wstring& city)
     // proxy's place), then through the proxy (a network that only reaches out through it): one
     // service blocked or over its limit (#67) is not the end of it.
     const bool english = LanguageIsEnglish();
-    struct Service { const wchar_t* url; const wchar_t *ok, *okValue, *city, *lat, *lon; };
+    struct Service {
+        const wchar_t* url;
+        const wchar_t *ok, *okValue, *city, *lat, *lon;
+    };
     const Service services[] = {
-        {english ? L"http://ip-api.com/json/?lang=en&fields=status,city,lat,lon" : L"http://ip-api.com/json/?lang=zh-CN&fields=status,city,lat,lon",
-         L"status", L"success", L"city", L"lat", L"lon"},
+        {english ? L"http://ip-api.com/json/?lang=en&fields=status,city,lat,lon" : L"http://ip-api.com/json/?lang=zh-CN&fields=status,city,lat,lon", L"status",
+         L"success", L"city", L"lat", L"lon"},
         {english ? L"https://ipwho.is/?lang=en" : L"https://ipwho.is/?lang=zh-CN", L"success", nullptr, L"city", L"latitude", L"longitude"},
         {L"https://ipapi.co/json/", nullptr, nullptr, L"city", L"latitude", L"longitude"},
     };
@@ -187,10 +191,7 @@ std::wstring Wide(const std::string& s)
     return w;
 }
 
-bool Parse(const std::string& text, json::JsonObject& out)
-{
-    return !text.empty() && json::JsonObject::TryParse(Wide(text), out);
-}
+bool Parse(const std::string& text, json::JsonObject& out) { return !text.empty() && json::JsonObject::TryParse(Wide(text), out); }
 
 // "2026-11-09T14:00" -> minutes since 2000 (only compared with each other), hour and minute.
 int64_t Minutes(const std::wstring& t, int* hour = nullptr, int* minute = nullptr, int* weekday = nullptr)

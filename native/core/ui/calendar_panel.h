@@ -25,7 +25,11 @@ public:
     void Close();
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
-    void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
+    void SetRadius(float dip)
+    {
+        radius_ = dip;
+        surface_.SetRadius(dip);
+    }
     void SetBarHeight(float dip) { barH_ = dip; }
     HWND Hwnd() const { return surface_.Hwnd(); }
 

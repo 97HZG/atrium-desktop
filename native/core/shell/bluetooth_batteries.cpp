@@ -31,10 +31,9 @@ struct Container {
     bool keyboard = false, mouse = false;
 };
 
-bool StartsWith(const std::wstring& s, const wchar_t* prefix) { return s.rfind(prefix, 0) == 0; }
+bool StartsWith(const std::wstring& s, const wchar_t* prefix) { return s.starts_with(prefix); }
 
-template <typename T>
-bool Property(HDEVINFO set, SP_DEVINFO_DATA& d, const DEVPROPKEY& key, T& out)
+template<typename T> bool Property(HDEVINFO set, SP_DEVINFO_DATA& d, const DEVPROPKEY& key, T& out)
 {
     DEVPROPTYPE type = 0;
     return SetupDiGetDevicePropertyW(set, &d, &key, &type, reinterpret_cast<BYTE*>(&out), sizeof(T), nullptr, 0) != FALSE;

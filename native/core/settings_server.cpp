@@ -125,8 +125,7 @@ void SettingsServer::Run()
     while (WaitForSingleObject(quit_, 0) == WAIT_TIMEOUT) {
         // First instance only: another process cannot pre-create our pipe name.
         HANDLE pipe = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                                       PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, kBuffer,
-                                       kBuffer, 0, nullptr);
+                                       PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, kBuffer, kBuffer, 0, nullptr);
         if (pipe == INVALID_HANDLE_VALUE) {
             Log(L"pipe: CreateNamedPipe failed (%lu)", GetLastError());
             if (WaitForSingleObject(quit_, 2000) != WAIT_TIMEOUT)
@@ -214,10 +213,10 @@ std::string SettingsServer::Handle(const std::string& request)
         std::wstring kind(o.GetNamedString(L"kind", L"")), size(o.GetNamedString(L"size", L"small"));
         WidgetKind widgetKind;
         WidgetSize widgetSize;
-        if (!DesktopWidgets::ParseNames(kind, size, widgetKind, widgetSize)) return Reply(L"error", L"unknown widget kind");
+        if (!DesktopWidgets::ParseNames(kind, size, widgetKind, widgetSize))
+            return Reply(L"error", L"unknown widget kind");
         DWORD_PTR added = 0;
-        SendMessageTimeoutW(host_, WM_ATRIUM_ADD_WIDGET, WPARAM(widgetKind), LPARAM(widgetSize), SMTO_ABORTIFHUNG, 3000,
-                            &added);
+        SendMessageTimeoutW(host_, WM_ATRIUM_ADD_WIDGET, WPARAM(widgetKind), LPARAM(widgetSize), SMTO_ABORTIFHUNG, 3000, &added);
         return added ? Reply(L"ok") : Reply(L"error", L"no room for another widget");
     }
 

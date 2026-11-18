@@ -8,7 +8,8 @@ namespace Atrium.Settings;
 internal static class ShellIcons
 {
     [StructLayout(LayoutKind.Sequential)] private struct PropertyKey { public Guid Format; public uint Id; }
-    [StructLayout(LayoutKind.Explicit, Size = 24)] private struct PropVariant
+    [StructLayout(LayoutKind.Explicit, Size = 24)]
+    private struct PropVariant
     {
         [FieldOffset(0)] public ushort Type;
         [FieldOffset(8)] public IntPtr Text;
@@ -106,7 +107,7 @@ internal static class ShellIcons
         parsingName = ExecutableForIcon(parsingName);
         // Read executable artwork directly, avoiding the Shell's generic file-type cache.
         if (parsingName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
-            SHDefExtractIconW(parsingName, 0, 0, out var icon, IntPtr.Zero, (uint)px) == 0)
+            SHDefExtractIconW(parsingName, 0, 0, out nint icon, IntPtr.Zero, (uint)px) == 0)
         {
             try
             {
@@ -124,7 +125,7 @@ internal static class ShellIcons
         try
         {
             var size = new Size { Cx = px, Cy = px };
-            if (factory.GetImage(size, SIIGBF_ICONONLY, out var hbitmap) != 0 && factory.GetImage(size, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, out hbitmap) != 0)
+            if (factory.GetImage(size, SIIGBF_ICONONLY, out nint hbitmap) != 0 && factory.GetImage(size, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, out hbitmap) != 0)
                 return null;
             try
             {
@@ -145,8 +146,8 @@ internal static class ShellIcons
     {
         if (GetObject(bitmap, Marshal.SizeOf<Bitmap>(), out var bm) == 0 || bm.Width <= 0 || bm.Height <= 0) return null;
         var header = new BitmapInfoHeader { Size = (uint)Marshal.SizeOf<BitmapInfoHeader>(), Width = bm.Width, Height = -bm.Height, Planes = 1, BitCount = 32 };
-        var pixels = new byte[bm.Width * bm.Height * 4];
-        var dc = GetDC(IntPtr.Zero);
+        byte[] pixels = new byte[bm.Width * bm.Height * 4];
+        nint dc = GetDC(IntPtr.Zero);
         int lines = GetDIBits(dc, bitmap, 0, (uint)bm.Height, pixels, ref header, 0);
         ReleaseDC(IntPtr.Zero, dc);
         if (lines == 0) return null;
@@ -162,11 +163,14 @@ internal static class ShellIcons
         if (!hasAlpha)
             for (int i = 3; i < pixels.Length; i += 4) pixels[i] = 255;
         else if (straight)
+        {
             for (int i = 0; i < pixels.Length; i += 4)
             {
                 int a = pixels[i + 3];
                 for (int c = 0; c < 3; c++) pixels[i + c] = (byte)((pixels[i + c] * a + 127) / 255);
             }
+        }
+
         return new Image(bm.Width, bm.Height, pixels);
     }
 
@@ -174,7 +178,7 @@ internal static class ShellIcons
     private static string ExecutableForIcon(string path)
     {
         if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return path;
-        string actual = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, "app", System.IO.Path.GetFileName(path));
-        return System.IO.File.Exists(actual) ? actual : path;
+        string actual = Path.Combine(Path.GetDirectoryName(path)!, "app", Path.GetFileName(path));
+        return File.Exists(actual) ? actual : path;
     }
 }

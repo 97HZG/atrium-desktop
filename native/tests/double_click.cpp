@@ -47,12 +47,15 @@ void CheckEdges()
     Require(!cleared.Click(L"icon:1", 1100, kWindow), "a cleared click is forgotten");
     DoubleClick backwards;
     Require(!backwards.Click(L"icon:1", 5000, kWindow) && !backwards.Click(L"icon:1", 4000, kWindow),
-        "a clock that goes backwards does not make a double click");
+            "a clock that goes backwards does not make a double click");
 }
 
 void CheckStableIdentities()
 {
-    struct Icon { std::wstring record; std::vector<int> runtime; };
+    struct Icon {
+        std::wstring record;
+        std::vector<int> runtime;
+    };
     std::vector<Icon> icons{{L"app-A", {}}, {L"app-B", {}}};
     DoubleClick clicks;
     auto clickAt = [&](size_t index, unsigned long long now) {
@@ -72,11 +75,9 @@ void CheckStableIdentities()
     const auto unknown = TrayClickIdentity(L"", {3, 101, 7});
     const auto other = TrayClickIdentity(L"", {3, 101, 8});
     Require(!unknown.empty() && unknown != other, "unknown UIA icons have distinct runtime identities");
-    Require(!clicks.Click(unknown, 3000, kWindow) && !clicks.Click(other, 3100, kWindow),
-            "distinct UIA icons do not form a pair");
+    Require(!clicks.Click(unknown, 3000, kWindow) && !clicks.Click(other, 3100, kWindow), "distinct UIA icons do not form a pair");
     Require(clicks.Click(other, 3200, kWindow), "one unknown UIA icon still supports pairing");
-    Require(TrayClickIdentity(L"app-A", {3, 1}) == TrayClickIdentity(L"app-A", {3, 2}),
-            "a persistent Windows identity survives a rebuilt UIA element");
+    Require(TrayClickIdentity(L"app-A", {3, 1}) == TrayClickIdentity(L"app-A", {3, 2}), "a persistent Windows identity survives a rebuilt UIA element");
     Require(TrayClickIdentity(L"", {}).empty(), "no identity is safer than pairing by position or tooltip");
 }
 

@@ -27,10 +27,7 @@ inline float EaseOutBack(float t, float overshoot)
 }
 
 // Moves v towards target by the share `rate` per second closes, whatever the frame time.
-inline float Approach(float v, float target, double dtMs, float rate)
-{
-    return v + (target - v) * (1 - std::exp(-float(dtMs) / 1000.f * rate));
-}
+inline float Approach(float v, float target, double dtMs, float rate) { return v + (target - v) * (1 - std::exp(-float(dtMs) / 1000.f * rate)); }
 
 // Hover and press washes: in quickly, out a little slower, as on macOS (per second).
 constexpr float kHoverIn = 20, kHoverOut = 11;

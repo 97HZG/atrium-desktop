@@ -6,15 +6,15 @@
 
 #include <array>
 #include <cmath>
+#include <numbers>
 
 namespace atrium {
 
 int WifiSteps(int signal) { return signal >= 60 ? 3 : signal >= 30 ? 2 : 1; }
 
-void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx, float cy, float radius, int lit, D2D1_COLOR_F on,
-                 D2D1_COLOR_F off)
+void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx, float cy, float radius, int lit, D2D1_COLOR_F on, D2D1_COLOR_F off)
 {
-    constexpr float kDeg = 3.14159265f / 180.f;
+    constexpr float kDeg = std::numbers::pi_v<float> / 180.f;
     constexpr float kSpan = 78, kFrom = 270 - kSpan / 2; // about 4:3, like the iPhone's
     winrt::com_ptr<ID2D1Factory> factory;
     d2d->GetFactory(factory.put());
@@ -32,12 +32,11 @@ void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx,
             winrt::com_ptr<ID2D1GeometrySink> sink;
             if (FAILED(factory->CreatePathGeometry(glyph.paths[k].put())) || FAILED(glyph.paths[k]->Open(sink.put())))
                 return;
-            sink->BeginFigure(k == 0 ? D2D1::Point2F(0, 0.5f) : point(radii[k], kFrom),
-                              k == 0 ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->BeginFigure(k == 0 ? D2D1::Point2F(0, 0.5f) : point(radii[k], kFrom), k == 0 ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
             if (k == 0)
                 sink->AddLine(point(radii[k], kFrom));
-            sink->AddArc(D2D1::ArcSegment(point(radii[k], kFrom + kSpan), D2D1::SizeF(radii[k], radii[k]), 0,
-                                          D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+            sink->AddArc(
+                D2D1::ArcSegment(point(radii[k], kFrom + kSpan), D2D1::SizeF(radii[k], radii[k]), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
             sink->EndFigure(k == 0 ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);
             sink->Close();
         }

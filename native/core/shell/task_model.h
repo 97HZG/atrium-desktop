@@ -58,8 +58,7 @@ class TaskModel {
 public:
     // Calls `onChanged` on the UI thread (coalesced, at most every ~30 ms)
     // whenever Snapshot() would return something different.
-    TaskModel(HWND uiWindow, std::function<void()> onChanged,
-              std::function<bool(const std::wstring&)> openExisting = {});
+    TaskModel(HWND uiWindow, std::function<void()> onChanged, const std::function<bool(const std::wstring&)>& openExisting = {});
     ~TaskModel();
     TaskModel(const TaskModel&) = delete;
     TaskModel& operator=(const TaskModel&) = delete;

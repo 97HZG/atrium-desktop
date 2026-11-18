@@ -52,7 +52,11 @@ public:
     int IconPx() const;                 // the same, in pixels on this monitor: what an icon is read at
     HWND Hwnd() const { return surface_.Hwnd(); }
     // Corner radius (DIP), the bar's; the panel uses it, the capsule is round like the bar.
-    void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
+    void SetRadius(float dip)
+    {
+        radius_ = dip;
+        surface_.SetRadius(dip);
+    }
     // Height of the bar (DIP): the status capsule has the same.
     void SetBarHeight(float dip) { barH_ = dip; }
     // The tray's button in the capsule (setting startTray).

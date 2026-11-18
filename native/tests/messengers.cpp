@@ -20,8 +20,8 @@ int main()
         require(MessengerOfNotice(L"windows", L"QQ", L"QQ") == Messenger::QQ, "QQ's Windows notification (AUMID QQ)");
         require(MessengerOfNotice(L"windows", L"\u9489\u9489", L"") == Messenger::DingTalk, "a notification by its shown name");
         require(MessengerOfNotice(L"wechat", L"WeChat", L"") == Messenger::WeChat, "the WeChat reader's card");
-        require(MessengerOfNotice(L"windows", L"Mail", L"microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.mail") ==
-                    Messenger::None, "other apps' notifications follow notifyListener");
+        require(MessengerOfNotice(L"windows", L"Mail", L"microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.mail") == Messenger::None,
+                "other apps' notifications follow notifyListener");
         require(MessengerOfNotice(L"windows", L"QQ Music", L"QQMusic") == Messenger::None, "a name only containing QQ is not QQ");
 
         MessengerAlerts alerts;

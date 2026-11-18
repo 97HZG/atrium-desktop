@@ -32,15 +32,13 @@ struct Locale {
     std::unordered_map<std::wstring, std::wstring> legacy;
 };
 
-std::atomic<std::shared_ptr<const Locale>> g_active{
-    std::make_shared<Locale>()};
+std::atomic<std::shared_ptr<const Locale>> g_active{std::make_shared<Locale>()};
 std::mutex g_switch;
 // Tr pointers can outlive a call or a language change. Cache each immutable
 // locale once, avoiding both dangling strings and a retired copy per edit.
 std::unordered_map<std::wstring, std::shared_ptr<const Locale>> g_loaded;
 std::unordered_map<std::wstring, std::wstring> g_legacy;
 bool g_legacyLoaded = false;
-
 
 std::wstring Utf8ToWide(const std::string& text)
 {
@@ -51,7 +49,8 @@ std::wstring Utf8ToWide(const std::string& text)
         return {};
     std::wstring out(size_t(size), L'\0');
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), int(text.size()), out.data(), size);
-    if (!out.empty() && out.front() == 0xFEFF) out.erase(0, 1);
+    if (!out.empty() && out.front() == 0xFEFF)
+        out.erase(0, 1);
     return out;
 }
 
@@ -62,7 +61,8 @@ std::string ReadFile(const std::filesystem::path& path)
         return {};
     std::error_code error;
     const auto size = std::filesystem::file_size(path, error);
-    if (error || size > 2 * 1024 * 1024) return {};
+    if (error || size > 2 * 1024 * 1024)
+        return {};
     return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 }
 
@@ -97,7 +97,8 @@ void LoadStrings(const json::JsonObject& root, Locale& locale)
         const json::IJsonValue value = pair.Value();
         if (value.ValueType() == json::JsonValueType::String) {
             const auto text = HString(value.GetString());
-            if (!text.empty() && text.find(L'\0') == std::wstring::npos) locale.strings[key] = text;
+            if (!text.empty() && text.find(L'\0') == std::wstring::npos)
+                locale.strings[key] = text;
         } else if (value.ValueType() == json::JsonValueType::Object) {
             const json::JsonObject forms = value.GetObject();
             std::unordered_map<std::wstring, std::wstring> plural;
@@ -106,7 +107,8 @@ void LoadStrings(const json::JsonObject& root, Locale& locale)
                     if (auto text = HString(form.Value().GetString()); !text.empty() && text.find(L'\0') == std::wstring::npos)
                         plural[HString(form.Key())] = std::move(text);
             }
-            if (plural.contains(L"other")) locale.plurals[key] = std::move(plural);
+            if (plural.contains(L"other"))
+                locale.plurals[key] = std::move(plural);
         }
     }
 }
@@ -162,21 +164,22 @@ const std::wstring* Find(const Locale& locale, const wchar_t* key, const wchar_t
     // OS data (jump list names, app names, cities, lunar festivals) arrives in
     // Chinese. The legacy table turns it into the English key, then the normal
     // locale lookup translates it. Static UI strings use English keys directly.
-    if (alias != locale.legacy.end()) return &alias->second;
+    if (alias != locale.legacy.end())
+        return &alias->second;
     return nullptr;
 }
 
-bool SystemPrefersChinese()
-{
-    return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;
-}
+bool SystemPrefersChinese() { return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE; }
 
 std::wstring NormalizeTag(std::wstring tag)
 {
-    for (auto& ch : tag) if (ch >= L'A' && ch <= L'Z') ch += L'a' - L'A';
+    for (auto& ch : tag)
+        if (ch >= L'A' && ch <= L'Z')
+            ch += L'a' - L'A';
     if (tag.empty() || tag == L"auto")
         return SystemPrefersChinese() ? L"zh-Hans" : L"en";
-    if (!localization::ValidTag(tag)) return L"en";
+    if (!localization::ValidTag(tag))
+        return L"en";
     if (tag == L"zh" || tag == L"zh-hans")
         return L"zh-Hans";
     return tag;
@@ -226,19 +229,23 @@ const wchar_t* Tr(const wchar_t* key, const wchar_t* context)
 
 std::wstring TrFormat(const wchar_t* key, ...)
 {
-    if (!key) return {};
+    if (!key)
+        return {};
     const auto locale = g_active.load(); // own the entire formatting operation
     const auto alias = locale->legacy.find(key);
     const wchar_t* source = alias != locale->legacy.end() && localization::PrintfMatches(key, alias->second) ? alias->second.c_str() : key;
     const std::wstring* translated = Find(*locale, key, nullptr);
     const wchar_t* format = translated && localization::PrintfMatches(source, *translated) ? translated->c_str() : source;
-    if (!localization::PrintfTokens(format)) return key;
+    if (!localization::PrintfTokens(format))
+        return key;
     va_list args;
     va_start(args, key);
     const int length = _vscwprintf(format, args);
     va_end(args);
-    if (length < 0 || length > 1024 * 1024) return key;
-    if (length == 0) return {};
+    if (length < 0 || length > 1024 * 1024)
+        return key;
+    if (length == 0)
+        return {};
     std::wstring text(size_t(length), L'\0');
     va_start(args, key);
     vswprintf_s(text.data(), text.size() + 1, format, args);
@@ -286,7 +293,8 @@ std::wstring TrPlural(const wchar_t* key, int count, const wchar_t* context)
         const auto* fallback = Find(*locale, key, context);
         text = fallback ? *fallback : key;
     }
-    if (!localization::CountMatches(source, text)) text = source;
+    if (!localization::CountMatches(source, text))
+        text = source;
     return localization::SubstituteCount(text, count);
 }
 

@@ -17,8 +17,8 @@ inline ID2D1StrokeStyle* RoundStroke(ID2D1RenderTarget* target)
     target->GetFactory(factory.put());
     if (factory != made || !style) {
         style = nullptr;
-        factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND),
-                                   nullptr, 0, style.put());
+        factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND), nullptr,
+                                   0, style.put());
         made = factory;
     }
     return style.get();

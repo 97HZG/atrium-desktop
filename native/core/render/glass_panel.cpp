@@ -11,8 +11,8 @@ namespace {
 bool SystemLight()
 {
     DWORD v = 0, size = sizeof(v);
-    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"SystemUsesLightTheme",
-                     RRF_RT_REG_DWORD, nullptr, &v, &size) != ERROR_SUCCESS)
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"SystemUsesLightTheme", RRF_RT_REG_DWORD,
+                     nullptr, &v, &size) != ERROR_SUCCESS)
         return false;
     return v != 0;
 }

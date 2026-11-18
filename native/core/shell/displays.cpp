@@ -9,20 +9,23 @@ namespace atrium {
 std::vector<DisplayInfo> ConnectedDisplays()
 {
     std::vector<DisplayInfo> displays;
-    EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR monitor, HDC, LPRECT, LPARAM data) -> BOOL {
-        MONITORINFOEXW info{};
-        info.cbSize = sizeof(info);
-        if (!GetMonitorInfoW(monitor, &info))
+    EnumDisplayMonitors(
+        nullptr, nullptr,
+        [](HMONITOR monitor, HDC, LPRECT, LPARAM data) -> BOOL {
+            MONITORINFOEXW info{};
+            info.cbSize = sizeof(info);
+            if (!GetMonitorInfoW(monitor, &info))
+                return TRUE;
+            DISPLAY_DEVICEW device{};
+            device.cb = sizeof(device);
+            std::wstring id = info.szDevice;
+            if (EnumDisplayDevicesW(info.szDevice, 0, &device, EDD_GET_DEVICE_INTERFACE_NAME) && device.DeviceID[0])
+                id = device.DeviceID;
+            auto& list = *reinterpret_cast<std::vector<DisplayInfo>*>(data);
+            list.push_back({monitor, std::move(id), info.rcMonitor, info.rcWork, (info.dwFlags & MONITORINFOF_PRIMARY) != 0});
             return TRUE;
-        DISPLAY_DEVICEW device{};
-        device.cb = sizeof(device);
-        std::wstring id = info.szDevice;
-        if (EnumDisplayDevicesW(info.szDevice, 0, &device, EDD_GET_DEVICE_INTERFACE_NAME) && device.DeviceID[0])
-            id = device.DeviceID;
-        auto& list = *reinterpret_cast<std::vector<DisplayInfo>*>(data);
-        list.push_back({monitor, std::move(id), info.rcMonitor, info.rcWork, (info.dwFlags & MONITORINFOF_PRIMARY) != 0});
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&displays));
+        },
+        reinterpret_cast<LPARAM>(&displays));
     return displays;
 }
 
@@ -34,13 +37,9 @@ HMONITOR ResolveDisplay(const std::vector<DisplayInfo>& displays, const std::wst
     return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
 }
 
-bool FilterTasksOnDisplay(const std::wstring& mode, bool primary)
-{
-    return mode == L"window" || (mode == L"primaryAndWindow" && !primary);
-}
+bool FilterTasksOnDisplay(const std::wstring& mode, bool primary) { return mode == L"window" || (mode == L"primaryAndWindow" && !primary); }
 
-std::optional<bool> WindowCoverOnMonitor(HMONITOR windowMonitor, const RECT& frame, bool maximized,
-    HMONITOR monitor, const RECT& bounds)
+std::optional<bool> WindowCoverOnMonitor(HMONITOR windowMonitor, const RECT& frame, bool maximized, HMONITOR monitor, const RECT& bounds)
 {
     if (windowMonitor != monitor || IsRectEmpty(&frame))
         return std::nullopt;
@@ -49,11 +48,11 @@ std::optional<bool> WindowCoverOnMonitor(HMONITOR windowMonitor, const RECT& fra
 
 bool IsTile(const RECT& frame, const RECT& work, int slack)
 {
-    if (IsRectEmpty(&frame) || frame.left < work.left - slack || frame.top < work.top - slack ||
-        frame.right > work.right + slack || frame.bottom > work.bottom + slack)
+    if (IsRectEmpty(&frame) || frame.left < work.left - slack || frame.top < work.top - slack || frame.right > work.right + slack ||
+        frame.bottom > work.bottom + slack)
         return false;
-    const int edges = (frame.left <= work.left + slack) + (frame.top <= work.top + slack) +
-                      (frame.right >= work.right - slack) + (frame.bottom >= work.bottom - slack);
+    const int edges =
+        (frame.left <= work.left + slack) + (frame.top <= work.top + slack) + (frame.right >= work.right - slack) + (frame.bottom >= work.bottom - slack);
     return edges >= 2;
 }
 
@@ -108,15 +107,14 @@ bool FullScreenInFront(HMONITOR monitor)
         const LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
         DWORD owner = 0;
         GetWindowThreadProcessId(w, &owner);
-        if (IsWindowVisible(w) && !IsIconic(w) && owner != GetCurrentProcessId() && !(ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) &&
-            !GetWindow(w, GW_OWNER) && MonitorFromWindow(w, MONITOR_DEFAULTTONULL) == monitor) {
+        if (IsWindowVisible(w) && !IsIconic(w) && owner != GetCurrentProcessId() && !(ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) && !GetWindow(w, GW_OWNER) &&
+            MonitorFromWindow(w, MONITOR_DEFAULTTONULL) == monitor) {
             root = w;
             break;
         }
     }
     DWORD pid = 0;
-    if (!root || !GetWindowThreadProcessId(root, &pid) || pid == GetCurrentProcessId() ||
-        MonitorFromWindow(root, MONITOR_DEFAULTTONULL) != monitor)
+    if (!root || !GetWindowThreadProcessId(root, &pid) || pid == GetCurrentProcessId() || MonitorFromWindow(root, MONITOR_DEFAULTTONULL) != monitor)
         return false;
     wchar_t cls[64] = {};
     GetClassNameW(root, cls, 64);
@@ -137,14 +135,14 @@ bool FillsScreen(HWND window)
 {
     MONITORINFO mi{sizeof(mi)};
     RECT r{};
-    if (!IsWindowVisible(window) || IsIconic(window) || IsZoomed(window) ||
-        !GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &mi) || !GetWindowRect(window, &r))
+    if (!IsWindowVisible(window) || IsIconic(window) || IsZoomed(window) || !GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &mi) ||
+        !GetWindowRect(window, &r))
         return false;
     return r.left <= mi.rcMonitor.left && r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
 }
 
-std::vector<TaskItem> TaskItemsForDisplay(const std::vector<TaskItem>& items, const std::wstring& mode, bool primary,
-    HMONITOR monitor, HWND foreground, const std::function<HMONITOR(HWND)>& monitorOf)
+std::vector<TaskItem> TaskItemsForDisplay(const std::vector<TaskItem>& items, const std::wstring& mode, bool primary, HMONITOR monitor, HWND foreground,
+                                          const std::function<HMONITOR(HWND)>& monitorOf)
 {
     auto result = items;
     if (!FilterTasksOnDisplay(mode, primary))

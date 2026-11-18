@@ -16,7 +16,11 @@ internal sealed class CoreClient : IDisposable
     private static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint processId);
 
     private readonly string _pipeName;
-    internal CoreClient(string? pipeName = null) => _pipeName = pipeName ?? "Atrium.Core." + Process.GetCurrentProcess().SessionId;
+    internal CoreClient(string? pipeName = null)
+    {
+        _pipeName = pipeName ?? "Atrium.Core." + Process.GetCurrentProcess().SessionId;
+    }
+
     public static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "settings.json");
 
     private readonly SemaphoreSlim _io = new(1, 1);
@@ -47,7 +51,7 @@ internal sealed class CoreClient : IDisposable
 
     public static string? CoreExe()
     {
-        foreach (var p in new[] { Path.Combine(AppContext.BaseDirectory, "..", "Atrium.exe"), Path.Combine(AppContext.BaseDirectory, "Atrium.exe") })
+        foreach (string? p in new[] { Path.Combine(AppContext.BaseDirectory, "..", "Atrium.exe"), Path.Combine(AppContext.BaseDirectory, "Atrium.exe") })
             if (File.Exists(p)) return Path.GetFullPath(p);
         return null;
     }
@@ -61,13 +65,13 @@ internal sealed class CoreClient : IDisposable
             await pipe.ConnectAsync(timeoutMs, _lifetime.Token);
             pipe.ReadMode = PipeTransmissionMode.Message;
             // The name is session-wide; only this distribution's executable owns our settings.
-            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid))
+            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out uint pid))
             {
                 pipe.Dispose();
                 return false;
             }
             using var process = Process.GetProcessById((int)pid);
-            var expected = CoreExe();
+            string? expected = CoreExe();
             if (expected == null || !string.Equals(process.MainModule?.FileName, expected, StringComparison.OrdinalIgnoreCase))
             {
                 _connectionLost = true;
@@ -121,7 +125,7 @@ internal sealed class CoreClient : IDisposable
             entered = true;
             deadline.Token.ThrowIfCancellationRequested();
             if (!ReferenceEquals(pipe, _pipe)) return null;
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(request);
+            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(request);
             await pipe.WriteAsync(bytes, deadline.Token);
             await pipe.FlushAsync(deadline.Token);
             using var message = new MemoryStream();
@@ -134,7 +138,7 @@ internal sealed class CoreClient : IDisposable
             } while (!pipe.IsMessageComplete);
             return JsonNode.Parse(message.GetBuffer().AsSpan(0, (int)message.Length)) as JsonObject;
         }
-        catch (Exception e) when (e is IOException or ObjectDisposedException or System.Text.Json.JsonException or OperationCanceledException)
+        catch (Exception e) when (e is IOException or ObjectDisposedException or JsonException or OperationCanceledException)
         {
             if (ReferenceEquals(pipe, _pipe))
             {
@@ -213,7 +217,7 @@ internal sealed class CoreClient : IDisposable
         {
             s = BarSettings.FromJson(JsonNode.Parse(File.ReadAllText(SettingsPath)) as JsonObject, new());
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
         {
             s = new BarSettings();
         }
@@ -228,10 +232,10 @@ internal sealed class CoreClient : IDisposable
         var pins = new List<PinnedApp>();
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar");
             if (!Directory.Exists(dir)) return pins;
-            foreach (var f in Directory.EnumerateFiles(dir, "*.lnk").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            foreach (string? f in Directory.EnumerateFiles(dir, "*.lnk").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
                 pins.Add(new PinnedApp(Path.GetFileNameWithoutExtension(f), f, "", ""));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -244,15 +248,15 @@ internal sealed class CoreClient : IDisposable
     {
         bool startupChanged = ReadFile().StartOnLogin != s.StartOnLogin;
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-        var tmp = SettingsPath + ".tmp";
+        string tmp = SettingsPath + ".tmp";
         File.WriteAllText(tmp, s.ToJson().ToJsonString(), new UTF8Encoding(false));
         File.Move(tmp, SettingsPath, overwrite: true);
         if (!startupChanged || Development) return null;
         try
         {
             using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-            var exe = CoreExe() ?? throw new FileNotFoundException(Loc.T("Atrium.exe was not found"));
-            var command = $"\"{exe}\"";
+            string exe = CoreExe() ?? throw new FileNotFoundException(Loc.T("Atrium.exe was not found"));
+            string command = $"\"{exe}\"";
             if (s.StartOnLogin)
             {
                 run.SetValue("Atrium", command);
@@ -276,7 +280,7 @@ internal sealed class CoreClient : IDisposable
     // itself, from the Run entry written above, when it next starts.
     private static void RemoveLogonTask(string exe)
     {
-        var name = "Atrium Startup-" + System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
+        string name = "Atrium Startup-" + System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
         try
         {
             dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;

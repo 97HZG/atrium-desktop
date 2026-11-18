@@ -21,24 +21,19 @@ inline std::vector<UINT> CallbackSequence(HostAction action, UINT version)
 {
     const bool v3 = version >= 3, v4 = version >= 4;
     switch (action) {
-    case HostAction::HoverIn:
-        return {WM_MOUSEMOVE};
-    case HostAction::PopupOpen:
-        return v4 ? std::vector<UINT>{NIN_POPUPOPEN} : std::vector<UINT>{};
-    case HostAction::PopupClose:
-        return v4 ? std::vector<UINT>{NIN_POPUPCLOSE} : std::vector<UINT>{};
+    case HostAction::HoverIn: return {WM_MOUSEMOVE};
+    case HostAction::PopupOpen: return v4 ? std::vector<UINT>{NIN_POPUPOPEN} : std::vector<UINT>{};
+    case HostAction::PopupClose: return v4 ? std::vector<UINT>{NIN_POPUPCLOSE} : std::vector<UINT>{};
     case HostAction::Right:
         if (v3)
             return {WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_CONTEXTMENU};
         return {WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP};
-    case HostAction::Middle:
-        return {WM_MOUSEMOVE, WM_MBUTTONDOWN, WM_MBUTTONUP};
+    case HostAction::Middle: return {WM_MOUSEMOVE, WM_MBUTTONDOWN, WM_MBUTTONUP};
     case HostAction::Open:
         if (v3)
             return {WM_LBUTTONDOWN, WM_LBUTTONUP, NIN_SELECT};
         return {WM_LBUTTONDOWN, WM_LBUTTONUP};
-    case HostAction::DoubleContinuation:
-        return {WM_LBUTTONDBLCLK, WM_LBUTTONUP};
+    case HostAction::DoubleContinuation: return {WM_LBUTTONDBLCLK, WM_LBUTTONUP};
     case HostAction::Double:
         if (v3)
             return {WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, NIN_SELECT, WM_LBUTTONDBLCLK, WM_LBUTTONUP};

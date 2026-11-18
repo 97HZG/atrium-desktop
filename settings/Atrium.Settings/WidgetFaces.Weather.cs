@@ -31,28 +31,47 @@ internal static partial class WidgetFaces
         {
             if (File.Exists(WeatherPath) && JsonNode.Parse(File.ReadAllText(WeatherPath)) is JsonObject o)
             {
-                var hours = (o["hours"] as JsonArray ?? new()).OfType<JsonObject>()
+                var hours = (o["hours"] as JsonArray ?? []).OfType<JsonObject>()
                     .Select(h => new WeatherHour((string?)h["label"] ?? "", (int)((double?)h["code"] ?? 0), (bool?)h["day"] ?? true, (double?)h["temp"] ?? 0,
                                                  (int)((double?)h["event"] ?? 0))).ToArray();
-                var days = (o["days"] as JsonArray ?? new()).OfType<JsonObject>()
+                var days = (o["days"] as JsonArray ?? []).OfType<JsonObject>()
                     .Select(d => new WeatherDay((string?)d["label"] ?? "", (int)((double?)d["code"] ?? 0), (double?)d["lo"] ?? 0, (double?)d["hi"] ?? 0)).ToArray();
                 if (hours.Length > 0 && days.Length > 0)
+                {
                     return new WeatherData((string?)o["city"] ?? "", (double?)o["temp"] ?? 0, (double?)o["hi"] ?? 0, (double?)o["lo"] ?? 0,
                                            (int)((double?)o["code"] ?? 0), (bool?)o["day"] ?? true, hours, days);
+                }
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or FormatException) { }
         return new WeatherData(Loc.T("Nanjing"), 18, 21, 12, 2, true,
-            new WeatherHour[] { new(Loc.T("Now"), 2, true, 18, 0), new(Loc.T("15:00"), 1, true, 19, 0), new(Loc.T("16:00"), 1, true, 19, 0), new("17:12", 0, true, 0, 2),
-                                new(Loc.T("18:00"), 1, false, 16, 0), new(Loc.T("19:00"), 0, false, 15, 0) },
-            new WeatherDay[] { new(Loc.T("Today"), 2, 12, 21), new(Loc.T("Tue"), 61, 11, 17), new(Loc.T("Wed"), 3, 9, 15), new(Loc.T("Thu"), 0, 8, 18), new(Loc.T("Fri"), 1, 10, 20) });
+            [ new(Loc.T("Now"), 2, true, 18, 0), new(Loc.T("15:00"), 1, true, 19, 0), new(Loc.T("16:00"), 1, true, 19, 0), new("17:12", 0, true, 0, 2),
+                                new(Loc.T("18:00"), 1, false, 16, 0), new(Loc.T("19:00"), 0, false, 15, 0) ],
+            [new(Loc.T("Today"), 2, 12, 21), new(Loc.T("Tue"), 61, 11, 17), new(Loc.T("Wed"), 3, 9, 15), new(Loc.T("Thu"), 0, 8, 18), new(Loc.T("Fri"), 1, 10, 20)]);
     }
 
     private static string Condition(int code) => code switch
     {
-        0 => Loc.T("Clear"), 1 => Loc.T("Mostly clear"), 2 => Loc.T("Partly cloudy"), 3 => Loc.T("Overcast"), 45 or 48 => Loc.T("Fog"), 51 or 53 or 55 => Loc.T("Drizzle"), 56 or 57 or 66 or 67 => Loc.T("Freezing rain"),
-        61 => Loc.T("Light rain"), 63 => Loc.T("Moderate rain"), 65 => Loc.T("Heavy rain"), 71 => Loc.T("Light snow"), 73 => Loc.T("Moderate snow"), 75 => Loc.T("Heavy snow"), 77 => Loc.T("Snow grains"), 80 or 81 => Loc.T("Rain showers"), 82 => Loc.T("Violent rain showers"),
-        85 or 86 => Loc.T("Snow showers"), 95 => Loc.T("Thunderstorm"), 96 or 99 => Loc.T("Thunderstorm with hail"), _ => Loc.T("Cloudy"),
+        0 => Loc.T("Clear"),
+        1 => Loc.T("Mostly clear"),
+        2 => Loc.T("Partly cloudy"),
+        3 => Loc.T("Overcast"),
+        45 or 48 => Loc.T("Fog"),
+        51 or 53 or 55 => Loc.T("Drizzle"),
+        56 or 57 or 66 or 67 => Loc.T("Freezing rain"),
+        61 => Loc.T("Light rain"),
+        63 => Loc.T("Moderate rain"),
+        65 => Loc.T("Heavy rain"),
+        71 => Loc.T("Light snow"),
+        73 => Loc.T("Moderate snow"),
+        75 => Loc.T("Heavy snow"),
+        77 => Loc.T("Snow grains"),
+        80 or 81 => Loc.T("Rain showers"),
+        82 => Loc.T("Violent rain showers"),
+        85 or 86 => Loc.T("Snow showers"),
+        95 => Loc.T("Thunderstorm"),
+        96 or 99 => Loc.T("Thunderstorm with hail"),
+        _ => Loc.T("Cloudy"),
     };
 
     private enum Sky { Clear, Partly, Cloudy, Fog, Rain, Snow, Storm }
@@ -86,7 +105,7 @@ internal static partial class WidgetFaces
     {
         var d = LoadWeather();
         Color text = p.Text, sub = p.Sub, faint = p.Track;
-        Ink ink = p.Icon;
+        var ink = p.Icon;
         bool dark = ink == Ink.Dark;
         const double pad = 16;
         Text(c, d.City, pad, 12, w - pad - (size == "small" ? 0 : 120), 32, 14.5, text, 2, 0, p);
@@ -146,15 +165,18 @@ internal static partial class WidgetFaces
 
     private static Color TempColor(double t)
     {
-        (double T, uint Rgb)[] stops = { (-5, 0x5AC8FA), (8, 0x63E6BE), (18, 0xFFD60A), (28, 0xFF9F0A), (36, 0xFF453A) };
+        (double T, uint Rgb)[] stops = [(-5, 0x5AC8FA), (8, 0x63E6BE), (18, 0xFFD60A), (28, 0xFF9F0A), (36, 0xFF453A)];
         if (t <= stops[0].T) return Rgb(stops[0].Rgb);
         for (int i = 1; i < stops.Length; i++)
+        {
             if (t <= stops[i].T)
             {
                 double k = (t - stops[i - 1].T) / (stops[i].T - stops[i - 1].T);
                 Color a = Rgb(stops[i - 1].Rgb), b = Rgb(stops[i].Rgb);
                 return Color.FromArgb(255, (byte)(a.R + (b.R - a.R) * k), (byte)(a.G + (b.G - a.G) * k), (byte)(a.B + (b.B - a.B) * k));
             }
+        }
+
         return Rgb(stops[^1].Rgb);
     }
 
@@ -201,8 +223,8 @@ internal static partial class WidgetFaces
             var p2 = new Point(mx - hh * dy / d, my + hh * dx / d);
             var f = new PathFigure { StartPoint = p1, IsClosed = true, IsFilled = true };
             // Round the far side of the disc, then back along the bite's edge.
-            f.Segments.Add(new ArcSegment { Point = p2, Size = new Windows.Foundation.Size(r0, r0), IsLargeArc = true, SweepDirection = SweepDirection.Counterclockwise });
-            f.Segments.Add(new ArcSegment { Point = p1, Size = new Windows.Foundation.Size(r1, r1), IsLargeArc = false, SweepDirection = SweepDirection.Clockwise });
+            f.Segments.Add(new ArcSegment { Point = p2, Size = new Size(r0, r0), IsLargeArc = true, SweepDirection = SweepDirection.Counterclockwise });
+            f.Segments.Add(new ArcSegment { Point = p1, Size = new Size(r1, r1), IsLargeArc = false, SweepDirection = SweepDirection.Clockwise });
             Geometry = new PathGeometry { Figures = { f } };
         }
     }
@@ -254,25 +276,25 @@ internal static partial class WidgetFaces
                 }
                 break;
             default:
-            {
-                var kind = SkyOf(code);
-                Cloud(c, cx, cy - 0.16 * s, s, kind == Sky.Storm ? grey : white);
-                for (int i = 0; i < 3; i++)
                 {
-                    double x = cx - 0.2 * s + i * 0.2 * s, y = cy + 0.24 * s;
-                    if (kind == Sky.Snow) Circle(c, x, y + (i % 2 == 1 ? 0.08 : 0) * s, 0.055 * s, white);
-                    else if (kind != Sky.Storm || i != 1) Line(c, x + 0.03 * s, y - 0.04 * s, x - 0.04 * s, y + 0.12 * s, k.Rain, lw);
+                    var kind = SkyOf(code);
+                    Cloud(c, cx, cy - 0.16 * s, s, kind == Sky.Storm ? grey : white);
+                    for (int i = 0; i < 3; i++)
+                    {
+                        double x = cx - 0.2 * s + i * 0.2 * s, y = cy + 0.24 * s;
+                        if (kind == Sky.Snow) Circle(c, x, y + (i % 2 == 1 ? 0.08 : 0) * s, 0.055 * s, white);
+                        else if (kind != Sky.Storm || i != 1) Line(c, x + 0.03 * s, y - 0.04 * s, x - 0.04 * s, y + 0.12 * s, k.Rain, lw);
+                    }
+                    if (kind == Sky.Storm)
+                    {
+                        double bw = Math.Max(1, 0.08 * s);
+                        var bolt = ink == Ink.Mono ? k.Arrow : gold;
+                        Line(c, cx + 0.04 * s, cy + 0.08 * s, cx - 0.06 * s, cy + 0.26 * s, bolt, bw);
+                        Line(c, cx - 0.06 * s, cy + 0.26 * s, cx + 0.05 * s, cy + 0.26 * s, bolt, bw);
+                        Line(c, cx + 0.05 * s, cy + 0.26 * s, cx - 0.05 * s, cy + 0.44 * s, bolt, bw);
+                    }
+                    break;
                 }
-                if (kind == Sky.Storm)
-                {
-                    double bw = Math.Max(1, 0.08 * s);
-                    Color bolt = ink == Ink.Mono ? k.Arrow : gold;
-                    Line(c, cx + 0.04 * s, cy + 0.08 * s, cx - 0.06 * s, cy + 0.26 * s, bolt, bw);
-                    Line(c, cx - 0.06 * s, cy + 0.26 * s, cx + 0.05 * s, cy + 0.26 * s, bolt, bw);
-                    Line(c, cx + 0.05 * s, cy + 0.26 * s, cx - 0.05 * s, cy + 0.44 * s, bolt, bw);
-                }
-                break;
-            }
         }
     }
 }

@@ -14,8 +14,8 @@ Gpu Create(const winrt::com_ptr<IDXGIFactory2>& factory, const winrt::com_ptr<ID
     g.factory = factory;
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
     winrt::check_hresult(D3D11CreateDevice(adapter.get(), adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                                           D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
-                                           g.device.put(), nullptr, g.context.put()));
+                                           D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, g.device.put(), nullptr,
+                                           g.context.put()));
     // Only the render thread uses the immediate context, but WGC works with the
     // device from its own threads.
     if (auto mt = g.device.try_as<ID3D11Multithread>())

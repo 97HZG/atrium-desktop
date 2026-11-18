@@ -27,7 +27,7 @@ using SetCompositionFn = BOOL(WINAPI*)(HWND, CompositionData*);
 
 SetCompositionFn SetComposition()
 {
-    static SetCompositionFn fn = reinterpret_cast<SetCompositionFn>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
+    static auto fn = reinterpret_cast<SetCompositionFn>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
     return fn;
 }
 

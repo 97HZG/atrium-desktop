@@ -23,14 +23,12 @@ namespace atrium {
 namespace {
 
 constexpr BYTE kFooter[4] = {0xAB, 0xFB, 0xBF, 0xBA};
-constexpr BYTE kLnkHead[20] = {0x4C, 0x00, 0x00, 0x00, 0x01, 0x14, 0x02, 0x00, 0x00, 0x00,
-                               0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46};
+constexpr BYTE kLnkHead[20] = {0x4C, 0x00, 0x00, 0x00, 0x01, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46};
 
 std::vector<BYTE> ReadFileBytes(const std::wstring& path)
 {
     std::vector<BYTE> bytes;
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
-                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return bytes;
     LARGE_INTEGER size{};
@@ -68,8 +66,7 @@ std::vector<BYTE> ReadStream(IStorage* storage, const wchar_t* name)
     return bytes;
 }
 
-template <typename T>
-T Read(const std::vector<BYTE>& bytes, size_t at)
+template<typename T> T Read(const std::vector<BYTE>& bytes, size_t at)
 {
     T value{};
     if (at + sizeof(T) <= bytes.size())
@@ -397,7 +394,7 @@ JumpItem ItemForPath(const std::wstring& parsingName)
 {
     JumpItem item;
     std::wstring path = parsingName;
-    if (path.rfind(L"knownfolder:", 0) == 0 || path.rfind(L"::", 0) == 0) {
+    if (path.starts_with(L"knownfolder:") || path.starts_with(L"::")) {
         // A known folder or shell namespace item: the shell knows its real path and name.
         item.name = ShellDisplayName(parsingName, SIGDN_NORMALDISPLAY);
         const std::wstring resolved = ShellDisplayName(parsingName, SIGDN_DESKTOPABSOLUTEPARSING);
@@ -410,7 +407,6 @@ JumpItem ItemForPath(const std::wstring& parsingName)
     item.folder = IsDirectory(path);
     return item;
 }
-
 
 // ---------------------------------------------------------------------------
 // File index
@@ -469,8 +465,8 @@ void BuildIndex()
         do {
             const std::wstring hash = std::wstring(found.cFileName).substr(0, 16);
             winrt::com_ptr<IStorage> storage;
-            if (FAILED(StgOpenStorage((recent + L"\\AutomaticDestinations\\" + found.cFileName).c_str(), nullptr,
-                                      STGM_READ | STGM_SHARE_DENY_WRITE, nullptr, 0, storage.put())) ||
+            if (FAILED(StgOpenStorage((recent + L"\\AutomaticDestinations\\" + found.cFileName).c_str(), nullptr, STGM_READ | STGM_SHARE_DENY_WRITE, nullptr, 0,
+                                      storage.put())) ||
                 !storage)
                 continue;
             for (const DestEntry& entry : ParseDestList(ReadStream(storage.get(), L"DestList"))) {
@@ -521,10 +517,7 @@ std::wstring FindIndexedHash(const std::wstring& appId, const std::wstring& exeP
 
 } // namespace
 
-bool IsRemotePath(const std::wstring& path)
-{
-    return IsRemoteShare(path);
-}
+bool IsRemotePath(const std::wstring& path) { return IsRemoteShare(path); }
 
 void StartJumpListIndex(bool enabled)
 {
@@ -590,9 +583,7 @@ std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, cons
     {
         winrt::com_ptr<IStorage> storage;
         const std::wstring path = recent + L"\\AutomaticDestinations\\" + hash + L".automaticDestinations-ms";
-        if (SUCCEEDED(StgOpenStorage(path.c_str(), nullptr, STGM_READ | STGM_SHARE_DENY_WRITE, nullptr, 0,
-                                     storage.put())) &&
-            storage)
+        if (SUCCEEDED(StgOpenStorage(path.c_str(), nullptr, STGM_READ | STGM_SHARE_DENY_WRITE, nullptr, 0, storage.put())) && storage)
             entries = ParseDestList(ReadStream(storage.get(), L"DestList"));
         Log(L"jump: parsed %zu entries from %s", entries.size(), hash.c_str());
     }
@@ -621,8 +612,7 @@ std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, cons
             Log(L"jump: pinned %d '%s' -> '%s'", entry.pin, entry.path.c_str(), entry.real.c_str());
         (entry.pin > 0 ? pinnedEntries : otherEntries).push_back(std::move(entry));
     }
-    std::stable_sort(pinnedEntries.begin(), pinnedEntries.end(),
-                     [](const DestEntry& a, const DestEntry& b) { return a.pin < b.pin; });
+    std::stable_sort(pinnedEntries.begin(), pinnedEntries.end(), [](const DestEntry& a, const DestEntry& b) { return a.pin < b.pin; });
     for (const DestEntry& entry : pinnedEntries)
         data->pinned.push_back(ItemForPath(entry.path));
 

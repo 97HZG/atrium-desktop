@@ -118,7 +118,7 @@ public:
                 continue;
             }
             s.pending = false;
-            if (!(s.noticed && s.noticed + kBeforeMs >= s.burst))
+            if (!s.noticed || s.noticed + kBeforeMs < s.burst)
                 out.push_back(Messenger(i));
         }
         if (waiting)

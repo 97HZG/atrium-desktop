@@ -11,10 +11,14 @@ public static class Tokens
     public static Microsoft.UI.Xaml.Media.Brush Brush(string key)
     {
         var res = Application.Current.Resources;
-        if (res.TryGetValue(key, out var v) && v is Microsoft.UI.Xaml.Media.Brush b) return b;
-        var theme = Application.Current.RequestedTheme == ApplicationTheme.Dark ? "Dark" : "Light";
-        if (res.ThemeDictionaries.TryGetValue(theme, out var d) && d is ResourceDictionary rd && rd.TryGetValue(key, out var t)
-            && t is Microsoft.UI.Xaml.Media.Brush tb) return tb;
+        if (res.TryGetValue(key, out object? v) && v is Microsoft.UI.Xaml.Media.Brush b) return b;
+        string theme = Application.Current.RequestedTheme == ApplicationTheme.Dark ? "Dark" : "Light";
+        if (res.ThemeDictionaries.TryGetValue(theme, out object? d) && d is ResourceDictionary rd && rd.TryGetValue(key, out object? t)
+            && t is Microsoft.UI.Xaml.Media.Brush tb)
+        {
+            return tb;
+        }
+
         return new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
     }
 }

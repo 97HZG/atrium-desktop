@@ -33,7 +33,7 @@ inline bool StageAppExcluded(const std::vector<std::wstring>& excluded, const st
         const std::wstring entry = LowerAppKey(raw);
         if (entry.empty())
             continue;
-        if (app == entry || file == entry || app.rfind(entry, 0) == 0)
+        if (app == entry || file == entry || app.starts_with(entry))
             return true;
     }
     return false;
@@ -42,9 +42,6 @@ inline bool StageAppExcluded(const std::vector<std::wstring>& excluded, const st
 // The Windows screenshot tools that must not be swallowed by the stage while they record or
 // capture: their own overlays/control bars are separate windows, and putting them away hides
 // pause/stop from the user. Other screenshot apps can be added in Settings.
-inline std::vector<std::wstring> DefaultStageExcluded()
-{
-    return {L"snippingtool.exe", L"screenclippinghost.exe", L"microsoft.screensketch_"};
-}
+inline std::vector<std::wstring> DefaultStageExcluded() { return {L"snippingtool.exe", L"screenclippinghost.exe", L"microsoft.screensketch_"}; }
 
 } // namespace atrium

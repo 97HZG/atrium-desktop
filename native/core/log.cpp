@@ -109,8 +109,8 @@ void Log(const wchar_t* format, ...)
     SYSTEMTIME t;
     GetLocalTime(&t);
     wchar_t line[1200];
-    swprintf_s(line, L"%04u-%02u-%02u %02u:%02u:%02u.%03u [%lu] %s\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
-               t.wSecond, t.wMilliseconds, GetCurrentThreadId(), text);
+    swprintf_s(line, L"%04u-%02u-%02u %02u:%02u:%02u.%03u [%lu] %s\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds,
+               GetCurrentThreadId(), text);
     OutputDebugStringW(line);
     Writer::Get().Add(line);
 }

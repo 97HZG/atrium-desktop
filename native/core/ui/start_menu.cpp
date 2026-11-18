@@ -79,7 +79,7 @@ const wchar_t kLetters[] = L"#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
 bool IsPath(const std::wstring& id) { return id.size() > 2 && id[1] == L':' && (id[2] == L'\\' || id[2] == L'/'); }
-bool Starts(const std::wstring& s, const wchar_t* prefix) { return s.rfind(prefix, 0) == 0; }
+bool Starts(const std::wstring& s, const wchar_t* prefix) { return s.starts_with(prefix); }
 int Index(const std::wstring& id, size_t prefix) { return int(wcstol(id.c_str() + prefix, nullptr, 10)); }
 float Mix(float a, float b, float t) { return a + (b - a) * t; }
 D2D1_RECT_F Mix(const D2D1_RECT_F& a, const D2D1_RECT_F& b, float t)
@@ -136,15 +136,33 @@ StartTile* Find(std::vector<StartTile>& tiles, const std::wstring& id)
 }
 
 enum MenuCommand {
-    kOpen = 1, kPinBar, kPinStart, kRemove, kOutOfFolder, kRename, kUngroup, kReset, kHide, kUnhide, kShowHidden, kAdmin, kLocation,
-    kSyncPins, kSyncFolders, kSyncBoth,
-    kSize, /* + the menu's size */ kIcon = kSize + StartLayout::kSizes /* + the icons' size */
+    kOpen = 1,
+    kPinBar,
+    kPinStart,
+    kRemove,
+    kOutOfFolder,
+    kRename,
+    kUngroup,
+    kReset,
+    kHide,
+    kUnhide,
+    kShowHidden,
+    kAdmin,
+    kLocation,
+    kSyncPins,
+    kSyncFolders,
+    kSyncBoth,
+    kSize,
+    /* + the menu's size */ kIcon = kSize + StartLayout::kSizes /* + the icons' size */
 };
 
 } // namespace
 
 StartMenu::StartMenu(HINSTANCE instance, TaskModel& tasks, AppCatalog& catalog)
-    : surface_(instance, L"Atrium Start", true), tasks_(tasks), catalog_(catalog), layout_(LoadStartLayout())
+    : surface_(instance, L"Atrium Start", true),
+      tasks_(tasks),
+      catalog_(catalog),
+      layout_(LoadStartLayout())
 {
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
@@ -490,7 +508,8 @@ void StartMenu::Refresh()
     auto apps = catalog_.Apps();
     auto pins = catalog_.StartPins();
     auto same = [](const std::vector<CatalogApp>& a, const std::vector<CatalogApp>& b) {
-        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](const CatalogApp& x, const CatalogApp& y) { return x.id == y.id && x.name == y.name; });
+        return a.size() == b.size() &&
+               std::equal(a.begin(), a.end(), b.begin(), [](const CatalogApp& x, const CatalogApp& y) { return x.id == y.id && x.name == y.name; });
     };
     if (!same(apps, apps_) || !same(pins, pins_)) {
         if (drag_.on) {
@@ -557,16 +576,17 @@ void StartMenu::OpenSyncMenu()
         for (MenuEntry& e : entries)
             e.disabled = true;
     menuOpen_ = true;
-    menu->Open(std::move(entries), at, MenuPlace::Below,
-               [this](int cmd) {
-                   if (cmd == kSyncPins || cmd == kSyncFolders || cmd == kSyncBoth)
-                       SyncFromWindows(cmd != kSyncFolders, cmd != kSyncPins);
-               },
-               [this] {
-                   menuOpen_ = false;
-                   if (surface_.Visible() && GetForegroundWindow() == menu->Hwnd())
-                       SetForegroundWindow(surface_.Hwnd());
-               });
+    menu->Open(
+        std::move(entries), at, MenuPlace::Below,
+        [this](int cmd) {
+            if (cmd == kSyncPins || cmd == kSyncFolders || cmd == kSyncBoth)
+                SyncFromWindows(cmd != kSyncFolders, cmd != kSyncPins);
+        },
+        [this] {
+            menuOpen_ = false;
+            if (surface_.Visible() && GetForegroundWindow() == menu->Hwnd())
+                SetForegroundWindow(surface_.Hwnd());
+        });
 }
 
 // Pins in the Windows order, at the end; a folder of All apps as a folder of its own (one of the
@@ -593,8 +613,7 @@ void StartMenu::SyncFromWindows(bool pins, bool folders)
         for (const CatalogFolder& f : windowsFolders) {
             std::vector<StartTile> missing;
             for (const CatalogApp& a : f.apps)
-                if (!placed(a.id) && !Hidden(a.id) &&
-                    std::none_of(missing.begin(), missing.end(), [&](const StartTile& m) { return m.id == a.id; }))
+                if (!placed(a.id) && !Hidden(a.id) && std::none_of(missing.begin(), missing.end(), [&](const StartTile& m) { return m.id == a.id; }))
                     missing.push_back({a.id, a.name, {}});
             auto same = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.Folder() && t.name == f.name; });
             if (same != tiles.end()) {
@@ -616,8 +635,8 @@ void StartMenu::SyncFromWindows(bool pins, bool folders)
         layout_.windowsPinsKnown = true;
         SaveStartLayout(layout_);
     }
-    Log(L"start: synced with the Windows start menu: %zu app(s), %zu new folder(s) (%zu pins, %zu folders there)", apps, newFolders,
-        pins_.size(), windowsFolders.size());
+    Log(L"start: synced with the Windows start menu: %zu app(s), %zu new folder(s) (%zu pins, %zu folders there)", apps, newFolders, pins_.size(),
+        windowsFolders.size());
 }
 
 void StartMenu::Rebuild()
@@ -636,7 +655,7 @@ void StartMenu::Rebuild()
             out = *it->second;
             return true;
         }
-        if (loaded && !(IsPath(t.id) && GetFileAttributesW(t.id.c_str()) != INVALID_FILE_ATTRIBUTES))
+        if (loaded && (!IsPath(t.id) || GetFileAttributesW(t.id.c_str()) == INVALID_FILE_ATTRIBUTES))
             return false;
         out = CatalogApp{t.name.empty() ? t.id : t.name, t.id, {}, {}, {}};
         return true;
@@ -801,10 +820,7 @@ void StartMenu::SetPage(int page)
     surface_.Invalidate();
 }
 
-bool StartMenu::Hidden(const std::wstring& id) const
-{
-    return std::find(layout_.hidden.begin(), layout_.hidden.end(), id) != layout_.hidden.end();
-}
+bool StartMenu::Hidden(const std::wstring& id) const { return std::find(layout_.hidden.begin(), layout_.hidden.end(), id) != layout_.hidden.end(); }
 
 void StartMenu::SetHidden(const CatalogApp& app, bool hidden)
 {
@@ -1432,7 +1448,8 @@ void StartMenu::PaintFolder(Canvas& c, const Theme& t, D2D1_RECT_F card, float s
     const float cx = (title.left + title.right) / 2;
     D2D1_RECT_F field = D2D1::RectF(cx - tw / 2 - 18, title.top, cx + tw / 2 + 18, title.bottom);
     if (naming_) {
-        field = D2D1::RectF(std::max(title.left, cx - std::max(tw / 2 + 18, 90.f)), title.top, std::min(title.right, cx + std::max(tw / 2 + 18, 90.f)), title.bottom);
+        field = D2D1::RectF(std::max(title.left, cx - std::max(tw / 2 + 18, 90.f)), title.top, std::min(title.right, cx + std::max(tw / 2 + 18, 90.f)),
+                            title.bottom);
         c.Fill(field, 17, Alpha(t.card, 1));
         c.Stroke(field, 17, Alpha(t.accent, 0.85f), 1.5f);
         if (nameDraft_.empty())
@@ -1610,8 +1627,8 @@ void StartMenu::PaintPower(Canvas& c, const Theme& t)
         c.Continue();
     c.BeginGroup(motion::EaseOut(e * 1.3f), 0.92f + 0.08f * motion::EaseOutBack(e, 1.5f), card.right - 22, card.bottom);
     for (int i = 0; i < int(power_.size()); ++i) {
-        D2D1_RECT_F row = D2D1::RectF(card.left + 8, card.top + kPowerPad + kPowerRowH * float(i), card.right - 8,
-                                      card.top + kPowerPad + kPowerRowH * float(i + 1));
+        D2D1_RECT_F row =
+            D2D1::RectF(card.left + 8, card.top + kPowerPad + kPowerRowH * float(i), card.right - 8, card.top + kPowerPad + kPowerRowH * float(i + 1));
         std::wstring id = L"pw:" + std::to_wstring(i);
         float hv = Hover(c, id, hover_ == id || powerSel_ == i);
         if (hv > 0)
@@ -1730,7 +1747,7 @@ std::vector<int> StartMenu::Order() const
 {
     std::vector<int> order;
     for (int i = 0; i < int(tiles_.size()); ++i)
-        if (!(drag_.on && !drag_.fromFolder && i == drag_.from))
+        if (!drag_.on || drag_.fromFolder || i != drag_.from)
             order.push_back(i);
     if (drag_.on && !drag_.inFolder)
         order.insert(order.begin() + std::clamp(drag_.insert, 0, int(order.size())), -1);
@@ -1744,7 +1761,7 @@ std::vector<int> StartMenu::FolderOrder() const
         return order;
     const bool carried = drag_.on && drag_.fromFolder && drag_.folderTile == folder_;
     for (int i = 0; i < int(tiles_[size_t(folder_)].apps.size()); ++i)
-        if (!(carried && i == drag_.from))
+        if (!carried || i != drag_.from)
             order.push_back(i);
     if (carried && drag_.inFolder)
         order.insert(order.begin() + std::clamp(drag_.insert, 0, int(order.size())), -1);
@@ -2191,121 +2208,114 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
         return;
     const std::wstring openKey = folder_ >= 0 ? tiles_[size_t(folder_)].key : L"";
     menuOpen_ = true;
-    menu->Open(std::move(entries), screen, MenuPlace::Below,
-               [this, app, folderKey, openKey](int cmd) {
-                   auto tileOf = [&](const std::wstring& key) {
-                       for (size_t i = 0; i < tiles_.size(); ++i)
-                           if (tiles_[i].key == key)
-                               return int(i);
-                       return -1;
-                   };
-                   switch (cmd) {
-                   case kOpen:
-                       if (!folderKey.empty())
-                           OpenFolder(tileOf(folderKey));
-                       else
-                           Launch(app);
-                       break;
-                   case kAdmin:
-                       Close(true);
-                       AppCatalog::LaunchAsAdmin(app);
-                       break;
-                   case kLocation:
-                       Close(true);
-                       if (PIDLIST_ABSOLUTE item = ILCreateFromPathW(AppCatalog::FileLocation(app).c_str())) {
-                           SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
-                           ILFree(item);
-                       }
-                       break;
-                   case kPinBar:
-                       if (onPin)
-                           onPin(AppCatalog::PinFor(app));
-                       break;
-                   case kPinStart:
-                       PinToStart(app);
-                       break;
-                   case kRemove:
-                       Arrange([&](std::vector<StartTile>& tiles) { Take(tiles, app.id); });
-                       Log(L"start: %s removed from the start menu", app.name.c_str());
-                       break;
-                   case kShowHidden:
-                       ShowHidden();
-                       break;
-                   case kHide:
-                       SetHidden(app, true);
-                       break;
-                   case kUnhide:
-                       SetHidden(app, false);
-                       break;
-                   case kOutOfFolder:
+    menu->Open(
+        std::move(entries), screen, MenuPlace::Below,
+        [this, app, folderKey, openKey](int cmd) {
+            auto tileOf = [&](const std::wstring& key) {
+                for (size_t i = 0; i < tiles_.size(); ++i)
+                    if (tiles_[i].key == key)
+                        return int(i);
+                return -1;
+            };
+            switch (cmd) {
+            case kOpen:
+                if (!folderKey.empty())
+                    OpenFolder(tileOf(folderKey));
+                else
+                    Launch(app);
+                break;
+            case kAdmin:
+                Close(true);
+                AppCatalog::LaunchAsAdmin(app);
+                break;
+            case kLocation:
+                Close(true);
+                if (PIDLIST_ABSOLUTE item = ILCreateFromPathW(AppCatalog::FileLocation(app).c_str())) {
+                    SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
+                    ILFree(item);
+                }
+                break;
+            case kPinBar:
+                if (onPin)
+                    onPin(AppCatalog::PinFor(app));
+                break;
+            case kPinStart: PinToStart(app); break;
+            case kRemove:
+                Arrange([&](std::vector<StartTile>& tiles) { Take(tiles, app.id); });
+                Log(L"start: %s removed from the start menu", app.name.c_str());
+                break;
+            case kShowHidden: ShowHidden(); break;
+            case kHide: SetHidden(app, true); break;
+            case kUnhide: SetHidden(app, false); break;
+            case kOutOfFolder:
                        // Next to its folder on the grid.
-                       Arrange([&](std::vector<StartTile>& tiles) {
-                           std::optional<StartTile> moved = Take(tiles, app.id);
-                           if (!moved)
-                               return;
-                           auto at = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.id == openKey; });
-                           tiles.insert(at == tiles.end() ? at : at + 1, std::move(*moved));
-                       });
-                       break;
-                   case kRename:
-                       OpenFolder(tileOf(folderKey));
-                       StartNaming();
-                       break;
-                   case kUngroup:
+                Arrange([&](std::vector<StartTile>& tiles) {
+                    std::optional<StartTile> moved = Take(tiles, app.id);
+                    if (!moved)
+                        return;
+                    auto at = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.id == openKey; });
+                    tiles.insert(at == tiles.end() ? at : at + 1, std::move(*moved));
+                });
+                break;
+            case kRename:
+                OpenFolder(tileOf(folderKey));
+                StartNaming();
+                break;
+            case kUngroup:
                        // Its apps take its place on the grid.
-                       if (folder_ >= 0 && tiles_[size_t(folder_)].key == folderKey)
-                           folder_ = -1;
-                       Arrange([&](std::vector<StartTile>& tiles) {
-                           auto at = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.id == folderKey; });
-                           if (at == tiles.end())
-                               return;
-                           std::vector<StartTile> apps = std::move(at->apps);
-                           at = tiles.erase(at);
-                           tiles.insert(at, apps.begin(), apps.end());
-                       });
-                       Log(L"start: folder %s ungrouped", folderKey.c_str());
-                       break;
-                   case kSize:
-                   case kSize + 1:
-                   case kSize + 2:
-                   case kSize + 3:
-                       SetSize(cmd - kSize, layout_.icon);
-                       SaveStartLayout(layout_);
-                       Log(L"start: sized to %d x %d tiles", cols_, rows_);
-                       if (onSize)
-                           onSize(SizeName());
-                       break;
-                   case kIcon:
-                   case kIcon + 1:
-                   case kIcon + 2:
-                   case kIcon + 3:
-                       SetSize(layout_.size, cmd - kIcon);
-                       SaveStartLayout(layout_);
-                       Log(L"start: icons %.0f DIP (%d px), %d x %d tiles", IconSize(), IconPx(), cols_, rows_);
-                       if (onIcon)
-                           onIcon(IconSizeName());
-                       break;
-                   case kReset:
-                       layout_.custom = false;
-                       layout_.tiles.clear();
-                       SaveStartLayout(layout_);
-                       Rebuild();
-                       surface_.Invalidate();
-                       Log(L"start: back to the Windows start menu's pins");
-                       break;
-                   }
-               },
-               [this] {
-                   menuOpen_ = false;
-                   if (!surface_.Visible())
-                       return;
+                if (folder_ >= 0 && tiles_[size_t(folder_)].key == folderKey)
+                    folder_ = -1;
+                Arrange([&](std::vector<StartTile>& tiles) {
+                    auto at = std::find_if(tiles.begin(), tiles.end(), [&](const StartTile& t) { return t.id == folderKey; });
+                    if (at == tiles.end())
+                        return;
+                    std::vector<StartTile> apps = std::move(at->apps);
+                    at = tiles.erase(at);
+                    tiles.insert(at, apps.begin(), apps.end());
+                });
+                Log(L"start: folder %s ungrouped", folderKey.c_str());
+                break;
+            case kSize:
+            case kSize + 1:
+            case kSize + 2:
+            case kSize + 3:
+                SetSize(cmd - kSize, layout_.icon);
+                SaveStartLayout(layout_);
+                Log(L"start: sized to %d x %d tiles", cols_, rows_);
+                if (onSize)
+                    onSize(SizeName());
+                break;
+            case kIcon:
+            case kIcon + 1:
+            case kIcon + 2:
+            case kIcon + 3:
+                SetSize(layout_.size, cmd - kIcon);
+                SaveStartLayout(layout_);
+                Log(L"start: icons %.0f DIP (%d px), %d x %d tiles", IconSize(), IconPx(), cols_, rows_);
+                if (onIcon)
+                    onIcon(IconSizeName());
+                break;
+            case kReset:
+                layout_.custom = false;
+                layout_.tiles.clear();
+                SaveStartLayout(layout_);
+                Rebuild();
+                surface_.Invalidate();
+                Log(L"start: back to the Windows start menu's pins");
+                break;
+            }
+        },
+        [this] {
+            menuOpen_ = false;
+            if (!surface_.Visible())
+                return;
                    // Back to the start menu, unless the click that closed the menu went to another window.
-                   HWND fg = GetForegroundWindow();
-                   if (!fg || fg == surface_.Hwnd() || fg == menu->Hwnd())
-                       SetForegroundWindow(surface_.Hwnd());
-                   else
-                       Close(false);
-               });
+            HWND fg = GetForegroundWindow();
+            if (!fg || fg == surface_.Hwnd() || fg == menu->Hwnd())
+                SetForegroundWindow(surface_.Hwnd());
+            else
+                Close(false);
+        });
     surface_.Invalidate();
 }
 
@@ -2594,9 +2604,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         surface_.Invalidate();
         return true;
     }
-    case WM_IME_STARTCOMPOSITION:
-        PlaceIme();
-        return false;
+    case WM_IME_STARTCOMPOSITION: PlaceIme(); return false;
     case WM_KEYDOWN:
         if (naming_)
             return w == VK_LEFT || w == VK_RIGHT || w == VK_UP || w == VK_DOWN; // the name is typed, not navigated
@@ -2606,18 +2614,10 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             return true;
         }
         switch (w) {
-        case VK_UP:
-            MoveSelection(0, -1);
-            return true;
-        case VK_DOWN:
-            MoveSelection(0, 1);
-            return true;
-        case VK_LEFT:
-            MoveSelection(-1, 0);
-            return true;
-        case VK_RIGHT:
-            MoveSelection(1, 0);
-            return true;
+        case VK_UP: MoveSelection(0, -1); return true;
+        case VK_DOWN: MoveSelection(0, 1); return true;
+        case VK_LEFT: MoveSelection(-1, 0); return true;
+        case VK_RIGHT: MoveSelection(1, 0); return true;
         case VK_F2:
             StartNaming(); // the open folder's name
             return true;

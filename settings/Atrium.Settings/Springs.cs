@@ -2,7 +2,6 @@ using System.Numerics;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -30,7 +29,7 @@ public sealed class KnobFace : Grid
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         DependencyObject? p = this;
-        while (p != null && p is not ToggleSwitch) p = VisualTreeHelper.GetParent(p);
+        while (p is not null and not ToggleSwitch) p = VisualTreeHelper.GetParent(p);
         if (p is not ToggleSwitch owner || owner == _owner) return;
         _owner = owner;
         _visual = ElementCompositionPreview.GetElementVisual(this);
@@ -94,8 +93,11 @@ public sealed class SegmentTrack : Grid
 {
     private readonly Border _pill = new()
     {
-        CornerRadius = new CornerRadius(13), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Left,
-        IsHitTestVisible = false, Opacity = 0,
+        CornerRadius = new CornerRadius(13),
+        BorderThickness = new Thickness(1),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        IsHitTestVisible = false,
+        Opacity = 0,
     };
     private readonly TranslateTransform _move = new();
     private RadioButton? _at;

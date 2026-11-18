@@ -75,7 +75,7 @@ internal sealed class BarSettings
     public bool WindowsContextMenu { get; set; } = true;
     public double NotifyTimeout { get; set; } = 6;    // seconds a popup stays
     public string NotifyPlacement { get; set; } = "dock"; // dock (default) | topLeft | topRight | bottomLeft | bottomRight
-    public static readonly string[] NotifyCorners = { "topLeft", "topRight", "bottomLeft", "bottomRight" };
+    public static readonly string[] NotifyCorners = ["topLeft", "topRight", "bottomLeft", "bottomRight"];
     public bool NotifyHideBody { get; set; }           // privacy: no message text, excluded from capture
     public bool ImeStatus { get; set; } = true;        // the status icon shows the foreground window's input language
     public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
@@ -98,10 +98,10 @@ internal sealed class BarSettings
     // and control bar must stay on screen while recording. Other tools can be added.
     // Keep in step with DefaultStageExcluded() in native/core/ui/stage_excluded.h.
     public static readonly string[] StageExcludedDefaults =
-    {
+    [
         "snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_",
-    };
-    public List<string> StageExcluded { get; set; } = new(StageExcludedDefaults);
+    ];
+    public List<string> StageExcluded { get; set; } = [.. StageExcludedDefaults];
     public string WidgetMaterial { get; set; } = "glass"; // glass (the bar's) | dusk (dimmed glass, white ink) | color (their own faces)
     public bool HideTaskbar { get; set; }              // the system taskbar is hidden while Atrium runs
     public bool HideBanners { get; set; }              // Do Not Disturb: no system banners, notifications still become cards
@@ -116,7 +116,15 @@ internal sealed class BarSettings
 
     public static BarSettings Frosted() => new()
     {
-        Preset = "frosted", Transparency = 0.80, Blur = 1.0, Refraction = 6, Edge = 10, Dispersion = 0.04, Highlight = 0.45, Shadow = 0.30, Tint = 0xF5F5FA,
+        Preset = "frosted",
+        Transparency = 0.80,
+        Blur = 1.0,
+        Refraction = 6,
+        Edge = 10,
+        Dispersion = 0.04,
+        Highlight = 0.45,
+        Shadow = 0.30,
+        Tint = 0xF5F5FA,
     };
 
     // Copies the material of `preset`, keeping layout and content options.
@@ -136,8 +144,8 @@ internal sealed class BarSettings
     public BarSettings Clone()
     {
         var copy = (BarSettings)MemberwiseClone();
-        copy.Pins = Pins == null ? null : new List<PinnedApp>(Pins);
-        copy.StageExcluded = new List<string>(StageExcluded);
+        copy.Pins = Pins == null ? null : [.. Pins];
+        copy.StageExcluded = [.. StageExcluded];
         return copy;
     }
 
@@ -263,8 +271,11 @@ internal sealed class BarSettings
         s.Magnify = Math.Clamp(Num("magnify", f.Magnify), 1, 2);
         s.Tint = f.Tint;
         if (o?["tint"] is JsonValue t && t.TryGetValue(out string? ts) && ts is { Length: 7 } && ts[0] == '#' &&
-            uint.TryParse(ts.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var tint))
+            uint.TryParse(ts.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint tint))
+        {
             s.Tint = tint;
+        }
+
         bool Flag(string k, bool d) => o?[k] is JsonValue v && v.TryGetValue(out bool b) ? b : d;
         s.HoverRise = Flag("hoverRise", f.HoverRise);
         s.RiseNear = Flag("riseNear", f.RiseNear);
@@ -309,13 +320,15 @@ internal sealed class BarSettings
         s.StageOnRight = Flag("stageOnRight", f.StageOnRight);
         s.StageAutoHide = Flag("stageAutoHide", f.StageAutoHide);
         s.StageMinimize = Flag("stageMinimize", f.StageMinimize);
-        s.StageExcluded = f.StageExcluded == null ? new List<string>() : new List<string>(f.StageExcluded);
+        s.StageExcluded = f.StageExcluded == null ? [] : [.. f.StageExcluded];
         if (o?["stageExcluded"] is JsonArray excluded)
         {
-            s.StageExcluded = new List<string>();
-            foreach (JsonNode? node in excluded)
+            s.StageExcluded = [];
+            foreach (var node in excluded)
+            {
                 if (node is JsonValue value && value.TryGetValue(out string? app) && !string.IsNullOrWhiteSpace(app))
                     s.StageExcluded.Add(app.Trim());
+            }
         }
         s.WidgetMaterial = o?["widgetMaterial"] is JsonValue wm && wm.TryGetValue(out string? wms) && wms is "dusk" or "color" or "glass"
             ? wms : f.WidgetMaterial;
@@ -352,7 +365,7 @@ internal sealed class BarSettings
         s.Language = !validLanguage ? "auto" : language == "zh" ? "zh-Hans" : language;
         s.StatusStyle = o?["statusStyle"] is JsonValue ss && ss.TryGetValue(out string? sss) && sss == "icons" ? "icons"
             : o?["statusStyle"] is JsonValue ? "ring" : f.StatusStyle;
-        s.Pins = f.Pins == null ? null : new List<PinnedApp>(f.Pins);
+        s.Pins = f.Pins == null ? null : [.. f.Pins];
         if (o?["pins"] is JsonArray arr)
         {
             var pins = new List<PinnedApp>();

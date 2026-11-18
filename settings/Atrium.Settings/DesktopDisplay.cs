@@ -38,7 +38,7 @@ internal sealed record DesktopDisplay(string Id, string Name, string Details, bo
     public static List<DesktopDisplay> Read()
     {
         var displays = new List<DesktopDisplay>();
-        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr monitor, IntPtr dc, ref Rect bounds, IntPtr data) =>
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (monitor, dc, ref bounds, data) =>
         {
             var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>(), Device = "" };
             if (!GetMonitorInfo(monitor, ref info)) return true;
@@ -54,6 +54,6 @@ internal sealed record DesktopDisplay(string Id, string Name, string Details, bo
                 info.Bounds.Left, info.Bounds.Top, w, h, info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top, scale));
             return true;
         }, IntPtr.Zero);
-        return displays.OrderByDescending(d => d.Primary).ThenBy(d => d.Left).ThenBy(d => d.Top).ToList();
+        return [.. displays.OrderByDescending(d => d.Primary).ThenBy(d => d.Left).ThenBy(d => d.Top)];
     }
 }

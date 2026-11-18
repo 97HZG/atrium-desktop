@@ -14,8 +14,8 @@ public sealed partial class MainWindow
     private readonly ImageBrush _sharedPhoto = new() { Stretch = Stretch.UniformToFill };
     private BitmapImage? _sharedSource;
     private string? _sharedPath = "\0";
-    private readonly Dictionary<string, (FrameworkElement Target, Image Snapshot)> _frozen = new();
-    private readonly Dictionary<string, (int Remaining, int Generation)> _waits = new();
+    private readonly Dictionary<string, (FrameworkElement Target, Image Snapshot)> _frozen = [];
+    private readonly Dictionary<string, (int Remaining, int Generation)> _waits = [];
     private bool _compareBuilt; // the design page's material comparison renders over the picture too
     private volatile int _heroPhotoGen = -1; // the photo generation of the newest hero background
     private int _photoSelection;
@@ -32,7 +32,7 @@ public sealed partial class MainWindow
 
     private void EnsureSharedPhoto()
     {
-        var path = Photo.SelectedPath;
+        string? path = Photo.SelectedPath;
         int generation = Photo.Generation;
         if (path == _sharedPath) return;
         _sharedPath = path;
@@ -94,8 +94,13 @@ public sealed partial class MainWindow
         if (selection != _photoSelection || _updatesClosed || _frozen.ContainsKey(key)) return;
         var image = new Image
         {
-            Source = rtb, Stretch = Stretch.Fill, IsHitTestVisible = false, Width = target.ActualWidth, Height = target.ActualHeight,
-            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            Source = rtb,
+            Stretch = Stretch.Fill,
+            IsHitTestVisible = false,
+            Width = target.ActualWidth,
+            Height = target.ActualHeight,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
         };
         if (target is Border b) image.Margin = new Thickness(-b.Padding.Left - b.BorderThickness.Left, -b.Padding.Top - b.BorderThickness.Top, 0, 0);
         Grid.SetRowSpan(image, 99);
@@ -115,7 +120,7 @@ public sealed partial class MainWindow
 
     private void ThawAllBut(string? keep)
     {
-        foreach (var key in _frozen.Keys.ToList())
+        foreach (string? key in _frozen.Keys.ToList())
             if (key != keep) Thaw(key);
     }
 

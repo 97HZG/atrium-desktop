@@ -84,8 +84,14 @@ private:
     void PruneIcons(); // under mutex_
     bool QueueIcon(const std::pair<std::wstring, int>& key, bool prefetch);
     std::deque<std::pair<std::wstring, int>> iconJobs_;
-    struct CachedIcon { IconImage image; uint64_t used = 0; };
-    struct FailedIcon { unsigned attempts = 0; ULONGLONG time = 0; };
+    struct CachedIcon {
+        IconImage image;
+        uint64_t used = 0;
+    };
+    struct FailedIcon {
+        unsigned attempts = 0;
+        ULONGLONG time = 0;
+    };
     std::map<std::pair<std::wstring, int>, CachedIcon> icons_;
     std::map<std::pair<std::wstring, int>, FailedIcon> failed_;
     std::set<std::pair<std::wstring, int>> requested_, visibleIcons_;

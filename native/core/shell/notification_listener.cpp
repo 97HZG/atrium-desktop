@@ -20,12 +20,9 @@ namespace {
 const wchar_t* AccessName(wunm::UserNotificationListenerAccessStatus s)
 {
     switch (s) {
-    case wunm::UserNotificationListenerAccessStatus::Allowed:
-        return L"Allowed";
-    case wunm::UserNotificationListenerAccessStatus::Denied:
-        return L"Denied";
-    default:
-        return L"Unspecified";
+    case wunm::UserNotificationListenerAccessStatus::Allowed: return L"Allowed";
+    case wunm::UserNotificationListenerAccessStatus::Denied: return L"Denied";
+    default: return L"Unspecified";
     }
 }
 

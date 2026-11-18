@@ -32,5 +32,4 @@ std::vector<WifiNetwork> ListWifi(bool rescan);
 bool ConnectWifi(const WifiNetwork& network);
 bool DisconnectWifi();
 
-
 } // namespace atrium

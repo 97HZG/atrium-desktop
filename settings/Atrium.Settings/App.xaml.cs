@@ -30,7 +30,7 @@ public partial class App : Application
     {
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "logs");
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "logs");
             Directory.CreateDirectory(dir);
             File.AppendAllText(Path.Combine(dir, "settings.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e}\n");
         }
@@ -46,7 +46,7 @@ public partial class App : Application
         s_instance = new Mutex(true, @"Local\Atrium.Settings", out bool created);
         if (!created)
         {
-            var other = FindWindow(null, WindowTitle);
+            nint other = FindWindow(null, WindowTitle);
             if (other != IntPtr.Zero)
             {
                 GetWindowThreadProcessId(other, out uint pid);
@@ -65,7 +65,7 @@ public partial class App : Application
                 }
                 ShowWindow(other, 9 /* SW_RESTORE */);
                 SetForegroundWindow(other);
-                var command = Environment.GetCommandLineArgs();
+                string[] command = Environment.GetCommandLineArgs();
                 int page = Array.IndexOf(command, "--page");
                 if (page >= 0 && page + 1 < command.Length && command[page + 1] == "about")
                     PostMessage(other, OpenAboutMessage, UIntPtr.Zero, IntPtr.Zero);
@@ -112,7 +112,7 @@ public partial class App : Application
 
     internal static void SignalStartupReady(bool coreReady)
     {
-        var command = Environment.GetCommandLineArgs();
+        string[] command = Environment.GetCommandLineArgs();
         if (command.Contains("--require-core-ready") && !coreReady) return;
         int index = Array.IndexOf(command, "--ready-event");
         if (index < 0 || index + 1 >= command.Length || !command[index + 1].StartsWith(@"Local\Atrium.Update.Settings.", StringComparison.Ordinal)) return;

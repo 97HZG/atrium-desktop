@@ -14,9 +14,6 @@ namespace Atrium.Settings;
 public sealed class PinVm : INotifyPropertyChanged
 {
     private readonly MainWindow _owner;
-    private string _number = "";
-    private bool _canUp, _canDown;
-    private ImageSource? _icon;
 
     internal PinVm(MainWindow owner, PinnedApp pin)
     {
@@ -40,22 +37,22 @@ public sealed class PinVm : INotifyPropertyChanged
         get => Pin.AllowsMultipleWindows ? 1 : 0;
         set
         {
-            if (value < 0 || (value == 1) == Pin.AllowsMultipleWindows) return;
+            if (value < 0 || value == 1 == Pin.AllowsMultipleWindows) return;
             Pin = Pin with { MultipleWindows = value == 1 };
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LaunchMode)));
             _owner.ChangePinLaunch();
         }
     }
 
-    public string Number { get => _number; private set => Set(ref _number, value, nameof(Number)); }
-    public bool CanUp { get => _canUp; private set => Set(ref _canUp, value, nameof(CanUp)); }
-    public bool CanDown { get => _canDown; private set => Set(ref _canDown, value, nameof(CanDown)); }
+    public string Number { get; private set => Set(ref field, value, nameof(Number)); } = "";
+    public bool CanUp { get; private set => Set(ref field, value, nameof(CanUp)); }
+    public bool CanDown { get; private set => Set(ref field, value, nameof(CanDown)); }
     public ImageSource? Icon
     {
-        get => _icon;
-        set { if (Set(ref _icon, value, nameof(Icon))) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FallbackVisibility))); }
+        get;
+        set { if (Set(ref field, value, nameof(Icon))) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FallbackVisibility))); }
     }
-    public Visibility FallbackVisibility => _icon == null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility FallbackVisibility => Icon == null ? Visibility.Visible : Visibility.Collapsed;
 
     internal void SetPosition(int index, int count)
     {
@@ -81,23 +78,23 @@ public sealed class PinVm : INotifyPropertyChanged
 
 public sealed partial class MainWindow
 {
-    private readonly ObservableCollection<PinVm> _pinVms = new();
+    private readonly ObservableCollection<PinVm> _pinVms = [];
     private readonly Dictionary<string, ImageSource?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
 
     internal static string PinTitle(PinnedApp p) =>
-        p.Name.Length > 0 ? p.Name : p.Path.Length > 0 ? System.IO.Path.GetFileNameWithoutExtension(p.Path) : p.Aumid;
+        p.Name.Length > 0 ? p.Name : p.Path.Length > 0 ? Path.GetFileNameWithoutExtension(p.Path) : p.Aumid;
 
     private void InitPins() => PinsList.ItemsSource = _pinVms;
 
     private void RebuildPins()
     {
-        if (_pinVms.Select(vm => vm.Pin).SequenceEqual(_current.Pins ?? Enumerable.Empty<PinnedApp>()))
+        if (_pinVms.Select(vm => vm.Pin).SequenceEqual(CurrentSettings.Pins ?? Enumerable.Empty<PinnedApp>()))
         {
             RefreshPins();
             return;
         }
         _pinVms.Clear();
-        foreach (var pin in _current.Pins ?? new List<PinnedApp>())
+        foreach (var pin in CurrentSettings.Pins ?? [])
         {
             var vm = new PinVm(this, pin);
             _pinVms.Add(vm);
@@ -109,8 +106,8 @@ public sealed partial class MainWindow
     private void RefreshPins()
     {
         var names = _pinVms.Select(vm => ShellIcons.ParsingName(vm.Pin)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var key in _iconCache.Keys.Where(key => !names.Contains(key)).ToArray()) _iconCache.Remove(key);
-        _previewPins = _pinVms.Take(MaxPreviewApps - 1).ToArray();
+        foreach (string? key in _iconCache.Keys.Where(key => !names.Contains(key)).ToArray()) _iconCache.Remove(key);
+        _previewPins = [.. _pinVms.Take(MaxPreviewApps - 1)];
         for (int i = 0; i < _pinVms.Count; i++) _pinVms[i].SetPosition(i, _pinVms.Count);
         bool empty = _pinVms.Count == 0;
         PinsEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
@@ -121,13 +118,13 @@ public sealed partial class MainWindow
     // The collection is the order the user sees; the settings follow it.
     private void SyncPins()
     {
-        _current.Pins = _pinVms.Select(v => v.Pin).ToList();
+        CurrentSettings.Pins = [.. _pinVms.Select(v => v.Pin)];
         RefreshPins();
     }
 
     private async Task LoadIconAsync(PinVm vm)
     {
-        var name = ShellIcons.ParsingName(vm.Pin);
+        string name = ShellIcons.ParsingName(vm.Pin);
         if (!_iconCache.TryGetValue(name, out var source))
         {
             var img = await ShellIcons.LoadAsync(name, 96); // 32 DIP at up to 300 % scale
@@ -196,7 +193,7 @@ public sealed partial class MainWindow
     private void OnWindowsContextMenuToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.WindowsContextMenu = WindowsContextMenuSwitch.IsOn;
+        CurrentSettings.WindowsContextMenu = WindowsContextMenuSwitch.IsOn;
         Changed();
     }
 
@@ -204,7 +201,7 @@ public sealed partial class MainWindow
     private void OnPinsDragCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
         var order = _pinVms.Select(v => v.Pin).ToList();
-        if (_current.Pins != null && order.SequenceEqual(_current.Pins))
+        if (CurrentSettings.Pins != null && order.SequenceEqual(CurrentSettings.Pins))
         {
             RefreshPins();
             return;
@@ -226,7 +223,7 @@ public sealed partial class MainWindow
             ShowMessage(InfoBarSeverity.Warning, Loc.T("Pinned apps limit reached"), Loc.T("You can pin at most 64 apps."));
             return;
         }
-        var vm = new PinVm(this, new PinnedApp(System.IO.Path.GetFileNameWithoutExtension(file.Path), file.Path, "", ""));
+        var vm = new PinVm(this, new PinnedApp(Path.GetFileNameWithoutExtension(file.Path), file.Path, "", ""));
         _pinVms.Add(vm);
         _ = LoadIconAsync(vm);
         SyncPins();
@@ -248,7 +245,7 @@ public sealed partial class MainWindow
             DefaultButton = ContentDialogButton.Close,
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        _current.Pins = CoreClient.ImportTaskbarPins();
+        CurrentSettings.Pins = CoreClient.ImportTaskbarPins();
         RebuildPins();
         Changed();
     }

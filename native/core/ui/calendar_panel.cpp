@@ -26,8 +26,8 @@ D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b,
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
 const wchar_t* const kWeekNames[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
 const wchar_t* const kWeekNamesEn[] = {L"M", L"T", L"W", L"T", L"F", L"S", L"S"};
-const wchar_t* const kMonthsEn[] = {L"January", L"February", L"March", L"April", L"May", L"June",
-                                    L"July", L"August", L"September", L"October", L"November", L"December"};
+const wchar_t* const kMonthsEn[] = {L"January", L"February", L"March",     L"April",   L"May",      L"June",
+                                    L"July",    L"August",   L"September", L"October", L"November", L"December"};
 const wchar_t* const kWeekShortEn[] = {L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat", L"Sun"};
 const wchar_t* WeekHeader(int wd) { return LanguageIsEnglish() ? kWeekNamesEn[wd] : kWeekNames[wd]; }
 void OpenUri(const wchar_t* uri) { ShellExecuteW(nullptr, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL); }
@@ -142,8 +142,8 @@ void CalendarPanel::PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card)
     GetLocalTime(&now);
 
     // The month and its buttons.
-    std::wstring title = LanguageIsEnglish() ? std::wstring(kMonthsEn[std::clamp(month_, 1, 12) - 1]) + L" " + std::to_wstring(year_)
-                                             : std::to_wstring(year_) + L"年" + std::to_wstring(month_) + L"月";
+    std::wstring title = LanguageIsEnglish() ? std::wstring(kMonthsEn[std::clamp(month_, 1, 12) - 1]) + L" " + std::to_wstring(year_) :
+                                               std::to_wstring(year_) + L"年" + std::to_wstring(month_) + L"月";
     c.Text(title, D2D1::RectF(kPad + 6, card.top, w / 2 + 20, card.top + kMonthH), 16, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     auto button = [&](const std::wstring& id, D2D1_RECT_F b, const std::wstring& glyph, const std::wstring& label) {
         float hv = Hover(c, id, hover_ == id);
@@ -160,8 +160,7 @@ void CalendarPanel::PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card)
     D2D1_RECT_F prev = D2D1::RectF(next.left - 38, by - 17, next.left - 4, by + 17);
     button(L"prev", prev, L"\uE76B", L"");
     button(L"next", next, L"\uE76C", L"");
-    bool away = year_ != now.wYear || month_ != now.wMonth || selected_.wYear != now.wYear || selected_.wMonth != now.wMonth ||
-                selected_.wDay != now.wDay;
+    bool away = year_ != now.wYear || month_ != now.wMonth || selected_.wYear != now.wYear || selected_.wMonth != now.wMonth || selected_.wDay != now.wDay;
     if (away) {
         std::wstring label = Tr(L"Today");
         float bw = c.TextWidth(label, 12.5f) + 26;
@@ -172,8 +171,8 @@ void CalendarPanel::PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card)
     const float cellW = (w - 2 * kPad) / 7, top = card.top + kMonthH;
     for (int i = 0; i < 7; ++i) {
         int wd = (firstWeekday_ + i) % 7;
-        c.Text(WeekHeader(wd), D2D1::RectF(kPad + float(i) * cellW, top, kPad + float(i + 1) * cellW, top + kWeekH), 12,
-               wd >= 5 ? t.subtext : t.faint, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        c.Text(WeekHeader(wd), D2D1::RectF(kPad + float(i) * cellW, top, kPad + float(i + 1) * cellW, top + kWeekH), 12, wd >= 5 ? t.subtext : t.faint,
+               DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
     float e = motion::EaseOut(float((c.now - monthMs_) / kMonthMs));
     if (e < 1)
@@ -238,12 +237,11 @@ void CalendarPanel::PaintCapsule(Canvas& c, const Theme& t, D2D1_RECT_F cap)
     c.Text(time, D2D1::RectF(cap.left + edge, cap.top, cap.left + edge + tw + 4, cap.bottom), 20, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     // The selected day (today unless another was picked).
     int wd = Weekday(selected_.wYear, selected_.wMonth, selected_.wDay);
-    std::wstring date = LanguageIsEnglish()
-                            ? std::wstring(kWeekShortEn[wd]) + L", " + kMonthsEn[std::clamp(int(selected_.wMonth), 1, 12) - 1] + L" " +
-                                  std::to_wstring(selected_.wDay) +
-                                  (selected_.wYear != now.wYear ? L", " + std::to_wstring(selected_.wYear) : std::wstring())
-                            : std::to_wstring(selected_.wMonth) + L"月" + std::to_wstring(selected_.wDay) + L"日 星期" + kWeekNames[wd] +
-                                  (selected_.wYear != now.wYear ? L"年" : L"");
+    std::wstring date = LanguageIsEnglish() ?
+                            std::wstring(kWeekShortEn[wd]) + L", " + kMonthsEn[std::clamp(int(selected_.wMonth), 1, 12) - 1] + L" " +
+                                std::to_wstring(selected_.wDay) + (selected_.wYear != now.wYear ? L", " + std::to_wstring(selected_.wYear) : std::wstring()) :
+                            std::to_wstring(selected_.wMonth) + L"月" + std::to_wstring(selected_.wDay) + L"日 星期" + kWeekNames[wd] +
+                                (selected_.wYear != now.wYear ? L"年" : L"");
     std::wstring lunar = lunar_.Line(selected_.wYear, selected_.wMonth, selected_.wDay);
     D2D1_RECT_F text = D2D1::RectF(cap.left + edge + tw + 16, cap.top, cap.right - edge, cap.bottom);
     if (lunar.empty()) {
@@ -276,7 +274,7 @@ void CalendarPanel::Activate(const std::wstring& id)
         int dir = now.wYear * 12 + now.wMonth < year_ * 12 + month_ ? -1 : now.wYear * 12 + now.wMonth > year_ * 12 + month_ ? 1 : 0;
         selected_ = now;
         ShowMonth(now.wYear, now.wMonth, dir);
-    } else if (id.rfind(L"day:", 0) == 0) {
+    } else if (id.starts_with(L"day:")) {
         size_t i = size_t(std::stoul(id.substr(4)));
         if (i >= days_.size())
             return;

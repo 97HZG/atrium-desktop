@@ -81,8 +81,24 @@ constexpr UINT kStatusMs = 3000;
 constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
-    kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager, kCmdTerminate, kCmdTerminateConfirm,
-    kCmdWidgets, kCmdStage, kCmdWidgetsModule, kCmdStageAdd, kCmdRunAs, kCmdProperties,
+    kCmdSettings = 100,
+    kCmdToggle,
+    kCmdExit,
+    kCmdNewWindow,
+    kCmdPin,
+    kCmdUnpin,
+    kCmdClose,
+    kCmdOpenLocation,
+    kCmdDesktop,
+    kCmdTaskManager,
+    kCmdTerminate,
+    kCmdTerminateConfirm,
+    kCmdWidgets,
+    kCmdStage,
+    kCmdWidgetsModule,
+    kCmdStageAdd,
+    kCmdRunAs,
+    kCmdProperties,
     kCmdRecent = 2000 // + index into the recent list (its length is bounded)
 };
 
@@ -190,9 +206,10 @@ bool SameCoreExecutable(HWND window)
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     wchar_t other[32768]{}, current[32768]{};
     DWORD length = DWORD(std::size(other));
-    bool same = process && QueryFullProcessImageNameW(process, 0, other, &length) &&
-                GetModuleFileNameW(nullptr, current, DWORD(std::size(current))) && _wcsicmp(other, current) == 0;
-    if (process) CloseHandle(process);
+    bool same = process && QueryFullProcessImageNameW(process, 0, other, &length) && GetModuleFileNameW(nullptr, current, DWORD(std::size(current))) &&
+                _wcsicmp(other, current) == 0;
+    if (process)
+        CloseHandle(process);
     return same;
 }
 
@@ -204,18 +221,20 @@ void OpenSettings(const wchar_t* page = nullptr)
     // A development build (native\build\win-x64\Release): the packaged settings app of the same repository.
     for (std::wstring up = dir; up.size() > 3;) {
         up = up.substr(0, up.find_last_of(L'\\'));
-        candidates.push_back(up + (IsDevelopmentBuild() ? L"\\dist\\Development\\Atrium\\Settings\\Atrium.Settings.exe"
-                                                       : L"\\dist\\Atrium\\Settings\\Atrium.Settings.exe"));
+        candidates.push_back(
+            up + (IsDevelopmentBuild() ? L"\\dist\\Development\\Atrium\\Settings\\Atrium.Settings.exe" : L"\\dist\\Atrium\\Settings\\Atrium.Settings.exe"));
     }
     for (const std::wstring& exe : candidates) {
         if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES)
             continue;
         // The settings app keeps a single instance itself and activates it.
-        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), page ? (std::wstring(L"--page ") + page).c_str() : nullptr, nullptr, SW_SHOWNORMAL)) > 32)
+        if (reinterpret_cast<INT_PTR>(
+                ShellExecuteW(nullptr, L"open", exe.c_str(), page ? (std::wstring(L"--page ") + page).c_str() : nullptr, nullptr, SW_SHOWNORMAL)) > 32)
             return;
     }
     Log(L"settings: Atrium.Settings.exe not found next to %s", dir.c_str());
-    MessageBoxW(nullptr, Tr(L"Atrium.Settings.exe was not found. Make sure the Settings folder in the installation directory is complete."), L"Atrium", MB_ICONWARNING);
+    MessageBoxW(nullptr, Tr(L"Atrium.Settings.exe was not found. Make sure the Settings folder in the installation directory is complete."), L"Atrium",
+                MB_ICONWARNING);
 }
 
 void AddTrayIcon()
@@ -225,8 +244,8 @@ void AddTrayIcon()
     nid.uID = kTrayId;
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
     nid.uCallbackMessage = WM_TRAY;
-    nid.hIcon = static_cast<HICON>(LoadImageW(g_app.instance, MAKEINTRESOURCEW(IDI_ATRIUM), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
-                                              GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    nid.hIcon = static_cast<HICON>(
+        LoadImageW(g_app.instance, MAKEINTRESOURCEW(IDI_ATRIUM), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
     wcscpy_s(nid.szTip, L"Atrium");
     g_app.trayAdded = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
     DestroyIcon(nid.hIcon);
@@ -274,7 +293,8 @@ void SendWinShortcut(WORD key, bool ctrl = false)
 // UIA and popup discovery run on the tray worker, including explicit fallback.
 void OpenTray()
 {
-    if (g_app.tray) g_app.tray->OpenSystemTray();
+    if (g_app.tray)
+        g_app.tray->OpenSystemTray();
 }
 
 void OpenSystem(const std::wstring& what)
@@ -397,7 +417,8 @@ MenuPlace BarMenuPlace(bool centered)
 
 void ShowMenu(POINT pt)
 {
-    std::vector<MenuEntry> entries = {{Tr(L"Appearance Settings…"), kCmdSettings}, {}, {Tr(L"Show Desktop"), kCmdDesktop}, {Tr(L"Task Manager"), kCmdTaskManager}};
+    std::vector<MenuEntry> entries = {
+        {Tr(L"Appearance Settings…"), kCmdSettings}, {}, {Tr(L"Show Desktop"), kCmdDesktop}, {Tr(L"Task Manager"), kCmdTaskManager}};
     if (g_app.widgetsOn)
         entries.push_back({Tr(L"Add Widgets…"), kCmdWidgets});
     // The three modules, each on its own.
@@ -409,31 +430,17 @@ void ShowMenu(POINT pt)
     entries.push_back({Tr(L"Quit Atrium"), kCmdExit});
     g_app.menu->Open(std::move(entries), pt, BarMenuPlace(false), [](int cmd) {
         switch (cmd) {
-        case kCmdSettings:
-            OpenSettings();
-            break;
-        case kCmdWidgets:
-            OpenSettings(L"widgets");
-            break;
-        case kCmdToggle:
-            SetBarModule(!g_app.barOn.value_or(true));
-            break;
-        case kCmdWidgetsModule:
-            SetWidgetsModule(!g_app.widgetsOn);
-            break;
-        case kCmdDesktop:
-            SendWinShortcut('D');
-            break;
+        case kCmdSettings: OpenSettings(); break;
+        case kCmdWidgets: OpenSettings(L"widgets"); break;
+        case kCmdToggle: SetBarModule(!g_app.barOn.value_or(true)); break;
+        case kCmdWidgetsModule: SetWidgetsModule(!g_app.widgetsOn); break;
+        case kCmdDesktop: SendWinShortcut('D'); break;
         case kCmdStage: {
             SetStageManager(!g_app.stage->Enabled());
             break;
         }
-        case kCmdTaskManager:
-            ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
-            break;
-        case kCmdExit:
-            DestroyWindow(g_app.host);
-            break;
+        case kCmdTaskManager: ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL); break;
+        case kCmdExit: DestroyWindow(g_app.host); break;
         }
     });
 }
@@ -483,11 +490,11 @@ bool RunNoticeAction(const Notice& n)
         OpenSettings(L"about");
         return true;
     }
-    if (n.action.rfind(L"uri:", 0) == 0) {
+    if (n.action.starts_with(L"uri:")) {
         std::wstring target = n.action.substr(4);
         return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
     }
-    if (n.action.rfind(L"app:", 0) == 0) {
+    if (n.action.starts_with(L"app:")) {
         std::wstring aumid = n.action.substr(4), key = aumid;
         for (auto& c : key)
             c = wchar_t(towlower(c));
@@ -658,13 +665,15 @@ void ApplySettings(const Settings& s)
     g_app.stage->SetExcluded(s.stageExcluded);
     g_app.stage->SetEnabled(s.stageManager);
     g_app.control->SetStage(s.stageManager, s.stageOnRight);
-    g_app.widgets->SetMaterial(s.widgetMaterial == L"dusk" ? WidgetMaterial::Dusk : s.widgetMaterial == L"color" ? WidgetMaterial::Color : WidgetMaterial::Glass);
+    g_app.widgets->SetMaterial(s.widgetMaterial == L"dusk"  ? WidgetMaterial::Dusk :
+                               s.widgetMaterial == L"color" ? WidgetMaterial::Color :
+                                                              WidgetMaterial::Glass);
     g_app.widgets->SetEnabled(s.widgets);
     g_app.widgetsOn = s.widgets;
     // The Windows key opens the start menu and the bar's apps, which belong to the bar.
     // Below medium integrity the keys it passes on would not reach the window in front: no hook at all.
     const bool keyStart = s.bar && s.winKeyStart && !LowIntegrity(), keyNumbers = s.bar && s.winNumbers && !LowIntegrity();
-    if (!(keyStart == g_app.winKeyStart && keyNumbers == g_app.winNumbers && bool(g_app.winKey) == (keyStart || keyNumbers))) {
+    if (keyStart != g_app.winKeyStart || keyNumbers != g_app.winNumbers || bool(g_app.winKey) != (keyStart || keyNumbers)) {
         g_app.winKey.reset();
         if (keyStart || keyNumbers)
             g_app.winKey = std::make_unique<WinKey>(g_app.host, WM_WIN_KEY, keyStart, keyNumbers);
@@ -806,8 +815,8 @@ bool IsWorkspaceFile(const std::wstring& path)
     if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash))
         return false;
     const wchar_t* extension = path.c_str() + dot;
-    static const wchar_t* const kinds[] = {L".code-workspace", L".sln", L".slnx", L".vcxproj", L".uvprojx", L".workspace",
-                                           L".sublime-project", L".uproject", L".xcworkspace", L".pro", L".csproj"};
+    static const wchar_t* const kinds[] = {L".code-workspace",  L".sln",      L".slnx",        L".vcxproj", L".uvprojx", L".workspace",
+                                           L".sublime-project", L".uproject", L".xcworkspace", L".pro",     L".csproj"};
     for (const wchar_t* kind : kinds)
         if (_wcsicmp(extension, kind) == 0)
             return true;
@@ -919,10 +928,9 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     std::wstring shape;
     for (const auto& [title, rows] : sections)
         shape += (shape.empty() ? L"" : L"; ") + title + L"(" + std::to_wstring(rows.size()) + L")";
-    Log(L"menu: '%s' path='%s' appid='%s' items=%zu [%s] in %llu ms", it->name.c_str(), appPath.c_str(), appId.c_str(),
-        listed.size(), shape.c_str(), GetTickCount64() - startedAt);
-    const bool canRunAs =
-        windowsEntries && !appPath.empty() && appPath.find(L"\\WindowsApps\\") == std::wstring::npos;
+    Log(L"menu: '%s' path='%s' appid='%s' items=%zu [%s] in %llu ms", it->name.c_str(), appPath.c_str(), appId.c_str(), listed.size(), shape.c_str(),
+        GetTickCount64() - startedAt);
+    const bool canRunAs = windowsEntries && !appPath.empty() && appPath.find(L"\\WindowsApps\\") == std::wstring::npos;
     if (canRunAs)
         entries.push_back({Tr(L"Run as administrator"), kCmdRunAs});
     std::wstring location = g_app.tasks->FileLocation(key);
@@ -939,9 +947,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     std::wstring name = it->name;
     g_app.menu->Open(std::move(entries), pt, BarMenuPlace(true), [key, location, pinIndex, windows, name, pt, appPath, listed](int cmd) {
         switch (cmd) {
-        case kCmdNewWindow:
-            g_app.tasks->Launch(key);
-            break;
+        case kCmdNewWindow: g_app.tasks->Launch(key); break;
         case kCmdStageAdd:
             if (g_app.stage && g_app.stage->Enabled())
                 g_app.stage->OpenInCurrentGroup(key);
@@ -990,15 +996,12 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
         case kCmdRunAs:
             if (!appPath.empty()) {
                 // Elevation is the shell's "runas" verb; no context menu is needed for it.
-                const HINSTANCE opened =
-                    ShellExecuteW(nullptr, L"runas", appPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                const HINSTANCE opened = ShellExecuteW(nullptr, L"runas", appPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 if (reinterpret_cast<INT_PTR>(opened) <= 32)
                     Log(L"menu: runas '%s' failed (%ld)", appPath.c_str(), GetLastError());
             }
             break;
-        case kCmdProperties:
-            ShowShellProperties(g_app.host, appPath);
-            break;
+        case kCmdProperties: ShowShellProperties(g_app.host, appPath); break;
         default:
             if (cmd >= kCmdRecent && size_t(cmd - kCmdRecent) < listed.size()) {
                 const JumpItem& item = listed[size_t(cmd - kCmdRecent)];
@@ -1006,16 +1009,14 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                 if (!item.program.empty()) {
                     // The system's own entries are shortcuts to the program with the
                     // item as an argument: a workspace file has no association of its own.
-                    opened = ShellExecuteW(nullptr, L"open", item.program.c_str(), item.args.c_str(), nullptr,
-                                           SW_SHOWNORMAL);
+                    opened = ShellExecuteW(nullptr, L"open", item.program.c_str(), item.args.c_str(), nullptr, SW_SHOWNORMAL);
                 } else if (item.folder && !item.target.empty()) {
                     const std::wstring args = L"\"" + item.target + L"\"";
                     opened = ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
                 } else if (!item.target.empty()) {
                     opened = ShellExecuteW(nullptr, L"open", item.target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 }
-                Log(L"menu: jump cmd=%d '%s' program='%s' -> %p (error %lu)", cmd, item.target.c_str(),
-                    item.program.c_str(), reinterpret_cast<void*>(opened),
+                Log(L"menu: jump cmd=%d '%s' program='%s' -> %p (error %lu)", cmd, item.target.c_str(), item.program.c_str(), reinterpret_cast<void*>(opened),
                     opened > reinterpret_cast<HINSTANCE>(32) ? 0ul : GetLastError());
             }
 
@@ -1133,10 +1134,13 @@ void ConfigureBar(Bar& bar)
     if (!g_app.imeWatch.state().empty())
         bar.SetIme(ImeGlyph(g_app.imeWatch.state()));
     bar.keepShown = [&bar] {
-        return g_app.activeBar == &bar && (g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() ||
-            g_app.calendar->Visible() || g_app.notes->CenterVisible() || g_app.menu->Visible());
+        return g_app.activeBar == &bar && (g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible() ||
+                                           g_app.notes->CenterVisible() || g_app.menu->Visible());
     };
-    bar.onStatusWheel = [](int notches) { AdjustVolume(2 * notches); UpdateStatus(); };
+    bar.onStatusWheel = [](int notches) {
+        AdjustVolume(2 * notches);
+        UpdateStatus();
+    };
     bar.onFileDragHover = [](const std::wstring& key) { g_app.tasks->Show(key); };
     bar.canOpenFiles = [](const std::wstring& key) { return g_app.tasks->CanOpenFiles(key); };
     bar.onDropFiles = [](const std::wstring& key, const std::vector<std::wstring>& files) { g_app.tasks->OpenFiles(key, files); };
@@ -1144,8 +1148,14 @@ void ConfigureBar(Bar& bar)
     bar.onPreview = [&bar](const std::wstring& key, const std::vector<HWND>& windows, POINT anchor) {
         g_app.preview->Show(key, windows, anchor, bar.BarRect(), g_app.tasks->Icon(key, 64));
     };
-    bar.onPreviewLeave = [&bar] { if (g_app.activeBar == &bar) g_app.preview->Leave(); };
-    bar.onPreviewClose = [&bar] { if (g_app.activeBar == &bar) g_app.preview->Close(); };
+    bar.onPreviewLeave = [&bar] {
+        if (g_app.activeBar == &bar)
+            g_app.preview->Leave();
+    };
+    bar.onPreviewClose = [&bar] {
+        if (g_app.activeBar == &bar)
+            g_app.preview->Close();
+    };
     bar.previewOpen = [&bar] { return g_app.activeBar == &bar && g_app.preview->Visible(); };
     bar.onMonitorChanged = [&bar] {
         if (g_app.activeBar == &bar) {
@@ -1186,8 +1196,9 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
     const auto displays = ConnectedDisplays();
     // Keep existing renderers when changing appearance; only retire disconnected or unused bars.
     std::erase_if(g_app.secondaryBars, [&](const auto& bar) {
-        const bool connected = settings.bar && settings.dockDisplayMode == L"all" && std::any_of(displays.begin(), displays.end(),
-            [&](const DisplayInfo& display) { return !display.primary && display.id == bar->DisplayOverride(); });
+        const bool connected =
+            settings.bar && settings.dockDisplayMode == L"all" &&
+            std::any_of(displays.begin(), displays.end(), [&](const DisplayInfo& display) { return !display.primary && display.id == bar->DisplayOverride(); });
         if (connected)
             return false;
         if (g_app.activeBar == bar.get()) {
@@ -1205,8 +1216,8 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
     });
     if (settings.bar && settings.dockDisplayMode == L"all")
         for (const DisplayInfo& display : displays) {
-            if (display.primary || std::any_of(g_app.secondaryBars.begin(), g_app.secondaryBars.end(),
-                    [&](const auto& bar) { return bar->DisplayOverride() == display.id; }))
+            if (display.primary ||
+                std::any_of(g_app.secondaryBars.begin(), g_app.secondaryBars.end(), [&](const auto& bar) { return bar->DisplayOverride() == display.id; }))
                 continue;
             auto bar = std::make_unique<Bar>(g_app.instance, g_app.capturable, display.id);
             ConfigureBar(*bar);
@@ -1266,14 +1277,10 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         case NIN_SELECT:
         case NIN_KEYSELECT:
-        case WM_LBUTTONDBLCLK:
-            OpenSettings();
-            return 0;
+        case WM_LBUTTONDBLCLK: OpenSettings(); return 0;
         }
         return 0;
-    case WM_OPEN_SETTINGS:
-        OpenSettings();
-        return 0;
+    case WM_OPEN_SETTINGS: OpenSettings(); return 0;
     case WM_IME_STATE: {
         // A finished read from the watcher's thread (see ImeWatcher::Run).
         std::unique_ptr<ImeWatcher::Sample> sample(reinterpret_cast<ImeWatcher::Sample*>(l));
@@ -1319,8 +1326,10 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (auto* n = reinterpret_cast<Notice*>(l)) {
             // Only from sources still turned on (a notice may arrive just after).
             const Messenger m = MessengerOfNotice(n->source, n->app, n->appId);
-            bool on = n->source == L"atrium" ? g_app.barOn.value_or(true) : n->source == L"wechat" ? bool(g_app.wechat)
-                       : n->source == L"feishu" ? bool(g_app.feishu) : bool(g_app.listener);
+            bool on = n->source == L"atrium" ? g_app.barOn.value_or(true) :
+                      n->source == L"wechat" ? bool(g_app.wechat) :
+                      n->source == L"feishu" ? bool(g_app.feishu) :
+                                               bool(g_app.listener);
             on = on && (m != Messenger::None ? MessengerOn(m) : n->source != L"windows" || g_app.displaySettings.notifyListener);
             if (g_app.notes && on) {
                 g_app.notes->Post(*n);
@@ -1334,9 +1343,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (g_app.start)
             g_app.start->Refresh();
         return 0;
-    case WM_VOLUME:
-        UpdateStatus();
-        return 0;
+    case WM_VOLUME: UpdateStatus(); return 0;
     case WM_STATUS: {
         std::unique_ptr<SystemStatus> status(reinterpret_cast<SystemStatus*>(l));
         status->brightness = g_app.brightness;
@@ -1361,17 +1368,14 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         // A removable drive went, or is going: Windows' own toast for it is a
         // balloon of its tray icon and Do Not Disturb swallows it whole, so the
         // card is Atrium's own (shell/usb_volume.h).
-        if (g_app.usb && (w == DBT_DEVICEARRIVAL || w == DBT_DEVICEREMOVEPENDING ||
-                          w == DBT_DEVICEQUERYREMOVEFAILED || w == DBT_DEVICEREMOVECOMPLETE)) {
+        if (g_app.usb && (w == DBT_DEVICEARRIVAL || w == DBT_DEVICEREMOVEPENDING || w == DBT_DEVICEQUERYREMOVEFAILED || w == DBT_DEVICEREMOVECOMPLETE)) {
             UsbVolumes::Event event;
             event.kind = UINT(w);
-            if (const auto* header = reinterpret_cast<const DEV_BROADCAST_HDR*>(l);
-                header && header->dbch_devicetype == DBT_DEVTYP_VOLUME) {
+            if (const auto* header = reinterpret_cast<const DEV_BROADCAST_HDR*>(l); header && header->dbch_devicetype == DBT_DEVTYP_VOLUME) {
                 const auto& volume = *reinterpret_cast<const DEV_BROADCAST_VOLUME*>(l);
                 event.unitmask = volume.dbcv_unitmask;
-            } else if (
-                header && header->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE &&
-                reinterpret_cast<const DEV_BROADCAST_DEVICEINTERFACE_W*>(l)->dbcc_classguid == kVolumeInterface) {
+            } else if (header && header->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE &&
+                       reinterpret_cast<const DEV_BROADCAST_DEVICEINTERFACE_W*>(l)->dbcc_classguid == kVolumeInterface) {
                 // No unitmask here: the mask snapshot decides which letters it concerns.
             } else {
                 break; // another device kind, or a broadcast without a payload
@@ -1412,12 +1416,14 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         if (w == 5) { // explicit system-tray opening succeeded
-            if (g_app.trayPanel) g_app.trayPanel->Close();
+            if (g_app.trayPanel)
+                g_app.trayPanel->Close();
             return 0;
         }
         if (w == 2 || w == 3) {
             KillTimer(h, kTrayFocusTimer);
-            if (g_app.trayPanel) g_app.trayPanel->Close();
+            if (g_app.trayPanel)
+                g_app.trayPanel->Close();
             static ULONGLONG lastTrayNotice = 0;
             const auto now = GetTickCount64();
             if (g_app.notes && (!lastTrayNotice || now - lastTrayNotice >= 30000)) {
@@ -1426,7 +1432,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 notice.source = L"atrium";
                 notice.app = L"Atrium";
                 notice.title = Tr(w == 2 ? L"Use the Windows notification area" : L"Windows notification area is unavailable");
-                notice.body = Tr(w == 2 ? L"Select the icon in the Windows hidden icons panel." : L"Temporarily turn off Hide system taskbar, open the hidden icons panel, and try again.");
+                notice.body = Tr(w == 2 ? L"Select the icon in the Windows hidden icons panel." :
+                                          L"Temporarily turn off Hide system taskbar, open the hidden icons panel, and try again.");
                 g_app.notes->Post(std::move(notice));
             }
         } else if (w == 1) // a click was forwarded: see where the focus ends up
@@ -1524,18 +1531,18 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                     ok = SetForegroundWindow(back) != FALSE;
                     how = L"after a key press";
                 }
-                Log(L"tray: the hidden overflow window had the focus; given back %s (%s, error %lu)", how, ok && GetForegroundWindow() == back ? L"ok" : L"failed",
-                    error);
+                Log(L"tray: the hidden overflow window had the focus; given back %s (%s, error %lu)", how,
+                    ok && GetForegroundWindow() == back ? L"ok" : L"failed", error);
             }
             return 0;
         }
         break;
     case WM_ATRIUM_ADD_WIDGET:
-        return w <= WPARAM(WidgetKind::Network) && l >= 0 && l <= LPARAM(WidgetSize::Large) &&
-               g_app.widgetsOn && g_app.widgets->Add(WidgetKind(w), WidgetSize(l)) ? 1 : 0;
-    case WM_ATRIUM_SETTINGS:
-        ApplySettings(g_app.server->Current());
-        return 0;
+        return w <= WPARAM(WidgetKind::Network) && l >= 0 && l <= LPARAM(WidgetSize::Large) && g_app.widgetsOn &&
+                       g_app.widgets->Add(WidgetKind(w), WidgetSize(l)) ?
+                   1 :
+                   0;
+    case WM_ATRIUM_SETTINGS: ApplySettings(g_app.server->Current()); return 0;
     case WM_DISPLAYCHANGE:
     case WM_DPICHANGED:
         if (!g_app.displaysReady)
@@ -1563,13 +1570,15 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_CLOSE:
-        if (g_app.chrome) g_app.chrome->RestoreForExit();
+        if (g_app.chrome)
+            g_app.chrome->RestoreForExit();
         DestroyWindow(h);
         return 0;
     case WM_ENDSESSION:
         if (w) {
             Log(L"core: session ending");
-            if (g_app.chrome) g_app.chrome->RestoreForExit(); // no later message may hide Windows again
+            if (g_app.chrome)
+                g_app.chrome->RestoreForExit(); // no later message may hide Windows again
         }
         return 0;
     case WM_DESTROY:
@@ -1596,7 +1605,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         CoTaskMemFree(profile);
     }
     int argumentCount = 0;
-    auto startupArguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+    auto* startupArguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
     for (int i = 1; startupArguments && i + 1 < argumentCount; ++i)
         if (wcscmp(startupArguments[i], L"--ready-event") == 0 && std::wstring_view(startupArguments[i + 1]).starts_with(L"Local\\Atrium.Update.Core."))
             g_readyEvent = startupArguments[i + 1];
@@ -1622,7 +1631,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         HWND other = FindWindowW(kHostClass, nullptr);
         if (!other)
             return 0;
-        if (!SameCoreExecutable(other)) return 1;
+        if (!SameCoreExecutable(other))
+            return 1;
         DWORD pid = 0;
         GetWindowThreadProcessId(other, &pid);
         HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
@@ -1640,7 +1650,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         return wait == WAIT_OBJECT_0 ? 0 : 1;
     }
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
-    if (!mutex) return 1;
+    if (!mutex)
+        return 1;
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         // Already running: launching it again opens the settings instead.
         HWND other = FindWindowW(kHostClass, nullptr);
@@ -1734,27 +1745,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     // The profile's jump list files are read off the UI thread, and only when the
     // menus that show them are on.
     StartJumpListIndex(settings.windowsContextMenu);
-    g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
-        const double t0 = ClockMs();
-        const std::vector<TaskItem> all = g_app.tasks->Snapshot(true); // once for both
-        if (g_app.stage)
-            g_app.stage->Update(all);
-        if (g_app.trayPanel) g_app.trayPanel->SetAttention(all);
-        const double t1 = ClockMs();
-        auto items = BarItems();
-        const double t2 = ClockMs();
-        ForBars([&](Bar& bar) { bar.SetItems(items); });
-        if (g_app.preview)
-            g_app.preview->Refresh(ActiveBar().Items());
-        const double t3 = ClockMs();
-        if (g_app.start)
-            g_app.start->Refresh();
-        const double t4 = ClockMs();
-        if (t4 - t0 > 20)
-            Log(L"tasks: changes took %.0f ms (stage %.0f, preview %.0f, bar %.0f, start %.0f)", t4 - t0, t1 - t0, t2 - t1, t3 - t2, t4 - t3);
-    }, [](const std::wstring& exe) {
-        return g_app.tray->OpenExisting(exe);
-    });
+    g_app.tasks = std::make_unique<TaskModel>(
+        g_app.host,
+        [] {
+            const double t0 = ClockMs();
+            const std::vector<TaskItem> all = g_app.tasks->Snapshot(true); // once for both
+            if (g_app.stage)
+                g_app.stage->Update(all);
+            if (g_app.trayPanel)
+                g_app.trayPanel->SetAttention(all);
+            const double t1 = ClockMs();
+            auto items = BarItems();
+            const double t2 = ClockMs();
+            ForBars([&](Bar& bar) { bar.SetItems(items); });
+            if (g_app.preview)
+                g_app.preview->Refresh(ActiveBar().Items());
+            const double t3 = ClockMs();
+            if (g_app.start)
+                g_app.start->Refresh();
+            const double t4 = ClockMs();
+            if (t4 - t0 > 20)
+                Log(L"tasks: changes took %.0f ms (stage %.0f, preview %.0f, bar %.0f, start %.0f)", t4 - t0, t1 - t0, t2 - t1, t3 - t2, t4 - t3);
+        },
+        [](const std::wstring& exe) { return g_app.tray->OpenExisting(exe); });
     g_app.tasks->SetOnFlash([](HWND window) { MessengerFlashed(ProgramOf(window)); });
     g_app.catalog = std::make_unique<AppCatalog>(g_app.host, WM_CATALOG);
     g_app.start = std::make_unique<StartMenu>(instance, *g_app.tasks, *g_app.catalog);
@@ -1768,7 +1781,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.notes = std::make_unique<Notifications>(instance);
     g_app.tray = std::make_unique<TrayModel>(g_app.host, WM_TRAY_ICONS, [] {
         std::vector<PinnedApp> names;
-        for (const auto& app : g_app.catalog->Apps()) names.push_back(AppCatalog::PinFor(app));
+        for (const auto& app : g_app.catalog->Apps())
+            names.push_back(AppCatalog::PinFor(app));
         return names;
     });
     g_app.trayPanel = std::make_unique<TrayPanel>(instance, *g_app.tray);
@@ -1797,9 +1811,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.notes->onActivate = RunNoticeAction;
     g_app.notes->quietIsOurs = [] { return g_app.chrome && g_app.chrome->QuietIsOurs(); };
     // New cards wait while one of Atrium's panels is open (they would overlap it).
-    g_app.notes->held = [] {
-        return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible();
-    };
+    g_app.notes->held = [] { return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible(); };
     // Pointer on an app with windows: its windows, previewed above it (as the Windows taskbar).
     g_app.preview = std::make_unique<WindowPreview>(instance);
     ConfigureBar(*g_app.bar);
@@ -1839,7 +1851,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     SetTimer(g_app.host, kStatusTimer, kStatusMs, nullptr);
     g_app.tray->Refresh(); // the panel opens with the icons already read
     g_app.updates = std::make_unique<UpdateChecker>(g_app.host);
-    if (!g_readyEvent.empty()) SetTimer(g_app.host, kReadyTimer, 50, nullptr);
+    if (!g_readyEvent.empty())
+        SetTimer(g_app.host, kReadyTimer, 50, nullptr);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
@@ -1850,7 +1863,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     // First the render thread, while every window it draws for is still there; a driver call stuck
     // in the desktop duplication (it holds the shared device) must not keep Atrium from exiting:
     // the system taskbar comes back and the process ends.
-    if (g_app.chrome) g_app.chrome->RestoreForExit();
+    if (g_app.chrome)
+        g_app.chrome->RestoreForExit();
     g_app.stage->RestoreAll(); // the windows Stage Manager put away come back
     g_app.winKey.reset();
     g_app.status.reset();

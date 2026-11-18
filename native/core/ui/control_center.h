@@ -34,7 +34,11 @@ public:
     void Close();
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
-    void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
+    void SetRadius(float dip)
+    {
+        radius_ = dip;
+        surface_.SetRadius(dip);
+    }
     void SetBarHeight(float dip) { barH_ = dip; }
     HWND Hwnd() const { return surface_.Hwnd(); }
     void SetStatus(const SystemStatus& status);
@@ -59,8 +63,8 @@ private:
     void PaintSound(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintCast(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void Link(Canvas& c, const Theme& t, const std::wstring& id, const std::wstring& label, float left, float right, float y, int align);
-    void PaintSlider(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& id, const std::wstring& title, const std::wstring& glyph,
-                     int value, bool dim, const std::wstring& right, D2D1_RECT_F& track, bool enabled = true);
+    void PaintSlider(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& id, const std::wstring& title, const std::wstring& glyph, int value,
+                     bool dim, const std::wstring& right, D2D1_RECT_F& track, bool enabled = true);
     float PaintHeader(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& title, bool on, const std::wstring& toggleId);
     void Switch(Canvas& c, const Theme& t, D2D1_RECT_F r, bool on, float hv);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);

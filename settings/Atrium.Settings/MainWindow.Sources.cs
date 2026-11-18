@@ -13,24 +13,20 @@ namespace Atrium.Settings;
 // leaves alone): the app's icon, found from its program, and its name.
 public abstract class AppRowVm : INotifyPropertyChanged
 {
-    private ImageSource? _icon;
-    private string _title = "";
-
-    public string Title { get => _title; set { _title = value; Raise(nameof(Title)); } }
+    public string Title { get; set { field = value; Raise(nameof(Title)); } } = "";
     public string Glyph { get; protected init; } = "\uecaa";
     public ImageSource? Icon
     {
-        get => _icon;
-        set
+        get; set
         {
-            _icon = value;
+            field = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Icon)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FallbackVisibility)));
         }
     }
-    public Visibility FallbackVisibility => _icon == null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility FallbackVisibility => Icon == null ? Visibility.Visible : Visibility.Collapsed;
     internal string IconSource { get; set; } = ""; // a parsing name for ShellIcons; empty: found from Programs, else the glyph
-    internal string[] Programs { get; init; } = Array.Empty<string>(); // program file names to look for
+    internal string[] Programs { get; init; } = []; // program file names to look for
     internal string Folder { get; init; } = ""; // a game's folder: its icon is its program's
     internal bool Describe { get; init; } // the title is the program's description, once found
 
@@ -94,28 +90,28 @@ public sealed class ExcludedVm : AppRowVm
 
 public sealed partial class MainWindow
 {
-    private readonly ObservableCollection<SourceVm> _sources = new();
-    private readonly ObservableCollection<ExcludedVm> _excluded = new();
+    private readonly ObservableCollection<SourceVm> _sources = [];
+    private readonly ObservableCollection<ExcludedVm> _excluded = [];
     private static readonly Dictionary<string, string> ProgramPaths = new(StringComparer.OrdinalIgnoreCase);
     // The Windows Snipping Tool, one row for its entries (the packaged app and its two programs).
     private const string SnippingToolIcon = @"shell:AppsFolder\Microsoft.ScreenSketch_8wekyb3d8bbwe!App";
 
-    internal BarSettings CurrentSettings => _current;
+    internal BarSettings CurrentSettings { get; private set; } = new();
 
     private void InitSources()
     {
         _sources.Add(new SourceVm(this, "WeChat", "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.",
-            "\ue8bd", new[] { "Weixin.exe", "WeChat.exe" }, s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v));
+            "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v));
         _sources.Add(new SourceVm(this, "QQ", "QQ's Windows notifications; when it flashes for a message without one, a card says there is a new message.",
-            "\ue8bd", new[] { "QQ.exe" }, s => s.NotifyQQ, (s, v) => s.NotifyQQ = v));
+            "\ue8bd", ["QQ.exe"], s => s.NotifyQQ, (s, v) => s.NotifyQQ = v));
         _sources.Add(new SourceVm(this, "Feishu", "Reads the text of Feishu's popups; when it flashes for a message without one, a card says there is a new message.",
-            "\ue8bd", new[] { "Feishu.exe", "Lark.exe" }, s => s.NotifyFeishu, (s, v) => s.NotifyFeishu = v));
+            "\ue8bd", ["Feishu.exe", "Lark.exe"], s => s.NotifyFeishu, (s, v) => s.NotifyFeishu = v));
         _sources.Add(new SourceVm(this, "WeCom", "When WeCom flashes for a new message, a card says so.",
-            "\ue8bd", new[] { "WXWork.exe", "WeCom.exe", "WXWorkLocal.exe", "WXWorkLocalPro.exe" }, s => s.NotifyWeCom, (s, v) => s.NotifyWeCom = v));
+            "\ue8bd", ["WXWork.exe", "WeCom.exe", "WXWorkLocal.exe", "WXWorkLocalPro.exe"], s => s.NotifyWeCom, (s, v) => s.NotifyWeCom = v));
         _sources.Add(new SourceVm(this, "DingTalk", "When DingTalk flashes for a new message, a card says so.",
-            "\ue8bd", new[] { "DingTalk.exe" }, s => s.NotifyDingTalk, (s, v) => s.NotifyDingTalk = v));
+            "\ue8bd", ["DingTalk.exe"], s => s.NotifyDingTalk, (s, v) => s.NotifyDingTalk = v));
         _sources.Add(new SourceVm(this, "Other apps", "Apps that send Windows notifications. Allow notification access in Windows privacy settings.",
-            "\uea8f", Array.Empty<string>(), s => s.NotifyListener, (s, v) => s.NotifyListener = v));
+            "\uea8f", [], s => s.NotifyListener, (s, v) => s.NotifyListener = v));
         SourcesList.ItemsSource = _sources;
         foreach (var vm in _sources) _ = LoadRowIconAsync(vm);
         ExcludedList.ItemsSource = _excluded;
@@ -134,7 +130,7 @@ public sealed partial class MainWindow
 
     private void RebuildExcluded()
     {
-        var entries = _current.StageExcluded;
+        var entries = CurrentSettings.StageExcluded;
         if (_excluded.SelectMany(vm => vm.Entries).SequenceEqual(entries, StringComparer.OrdinalIgnoreCase))
         {
             RefreshExcluded();
@@ -149,11 +145,11 @@ public sealed partial class MainWindow
             {
                 if (snippingAdded) continue;
                 snippingAdded = true;
-                _excluded.Add(new ExcludedVm(this, Loc.T("Snipping Tool"), SnippingToolIcon, Array.Empty<string>(), snipping));
+                _excluded.Add(new ExcludedVm(this, Loc.T("Snipping Tool"), SnippingToolIcon, [], snipping));
                 continue;
             }
             bool program = entry.EndsWith(".exe", StringComparison.OrdinalIgnoreCase), path = entry.Contains('\\') && !GameFinder.IsFolder(entry);
-            _excluded.Add(new ExcludedVm(this, ExcludedTitle(entry), path ? entry : "", program && !path ? new[] { entry } : Array.Empty<string>(), new[] { entry }));
+            _excluded.Add(new ExcludedVm(this, ExcludedTitle(entry), path ? entry : "", program && !path ? [entry] : [], new[] { entry }));
         }
         foreach (var vm in _excluded) _ = LoadRowIconAsync(vm);
         RefreshExcluded();
@@ -164,13 +160,13 @@ public sealed partial class MainWindow
         bool empty = _excluded.Count == 0;
         ExcludedEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         ExcludedList.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
-        bool defaults = _current.StageExcluded.SequenceEqual(BarSettings.StageExcludedDefaults, StringComparer.OrdinalIgnoreCase);
+        bool defaults = CurrentSettings.StageExcluded.SequenceEqual(BarSettings.StageExcludedDefaults, StringComparer.OrdinalIgnoreCase);
         ExcludedDefaultsButton.Visibility = defaults ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void SyncExcluded()
     {
-        _current.StageExcluded = _excluded.SelectMany(vm => vm.Entries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        CurrentSettings.StageExcluded = [.. _excluded.SelectMany(vm => vm.Entries).Distinct(StringComparer.OrdinalIgnoreCase)];
         RefreshExcluded();
     }
 
@@ -192,10 +188,10 @@ public sealed partial class MainWindow
         // By its program's file name: still the same app after it updates into another folder.
         string exe = ShellIcons.ExecutablePath(file.Path);
         if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return;
-        string entry = System.IO.Path.GetFileName(exe).ToLowerInvariant();
-        if (_current.StageExcluded.Contains(entry, StringComparer.OrdinalIgnoreCase)) return;
+        string entry = Path.GetFileName(exe).ToLowerInvariant();
+        if (CurrentSettings.StageExcluded.Contains(entry, StringComparer.OrdinalIgnoreCase)) return;
         lock (ProgramPaths) ProgramPaths[entry] = exe;
-        var vm = new ExcludedVm(this, ExcludedTitle(entry), exe, Array.Empty<string>(), new[] { entry });
+        var vm = new ExcludedVm(this, ExcludedTitle(entry), exe, [], new[] { entry });
         _excluded.Add(vm);
         _ = LoadRowIconAsync(vm);
         SyncExcluded();
@@ -211,7 +207,7 @@ public sealed partial class MainWindow
         List<GameFinder.Game> found;
         try { found = await Task.Run(GameFinder.Find); }
         finally { button.IsEnabled = true; }
-        found.RemoveAll(g => _current.StageExcluded.Contains(g.Entry, StringComparer.OrdinalIgnoreCase));
+        found.RemoveAll(g => CurrentSettings.StageExcluded.Contains(g.Entry, StringComparer.OrdinalIgnoreCase));
         var rows = new List<(CheckBox Box, GameFinder.Game Game)>();
         var list = new StackPanel { Spacing = 2, MinWidth = 360 };
         foreach (var game in found)
@@ -239,8 +235,8 @@ public sealed partial class MainWindow
         ExcludedVm? last = null;
         foreach (var (box, game) in rows)
         {
-            if (box.IsChecked != true || _current.StageExcluded.Contains(game.Entry, StringComparer.OrdinalIgnoreCase)) continue;
-            last = new ExcludedVm(this, game.Title, game.Icon, Array.Empty<string>(), new[] { game.Entry }, named: true);
+            if (box.IsChecked != true || CurrentSettings.StageExcluded.Contains(game.Entry, StringComparer.OrdinalIgnoreCase)) continue;
+            last = new ExcludedVm(this, game.Title, game.Icon, [], new[] { game.Entry }, named: true);
             _excluded.Add(last);
             _ = LoadRowIconAsync(last);
             SyncExcluded();
@@ -257,7 +253,7 @@ public sealed partial class MainWindow
 
     private void OnStageExcludedDefaults(object sender, RoutedEventArgs e)
     {
-        _current.StageExcluded = new List<string>(BarSettings.StageExcludedDefaults);
+        CurrentSettings.StageExcluded = [.. BarSettings.StageExcludedDefaults];
         RebuildExcluded();
         Changed();
     }
@@ -266,7 +262,7 @@ public sealed partial class MainWindow
     private static string ExcludedTitle(string entry)
     {
         string name = entry.TrimEnd('_', '\\');
-        int slash = name.LastIndexOfAny(new[] { '\\', '/' });
+        int slash = name.LastIndexOfAny(['\\', '/']);
         if (slash >= 0) name = name[(slash + 1)..];
         return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
     }
@@ -284,7 +280,7 @@ public sealed partial class MainWindow
         foreach (string file in files)
         {
             lock (ProgramPaths)
-                if (ProgramPaths.TryGetValue(file, out var known)) return known;
+                if (ProgramPaths.TryGetValue(file, out string? known)) return known;
             string found = FindProgram(file);
             lock (ProgramPaths) ProgramPaths[file] = found;
             if (found.Length > 0) return found;
@@ -294,7 +290,7 @@ public sealed partial class MainWindow
 
     private static string FindProgram(string file)
     {
-        string stem = System.IO.Path.GetFileNameWithoutExtension(file);
+        string stem = Path.GetFileNameWithoutExtension(file);
         foreach (var p in System.Diagnostics.Process.GetProcessesByName(stem))
         {
             try { if (p.MainModule?.FileName is string path && path.Length > 0) return path; }
@@ -305,10 +301,10 @@ public sealed partial class MainWindow
         {
             try
             {
-                foreach (string link in System.IO.Directory.EnumerateFiles(Environment.GetFolderPath(folder), "*.lnk", System.IO.SearchOption.AllDirectories))
+                foreach (string link in Directory.EnumerateFiles(Environment.GetFolderPath(folder), "*.lnk", SearchOption.AllDirectories))
                 {
                     string target = ShellIcons.ExecutablePath(link);
-                    if (string.Equals(System.IO.Path.GetFileName(target), file, StringComparison.OrdinalIgnoreCase)) return target;
+                    if (string.Equals(Path.GetFileName(target), file, StringComparison.OrdinalIgnoreCase)) return target;
                 }
             }
             catch { }
@@ -318,7 +314,7 @@ public sealed partial class MainWindow
             try
             {
                 using var key = root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths\" + file);
-                if (key?.GetValue(null) is string path && System.IO.File.Exists(path.Trim('"'))) return path.Trim('"');
+                if (key?.GetValue(null) is string path && File.Exists(path.Trim('"'))) return path.Trim('"');
             }
             catch { }
         }

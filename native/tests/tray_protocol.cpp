@@ -29,11 +29,9 @@ int main()
     Check(CallbackSequence(HostAction::Middle, 4) == V{WM_MOUSEMOVE, WM_MBUTTONDOWN, WM_MBUTTONUP}, "middle");
     Check(CallbackSequence(HostAction::DoubleContinuation, 4) == V{WM_LBUTTONDBLCLK, WM_LBUTTONUP},
           "the second click of a double click never repeats the first");
-    Check(CallbackSequence(HostAction::Double, 4) ==
-              V{WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, NIN_SELECT, WM_LBUTTONDBLCLK, WM_LBUTTONUP},
+    Check(CallbackSequence(HostAction::Double, 4) == V{WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, NIN_SELECT, WM_LBUTTONDBLCLK, WM_LBUTTONUP},
           "a whole double click is a click and its continuation");
-    Check(CallbackSequence(HostAction::PopupOpen, 3).empty() && CallbackSequence(HostAction::PopupClose, 0).empty(),
-          "popup requests are version 4 only");
+    Check(CallbackSequence(HostAction::PopupOpen, 3).empty() && CallbackSequence(HostAction::PopupClose, 0).empty(), "popup requests are version 4 only");
     Check(CallbackSequence(HostAction::PopupOpen, 4) == V{NIN_POPUPOPEN} && CallbackSequence(HostAction::PopupClose, 4) == V{NIN_POPUPCLOSE},
           "v4 popup requests");
     Check(CallbackSequence(HostAction::HoverIn, 0) == V{WM_MOUSEMOVE}, "hover is a mouse move");

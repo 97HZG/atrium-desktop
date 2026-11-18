@@ -64,8 +64,12 @@ internal static class ReleaseInstaller
         if (download == null || download.Release.Version <= CurrentVersion) return null;
         if (download.Error != null) return new(Loc.T("Could not prepare the update. Try again."), true);
         using var job = BitsTransfer.Open(download.Job);
-        if (job == null) return File.Exists(Path.Combine(WorkDirectory, "release.zip"))
+        if (job == null)
+        {
+            return File.Exists(Path.Combine(WorkDirectory, "release.zip"))
             ? new(Loc.T("Preparing the update…")) : new(Loc.T("The download did not finish. Try again."), true);
+        }
+
         if (job.CurrentState == BitsTransfer.State.Error) return new(Loc.T("The background download failed. Try again."), true);
         if (job.CurrentState == BitsTransfer.State.Transferred) return new(Loc.T("Preparing the update…"));
         if (job.CurrentState == BitsTransfer.State.TransientError) return new(Loc.T("Waiting to resume the background download…"));
@@ -123,7 +127,11 @@ internal static class ReleaseInstaller
                 if (pending != null) Queue(pending.Release, pending);
                 else NotifyReady();
             }
-            else Finish(pending);
+            else
+            {
+                Finish(pending);
+            }
+
             return 0;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException or JsonException
@@ -262,10 +270,14 @@ internal static class ReleaseInstaller
         // Windows PowerShell 5.1 needs a BOM to read the helper's Chinese messages.
         File.WriteAllText(script, File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Update.ps1")), new System.Text.UTF8Encoding(true));
         var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
-            "WindowsPowerShell", "v1.0", "powershell.exe")) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = CacheDirectory };
+            "WindowsPowerShell", "v1.0", "powershell.exe"))
+        { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = CacheDirectory };
         foreach (string arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
             "-InstallDirectory", InstallDirectory, "-PackageDirectory", ready.Directory, "-StatePath", StatePath,
-            "-WaitForProcessId", Environment.ProcessId.ToString(), "-StartCore", startCore ? "1" : "0" }) start.ArgumentList.Add(arg);
+            "-WaitForProcessId", Environment.ProcessId.ToString(), "-StartCore", startCore ? "1" : "0" })
+        {
+            start.ArgumentList.Add(arg);
+        }
         // Check before closing any UI. Program Files installations need a writable
         // parent directory; do not stop the app and then discover access was denied.
         string probe = Path.Combine(Path.GetDirectoryName(InstallDirectory)!, ".atrium-update-" + Guid.NewGuid().ToString("N"));

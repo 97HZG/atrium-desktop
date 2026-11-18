@@ -60,12 +60,8 @@ bool Place(IWICImagingFactory* wic, const std::wstring& path, RECT target, DESKT
     double sx = 1, sy = 1;
     switch (pos) {
     case DWPOS_FILL:
-    case DWPOS_SPAN:
-        sx = sy = std::max(double(tw) / iw, double(th) / ih);
-        break;
-    case DWPOS_FIT:
-        sx = sy = std::min(double(tw) / iw, double(th) / ih);
-        break;
+    case DWPOS_SPAN: sx = sy = std::max(double(tw) / iw, double(th) / ih); break;
+    case DWPOS_FIT: sx = sy = std::min(double(tw) / iw, double(th) / ih); break;
     case DWPOS_STRETCH:
         sx = double(tw) / iw;
         sy = double(th) / ih;
@@ -258,8 +254,10 @@ bool DesktopBackdrop::StartCapture()
             }
             std::lock_guard g(start->lock);
             if (start->abandoned) { // too late: the render thread went on without it
-                if (s.session) s.session.Close();
-                if (s.pool) s.pool.Close();
+                if (s.session)
+                    s.session.Close();
+                if (s.pool)
+                    s.pool.Close();
             } else {
                 start->item = std::move(s.item);
                 start->pool = std::move(s.pool);
@@ -400,8 +398,8 @@ void DesktopBackdrop::WallpaperLoop()
         RECT virt{GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN), 0, 0};
         virt.right = virt.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
         virt.bottom = virt.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
-        std::wstring sig = std::to_wstring(int(pos)) + L"|" + std::to_wstring(bg) + L"|" + std::to_wstring(virt.left) + L"," +
-                           std::to_wstring(virt.top) + L"," + std::to_wstring(virt.right) + L"," + std::to_wstring(virt.bottom);
+        std::wstring sig = std::to_wstring(int(pos)) + L"|" + std::to_wstring(bg) + L"|" + std::to_wstring(virt.left) + L"," + std::to_wstring(virt.top) +
+                           L"," + std::to_wstring(virt.right) + L"," + std::to_wstring(virt.bottom);
         for (const Screen& s : screens)
             sig += L"|" + std::to_wstring(s.rect.left) + L"," + std::to_wstring(s.rect.top) + L"," + std::to_wstring(s.rect.right) + L"," +
                    std::to_wstring(s.rect.bottom) + L":" + s.path + L"@" + FileStamp(s.path);

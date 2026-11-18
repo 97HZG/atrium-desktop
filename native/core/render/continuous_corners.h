@@ -33,36 +33,41 @@ inline winrt::com_ptr<IUnknown> CornerResourceDomain(ID2D1RenderTarget* target)
         winrt::com_ptr<ID2D1Device> device;
         context->GetDevice(device.put());
         domain = device.as<IUnknown>();
-    } else winrt::check_hresult(target->QueryInterface(IID_PPV_ARGS(domain.put())));
+    } else
+        winrt::check_hresult(target->QueryInterface(IID_PPV_ARGS(domain.put())));
     return domain;
 }
 inline void ForgetContinuousMaskDomain(IUnknown* domain)
 {
-    if (!domain) return;
+    if (!domain)
+        return;
     auto& cache = ContinuousMasks();
     std::erase_if(cache.entries, [&](const auto& entry) {
-        if (entry.domain.get() != domain) return false;
+        if (entry.domain.get() != domain)
+            return false;
         cache.bytes -= entry.bytes;
         return true;
     });
 }
 inline void ForgetContinuousMasks(ID2D1RenderTarget* target)
 {
-    if (target) ForgetContinuousMaskDomain(CornerResourceDomain(target).get());
+    if (target)
+        ForgetContinuousMaskDomain(CornerResourceDomain(target).get());
 }
 inline ID2D1Bitmap* ContinuousMask(ID2D1RenderTarget* target, float width, float height, float radius, float stroke = 0)
 {
     auto& storage = ContinuousMasks();
     auto& cache = storage.entries;
     auto& bytes = storage.bytes;
-    if (width <= 0 || height <= 0) return nullptr;
+    if (width <= 0 || height <= 0)
+        return nullptr;
     stroke = std::clamp(stroke, 0.f, std::min(width, height) * 0.5f);
     auto domain = CornerResourceDomain(target);
     const auto outer = CornerFor(width, height, radius);
     const auto inner = CornerFor(std::max(0.f, width - 2 * stroke), std::max(0.f, height - 2 * stroke), std::max(0.f, radius - stroke));
     for (auto& entry : cache)
-        if (entry.domain == domain && entry.outer.reach == outer.reach && entry.outer.a == outer.a &&
-            entry.inner.reach == inner.reach && entry.inner.a == inner.a && entry.stroke == stroke)
+        if (entry.domain == domain && entry.outer.reach == outer.reach && entry.outer.a == outer.a && entry.inner.reach == inner.reach &&
+            entry.inner.a == inner.a && entry.stroke == stroke)
             return entry.bitmap.get();
     // A corner stamp has a small stretchable centre. Animated lengths reuse it
     // without allocating or rasterizing a full-size bitmap every frame.
@@ -72,13 +77,14 @@ inline ID2D1Bitmap* ContinuousMask(ID2D1RenderTarget* target, float width, float
         for (UINT32 x = 0; x < w; ++x) {
             float alpha = CornerCoverage(float(x) + 0.5f, float(y) + 0.5f, float(w), float(h), outer);
             if (stroke > 0 && width > 2 * stroke && height > 2 * stroke)
-                alpha = std::max(0.f, alpha - CornerCoverage(float(x) + 0.5f - stroke, float(y) + 0.5f - stroke,
-                    float(w) - 2 * stroke, float(h) - 2 * stroke, inner));
+                alpha = std::max(
+                    0.f, alpha - CornerCoverage(float(x) + 0.5f - stroke, float(y) + 0.5f - stroke, float(w) - 2 * stroke, float(h) - 2 * stroke, inner));
             pixels[size_t(y) * w + x] = BYTE(std::lround(alpha * 255));
         }
     winrt::com_ptr<ID2D1Bitmap> bitmap;
     auto properties = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
-    if (FAILED(target->CreateBitmap(D2D1::SizeU(w, h), pixels.data(), w, &properties, bitmap.put()))) return nullptr;
+    if (FAILED(target->CreateBitmap(D2D1::SizeU(w, h), pixels.data(), w, &properties, bitmap.put())))
+        return nullptr;
     constexpr size_t budget = 4 * 1024 * 1024;
     while (!cache.empty() && (bytes + pixels.size() > budget || cache.size() >= 64)) {
         bytes -= cache.front().bytes;
@@ -125,7 +131,8 @@ inline void StrokeContinuousRect(ID2D1RenderTarget* target, D2D1_RECT_F rect, fl
 inline D2D1_POINT_2F ContinuousCornerPoint(double theta, double a)
 {
     const double x = std::sin(theta), y = -std::cos(theta);
-    if (a == 0) return D2D1::Point2F(float(x), float(y));
+    if (a == 0)
+        return D2D1::Point2F(float(x), float(y));
     double n = 1;
     for (int i = 0; i < 8; ++i) {
         const double vx = x / n, vy = y / n, xx = vx * vx, yy = vy * vy;
@@ -144,8 +151,10 @@ inline HRGN ContinuousRegion(RECT rect, int radius)
     const double r = profile.reach;
     std::vector<POINT> points;
     points.reserve(260);
-    const D2D1_POINT_2F centres[] = {{float(rect.right - r), float(rect.top + r)}, {float(rect.right - r), float(rect.bottom - r)},
-                                   {float(rect.left + r), float(rect.bottom - r)}, {float(rect.left + r), float(rect.top + r)}};
+    const D2D1_POINT_2F centres[] = {{float(rect.right - r), float(rect.top + r)},
+                                     {float(rect.right - r), float(rect.bottom - r)},
+                                     {float(rect.left + r), float(rect.bottom - r)},
+                                     {float(rect.left + r), float(rect.top + r)}};
     for (int corner = 0; corner < 4; ++corner)
         for (int i = 0; i <= 64; ++i) {
             const auto p = ContinuousCornerPoint(double(i) * 1.5707963267948966 / 64, profile.a);

@@ -93,8 +93,7 @@ inline UINT_PTR AppBarMessage(DWORD message, APPBARDATA& abd)
     data.dwSourceProcessId = GetCurrentProcessId();
     COPYDATASTRUCT cds{0, sizeof(data), &data};
     DWORD_PTR result = 0;
-    if (!SendMessageTimeoutW(shell, WM_COPYDATA, reinterpret_cast<WPARAM>(abd.hWnd), reinterpret_cast<LPARAM>(&cds),
-                             SMTO_ABORTIFHUNG, 4000, &result))
+    if (!SendMessageTimeoutW(shell, WM_COPYDATA, reinterpret_cast<WPARAM>(abd.hWnd), reinterpret_cast<LPARAM>(&cds), SMTO_ABORTIFHUNG, 4000, &result))
         return 0;
     return result;
 }

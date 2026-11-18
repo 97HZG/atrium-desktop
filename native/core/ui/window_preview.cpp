@@ -99,8 +99,7 @@ void WindowPreview::SetWindows(const std::vector<HWND>& windows)
         RECT win{}, frame{};
         GetWindowRect(c.window, &win);
         c.sourceRect = RECT{0, 0, c.source.cx, c.source.cy};
-        if (!IsIconic(c.window) && SUCCEEDED(DwmGetWindowAttribute(c.window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) &&
-            win.right > win.left) {
+        if (!IsIconic(c.window) && SUCCEEDED(DwmGetWindowAttribute(c.window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) && win.right > win.left) {
             // The source size is in the window's own (physical) px, as the rectangles are.
             c.sourceRect = RECT{frame.left - win.left, frame.top - win.top, frame.right - win.left, frame.bottom - win.top};
             c.sourceRect.right = std::min<LONG>(c.sourceRect.right, c.source.cx);

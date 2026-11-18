@@ -72,7 +72,10 @@ constexpr UINT kPointerMs = 50;
 constexpr DWORD kLeaveMs = 500;       // a revealed bar goes down this long after the pointer left it
 
 std::map<HWINEVENTHOOK, Bar*> g_guards; // each display has its own stacking guard
-struct CaptureWindows { HWND visual, input; bool visible; };
+struct CaptureWindows {
+    HWND visual, input;
+    bool visible;
+};
 std::map<Bar*, CaptureWindows> g_capturePolicies; // UI-thread only
 
 void ApplyCapturePolicies()
@@ -90,10 +93,22 @@ void ApplyCapturePolicies()
 // surfaces, input method windows.
 bool IgnoredCover(HWND w)
 {
-    static const wchar_t* const kClasses[] = {L"#32768", L"tooltips_class32", L"Shell_SecondaryTrayWnd", L"NotifyIconOverflowWindow",
-                                              L"TopLevelWindowForOverflowXamlIsland", L"Xaml_WindowedPopupClass", L"XamlExplorerHostIslandWindow",
-                                              L"Windows.UI.Core.CoreWindow", L"SysShadow", L"IME", L"MSCTFIME UI", L"ForegroundStaging",
-                                              L"MultitaskingViewFrame", L"Shell_InputSwitchTopLevelWindow", L"Progman", L"WorkerW"};
+    static const wchar_t* const kClasses[] = {L"#32768",
+                                              L"tooltips_class32",
+                                              L"Shell_SecondaryTrayWnd",
+                                              L"NotifyIconOverflowWindow",
+                                              L"TopLevelWindowForOverflowXamlIsland",
+                                              L"Xaml_WindowedPopupClass",
+                                              L"XamlExplorerHostIslandWindow",
+                                              L"Windows.UI.Core.CoreWindow",
+                                              L"SysShadow",
+                                              L"IME",
+                                              L"MSCTFIME UI",
+                                              L"ForegroundStaging",
+                                              L"MultitaskingViewFrame",
+                                              L"Shell_InputSwitchTopLevelWindow",
+                                              L"Progman",
+                                              L"WorkerW"};
     wchar_t cls[96] = {};
     GetClassNameW(w, cls, 96);
     for (const wchar_t* c : kClasses)
@@ -216,7 +231,6 @@ void ClockStrings(std::wstring& time, std::wstring& date, bool seconds)
     date = d;
 }
 
-
 // Widest rendering of a clock string: every digit replaced by the widest digit.
 std::wstring WidestDigits(std::wstring s)
 {
@@ -287,7 +301,7 @@ struct BarDropTarget : winrt::implements<BarDropTarget, IDropTarget> {
         if (FAILED(data->GetData(&fe, &sm)))
             return S_OK;
         std::vector<std::wstring> paths;
-        if (auto drop = static_cast<HDROP>(GlobalLock(sm.hGlobal))) {
+        if (auto* drop = static_cast<HDROP>(GlobalLock(sm.hGlobal))) {
             UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
             for (UINT i = 0; i < count && i < 64; ++i) {
                 std::wstring p(DragQueryFileW(drop, i, nullptr, 0) + 1, L'\0');
@@ -312,12 +326,12 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display) : debug
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory3), reinterpret_cast<IUnknown**>(dwrite_.put()));
 
     // Visual: never hit-tested (layered + transparent), no redirection bitmap.
-    visual_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_LAYERED,
-                              kVisualClass, L"Atrium Bar", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
+    visual_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_LAYERED, kVisualClass,
+                              L"Atrium Bar", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
     SetLayeredWindowAttributes(visual_, 0, 255, LWA_ALPHA);
     // Input: draws nothing, so it is invisible; its window region is the shape.
-    input_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP, kInputClass,
-                             L"Atrium Bar Input", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
+    input_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP, kInputClass, L"Atrium Bar Input", WS_POPUP, 0, 0,
+                             1, 1, nullptr, nullptr, instance, nullptr);
     SetWindowLongPtrW(input_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     SetWindowLongPtrW(input_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&Bar::InputProc));
     SetWindowLongPtrW(visual_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -347,8 +361,8 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display) : debug
         if (c.panel)
             c.Callout(bounds, std::min(16.f, tooltipSize_.height / 2), tooltipTailX_, kTooltipTailHalfW, edge_ == BarEdge::Bottom ? kTooltipTailH : 0,
                       kTooltipTailInset, c.theme.panel);
-        c.Text(tooltipText_, D2D1::RectF(kTooltipPadX, kTooltipPadY, bounds.right - kTooltipPadX, bounds.bottom - kTooltipPadY),
-               kTooltipFont, c.theme.text, DWRITE_FONT_WEIGHT_MEDIUM, 1);
+        c.Text(tooltipText_, D2D1::RectF(kTooltipPadX, kTooltipPadY, bounds.right - kTooltipPadX, bounds.bottom - kTooltipPadY), kTooltipFont, c.theme.text,
+               DWRITE_FONT_WEIGHT_MEDIUM, 1);
     };
 
     // Drag and drop needs OLE on this (STA) thread; balanced in the destructor.
@@ -362,10 +376,10 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display) : debug
     }
 
     // Stacking guard: raised again when covered, hidden behind full-screen apps.
-    hooks_[0] = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, &Bar::WinEvent, 0, 0,
-                                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    hooks_[1] = SetWinEventHook(EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND, nullptr, &Bar::WinEvent, 0, 0,
-                                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    hooks_[0] =
+        SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, &Bar::WinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    hooks_[1] =
+        SetWinEventHook(EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND, nullptr, &Bar::WinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     // Maximizing, restoring and entering full screen move the window without a move-size loop.
     hooks_[2] = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, &Bar::WinEvent, 0, 0,
                                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
@@ -884,8 +898,8 @@ void Bar::RefreshDisplays(bool workAreaOnly)
     std::vector<DisplayInfo> before = std::move(displays_);
     displays_ = ConnectedDisplays();
     WatchDisplaysIfNeeded();
-    const bool same = workAreaOnly && std::equal(before.begin(), before.end(), displays_.begin(), displays_.end(),
-        [](const DisplayInfo& a, const DisplayInfo& b) {
+    const bool same =
+        workAreaOnly && std::equal(before.begin(), before.end(), displays_.begin(), displays_.end(), [](const DisplayInfo& a, const DisplayInfo& b) {
             return a.monitor == b.monitor && a.id == b.id && EqualRect(&a.bounds, &b.bounds) && a.primary == b.primary;
         });
     if (!same)
@@ -900,8 +914,8 @@ void Bar::RefreshDisplays(bool workAreaOnly)
 void Bar::WatchDisplays()
 {
     // Never move a Dock while its icons, a file drop, or a popup are being used.
-    if (!visible_ || dragging_ || pressedLeft_ || !fileHoverKey_.empty() || (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
-        (keepShown && keepShown()) || (previewOpen && previewOpen())) {
+    if (!visible_ || dragging_ || pressedLeft_ || !fileHoverKey_.empty() || (GetAsyncKeyState(VK_LBUTTON) & 0x8000) || (keepShown && keepShown()) ||
+        (previewOpen && previewOpen())) {
         summonMonitor_ = nullptr;
         return;
     }
@@ -972,15 +986,17 @@ void Bar::SetVisible(bool visible)
 
 void Bar::Relayout()
 {
-    const std::wstring id = !displayOverride_.empty() ? displayOverride_ : settings_.dockDisplayMode == L"fixed" ? settings_.dockDisplay :
-                            settings_.dockDisplayMode == L"follow" ? activeDisplay_ : std::wstring();
+    const std::wstring id = !displayOverride_.empty()              ? displayOverride_ :
+                            settings_.dockDisplayMode == L"fixed"  ? settings_.dockDisplay :
+                            settings_.dockDisplayMode == L"follow" ? activeDisplay_ :
+                                                                     std::wstring();
     HMONITOR mon = ResolveDisplay(displays_, id);
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(mon, &mi);
     const bool primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
     filterTasks_ = FilterTasksOnDisplay(settings_.taskbarApps, primary);
     items_ = TaskItemsForDisplay(allItems_, settings_.taskbarApps, primary, mon, GetAncestor(GetForegroundWindow(), GA_ROOTOWNER),
-        [](HWND window) { return MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST); });
+                                 [](HWND window) { return MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST); });
     UINT dpiX = 96, dpiY = 96;
     GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
     const float s = float(dpiX) / 96.f;
@@ -1459,8 +1475,7 @@ bool Bar::MonitorCoveredByApp() const
             continue; // windows on another virtual desktop do not cover this one
         wchar_t cls[64] = {};
         GetClassNameW(window, cls, 64);
-        if (wcscmp(cls, L"Shell_TrayWnd") == 0 || wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0 ||
-            wcscmp(cls, L"Progman") == 0 || wcscmp(cls, L"WorkerW") == 0)
+        if (wcscmp(cls, L"Shell_TrayWnd") == 0 || wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0 || wcscmp(cls, L"Progman") == 0 || wcscmp(cls, L"WorkerW") == 0)
             continue;
         RECT frame{};
         if (!GetWindowRect(window, &frame))
@@ -1859,7 +1874,7 @@ void Bar::ShowTooltip()
     layout->GetMetrics(&metrics);
     tooltipText_ = std::move(text);
     tooltipSize_ = D2D1::SizeF(std::min(maxTextW, std::ceil(metrics.widthIncludingTrailingWhitespace / scale_)) + 2 * kTooltipPadX,
-                              std::max(kTooltipMinH, std::ceil(metrics.height / scale_) + 2 * kTooltipPadY));
+                               std::max(kTooltipMinH, std::ceil(metrics.height / scale_) + 2 * kTooltipPadY));
     int w = Px(tooltipSize_.width, scale_), h = Px(tooltipSize_.height, scale_);
     int minX = int(mi.rcWork.left) + margin, maxX = std::max(minX, int(mi.rcWork.right) - margin - w);
     int minY = int(mi.rcWork.top) + margin, maxY = std::max(minY, int(mi.rcWork.bottom) - margin - h);
@@ -2056,8 +2071,7 @@ bool Bar::RenderSession()
         if (!capture) {
             duplicationFailed_ = true;
             duplicationRetryAt_ = GetTickCount64() + 30000;
-            Log(L"render: desktop duplication unavailable (0x%08X); Windows.Graphics.Capture, Atrium kept out of screenshots",
-                static_cast<unsigned>(why));
+            Log(L"render: desktop duplication unavailable (0x%08X); Windows.Graphics.Capture, Atrium kept out of screenshots", static_cast<unsigned>(why));
         }
     }
     if (!capture) {
@@ -2178,9 +2192,8 @@ bool Bar::RenderSession()
         inkDue = false;
         // A menu or Stage Manager can remain on a different display from the Dock.
         std::erase_if(panelCaptures, [&](const auto& entry) {
-            return std::none_of(snap.panels.begin(), snap.panels.end(), [&](const GlassPanel& p) {
-                return !p.desktop && MonitorFromRect(&p.window, MONITOR_DEFAULTTONEAREST) == entry.first;
-            });
+            return std::none_of(snap.panels.begin(), snap.panels.end(),
+                                [&](const GlassPanel& p) { return !p.desktop && MonitorFromRect(&p.window, MONITOR_DEFAULTTONEAREST) == entry.first; });
         });
         for (const GlassPanel& p : snap.panels) {
             HMONITOR monitor = MonitorFromRect(&p.window, MONITOR_DEFAULTTONEAREST);
@@ -2203,7 +2216,7 @@ bool Bar::RenderSession()
             }
         }
         const bool canShow = capture->KeepsOwnWindowsOut() && std::all_of(panelCaptures.begin(), panelCaptures.end(),
-            [](const auto& entry) { return entry.second.source->KeepsOwnWindowsOut(); });
+                                                                          [](const auto& entry) { return entry.second.source->KeepsOwnWindowsOut(); });
         if (canShow != mayShowInCapture) {
             ShowOwnWindowsToCapture(canShow);
             mayShowInCapture = canShow;
@@ -2249,8 +2262,8 @@ bool Bar::RenderSession()
                     double span = ps.burstLast - ps.burstStart;
                     Log(L"render: %s glass animated %d presents in %.0f ms (%.0f fps), longest gap %.1f ms (moved %d, desktop %d, under %d, "
                         L"params %d)",
-                        title, ps.burstFrames, span, span > 0 ? 1000.0 * (ps.burstFrames - 1) / span : 0.0, ps.burstGap, ps.burstMoved,
-                        ps.burstDesktop, ps.burstReadback, ps.burstParams);
+                        title, ps.burstFrames, span, span > 0 ? 1000.0 * (ps.burstFrames - 1) / span : 0.0, ps.burstGap, ps.burstMoved, ps.burstDesktop,
+                        ps.burstReadback, ps.burstParams);
                 }
                 ps.burstFrames = 0;
                 ps.burstMoved = ps.burstDesktop = ps.burstReadback = ps.burstParams = 0;
@@ -2457,9 +2470,8 @@ bool Bar::RenderSession()
         // Pending readbacks are polled soon.
         bool owed = barOwed || inkDue || std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.owed; });
         bool paced = animating || panelsMoving || owed;
-        bool readback = renderer.ReadbackPending() || std::any_of(panels.begin(), panels.end(), [](const auto& e) {
-            return e.second.renderer && e.second.renderer->ReadbackPending();
-        });
+        bool readback = renderer.ReadbackPending() ||
+                        std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.renderer && e.second.renderer->ReadbackPending(); });
         DWORD w = WAIT_FAILED;
         if (paced && g_waitClock) {
             w = g_waitClock(3, handles, 100);
@@ -2687,8 +2699,8 @@ bool Bar::RenderSession()
             };
             decide(darkClock, snap.scene.clock);
             if (!snap.scene.items.empty())
-                decide(darkApps, D2D1::RectF(snap.scene.items.front().icon.left, snap.scene.bar.top, snap.scene.items.back().icon.right,
-                                             snap.scene.bar.bottom));
+                decide(darkApps,
+                       D2D1::RectF(snap.scene.items.front().icon.left, snap.scene.bar.top, snap.scene.items.back().icon.right, snap.scene.bar.bottom));
             dotBackdrop = std::move(*rb);
         }
         auto ink = [&](bool autoDark) { return snap.settings.textColor == L"dark" || (snap.settings.textColor == L"auto" && autoDark); };
@@ -2706,8 +2718,8 @@ bool Bar::RenderSession()
         animating |= clockInk.Moving(nowMs) || appsInk.Moving(nowMs);
         const Ink inks{clockInk.Value(nowMs), appsInk.Value(nowMs)};
         ULONGLONG now = GetTickCount64();
-        bool force = snap.generation != drawnGeneration || textKey != drawnText || dark != drawnDark || darkIcons != drawnDarkIcons ||
-                     animating || barOwed || now - lastPresent > kStaleMs;
+        bool force = snap.generation != drawnGeneration || textKey != drawnText || dark != drawnDark || darkIcons != drawnDarkIcons || animating || barOwed ||
+                     now - lastPresent > kStaleMs;
         if (!changed && !force) {
             ++skipped; // echo of our own present, or nothing new under the glass
             if (hadBackdrop)
@@ -2736,12 +2748,10 @@ bool Bar::RenderSession()
         params.fromArea =
             EdgeFrame{snap.scene.edge, D2D1::RectF(0, 0, float(snap.window.right - snap.window.left), float(snap.window.bottom - snap.window.top))}
                 .FromAreaMatrix();
-        bool ok = renderer.Present(params,
-                                   [&](ID2D1DeviceContext2* d2d) {
-                                       painter.Draw(d2d, snap.scene, inks, time, date,
-                                                    std::to_wstring(snap.generation) + textKey + (dark ? L"d" : L"l") + (darkIcons ? L"d" : L"l"),
-                                                    animating);
-                                   });
+        bool ok = renderer.Present(params, [&](ID2D1DeviceContext2* d2d) {
+            painter.Draw(d2d, snap.scene, inks, time, date, std::to_wstring(snap.generation) + textKey + (dark ? L"d" : L"l") + (darkIcons ? L"d" : L"l"),
+                         animating);
+        });
         if (!ok) {
             Log(L"render: device lost");
             return true;

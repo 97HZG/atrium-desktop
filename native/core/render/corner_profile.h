@@ -16,12 +16,14 @@ inline CornerProfile CornerFor(float width, float height, float radius)
     const float half = std::max(0.f, std::min(width, height) * 0.5f);
     radius = std::clamp(radius, 0.f, half);
     const float reach = std::min(radius * 1.6f, half);
-    if (reach <= 0) return {};
+    if (reach <= 0)
+        return {};
     // Figma's iOS reference extends the transition by 60%. Keep the same
     // 45-degree inset as R, tapering the extension when the sides run out.
     const float v = 1 - 0.2928932188134525f * radius / reach;
     const float v2 = v * v;
-    if (width == height && radius == half) return {reach, 0}; // a whole circle has no straight joins
+    if (width == height && radius == half)
+        return {reach, 0}; // a whole circle has no straight joins
     return {reach, std::max(0.02f, (2 * v2 * v2 - v2) / (1 - v2))};
 }
 
@@ -40,7 +42,8 @@ inline float CornerDF(float t, float a)
 // No fitted path, circle fallback, or iterated radial solution defines the edge.
 inline float CornerEdge(float qx, float qy, CornerProfile p)
 {
-    if (p.reach <= 0 || std::min(qx, qy) <= 0) return std::max(qx, qy) - p.reach;
+    if (p.reach <= 0 || std::min(qx, qy) <= 0)
+        return std::max(qx, qy) - p.reach;
     const float x = qx / p.reach, y = qy / p.reach;
     const float f = CornerF(x, p.a) + CornerF(y, p.a) - 1;
     return f * p.reach / std::max(std::hypot(CornerDF(x, p.a), CornerDF(y, p.a)), 1e-12f);

@@ -33,8 +33,7 @@ enum class PointerClick { sent, unavailable, cancelled };
 
 // Desktop supplies Win32/UIA in production and an isolated desktop in tests.
 // Returning cancelled must not fall through to another invocation route.
-template<class Desktop>
-PointerClick RightClick(Desktop& desktop)
+template<class Desktop> PointerClick RightClick(Desktop& desktop)
 {
     POINT original{}, target{};
     if (!desktop.Cursor(original) || desktop.Interacting())

@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using Microsoft.UI;
-using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
@@ -29,15 +28,21 @@ internal sealed class BarFace
     private readonly Canvas _canvas;
     private readonly Canvas _logo = new() { IsHitTestVisible = false };
     private readonly Rectangle[] _logoPanes = new Rectangle[4];
-    private readonly List<Image> _icons = new();
-    private readonly List<Ellipse> _dots = new();
+    private readonly List<Image> _icons = [];
+    private readonly List<Ellipse> _dots = [];
     private readonly Border _plate = new() { IsHitTestVisible = false };
     private readonly Rectangle _sep = new() { IsHitTestVisible = false }, _desk = new() { IsHitTestVisible = false };
     private readonly FontIcon _tray = Glyph("\uE70E"), _bell = Glyph("\uEA8F");
     private readonly TextBlock _ime = Ime(), _imePrev = Ime();
     private readonly Border _badge = new() { IsHitTestVisible = false, Background = new SolidColorBrush(Color.FromArgb(255, 10, 133, 255)) };
-    private readonly TextBlock _badgeText = new() { Text = "3", Foreground = new SolidColorBrush(Colors.White), HorizontalAlignment = HorizontalAlignment.Center,
-                                                    VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center };
+    private readonly TextBlock _badgeText = new()
+    {
+        Text = "3",
+        Foreground = new SolidColorBrush(Colors.White),
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+        TextAlignment = TextAlignment.Center
+    };
     private readonly StatusGlyph _status = new();
     private readonly StatusIcons _statusIcons = new();
     private readonly TextBlock _time = Clock(true), _date = Clock(false), _timeHalo = Clock(true), _dateHalo = Clock(false);
@@ -105,14 +110,22 @@ internal sealed class BarFace
 
     private static TextBlock Ime() => new()
     {
-        Text = "中", TextAlignment = TextAlignment.Center, IsHitTestVisible = false, IsTextScaleFactorEnabled = false,
-        TextWrapping = TextWrapping.NoWrap, TextLineBounds = TextLineBounds.Tight, FontFamily = (FontFamily)Application.Current.Resources["LightFont"],
+        Text = "中",
+        TextAlignment = TextAlignment.Center,
+        IsHitTestVisible = false,
+        IsTextScaleFactorEnabled = false,
+        TextWrapping = TextWrapping.NoWrap,
+        TextLineBounds = TextLineBounds.Tight,
+        FontFamily = (FontFamily)Application.Current.Resources["LightFont"],
     };
 
     private static FontIcon Glyph(string glyph) => new()
     {
-        Glyph = glyph, IsHitTestVisible = false, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
-        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+        Glyph = glyph,
+        IsHitTestVisible = false,
+        FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
     };
 
     // Time: Semibold; date: the regular face (MiSans Medium). Figures tabular.
@@ -120,9 +133,13 @@ internal sealed class BarFace
     {
         var t = new TextBlock
         {
-            TextAlignment = TextAlignment.Center, IsHitTestVisible = false, IsTextScaleFactorEnabled = false, TextWrapping = TextWrapping.NoWrap,
+            TextAlignment = TextAlignment.Center,
+            IsHitTestVisible = false,
+            IsTextScaleFactorEnabled = false,
+            TextWrapping = TextWrapping.NoWrap,
             FontFamily = (FontFamily)Application.Current.Resources[time ? "TitleFont" : "TextFont"],
-            LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Text = time ? "10:24" : "2026/11/3",
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+            Text = time ? "10:24" : "2026/11/3",
         };
         Typography.SetNumeralAlignment(t, FontNumeralAlignment.Tabular);
         return t;
@@ -199,7 +216,7 @@ internal sealed class BarFace
             for (int i = 0; i < 4; i++)
             {
                 var part = _logoPanes[i];
-                double px = (i % 2) * (pane + gap), py = (i / 2) * (pane + gap);
+                double px = i % 2 * (pane + gap), py = i / 2 * (pane + gap);
                 part.Width = part.Height = pane;
                 part.RadiusX = part.RadiusY = r;
                 var gradient = (LinearGradientBrush)ContinuousCorners.Original(part)!;
@@ -335,7 +352,7 @@ internal sealed class BarFace
 // centred paragraphs), so marks sit where the core's do.
 internal static class TextMetrics
 {
-    private static readonly Dictionary<(string, double, int), double> Lines = new();
+    private static readonly Dictionary<(string, double, int), double> Lines = [];
 
     public static double Line(TextBlock t)
     {
@@ -383,7 +400,10 @@ internal sealed class StatusGlyph : Canvas
 
     internal static TextBlock Symbol() => new()
     {
-        IsHitTestVisible = false, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), TextAlignment = TextAlignment.Center, IsTextScaleFactorEnabled = false,
+        IsHitTestVisible = false,
+        FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+        TextAlignment = TextAlignment.Center,
+        IsTextScaleFactorEnabled = false,
     };
 
     // A glyph centred in the w x w square at (x, y).
@@ -394,8 +414,8 @@ internal sealed class StatusGlyph : Canvas
         t.FontSize = Math.Max(1, size);
         t.Width = w;
         t.Foreground = new SolidColorBrush(color);
-        Canvas.SetLeft(t, x);
-        Canvas.SetTop(t, y + (w - TextMetrics.Line(t)) / 2);
+        SetLeft(t, x);
+        SetTop(t, y + (w - TextMetrics.Line(t)) / 2);
     }
 
     internal static Point At(double cx, double cy, double r, double deg) =>
@@ -416,7 +436,7 @@ internal sealed class StatusGlyph : Canvas
         s.Muted || s.Volume == 0 ? "\uE74F" : s.Volume < 34 ? "\uE993" : s.Volume < 67 ? "\uE994" : "\uE995";
 
     // The bolt (BarPainter's chargingBolt_): six points in a unit square.
-    internal static readonly (double X, double Y)[] BoltPoints = { (0.18, -0.5), (-0.4, 0.08), (-0.02, 0.08), (-0.18, 0.5), (0.4, -0.08), (0.02, -0.08) };
+    internal static readonly (double X, double Y)[] BoltPoints = [(0.18, -0.5), (-0.4, 0.08), (-0.02, 0.08), (-0.18, 0.5), (0.4, -0.08), (0.02, -0.08)];
 
     public void Update(double h, Color ink, StatusLook s)
     {
@@ -429,7 +449,10 @@ internal sealed class StatusGlyph : Canvas
             _fan.Visibility = !wired && alpha > 0.003 ? Visibility.Visible : Visibility.Collapsed;
             _wired.Visibility = Visibility.Collapsed;
             if (alpha <= 0.003) return;
-            if (wired) Place(_wired, "\uE839", cx - size, cy - size / 2, 2 * size, size * 0.62, Fade(ink, alpha));
+            if (wired)
+            {
+                Place(_wired, "\uE839", cx - size, cy - size / 2, 2 * size, size * 0.62, Fade(ink, alpha));
+            }
             else
             {
                 int lit = !s.Connected ? -1 : s.Lit;
@@ -441,7 +464,7 @@ internal sealed class StatusGlyph : Canvas
         double rad = h * 0.44, stroke = Math.Max(0.75, h * 0.07);
         double shown = Math.Min(1, s.VolumeMix + s.BrightMix);
         double mix = s.Battery ? s.VolumeMix : 1 - s.BrightMix; // 1: the ring shows the volume
-        Color level = ink;
+        var level = ink;
         if (s.Low)
         {
             var red = Red(ink);
@@ -522,7 +545,7 @@ internal sealed class StatusIcons : Canvas
     private readonly WifiFan _fan = new();
     private readonly TextBlock _wired = StatusGlyph.Symbol();
     private readonly Path _cone = new() { IsHitTestVisible = false, StrokeLineJoin = PenLineJoin.Round };
-    private readonly Path[] _waves = { StatusGlyph.Stroke(), StatusGlyph.Stroke(), StatusGlyph.Stroke() };
+    private readonly Path[] _waves = [StatusGlyph.Stroke(), StatusGlyph.Stroke(), StatusGlyph.Stroke()];
     private readonly Path _cross = StatusGlyph.Stroke();
     private readonly Path _body = new() { IsHitTestVisible = false }, _nub = new() { IsHitTestVisible = false }, _fill = new() { IsHitTestVisible = false };
 
@@ -551,7 +574,10 @@ internal sealed class StatusIcons : Canvas
         bool wired = s.Connected && !s.Wifi;
         _fan.Visibility = wired ? Visibility.Collapsed : Visibility.Visible;
         _wired.Visibility = wired ? Visibility.Visible : Visibility.Collapsed;
-        if (wired) StatusGlyph.Place(_wired, "\uE839", x - h, cy - h / 2, netW + 2 * h, h * 0.62, ink);
+        if (wired)
+        {
+            StatusGlyph.Place(_wired, "\uE839", x - h, cy - h / 2, netW + 2 * h, h * 0.62, ink);
+        }
         else
         {
             int lit = !s.Connected ? -1 : s.Lit;
@@ -560,9 +586,12 @@ internal sealed class StatusIcons : Canvas
         x += netW + gap;
 
         // The speaker: a cone, a wave for each third of the volume (the others faint); muted, a cross.
-        _cone.Data = new PathGeometry { Figures = { Figure(new[] {
+        _cone.Data = new PathGeometry
+        {
+            Figures = { Figure(new[] {
             new Point(x, cy - 0.10 * h), new Point(x + 0.11 * h, cy - 0.10 * h), new Point(x + 0.25 * h, cy - 0.22 * h),
-            new Point(x + 0.25 * h, cy + 0.22 * h), new Point(x + 0.11 * h, cy + 0.10 * h), new Point(x, cy + 0.10 * h) }) } };
+            new Point(x + 0.25 * h, cy + 0.22 * h), new Point(x + 0.11 * h, cy + 0.10 * h), new Point(x, cy + 0.10 * h) }) }
+        };
         _cone.Fill = _cone.Stroke = new SolidColorBrush(StatusGlyph.Fade(ink, s.Muted ? 0.55 : 1));
         _cone.StrokeThickness = stroke * 0.6;
         double ox = x + 0.25 * h;

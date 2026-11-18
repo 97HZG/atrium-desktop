@@ -96,8 +96,11 @@ void WatchVolume(HWND hwnd, UINT msg)
 }
 
 SystemStatusReader::SystemStatusReader(HWND notify, UINT readyMessage, UINT volumeMessage)
-    : notify_(notify), readyMessage_(readyMessage), volumeMessage_(volumeMessage),
-      quit_(CreateEventW(nullptr, TRUE, FALSE, nullptr)), wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+    : notify_(notify),
+      readyMessage_(readyMessage),
+      volumeMessage_(volumeMessage),
+      quit_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
+      wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
       thread_([this] { Run(); })
 {
 }

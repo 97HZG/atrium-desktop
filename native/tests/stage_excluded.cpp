@@ -9,7 +9,8 @@ int main()
 {
     int failures = 0;
     auto require = [](bool condition, const char* message) {
-        if (!condition) throw std::runtime_error(message);
+        if (!condition)
+            throw std::runtime_error(message);
     };
     auto run = [&](const char* name, auto test) {
         try {
@@ -25,20 +26,16 @@ int main()
         require(StageAppExcluded({L"wechat.exe"}, L"d:\\apps\\wechat\\wechat.exe"), "the file name must match a full app key");
         require(StageAppExcluded({L"wechat.exe"}, L"c:\\program files\\wechat\\wechat.exe"), "another install path must match too");
     });
-    run("AUMIDs match by prefix", [&] {
-        require(StageAppExcluded({L"microsoft.screensketch_"}, L"microsoft.screensketch_8wekyb3d8bbwe!app"), "a package prefix must match its AUMID");
-    });
+    run("AUMIDs match by prefix",
+        [&] { require(StageAppExcluded({L"microsoft.screensketch_"}, L"microsoft.screensketch_8wekyb3d8bbwe!app"), "a package prefix must match its AUMID"); });
     run("window keys match their app", [&] {
         require(StageAppExcluded({L"wechat.exe"}, L"d:\\apps\\wechat\\wechat.exe|2a4"), "a per-window key must match by its app key");
         require(StageAppExcluded({L"microsoft.screensketch_"}, L"microsoft.screensketch_8wekyb3d8bbwe!app|2a4"),
-            "a packaged window key must match its package prefix");
+                "a packaged window key must match its package prefix");
     });
-    run("case does not matter", [&] {
-        require(StageAppExcluded({L"WeChat.EXE"}, L"D:\\Apps\\WeChat\\wechat.exe"), "entries and app keys compare without case");
-    });
-    run("a full path entry matches exactly", [&] {
-        require(StageAppExcluded({L"d:\\apps\\tool.exe"}, L"d:\\apps\\tool.exe"), "a full key must match");
-    });
+    run("case does not matter",
+        [&] { require(StageAppExcluded({L"WeChat.EXE"}, L"D:\\Apps\\WeChat\\wechat.exe"), "entries and app keys compare without case"); });
+    run("a full path entry matches exactly", [&] { require(StageAppExcluded({L"d:\\apps\\tool.exe"}, L"d:\\apps\\tool.exe"), "a full key must match"); });
     run("unrelated apps are not excluded", [&] {
         require(!StageAppExcluded({L"wechat.exe"}, L"d:\\apps\\notepad.exe"), "no substring or unrelated match");
         require(!StageAppExcluded({}, L"d:\\apps\\wechat.exe"), "an empty list excludes nothing");
@@ -52,8 +49,7 @@ int main()
         require(!StageAppExcluded(defaults, L"d:\\apps\\wechat\\wechat.exe"), "other screenshot tools are opt-in");
         require(!StageAppExcluded(defaults, L"c:\\windows\\notepad.exe"), "ordinary apps stay managed");
     });
-    run("non-ASCII letters compare as Windows compares paths", [&] {
-        require(StageAppExcluded({L"C:\\Apps\\\u00c9diteur\\APP.exe"}, L"c:\\apps\\\u00e9diteur\\app.exe"), "É and é are one letter in an app key");
-    });
+    run("non-ASCII letters compare as Windows compares paths",
+        [&] { require(StageAppExcluded({L"C:\\Apps\\\u00c9diteur\\APP.exe"}, L"c:\\apps\\\u00e9diteur\\app.exe"), "É and é are one letter in an app key"); });
     return failures ? 1 : 0;
 }

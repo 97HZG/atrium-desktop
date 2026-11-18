@@ -1,8 +1,4 @@
-#nullable enable
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -28,7 +24,7 @@ public static class LocalizationValidation
             tokens.Add(token.Value);
             i += token.Length - 1;
         }
-        return tokens.ToArray();
+        return [.. tokens];
     }
 
     private static readonly Regex NativePattern = new(@"\G%[-+ #0]*(?:\*|[0-9]+)?(?:\.(?:\*|[0-9]*))?(?:I32|I64|hh|ll|[hljztLIw])?[diouxXfFeEgGaAcCsSp]",
@@ -36,8 +32,8 @@ public static class LocalizationValidation
 
     public static bool NativeMatches(string source, string translated)
     {
-        var expected = NativeTokens(source);
-        var actual = NativeTokens(translated);
+        string[]? expected = NativeTokens(source);
+        string[]? actual = NativeTokens(translated);
         return expected != null && actual != null && expected.SequenceEqual(actual, StringComparer.Ordinal);
     }
 
@@ -53,26 +49,26 @@ public static class LocalizationValidation
             int field = i;
             int begin = ++i;
             while (i < text.Length && text[i] is >= '0' and <= '9') i++;
-            if (!int.TryParse(text.AsSpan(begin, i - begin), NumberStyles.None, CultureInfo.InvariantCulture, out int index)) return null;
+            if (!int.TryParse(text.AsSpan(begin, i - begin), NumberStyles.None, CultureInfo.InvariantCulture, out _)) return null;
             while (i < text.Length && text[i] != '}') i++;
             tokens.Add(text.Substring(field, i - field + 1));
         }
         // Reordering is safe; new alignment/precision/format specifiers are not.
         tokens.Sort(StringComparer.Ordinal);
-        return tokens.ToArray();
+        return [.. tokens];
     }
 
     public static bool ManagedMatches(string source, string translated)
     {
-        var expected = ManagedTokens(source);
-        var actual = ManagedTokens(translated);
+        string[]? expected = ManagedTokens(source);
+        string[]? actual = ManagedTokens(translated);
         return expected != null && actual != null && expected.SequenceEqual(actual);
     }
 
     public static bool CountMatches(string source, string translated)
     {
         // TrPlural and Loc.Plural share the {0}-only, unformatted count syntax.
-        static bool Valid(string value) => Regex.Replace(value, @"\{\{|\}\}|\{0\}", "").IndexOfAny(new[] { '{', '}' }) < 0;
+        static bool Valid(string value) => Regex.Replace(value, @"\{\{|\}\}|\{0\}", "").IndexOfAny(['{', '}']) < 0;
         return Valid(source) && Valid(translated) && ManagedMatches(source, translated);
     }
 
@@ -81,7 +77,7 @@ public static class LocalizationValidation
         using var document = JsonDocument.Parse(json);
         var duplicates = new List<string>();
         FindDuplicates(document.RootElement, "$", duplicates);
-        return duplicates.ToArray();
+        return [.. duplicates];
     }
 
     private static void FindDuplicates(JsonElement value, string path, List<string> duplicates)

@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
@@ -9,8 +10,6 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
-using Windows.UI;
-using Microsoft.Graphics.Canvas.Geometry;
 
 namespace Atrium.Settings;
 
@@ -27,7 +26,10 @@ public sealed class ContinuousSurface : Grid
         nameof(Edge), typeof(Brush), typeof(ContinuousSurface), new PropertyMetadata(null,
             (owner, args) => ContinuousCorners.SetEdge(owner, (Brush?)args.NewValue)));
     public Brush? Edge { get => (Brush?)GetValue(EdgeProperty); set => SetValue(EdgeProperty, value); }
-    public ContinuousSurface() => ContinuousCorners.SetEnabled(this, true);
+    public ContinuousSurface()
+    {
+        ContinuousCorners.SetEnabled(this, true);
+    }
 }
 
 // Applies the analytic boundary as an alpha mask. Native CornerRadius / cubic
@@ -50,8 +52,8 @@ public sealed class ContinuousCorners : DependencyObject
         "ClipChildren", typeof(bool), typeof(ContinuousCorners), new PropertyMetadata(false));
     public static bool GetClipChildren(DependencyObject value) => (bool)value.GetValue(ClipChildrenProperty);
     public static void SetClipChildren(DependencyObject value, bool clip) => value.SetValue(ClipChildrenProperty, clip);
-    private static readonly ConditionalWeakTable<FrameworkElement, State> States = new();
-    private static readonly ConditionalWeakTable<Control, FocusChrome> FocusOwners = new();
+    private static readonly ConditionalWeakTable<FrameworkElement, State> States = [];
+    private static readonly ConditionalWeakTable<Control, FocusChrome> FocusOwners = [];
     private static readonly SolidColorBrush Transparent = new(Colors.Transparent);
     private static void PaintChanged(DependencyObject value, DependencyPropertyChangedEventArgs args)
     {
@@ -104,7 +106,7 @@ public sealed class ContinuousCorners : DependencyObject
         internal Brush? Background;
         private Brush? stroke;
         private readonly Brush? baseBackground, baseStroke;
-        private FocusChrome? focus;
+        private readonly FocusChrome? focus;
         private CompositionGeometricClip? nativeClip;
         private (double Width, double Height, double Radius) clipGeometry;
         internal void RefreshPaint()
@@ -150,8 +152,10 @@ public sealed class ContinuousCorners : DependencyObject
             });
             var thicknessProperty = element switch
             {
-                Border => Border.BorderThicknessProperty, Grid => Grid.BorderThicknessProperty,
-                ContentPresenter => ContentPresenter.BorderThicknessProperty, _ => Shape.StrokeThicknessProperty,
+                Border => Border.BorderThicknessProperty,
+                Grid => Grid.BorderThicknessProperty,
+                ContentPresenter => ContentPresenter.BorderThicknessProperty,
+                _ => Shape.StrokeThicknessProperty,
             };
             element.RegisterPropertyChangedCallback(thicknessProperty, (_, _) => { if (!changing) Update(); });
             element.SizeChanged += (_, _) => Update();
@@ -171,25 +175,35 @@ public sealed class ContinuousCorners : DependencyObject
 
         internal static double Radius(FrameworkElement e) => e switch
         {
-            Border b => b.CornerRadius.TopLeft, Grid p => p.CornerRadius.TopLeft,
+            Border b => b.CornerRadius.TopLeft,
+            Grid p => p.CornerRadius.TopLeft,
             ContentPresenter c => c.CornerRadius.TopLeft,
-            Rectangle r => r.RadiusX, _ => 0,
+            Rectangle r => r.RadiusX,
+            _ => 0,
         };
         internal static Brush? GetBackground(FrameworkElement e) => e switch
         {
-            Border b => b.Background, Panel p => p.Background, Control c => c.Background,
-            ContentPresenter c => c.Background, Rectangle r => r.Fill, _ => null,
+            Border b => b.Background,
+            Panel p => p.Background,
+            Control c => c.Background,
+            ContentPresenter c => c.Background,
+            Rectangle r => r.Fill,
+            _ => null,
         };
         private Thickness Thickness => element switch
         {
-            Border b => b.BorderThickness, Grid p => p.BorderThickness,
-            ContentPresenter c => c.BorderThickness, Rectangle r => new Thickness(r.StrokeThickness), _ => new Thickness(),
+            Border b => b.BorderThickness,
+            Grid p => p.BorderThickness,
+            ContentPresenter c => c.BorderThickness,
+            Rectangle r => new Thickness(r.StrokeThickness),
+            _ => new Thickness(),
         };
         private TimeSpan Transition => element switch
         {
             Border b => b.BackgroundTransition?.Duration ?? TimeSpan.Zero,
             Panel p => p.BackgroundTransition?.Duration ?? TimeSpan.Zero,
-            ContentPresenter c => c.BackgroundTransition?.Duration ?? TimeSpan.Zero, _ => TimeSpan.Zero,
+            ContentPresenter c => c.BackgroundTransition?.Duration ?? TimeSpan.Zero,
+            _ => TimeSpan.Zero,
         };
 
         private void Update()
@@ -235,7 +249,11 @@ public sealed class ContinuousCorners : DependencyObject
                     outlineVisual!.Size = new Vector2((float)element.ActualWidth, (float)element.ActualHeight);
                     outlineVisual.Opacity = 1;
                 }
-                else if (outlineVisual != null) outlineVisual.Opacity = 0;
+                else
+                {
+                    outlineVisual?.Opacity = 0;
+                }
+
                 focus?.Update(Corner);
             }
             finally { changing = false; }
@@ -250,7 +268,7 @@ public sealed class ContinuousCorners : DependencyObject
                 return;
             }
             clipGeometry = next;
-            float w = (float)next.Item1, h = (float)next.Item2;
+            float w = (float)next.ActualWidth, h = (float)next.ActualHeight;
             var p = CornerProfile.For(w, h, (float)Corner);
             // No CanvasDevice: this path is device-independent. The points are a
             // subpixel tessellation of F=0 for the platform clip. Its finite
@@ -258,6 +276,7 @@ public sealed class ContinuousCorners : DependencyObject
             using var builder = new CanvasPathBuilder(null);
             int steps = Math.Max(16, (int)Math.Ceiling(Math.PI * Math.Sqrt(p.Reach / 0.01) / 2));
             for (int corner = 0; corner < 4; ++corner)
+            {
                 for (int i = 0; i <= steps; ++i)
                 {
                     var q = p.Point(i * Math.PI / (2 * steps));
@@ -270,6 +289,8 @@ public sealed class ContinuousCorners : DependencyObject
                     };
                     if (corner == 0 && i == 0) builder.BeginFigure(point); else builder.AddLine(point);
                 }
+            }
+
             builder.EndFigure(CanvasFigureLoop.Closed);
             using var geometry = CanvasGeometry.CreatePath(builder);
             var compositor = ElementCompositionPreview.GetElementVisual(element).Compositor;
@@ -308,7 +329,7 @@ public sealed class ContinuousCorners : DependencyObject
             visual.Children.InsertAtTop(outer);
             visual.Children.InsertAtTop(inner);
             ElementCompositionPreview.SetElementChildVisual(control, visual);
-            control.RegisterPropertyChangedCallback(Control.FocusStateProperty, (_, _) => Show());
+            control.RegisterPropertyChangedCallback(UIElement.FocusStateProperty, (_, _) => Show());
             Show();
         }
         internal void Update(double radius)
@@ -427,7 +448,7 @@ public sealed class ContinuousCorners : DependencyObject
                 return;
             }
             mask.Source = color;
-            Color target = source is SolidColorBrush solid ? solid.Color : Colors.Transparent;
+            var target = source is SolidColorBrush solid ? solid.Color : Colors.Transparent;
             if (transition > TimeSpan.Zero)
             {
                 var animation = compositor.CreateColorKeyFrameAnimation();
@@ -450,8 +471,8 @@ public sealed class ContinuousCorners : DependencyObject
 
         private async Task SetMaskAsync(int ticket)
         {
-            var g = geometry;
-            float scale = (float)g.Scale, w = (float)g.W * scale, h = (float)g.H * scale, r = (float)g.R * scale, s = (float)g.Stroke * scale;
+            var (W, H, R, Stroke, Scale) = geometry;
+            float scale = (float)Scale, w = (float)W * scale, h = (float)H * scale, r = (float)R * scale, s = (float)Stroke * scale;
             var profile = CornerProfile.For(w, h, r);
             var inner = CornerProfile.For(Math.Max(0, w - 2 * s), Math.Max(0, h - 2 * s), Math.Max(0, r - s));
             var key = new MaskKey(profile, inner, s);
@@ -466,7 +487,7 @@ public sealed class ContinuousCorners : DependencyObject
     }
 
     private readonly record struct MaskKey(CornerProfile Outer, CornerProfile Inner, float Stroke);
-    private static readonly Dictionary<MaskKey, (long Bytes, Task<LoadedImageSurface> Surface)> Masks = new();
+    private static readonly Dictionary<MaskKey, (long Bytes, Task<LoadedImageSurface> Surface)> Masks = [];
     private static long maskBytes;
     private static Task<LoadedImageSurface> MaskForAsync(MaskKey key)
     {
@@ -479,17 +500,23 @@ public sealed class ContinuousCorners : DependencyObject
             maskBytes -= first.Value.Bytes;
             Masks.Remove(first.Key);
         }
-        var pixels = new byte[size * size * 4];
+        byte[] pixels = new byte[size * size * 4];
         for (int y = 0; y < size; ++y)
+        {
             for (int x = 0; x < size; ++x)
             {
                 float a = key.Outer.Coverage(x + 0.5f, y + 0.5f, size, size);
                 if (key.Stroke > 0)
+                {
                     a = Math.Max(0, a - key.Inner.Coverage(x + 0.5f - key.Stroke, y + 0.5f - key.Stroke,
                         size - 2 * key.Stroke, size - 2 * key.Stroke));
+                }
+
                 int offset = (y * size + x) * 4;
                 pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = pixels[offset + 3] = (byte)MathF.Round(a * 255);
             }
+        }
+
         var surface = LoadPixelsAsync((uint)size, (uint)size, pixels);
         Masks.Add(key, (bytes, surface));
         maskBytes += bytes;

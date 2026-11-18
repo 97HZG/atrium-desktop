@@ -20,9 +20,8 @@ namespace atrium {
 
 // Callbacks only wake the reader. Cross-process tree reads remain on its MTA
 // worker.
-class UiaChanges
-    : public winrt::implements<UiaChanges, IUIAutomationPropertyChangedEventHandler, IUIAutomationStructureChangedEventHandler> {
-    public:
+class UiaChanges : public winrt::implements<UiaChanges, IUIAutomationPropertyChangedEventHandler, IUIAutomationStructureChangedEventHandler> {
+public:
     explicit UiaChanges(HANDLE wake)
     {
         // UIA can finish an in-flight callback after unsubscription. The sink
@@ -40,14 +39,14 @@ class UiaChanges
         return S_OK;
     }
 
-    private:
+private:
     winrt::handle wake_;
 };
 
 // Scoped to one client: replacing a window releases its subscriptions before
 // the wake handle closes.
 class UiaWatch {
-    public:
+public:
     UiaWatch(IUIAutomation* uia, HANDLE wake) : uia_(uia), changes_(winrt::make_self<UiaChanges>(wake)) {}
     ~UiaWatch() { Clear(); }
     bool Contains(HWND window) const
@@ -87,7 +86,7 @@ class UiaWatch {
             }
     }
 
-    private:
+private:
     struct Root {
         HWND window;
         winrt::com_ptr<IUIAutomationElement> root;
@@ -98,14 +97,12 @@ class UiaWatch {
 };
 
 class UiaWindowWake {
-    public:
+public:
     UiaWindowWake(HANDLE wake, const wchar_t* windowClass) : wake_(wake), windowClass_(windowClass)
     {
         active_ = this;
-        show_ =
-            SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_REORDER, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-        name_ = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_VALUECHANGE, nullptr, Changed, 0, 0,
-                                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        show_ = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_REORDER, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        name_ = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_VALUECHANGE, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     }
     ~UiaWindowWake()
     {
@@ -116,14 +113,14 @@ class UiaWindowWake {
         active_ = nullptr;
     }
 
-    template <typename Processes> void SetProcesses(const Processes& processes)
+    template<typename Processes> void SetProcesses(const Processes& processes)
     {
         processes_.clear();
         for (const auto& [pid, path] : processes)
             processes_.push_back(pid);
     }
 
-    private:
+private:
     static void CALLBACK Changed(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD)
     {
         if (!active_)
@@ -170,8 +167,7 @@ inline void WaitForUiaWake(HANDLE wake, DWORD timeout)
 
 // `prepare` makes what the reader needs from the client (its conditions) and
 // returns an HRESULT.
-template <typename Prepare>
-winrt::com_ptr<IUIAutomation> CreateUia(const std::atomic<bool>& stop, HANDLE wake, const wchar_t* who, Prepare prepare)
+template<typename Prepare> winrt::com_ptr<IUIAutomation> CreateUia(const std::atomic<bool>& stop, HANDLE wake, const wchar_t* who, Prepare prepare)
 {
     for (bool logged = false; !stop; WaitForSingleObject(wake, 2000)) {
         winrt::com_ptr<IUIAutomation> uia;

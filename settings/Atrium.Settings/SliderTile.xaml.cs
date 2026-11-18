@@ -2,7 +2,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Media;
 
 namespace Atrium.Settings;
 
@@ -11,7 +10,6 @@ public sealed partial class SliderTile : UserControl
 {
     private string _unit = "";
     private double _min, _max;
-    private bool _flat;
 
     public event Action<double>? UserValueChanged;
     public event Action<bool>? Engaged;
@@ -34,10 +32,10 @@ public sealed partial class SliderTile : UserControl
     // In the inspector: a plain row, no card (lit while in use all the same).
     public bool Flat
     {
-        get => _flat;
+        get;
         set
         {
-            _flat = value;
+            field = value;
             Surface.Style = (Style)Application.Current.Resources[value ? "FlatTileStyle" : "TileStyle"];
             Surface.Background = Tokens.Brush(value ? "TransparentBrush" : "CardBrush");
         }
@@ -65,7 +63,7 @@ public sealed partial class SliderTile : UserControl
     // The tile being adjusted is lit a little (the hero shows that parameter).
     private void SetEngaged(bool on)
     {
-        Surface.Background = Tokens.Brush(on ? "TileActiveBrush" : _flat ? "TransparentBrush" : "CardBrush");
+        Surface.Background = Tokens.Brush(on ? "TileActiveBrush" : Flat ? "TransparentBrush" : "CardBrush");
         Engaged?.Invoke(on);
     }
 }

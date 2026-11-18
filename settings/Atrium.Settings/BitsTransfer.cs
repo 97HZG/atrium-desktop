@@ -18,14 +18,14 @@ internal sealed class BitsTransfer : IDisposable
     internal static BitsTransfer Create(string name)
     {
         var manager = Manager();
-        try { manager.CreateJob(name, 0, out var id, out var value); return new(id, (IJob)value); }
+        try { manager.CreateJob(name, 0, out var id, out object? value); return new(id, (IJob)value); }
         finally { Marshal.FinalReleaseComObject(manager); }
     }
 
     internal static BitsTransfer? Open(Guid id)
     {
         var manager = Manager();
-        try { manager.GetJob(ref id, out var value); return new(id, (IJob)value); }
+        try { manager.GetJob(ref id, out object? value); return new(id, (IJob)value); }
         catch (COMException e) when (e.HResult == unchecked((int)0x80200001)) { return null; }
         finally { Marshal.FinalReleaseComObject(manager); }
     }

@@ -35,10 +35,7 @@ void Settle(HoverWave& wave, const BarScene& scene)
         wave.Update(scene, 16);
 }
 
-void Move(BarScene& scene, NearHover& control, float distance)
-{
-    control.Sample(scene, {scene.pointerX, scene.bar.top - distance * scene.scale}, 40, 4, true);
-}
+void Move(BarScene& scene, NearHover& control, float distance) { control.Sample(scene, {scene.pointerX, scene.bar.top - distance * scene.scale}, 40, 4, true); }
 
 void CheckSmallLeave()
 {
@@ -49,21 +46,20 @@ void CheckSmallLeave()
         Move(scene, control, -20);
         Settle(wave, scene);
         Require(wave.Height(scene.magnifyLift) == 20 * scale && wave.Scale(scene.pointerX, 40 * scale) > 1.6f,
-            "ordinary hover establishes real glass rise and icon magnification before departure");
+                "ordinary hover establishes real glass rise and icon magnification before departure");
         Move(scene, control, 4);
         Settle(wave, scene);
-        Require(wave.Height(scene.magnifyLift) == 20 * scale,
-            "the geometry remains raised through the four-DIP leave boundary");
+        Require(wave.Height(scene.magnifyLift) == 20 * scale, "the geometry remains raised through the four-DIP leave boundary");
         Move(scene, control, 5);
         Require(scene.pointerX >= 0 && !scene.nearRise && !scene.nearMagnify,
-            "departure clears the early response while the expanded input region still has the pointer");
+                "departure clears the early response while the expanded input region still has the pointer");
         wave.Update(scene, 16);
         Require(wave.Height(scene.magnifyLift) < 20 * scale && wave.Scale(scene.pointerX, 40 * scale) < 1.6f,
-            "leave four must start collapsing real geometry at five DIP despite ordinary hover input");
+                "leave four must start collapsing real geometry at five DIP despite ordinary hover input");
         Settle(wave, scene);
-        Require(wave.Height(scene.magnifyLift) == 0 && wave.Scale(scene.pointerX, 40 * scale) == 1 &&
-                wave.MapX(20 * scale) == 20 * scale && wave.MapX(420 * scale) == 420 * scale,
-            "released glass and icons return to baseline without waiting for the expanded input region to end");
+        Require(wave.Height(scene.magnifyLift) == 0 && wave.Scale(scene.pointerX, 40 * scale) == 1 && wave.MapX(20 * scale) == 20 * scale &&
+                    wave.MapX(420 * scale) == 420 * scale,
+                "released glass and icons return to baseline without waiting for the expanded input region to end");
     }
 }
 
@@ -76,12 +72,10 @@ void CheckMoveBeforeTick()
     Settle(wave, scene);
     control.Sample(scene, {120, 196}, 40, 4, true);
     wave.Update(scene, 16); // render the move before the next timer tick
-    Require(wave.Height(20) == 20 && wave.Scale(120, 40) > 1.6f,
-        "a move still within leave four must publish near flags with its new Y before rendering");
+    Require(wave.Height(20) == 20 && wave.Scale(120, 40) > 1.6f, "a move still within leave four must publish near flags with its new Y before rendering");
     control.Sample(scene, {120, 195}, 40, 4, true);
     wave.Update(scene, 16);
-    Require(wave.Height(20) < 20,
-        "the same coherent move sampling must release immediately beyond leave four");
+    Require(wave.Height(20) < 20, "the same coherent move sampling must release immediately beyond leave four");
 }
 
 void CheckIndependentChannels()
@@ -96,10 +90,9 @@ void CheckIndependentChannels()
         Settle(wave, scene);
         Move(scene, control, 5);
         Settle(wave, scene);
-        Require(wave.Height(20) == (releaseRise ? 0.f : 20.f),
-            "the rise channel uses its own early-response switch rather than the icon switch");
+        Require(wave.Height(20) == (releaseRise ? 0.f : 20.f), "the rise channel uses its own early-response switch rather than the icon switch");
         Require(releaseRise ? wave.Scale(120, 40) > 1.6f : wave.Scale(120, 40) == 1,
-            "the magnification channel releases independently while ordinary hover still drives the other channel");
+                "the magnification channel releases independently while ordinary hover still drives the other channel");
     }
 }
 
@@ -110,14 +103,12 @@ void CheckOrdinaryHover()
     scene.pointerY = 195;
     HoverWave wave;
     Settle(wave, scene);
-    Require(wave.Height(20) == 20 && wave.Scale(120, 40) > 1.6f,
-        "with early response disabled the expanded region keeps ordinary hover working");
+    Require(wave.Height(20) == 20 && wave.Scale(120, 40) > 1.6f, "with early response disabled the expanded region keeps ordinary hover working");
     Require(std::fabs(wave.MapX(20) + 8) < 0.001f && std::fabs(wave.MapX(420) - 448) < 0.001f,
-        "the shared production wave still maps the glass edges to the expected stretched positions");
+            "the shared production wave still maps the glass edges to the expected stretched positions");
     scene.pointerX = -1;
     Settle(wave, scene);
-    Require(wave.Height(20) == 0 && wave.Scale(120, 40) == 1,
-        "ordinary hover collapses when the input pointer leaves");
+    Require(wave.Height(20) == 0 && wave.Scale(120, 40) == 1, "ordinary hover collapses when the input pointer leaves");
 }
 
 void CheckEarlyOnly()
@@ -128,13 +119,11 @@ void CheckEarlyOnly()
     scene.nearRise = scene.nearMagnify = true;
     HoverWave wave;
     Settle(wave, scene);
-    Require(wave.Height(20) == 20 && wave.Scale(120, 40) > 1.6f,
-        "early response still animates before the pointer belongs to the input window");
+    Require(wave.Height(20) == 20 && wave.Scale(120, 40) > 1.6f, "early response still animates before the pointer belongs to the input window");
     scene.nearRise = scene.nearMagnify = false;
     scene.nearX = -1;
     Settle(wave, scene);
-    Require(wave.Height(20) == 0 && wave.Scale(120, 40) == 1,
-        "early-only geometry collapses after release too");
+    Require(wave.Height(20) == 0 && wave.Scale(120, 40) == 1, "early-only geometry collapses after release too");
 }
 
 void CheckDragging()
@@ -144,10 +133,9 @@ void CheckDragging()
     Settle(wave, scene);
     scene.dragKey = L"app";
     Settle(wave, scene);
-    Require(wave.Height(20) == 0 && wave.Scale(120, 40) == 1,
-        "dragging does not become ordinary hover in the shared wave consumer");
+    Require(wave.Height(20) == 0 && wave.Scale(120, 40) == 1, "dragging does not become ordinary hover in the shared wave consumer");
 }
-}
+} // namespace
 
 int main()
 {

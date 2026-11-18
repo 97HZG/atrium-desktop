@@ -1,14 +1,10 @@
 using System.Numerics;
-using Microsoft.UI;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Microsoft.UI.Xaml.Shapes;
-using Windows.UI;
 
 namespace Atrium.Settings;
 
@@ -19,10 +15,10 @@ public sealed partial class MainWindow
     private sealed record WidgetChoice(string Kind, string Size, string Name, string Note, string Category);
 
     // The gallery's groups, in order; a segmented control above shows all of them or one.
-    private static readonly string[] WidgetCategoryNames = { "Clock", "Weather", "Calendar", "Productivity", "Photos", "System" };
+    private static readonly string[] WidgetCategoryNames = ["Clock", "Weather", "Calendar", "Productivity", "Photos", "System"];
 
-    private static WidgetChoice[] WidgetChoices => new WidgetChoice[]
-    {
+    private static WidgetChoice[] WidgetChoices =>
+    [
         new("clock", "small", Loc.T("Clock"), Loc.T("Local time face"), "Clock"),
         new("clock", "medium", Loc.T("World clock"), Loc.T("Four city faces"), "Clock"),
         new("digital", "small", Loc.T("Digital clock"), Loc.T("Time, weekday and date"), "Clock"),
@@ -44,9 +40,9 @@ public sealed partial class MainWindow
         new("bluetooth", "medium", Loc.T("Bluetooth devices"), Loc.T("Name and battery"), "System"),
         new("network", "small", Loc.T("Network"), Loc.T("Down and up rates, with the last minute"), "System"),
         new("network", "medium", Loc.T("Network"), Loc.T("Rates, the last minute and this session's traffic"), "System"),
-    };
+    ];
 
-    private readonly Dictionary<string, FrameworkElement> _widgetSections = new();
+    private readonly Dictionary<string, FrameworkElement> _widgetSections = [];
 
     // Each group under its name; the control above narrows the gallery to one group.
     private void BuildWidgetGallery()
@@ -89,7 +85,7 @@ public sealed partial class MainWindow
         public string? Material;
     }
 
-    private readonly List<GalleryPreview> _galleryStages = new();
+    private readonly List<GalleryPreview> _galleryStages = [];
     private BarSettings? _galleryMaterial;
     private int _galleryGen = -1;
 
@@ -107,18 +103,24 @@ public sealed partial class MainWindow
         var name = new TextBlock
         {
             Text = c.Name + " · " + Loc.T(c.Size switch { "small" => "Small", "medium" => "Medium", _ => "Large" }),
-            Style = (Style)Application.Current.Resources["RowTitleStyle"], Margin = new Thickness(4, 0, 4, 2),
+            Style = (Style)Application.Current.Resources["RowTitleStyle"],
+            Margin = new Thickness(4, 0, 4, 2),
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         var body = new StackPanel { Spacing = 10, Children = { stage, name } };
         var button = new Button
         {
-            Content = body, Padding = new Thickness(10), CornerRadius = new CornerRadius(24), HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Tokens.Brush("CardBrush"),
-            BorderBrush = Tokens.Brush("CardStrokeBrush"), BorderThickness = new Thickness(1),
+            Content = body,
+            Padding = new Thickness(10),
+            CornerRadius = new CornerRadius(24),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = Tokens.Brush("CardBrush"),
+            BorderBrush = Tokens.Brush("CardStrokeBrush"),
+            BorderThickness = new Thickness(1),
+            // Pointer over: the card rises a little.
+            TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(180) }
         };
-        // Pointer over: the card rises a little.
-        button.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(180) };
         button.PointerEntered += (_, _) => button.Translation = new Vector3(0, -2, 0);
         button.PointerExited += (_, _) => button.Translation = Vector3.Zero;
         AutomationProperties.SetName(button, c.Size == "small" ? Loc.F("Add {0} (small)", c.Name)
@@ -126,7 +128,7 @@ public sealed partial class MainWindow
         ToolTipService.SetToolTip(button, c.Note);
         button.Click += async (_, _) =>
         {
-            var error = await _client.AddWidgetAsync(c.Kind, c.Size);
+            string? error = await _client.AddWidgetAsync(c.Kind, c.Size);
             WidgetHint.Text = error == null ? Loc.F("Added “{0}” to the desktop.", c.Name) : error.Contains("room") ? Loc.T("No room on the desktop: remove or shrink a widget first.") : Loc.F("Not added: {0}", error);
             WidgetHint.Visibility = Visibility.Visible;
         };
@@ -136,7 +138,7 @@ public sealed partial class MainWindow
     // The gallery again when the picture or the material changed since it was drawn.
     private void RefreshGallery()
     {
-        if (_galleryMaterial != null && _galleryMaterial.SameMaterial(_current) && _galleryMaterial.WidgetMaterial == _current.WidgetMaterial && _galleryGen == Photo.Generation) return;
+        if (_galleryMaterial != null && _galleryMaterial.SameMaterial(CurrentSettings) && _galleryMaterial.WidgetMaterial == CurrentSettings.WidgetMaterial && _galleryGen == Photo.Generation) return;
         foreach (var preview in _galleryStages) RenderGalleryCard(preview);
     }
 
@@ -145,7 +147,7 @@ public sealed partial class MainWindow
         var (c, stage, face, viewport) = preview;
         double sw = stage.ActualWidth, sh = stage.ActualHeight;
         if (sw < 8 || sh < 8) return;
-        _galleryMaterial = _current.Clone();
+        _galleryMaterial = CurrentSettings.Clone();
         _galleryGen = Photo.Generation;
         // The widget fitted into the card, 14 DIP of air around.
         var (w, h) = WidgetFaces.Size(c.Size);
@@ -158,7 +160,7 @@ public sealed partial class MainWindow
             viewport.Height = sh;
             bool dark = frame.Lumas[0] > 0.5f;
             long stamp = WidgetFaces.Stamp(c.Kind);
-            string material = _current.WidgetMaterial;
+            string material = CurrentSettings.WidgetMaterial;
             if (preview.DarkInk != dark || preview.Stamp != stamp || preview.Material != material)
             {
                 face.Child = WidgetFaces.Face(c.Kind, c.Size, dark, PhotoBrush(), material);
@@ -182,10 +184,10 @@ public sealed partial class MainWindow
     private sealed record TileJob(object Target, int Id, double W, double H, double K, double Rs,
                                   IReadOnlyList<GlassTile> Tiles, GlassTile? Bar, BarSettings Material,
                                   Lazy<Photo> Photo, Action<TileFrame> Done, bool Overlays, bool Scaled);
-    private readonly object _tileLock = new();
-    private readonly Dictionary<object, TileJob> _pendingTiles = new();
+    private readonly Lock _tileLock = new();
+    private readonly Dictionary<object, TileJob> _pendingTiles = [];
     private bool _tilesBusy, _tilesStopped;
-    private readonly Dictionary<object, int> _tileRequests = new();
+    private readonly Dictionary<object, int> _tileRequests = [];
 
     // A rendered stage: its pixels (BGRA), and each tile's brightness.
     private sealed record TileFrame(byte[] Px, int PW, int PH, double Rs, float[] Lumas, GlassOverlay[]? Overlays = null)
@@ -232,7 +234,7 @@ public sealed partial class MainWindow
         lock (_tileLock)
         {
             if (_tilesStopped) return;
-            _pendingTiles[target] = new TileJob(target, mine, w, h, k, rs, tiles, bar, _current.Clone(), Photo.Capture(), done, overlays, scaled);
+            _pendingTiles[target] = new TileJob(target, mine, w, h, k, rs, tiles, bar, CurrentSettings.Clone(), Photo.Capture(), done, overlays, scaled);
             if (_tilesBusy) return;
             _tilesBusy = true;
         }
@@ -254,7 +256,7 @@ public sealed partial class MainWindow
             lock (_tileLock)
             {
                 if (_pendingTiles.Count == 0) { _tilesBusy = false; return; }
-                jobs = _pendingTiles.Values.ToArray();
+                jobs = [.. _pendingTiles.Values];
                 _pendingTiles.Clear();
             }
             foreach (var group in jobs.GroupBy(j => (j.W, j.H, j.Rs, j.Photo)))
@@ -277,12 +279,12 @@ public sealed partial class MainWindow
                         {
                             // Scaled: the widget map, whose picture comes along (its cards move over it).
                             var cards = GlassRenderer.CardOverlays(bg, job.Material, job.Rs, job.Tiles, job.Scaled ? job.K : 0);
-                            frame = new TileFrame(job.Scaled ? bg.Base : Array.Empty<byte>(), pw, ph, job.Rs, cards.Select(c => c.Luma).ToArray(), cards);
+                            frame = new TileFrame(job.Scaled ? bg.Base : [], pw, ph, job.Rs, [.. cards.Select(c => c.Luma)], cards);
                         }
                         else
                         {
-                            var px = new byte[bg.Base.Length];
-                            var lumas = GlassRenderer.DrawTiles(bg, px, job.Material, job.K, job.Rs, job.Tiles, job.Bar);
+                            byte[] px = new byte[bg.Base.Length];
+                            float[] lumas = GlassRenderer.DrawTiles(bg, px, job.Material, job.K, job.Rs, job.Tiles, job.Bar);
                             frame = new TileFrame(px, pw, ph, job.Rs, lumas);
                         }
                         DispatcherQueue.TryEnqueue(() =>

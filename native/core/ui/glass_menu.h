@@ -34,8 +34,7 @@ public:
 
     // onPick runs after the menu closed, with the chosen entry's id; onClosed
     // runs when it closes either way (after onPick).
-    void Open(std::vector<MenuEntry> entries, POINT at, MenuPlace place, std::function<void(int)> onPick,
-              std::function<void()> onClosed = nullptr);
+    void Open(std::vector<MenuEntry> entries, POINT at, MenuPlace place, std::function<void(int)> onPick, std::function<void()> onClosed = nullptr);
     void Close();
     bool Visible() const { return surface_.Visible(); }
     HWND Hwnd() const { return surface_.Hwnd(); }

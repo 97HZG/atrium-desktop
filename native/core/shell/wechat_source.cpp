@@ -30,7 +30,7 @@ bool IsTime(const std::wstring& s)
     // "17:06", "10/27", "2025/10/27", "昨天", "星期三"
     if (s.empty() || s.size() > 12)
         return false;
-    if (s == L"昨天" || s.rfind(L"星期", 0) == 0)
+    if (s == L"昨天" || s.starts_with(L"星期"))
         return true;
     for (wchar_t c : s)
         if (!iswdigit(c) && c != L':' && c != L'/' && c != L'-')

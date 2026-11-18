@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
@@ -21,10 +20,9 @@ internal static class GameFinder
         try { GameBar(games); } catch { }
         // A program inside a library's folder is that game already.
         var folders = games.Select(g => g.Entry).Where(IsFolder).ToList();
-        return games.Where(g => IsFolder(g.Entry) || !folders.Any(f => g.Entry.StartsWith(f, StringComparison.OrdinalIgnoreCase)))
+        return [.. games.Where(g => IsFolder(g.Entry) || !folders.Any(f => g.Entry.StartsWith(f, StringComparison.OrdinalIgnoreCase)))
                     .DistinctBy(g => g.Entry, StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(g => g.Title, StringComparer.CurrentCultureIgnoreCase)
-                    .ToList();
+                    .OrderBy(g => g.Title, StringComparer.CurrentCultureIgnoreCase)];
     }
 
     internal static bool IsFolder(string entry) => entry.EndsWith('\\');
@@ -39,9 +37,12 @@ internal static class GameFinder
         var libraries = new List<string> { steam };
         string vdf = Path.Combine(steam, "steamapps", "libraryfolders.vdf");
         if (File.Exists(vdf))
+        {
             foreach (Match m in Regex.Matches(File.ReadAllText(vdf), "\"path\"\\s+\"([^\"]+)\""))
                 libraries.Add(m.Groups[1].Value.Replace(@"\\", @"\"));
-        foreach (string library in libraries.Select(l => Path.GetFullPath(l)).Distinct(StringComparer.OrdinalIgnoreCase))
+        }
+
+        foreach (string library in libraries.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             string apps = Path.Combine(library, "steamapps");
             if (!Directory.Exists(apps)) continue;
@@ -52,7 +53,10 @@ internal static class GameFinder
                 // Steam's own runtimes are not games.
                 if (name.Length == 0 || dir.Length == 0 || name.StartsWith("Steamworks", StringComparison.OrdinalIgnoreCase) ||
                     name.Contains("Redistributable", StringComparison.OrdinalIgnoreCase))
+                {
                     continue;
+                }
+
                 string folder = Path.Combine(apps, "common", dir);
                 if (Directory.Exists(folder))
                     games.Add(new Game(name, FolderEntry(folder), MainProgram(folder)));
@@ -97,7 +101,10 @@ internal static class GameFinder
             // A packaged game is matched by its app id, not its path: left out.
             if (child?.GetValue("MatchedExeFullPath") is not string exe || !File.Exists(exe) ||
                 exe.StartsWith(windows, StringComparison.OrdinalIgnoreCase) || exe.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase))
+            {
                 continue;
+            }
+
             games.Add(new Game(Title(exe), Path.GetFullPath(exe).ToLowerInvariant(), exe));
         }
     }

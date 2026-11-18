@@ -116,8 +116,8 @@ public:
     // Draws the content. It is rendered into a cached layer and only redrawn
     // when `contentKey` changes or an animation runs; a present caused by the
     // backdrop alone just composites the cached layer.
-    void Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date,
-              const std::wstring& contentKey, bool animating);
+    void Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date, const std::wstring& contentKey,
+              bool animating);
 
 private:
     void DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date);
@@ -152,8 +152,7 @@ private:
         SceneItem ghost;
     };
     D2D1_ELLIPSE RunningDot(const BarScene& scene, const SceneItem& item, const Motion& motion) const;
-    void DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const SceneItem& it, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
-                  D2D1_COLOR_F wash);
+    void DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const SceneItem& it, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink, D2D1_COLOR_F wash);
     winrt::com_ptr<IDWriteFactory3> dwrite_;
     winrt::com_ptr<ID2D1SolidColorBrush> contentBrush_;
     winrt::com_ptr<ID2D1Effect> shadow_;

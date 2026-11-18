@@ -47,7 +47,7 @@ internal sealed class Photo
 
     private static string? SamplePath(string name)
     {
-        var asset = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Backgrounds", name + ".jpg");
+        string asset = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Backgrounds", name + ".jpg");
         return File.Exists(asset) ? asset : null;
     }
 
@@ -55,7 +55,7 @@ internal sealed class Photo
     {
         var sb = new StringBuilder(520);
         if (SystemParametersInfoW(0x0073 /* SPI_GETDESKWALLPAPER */, (uint)sb.Capacity, sb, 0) && File.Exists(sb.ToString())) return sb.ToString();
-        var transcoded = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
+        string transcoded = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
         return File.Exists(transcoded) ? transcoded : null;
     }
 
@@ -100,7 +100,7 @@ internal sealed class Photo
             for (int i = 0; i < pw; i++)
             {
                 float u = (x0 + (i + 0.5f) / ppd - ox) / s;
-                Vector3 c = Sample(u, v);
+                var c = Sample(u, v);
                 int o = (j * pw + i) * 4;
                 bgra[o] = To8(c.Z); bgra[o + 1] = To8(c.Y); bgra[o + 2] = To8(c.X); bgra[o + 3] = 255;
             }

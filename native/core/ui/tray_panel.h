@@ -30,7 +30,11 @@ public:
     ULONGLONG LastClosed() const { return lastClosed_; }
     void Refresh(); // the model has a new list
     void SetAttention(const std::vector<TaskItem>& tasks);
-    void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
+    void SetRadius(float dip)
+    {
+        radius_ = dip;
+        surface_.SetRadius(dip);
+    }
     HWND Hwnd() const { return surface_.Hwnd(); }
 
     std::function<void()> onSystemTray; // the fallback button

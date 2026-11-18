@@ -1,11 +1,9 @@
 using System.Diagnostics;
 using System.Net;
-using System.Net.Http;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.UI;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
@@ -25,15 +23,15 @@ public sealed partial class MainWindow : Window
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(IntPtr hwnd, SubclassProc proc, UIntPtr id, UIntPtr data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(IntPtr hwnd, SubclassProc proc, UIntPtr id);
     [DllImport("comctl32.dll")] private static extern IntPtr DefSubclassProc(IntPtr hwnd, uint message, UIntPtr wparam, IntPtr lparam);
-    private SubclassProc? _updateMessage;
+    private readonly SubclassProc? _updateMessage;
 
     // One slider tile: its group, UI range, and the mapping between the stored
     // value and the slider value (percentages are stored as 0..1).
     private sealed record SliderDef(string Group, string Title, double Min, double Max, double Step, string Unit,
         Func<BarSettings, double> Get, Action<BarSettings, double> Set, bool Material);
 
-    private SliderDef[] Sliders => new SliderDef[]
-    {
+    private SliderDef[] Sliders =>
+    [
         new("clarity", Loc.T("Transparency"), 0, 100, 1, "%",
             s => s.Transparency * 100, (s, v) => s.Transparency = v / 100, true),
         new("clarity", Loc.T("Blur"), 0, 100, 1, "%",
@@ -70,23 +68,22 @@ public sealed partial class MainWindow : Window
 
         new("notify", Loc.T("Popup duration"), 3, 30, 1, "s",
             s => s.NotifyTimeout, (s, v) => s.NotifyTimeout = v, false),
-    };
+    ];
 
-    private static string[] PageTitles => new[]
-    {
+    private static string[] PageTitles =>
+    [
         Loc.T("Material"), Loc.T("Shape"), Loc.T("Taskbar"), Loc.T("Notifications"), Loc.T("Widgets"), Loc.T("Stage Manager"), Loc.T("Displays"), Loc.T("System"), Loc.T("Design language"), Loc.T("About"),
         Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), Loc.T("Input method"), // the bar's parts, listed under it
-    };
+    ];
     private readonly CoreClient _client = new();
-    private readonly List<(SliderDef Def, SliderTile Tile)> _rows = new();
-    private readonly List<(uint Rgb, Button Button, FrameworkElement Ring)> _tintButtons = new();
+    private readonly List<(SliderDef Def, SliderTile Tile)> _rows = [];
+    private readonly List<(uint Rgb, Button Button, FrameworkElement Ring)> _tintButtons = [];
     private BarSettings _saved = new();
-    private BarSettings _current = new();
     private bool _loading;
     private bool _previewBusy, _previewPending;
     private bool _closePending;
-    private FrameworkElement[] _mains = Array.Empty<FrameworkElement>();
-    private FrameworkElement?[] _sides = Array.Empty<FrameworkElement?>();
+    private readonly FrameworkElement[] _mains = [];
+    private readonly FrameworkElement?[] _sides = [];
     private int _page;
     private bool _folded; // a narrow window: the inspector's groups under the workspace
     private int _flashId;
@@ -141,7 +138,7 @@ public sealed partial class MainWindow : Window
             presenter.PreferredMinimumHeight = (int)(680 * scale);
         }
         AppWindow.Closing += OnClosing;
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _updateMessage = (handle, message, wparam, lparam, id, data) =>
         {
             if (message == App.OpenAboutMessage) { SelectPage(9); return IntPtr.Zero; }
@@ -149,11 +146,11 @@ public sealed partial class MainWindow : Window
                 DispatcherQueue.TryEnqueue(RefreshDisplays); // hotplug, DPI or work-area changed
             return DefSubclassProc(handle, message, wparam, lparam);
         };
-        SetWindowSubclass(hwnd, _updateMessage, (UIntPtr)1, UIntPtr.Zero);
+        SetWindowSubclass(hwnd, _updateMessage, 1, UIntPtr.Zero);
         Closed += (_, _) =>
         {
             _client.Dispose();
-            RemoveWindowSubclass(hwnd, _updateMessage, (UIntPtr)1);
+            RemoveWindowSubclass(hwnd, _updateMessage, 1);
             _updateCheck?.Cancel();
             _updatesClosed = true;
             _downloadTimer?.Stop();
@@ -196,11 +193,26 @@ public sealed partial class MainWindow : Window
         VersionText.Text = Loc.F("Version {0}", v?.ToString(3) ?? "1.0.0");
         ShowStatus(false);
         // `--page widgets` (the widgets' menu): open on that page.
-        var args = Environment.GetCommandLineArgs();
+        string[] args = Environment.GetCommandLineArgs();
         int page = startPage >= 0 ? startPage
             : Array.IndexOf(args, "--page") is int i && i >= 0 && i + 1 < args.Length
-            ? args[i + 1] switch { "shape" => 1, "dock" => 2, "notify" => 3, "widgets" => 4, "stage" => 5, "displays" => 6, "system" => 7, "about" => 9,
-                                 "start" => 10, "tray" => 11, "status" => 12, "clock" => 13, "ime" => 14, _ => 0 } : 0;
+            ? args[i + 1] switch
+            {
+                "shape" => 1,
+                "dock" => 2,
+                "notify" => 3,
+                "widgets" => 4,
+                "stage" => 5,
+                "displays" => 6,
+                "system" => 7,
+                "about" => 9,
+                "start" => 10,
+                "tray" => 11,
+                "status" => 12,
+                "clock" => 13,
+                "ime" => 14,
+                _ => 0
+            } : 0;
         SelectPage(page);
         _ = ConnectAndLoadAsync();
         _ = CheckForUpdatesAsync(); // once per settings window; no resident polling
@@ -344,7 +356,7 @@ public sealed partial class MainWindow : Window
         e.TranslationTransition = null;
         e.Opacity = 0;
         e.Translation = new Vector3(0, 10, 0);
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             e.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(240) };
             e.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(300) };
@@ -362,8 +374,13 @@ public sealed partial class MainWindow : Window
         // The basic three are tiles in the workspace; the rest are plain rows in the inspector.
         var groups = new Dictionary<string, (Panel Panel, bool First, bool Flat)>
         {
-            ["clarity"] = (ClarityTiles, true, false), ["edge"] = (EdgeRows, false, true), ["light"] = (LightRows, false, true),
-            ["size"] = (SizeRows, false, true), ["width"] = (WidthRows, false, true), ["dock"] = (DockRows, false, true), ["notify"] = (NotifyRows, true, true),
+            ["clarity"] = (ClarityTiles, true, false),
+            ["edge"] = (EdgeRows, false, true),
+            ["light"] = (LightRows, false, true),
+            ["size"] = (SizeRows, false, true),
+            ["width"] = (WidthRows, false, true),
+            ["dock"] = (DockRows, false, true),
+            ["notify"] = (NotifyRows, true, true),
             ["near"] = (NearRows, false, true),
         };
         var placed = new Dictionary<string, int>();
@@ -384,28 +401,42 @@ public sealed partial class MainWindow : Window
     }
 
     private static readonly (string Name, uint Rgb)[] TintChoices =
-    {
+    [
         ("White", 0xFFFFFF), ("Warm white", 0xFFE6C8), ("Cool blue", 0xD3E6FF), ("Rose", 0xFFD0DC), ("Mint", 0xCCF4E0), ("Graphite", 0x2E3138),
-    };
+    ];
 
     private void BuildTintSwatches()
     {
         foreach (var (name, rgb) in TintChoices)
         {
-            var ring = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 28, Height = 28, Stroke = Tokens.Brush("AccentBrush"), StrokeThickness = 2, Opacity = 0 };
-            ring.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
+            var ring = new Microsoft.UI.Xaml.Shapes.Ellipse
+            {
+                Width = 28,
+                Height = 28,
+                Stroke = Tokens.Brush("AccentBrush"),
+                StrokeThickness = 2,
+                Opacity = 0,
+                OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) }
+            };
             var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
             {
-                Width = 22, Height = 22, Fill = new SolidColorBrush(TintColor(rgb)), Stroke = Tokens.Brush("CardStrokeBrush"), StrokeThickness = 1,
+                Width = 22,
+                Height = 22,
+                Fill = new SolidColorBrush(TintColor(rgb)),
+                Stroke = Tokens.Brush("CardStrokeBrush"),
+                StrokeThickness = 1,
             };
             var button = new Button
             {
                 Content = new Grid { Width = 28, Height = 28, Children = { dot, ring } },
-                Style = (Style)Application.Current.Resources["IconButtonStyle"], Width = 32, Height = 32, CornerRadius = new CornerRadius(16),
+                Style = (Style)Application.Current.Resources["IconButtonStyle"],
+                Width = 32,
+                Height = 32,
+                CornerRadius = new CornerRadius(16),
             };
             AutomationProperties.SetName(button, Loc.F("Tint {0}", Loc.T(name)));
             ToolTipService.SetToolTip(button, Loc.T(name));
-            var captured = rgb;
+            uint captured = rgb;
             button.Click += (_, _) => SetTint(captured);
             _tintButtons.Add((rgb, button, ring));
             TintSwatches.Children.Add(button);
@@ -414,7 +445,7 @@ public sealed partial class MainWindow : Window
 
     private void SetTint(uint rgb)
     {
-        _current.Tint = rgb;
+        CurrentSettings.Tint = rgb;
         MarkCustom();
         _loading = true;
         TintPicker.Color = TintColor(rgb);
@@ -425,10 +456,10 @@ public sealed partial class MainWindow : Window
 
     private void ShowTint()
     {
-        var c = TintColor(_current.Tint);
+        var c = TintColor(CurrentSettings.Tint);
         TintSwatch.Fill = new SolidColorBrush(c);
-        TintHex.Text = "#" + _current.Tint.ToString("X6", System.Globalization.CultureInfo.InvariantCulture);
-        foreach (var (rgb, _, ring) in _tintButtons) ring.Opacity = rgb == _current.Tint ? 1 : 0;
+        TintHex.Text = "#" + CurrentSettings.Tint.ToString("X6", System.Globalization.CultureInfo.InvariantCulture);
+        foreach (var (rgb, _, ring) in _tintButtons) ring.Opacity = rgb == CurrentSettings.Tint ? 1 : 0;
     }
 
     // ---- Updates ----
@@ -486,7 +517,11 @@ public sealed partial class MainWindow : Window
                 if (_transferStatus.CanRetry) _downloadTimer?.Stop();
                 else ObserveDownload();
             }
-            else _downloadTimer?.Stop();
+            else
+            {
+                _downloadTimer?.Stop();
+            }
+
             ShowInstallAction();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException or JsonException)
@@ -618,7 +653,7 @@ public sealed partial class MainWindow : Window
         var (saved, current) = await _client.GetAsync();
         if (_updatesClosed) return;
         _saved = saved;
-        _current = current;
+        CurrentSettings = current;
         // A language change re-created the window: restore the edits that
         // arrived while the save was in flight, then preview them.
         var pending = App.TakePendingState();
@@ -626,7 +661,7 @@ public sealed partial class MainWindow : Window
         if (hasPending)
         {
             _saved = pending.Saved!;
-            _current = pending.Current!;
+            CurrentSettings = pending.Current!;
         }
         _coreChanging = false;
         WatchCore();
@@ -661,11 +696,11 @@ public sealed partial class MainWindow : Window
                 if (!_updatesClosed && !_coreChanging) ShowStatus(_client.Connected);
                 return;
             }
-            bool dirty = !_current.SameAs(_saved);
+            bool dirty = !CurrentSettings.SameAs(_saved);
             var (saved, current) = await _client.GetAsync();
             if (_updatesClosed) return;
             _saved = saved;
-            if (!dirty) _current = current;
+            if (!dirty) CurrentSettings = current;
             LoadIntoControls();
             UpdateButtons();
             if (dirty) SchedulePreview();
@@ -685,8 +720,11 @@ public sealed partial class MainWindow : Window
         CoreSwitch.IsOn = connected || (_coreProcess != null && !_coreProcess.HasExited);
         _updatingCoreSwitch = false;
         CoreSwitch.IsEnabled = !_coreChanging && CoreClient.CoreExe() != null;
-        if (!_coreChanging) StatusMessage.Text = connected ? Loc.T("Running") : _client.ConnectionError ??
+        if (!_coreChanging)
+        {
+            StatusMessage.Text = connected ? Loc.T("Running") : _client.ConnectionError ??
             (_coreProcess != null && !_coreProcess.HasExited ? Loc.T("The core is still running; the settings connection closed") : Loc.T("Closed; Windows' taskbar is back"));
+        }
     }
 
     private void ShowMessage(InfoBarSeverity severity, string title, string message)
@@ -732,15 +770,15 @@ public sealed partial class MainWindow : Window
         Status.IsOpen = false;
         try
         {
-            var exe = CoreClient.CoreExe() ?? throw new FileNotFoundException(Loc.T("Atrium.exe was not found"));
+            string exe = CoreClient.CoreExe() ?? throw new FileNotFoundException(Loc.T("Atrium.exe was not found"));
             if (start)
             {
                 using var launched = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
                 if (!await _client.ConnectAsync(8000)) throw new TimeoutException(Loc.T("Could not connect to Atrium. Try again later."));
-                bool dirty = !_current.SameAs(_saved);
+                bool dirty = !CurrentSettings.SameAs(_saved);
                 var (saved, current) = await _client.GetAsync();
                 _saved = saved;
-                if (!dirty) _current = current;
+                if (!dirty) CurrentSettings = current;
                 LoadIntoControls();
                 UpdateButtons();
                 if (dirty) SchedulePreview();
@@ -781,9 +819,10 @@ public sealed partial class MainWindow : Window
         if (_settingsWatcher != null || dir == null || !Directory.Exists(dir)) return;
         _settingsWatcher = new FileSystemWatcher(dir, "settings.json")
         {
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size, EnableRaisingEvents = true,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+            EnableRaisingEvents = true,
         };
-        FileSystemEventHandler changed = (_, _) => DispatcherQueue.TryEnqueue(ReloadExternal);
+        void changed(object _1, FileSystemEventArgs _2) => DispatcherQueue.TryEnqueue(ReloadExternal);
         _settingsWatcher.Changed += changed;
         _settingsWatcher.Created += changed;
         _settingsWatcher.Renamed += (_, _) => DispatcherQueue.TryEnqueue(ReloadExternal);
@@ -800,15 +839,15 @@ public sealed partial class MainWindow : Window
         var after = saved.ToJson();
         var changed = after.Select(kv => kv.Key).Where(k => !JsonNode.DeepEquals(before[k], after[k])).ToList();
         if (changed.Count == 0) return;
-        var current = _current.ToJson();
-        foreach (var k in changed) current[k] = after[k]?.DeepClone();
+        var current = CurrentSettings.ToJson();
+        foreach (string? k in changed) current[k] = after[k]?.DeepClone();
         _saved = saved;
-        _current = BarSettings.FromJson(current, _current);
+        CurrentSettings = BarSettings.FromJson(current, CurrentSettings);
         LoadIntoControls();
         UpdateButtons();
         if (_page == 4) ShowWidgetMap();
         if (_page == 5) ShowStagePreview(true);
-        if (!_current.SameAs(_saved)) SchedulePreview(); // the edits made here, over the new state
+        if (!CurrentSettings.SameAs(_saved)) SchedulePreview(); // the edits made here, over the new state
     }
 
     // ---- Controls <-> settings ----
@@ -817,70 +856,73 @@ public sealed partial class MainWindow : Window
     {
         _loading = true;
         foreach (var (d, card) in _rows)
-            card.SetValue(d.Get(_current));
-        (_current.Preset switch { "liquid" => PresetLiquid, "frosted" => PresetFrosted, _ => PresetCustom }).IsChecked = true;
+            card.SetValue(d.Get(CurrentSettings));
+        (CurrentSettings.Preset switch { "liquid" => PresetLiquid, "frosted" => PresetFrosted, _ => PresetCustom }).IsChecked = true;
         (Photo.Selected switch { "wallpaper" => BgWallpaper, "paper" => BgPaper, "geometry" => BgGeometry, "layers" => BgLayers, _ => BgSpecimen }).IsChecked = true;
-        ClockSwitch.IsOn = _current.ShowClock;
-        ClockSecondsSwitch.IsOn = _current.ShowClockSeconds;
+        ClockSwitch.IsOn = CurrentSettings.ShowClock;
+        ClockSecondsSwitch.IsOn = CurrentSettings.ShowClockSeconds;
         UpdateClockOptions();
-        TraySwitch.IsOn = _current.ShowTray;
-        TrayHostSwitch.IsOn = _current.TrayHost;
-        StartTraySwitch.IsOn = _current.StartTray;
-        StartStatusSwitch.IsOn = _current.StartStatus;
-        StartCenteredSwitch.IsOn = _current.StartCentered;
-        StartWithBarSwitch.IsOn = _current.StartWithBar;
-        (_current.StartSize switch { "small" => StartSmall, "large" => StartLarge, "xlarge" => StartXLarge, _ => StartMedium }).IsChecked = true;
-        (_current.StartIcon switch { "small" => StartIconSmall, "large" => StartIconLarge, "xlarge" => StartIconXLarge, _ => StartIconMedium }).IsChecked = true;
-        StatusSwitch.IsOn = _current.ShowStatus;
-        NotificationsSwitch.IsOn = _current.ShowNotifications;
-        DesktopSwitch.IsOn = _current.ShowDesktop;
-        AttentionLightSwitch.IsOn = _current.AttentionLight;
-        AttentionBounceSwitch.IsOn = _current.AttentionBounce;
-        AutoWidthSwitch.IsOn = _current.AutoWidth;
-        HoverRiseSwitch.IsOn = _current.HoverRise;
-        RiseNearSwitch.IsOn = _current.RiseNear;
-        MagnifyNearSwitch.IsOn = _current.MagnifyNear;
+        TraySwitch.IsOn = CurrentSettings.ShowTray;
+        TrayHostSwitch.IsOn = CurrentSettings.TrayHost;
+        StartTraySwitch.IsOn = CurrentSettings.StartTray;
+        StartStatusSwitch.IsOn = CurrentSettings.StartStatus;
+        StartCenteredSwitch.IsOn = CurrentSettings.StartCentered;
+        StartWithBarSwitch.IsOn = CurrentSettings.StartWithBar;
+        (CurrentSettings.StartSize switch { "small" => StartSmall, "large" => StartLarge, "xlarge" => StartXLarge, _ => StartMedium }).IsChecked = true;
+        (CurrentSettings.StartIcon switch { "small" => StartIconSmall, "large" => StartIconLarge, "xlarge" => StartIconXLarge, _ => StartIconMedium }).IsChecked = true;
+        StatusSwitch.IsOn = CurrentSettings.ShowStatus;
+        NotificationsSwitch.IsOn = CurrentSettings.ShowNotifications;
+        DesktopSwitch.IsOn = CurrentSettings.ShowDesktop;
+        AttentionLightSwitch.IsOn = CurrentSettings.AttentionLight;
+        AttentionBounceSwitch.IsOn = CurrentSettings.AttentionBounce;
+        AutoWidthSwitch.IsOn = CurrentSettings.AutoWidth;
+        HoverRiseSwitch.IsOn = CurrentSettings.HoverRise;
+        RiseNearSwitch.IsOn = CurrentSettings.RiseNear;
+        MagnifyNearSwitch.IsOn = CurrentSettings.MagnifyNear;
         UpdateRiseNearDependent();
-        RunningSwitch.IsOn = _current.ShowRunning;
-        HideBodySwitch.IsOn = _current.NotifyHideBody;
-        ImeStatusSwitch.IsOn = _current.ImeStatus;
-        bool notifyCorner = BarSettings.NotifyCorners.Contains(_current.NotifyPlacement);
-        if (notifyCorner) _notifyCorner = _current.NotifyPlacement;
+        RunningSwitch.IsOn = CurrentSettings.ShowRunning;
+        HideBodySwitch.IsOn = CurrentSettings.NotifyHideBody;
+        ImeStatusSwitch.IsOn = CurrentSettings.ImeStatus;
+        bool notifyCorner = BarSettings.NotifyCorners.Contains(CurrentSettings.NotifyPlacement);
+        if (notifyCorner) _notifyCorner = CurrentSettings.NotifyPlacement;
         (notifyCorner ? NotifyAtCorner : NotifyAtDock).IsChecked = true;
         NotifyCornerRow.Visibility = notifyCorner ? Visibility.Visible : Visibility.Collapsed;
         (_notifyCorner switch { "topLeft" => NotifyTopLeft, "bottomLeft" => NotifyBottomLeft, "bottomRight" => NotifyBottomRight, _ => NotifyTopRight }).IsChecked = true;
         RefreshSources();
-        BarSwitch.IsOn = _current.Bar;
+        BarSwitch.IsOn = CurrentSettings.Bar;
         UpdateBarModule();
-        WidgetsSwitch.IsOn = _current.Widgets;
-        (_current.WidgetsOnRight ? WidgetsRight : WidgetsLeft).IsChecked = true;
-        HideTaskbarSwitch.IsOn = _current.HideTaskbar;
-        StageSwitch.IsOn = _current.StageManager;
-        (_current.StageOnRight ? StageRight : StageLeft).IsChecked = true;
-        (_current.StageAutoHide ? StageAutoHide : StageAlways).IsChecked = true;
-        StageMinimizeSwitch.IsOn = _current.StageMinimize;
+        WidgetsSwitch.IsOn = CurrentSettings.Widgets;
+        (CurrentSettings.WidgetsOnRight ? WidgetsRight : WidgetsLeft).IsChecked = true;
+        HideTaskbarSwitch.IsOn = CurrentSettings.HideTaskbar;
+        StageSwitch.IsOn = CurrentSettings.StageManager;
+        (CurrentSettings.StageOnRight ? StageRight : StageLeft).IsChecked = true;
+        (CurrentSettings.StageAutoHide ? StageAutoHide : StageAlways).IsChecked = true;
+        StageMinimizeSwitch.IsOn = CurrentSettings.StageMinimize;
         RebuildExcluded();
-        (_current.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
-        (_current.WidgetMaterial switch { "dusk" => MaterialDusk, "color" => MaterialColor, _ => MaterialGlass }).IsChecked = true;
-        HideBannersSwitch.IsOn = _current.HideBanners;
-        WinKeySwitch.IsOn = _current.WinKeyStart;
-        WinNumbersSwitch.IsOn = _current.WinNumbers;
-        RemoteVisibleSwitch.IsOn = _current.RemoteVisible;
-        (_current.StatusStyle == "icons" ? StatusIcons : StatusRing).IsChecked = true;
-        (_current.AutoHide switch { "never" => HideNever, "always" => HideAlways, _ => HideFullscreen }).IsChecked = true;
-        (_current.BarEdge switch { "top" => EdgeTop, "left" => EdgeLeft, "right" => EdgeRight, _ => EdgeBottom }).IsChecked = true;
-        StartupSwitch.IsOn = _current.StartOnLogin;
-        string currentLanguage = _current.Language == "zh" ? "zh-Hans" : _current.Language;
+        (CurrentSettings.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
+        (CurrentSettings.WidgetMaterial switch { "dusk" => MaterialDusk, "color" => MaterialColor, _ => MaterialGlass }).IsChecked = true;
+        HideBannersSwitch.IsOn = CurrentSettings.HideBanners;
+        WinKeySwitch.IsOn = CurrentSettings.WinKeyStart;
+        WinNumbersSwitch.IsOn = CurrentSettings.WinNumbers;
+        RemoteVisibleSwitch.IsOn = CurrentSettings.RemoteVisible;
+        (CurrentSettings.StatusStyle == "icons" ? StatusIcons : StatusRing).IsChecked = true;
+        (CurrentSettings.AutoHide switch { "never" => HideNever, "always" => HideAlways, _ => HideFullscreen }).IsChecked = true;
+        (CurrentSettings.BarEdge switch { "top" => EdgeTop, "left" => EdgeLeft, "right" => EdgeRight, _ => EdgeBottom }).IsChecked = true;
+        StartupSwitch.IsOn = CurrentSettings.StartOnLogin;
+        string currentLanguage = CurrentSettings.Language == "zh" ? "zh-Hans" : CurrentSettings.Language;
         LanguagePicker.SelectedIndex = 0;
         for (int i = 0; i < LanguagePicker.Items.Count; i++)
+        {
             if (LanguagePicker.Items[i] is ComboBoxItem item && (item.Tag as string) == currentLanguage)
                 LanguagePicker.SelectedIndex = i;
+        }
+
         LoadDisplayControls();
-        (_current.TextColor switch { "light" => TextLight, "dark" => TextDark, _ => TextAuto }).IsChecked = true;
+        (CurrentSettings.TextColor switch { "light" => TextLight, "dark" => TextDark, _ => TextAuto }).IsChecked = true;
         UpdateGallery();
         RebuildPins();
-        WindowsContextMenuSwitch.IsOn = _current.WindowsContextMenu;
-        TintPicker.Color = TintColor(_current.Tint);
+        WindowsContextMenuSwitch.IsOn = CurrentSettings.WindowsContextMenu;
+        TintPicker.Color = TintColor(CurrentSettings.Tint);
         ShowTint();
         _loading = false;
         UpdateHero();
@@ -896,14 +938,14 @@ public sealed partial class MainWindow : Window
     private void OnSliderChanged(SliderDef d, double v)
     {
         if (_loading) return;
-        d.Set(_current, v);
+        d.Set(CurrentSettings, v);
         if (d.Material) MarkCustom();
         Changed();
     }
 
     private void MarkCustom()
     {
-        _current.Preset = "custom";
+        CurrentSettings.Preset = "custom";
         bool was = _loading;
         _loading = true;
         PresetCustom.IsChecked = true;
@@ -913,9 +955,9 @@ public sealed partial class MainWindow : Window
     private void OnPresetChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        if (tag == "liquid") _current.ApplyMaterial(BarSettings.Liquid());
-        else if (tag == "frosted") _current.ApplyMaterial(BarSettings.Frosted());
-        else _current.Preset = "custom";
+        if (tag == "liquid") CurrentSettings.ApplyMaterial(BarSettings.Liquid());
+        else if (tag == "frosted") CurrentSettings.ApplyMaterial(BarSettings.Frosted());
+        else CurrentSettings.Preset = "custom";
         LoadIntoControls();
         Changed();
     }
@@ -923,7 +965,7 @@ public sealed partial class MainWindow : Window
     private void OnTintChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
         if (_loading) return;
-        _current.Tint = ((uint)args.NewColor.R << 16) | ((uint)args.NewColor.G << 8) | args.NewColor.B;
+        CurrentSettings.Tint = ((uint)args.NewColor.R << 16) | ((uint)args.NewColor.G << 8) | args.NewColor.B;
         MarkCustom();
         ShowTint();
         Changed();
@@ -932,7 +974,7 @@ public sealed partial class MainWindow : Window
     private void OnClockToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.ShowClock = ClockSwitch.IsOn;
+        CurrentSettings.ShowClock = ClockSwitch.IsOn;
         UpdateClockOptions();
         Changed();
     }
@@ -940,47 +982,47 @@ public sealed partial class MainWindow : Window
     // Seconds only matter while the clock itself is shown.
     private void UpdateClockOptions()
     {
-        ClockSecondsSwitch.IsEnabled = _current.ShowClock;
-        ClockSecondsSwitch.Opacity = _current.ShowClock ? 1 : 0.45;
+        ClockSecondsSwitch.IsEnabled = CurrentSettings.ShowClock;
+        ClockSecondsSwitch.Opacity = CurrentSettings.ShowClock ? 1 : 0.45;
     }
 
     private void OnClockSecondsToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.ShowClockSeconds = ClockSecondsSwitch.IsOn;
+        CurrentSettings.ShowClockSeconds = ClockSecondsSwitch.IsOn;
         Changed();
     }
 
     private void OnBarContentToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.ShowTray = TraySwitch.IsOn;
-        _current.TrayHost = TrayHostSwitch.IsOn;
-        _current.StartTray = StartTraySwitch.IsOn;
-        _current.StartStatus = StartStatusSwitch.IsOn;
-        _current.ShowStatus = StatusSwitch.IsOn;
-        _current.ShowNotifications = NotificationsSwitch.IsOn;
-        _current.ShowDesktop = DesktopSwitch.IsOn;
-        _current.StartCentered = StartCenteredSwitch.IsOn;
-        _current.StartWithBar = StartWithBarSwitch.IsOn;
-        _current.AttentionLight = AttentionLightSwitch.IsOn;
-        _current.AttentionBounce = AttentionBounceSwitch.IsOn;
+        CurrentSettings.ShowTray = TraySwitch.IsOn;
+        CurrentSettings.TrayHost = TrayHostSwitch.IsOn;
+        CurrentSettings.StartTray = StartTraySwitch.IsOn;
+        CurrentSettings.StartStatus = StartStatusSwitch.IsOn;
+        CurrentSettings.ShowStatus = StatusSwitch.IsOn;
+        CurrentSettings.ShowNotifications = NotificationsSwitch.IsOn;
+        CurrentSettings.ShowDesktop = DesktopSwitch.IsOn;
+        CurrentSettings.StartCentered = StartCenteredSwitch.IsOn;
+        CurrentSettings.StartWithBar = StartWithBarSwitch.IsOn;
+        CurrentSettings.AttentionLight = AttentionLightSwitch.IsOn;
+        CurrentSettings.AttentionBounce = AttentionBounceSwitch.IsOn;
         Changed();
     }
 
     private void OnWidgetAlignmentChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.WidgetsOnRight = tag == "right";
+        CurrentSettings.WidgetsOnRight = tag == "right";
         // With Stage Manager on, it keeps to the widgets' other side.
-        if (_current.StageManager) SetStageSide(!_current.WidgetsOnRight);
+        if (CurrentSettings.StageManager) SetStageSide(!CurrentSettings.WidgetsOnRight);
         ShowWidgetMap();
         Changed();
     }
 
     private void SetStageSide(bool right)
     {
-        _current.StageOnRight = right;
+        CurrentSettings.StageOnRight = right;
         _loading = true;
         (right ? StageRight : StageLeft).IsChecked = true;
         _loading = false;
@@ -988,7 +1030,7 @@ public sealed partial class MainWindow : Window
 
     private void SetWidgetSide(bool right)
     {
-        _current.WidgetsOnRight = right;
+        CurrentSettings.WidgetsOnRight = right;
         _loading = true;
         (right ? WidgetsRight : WidgetsLeft).IsChecked = true;
         _loading = false;
@@ -997,14 +1039,14 @@ public sealed partial class MainWindow : Window
     private void OnAutoWidthToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.AutoWidth = AutoWidthSwitch.IsOn;
+        CurrentSettings.AutoWidth = AutoWidthSwitch.IsOn;
         Changed();
     }
 
     private void OnHoverRiseToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.HoverRise = HoverRiseSwitch.IsOn;
+        CurrentSettings.HoverRise = HoverRiseSwitch.IsOn;
         UpdateRiseNearDependent();
         Changed();
     }
@@ -1012,42 +1054,42 @@ public sealed partial class MainWindow : Window
     // The early rise only means something while the glass rises with the wave at all.
     private void UpdateRiseNearDependent()
     {
-        RiseNearSwitch.Opacity = _current.HoverRise ? 1 : 0.45;
-        RiseNearSwitch.IsHitTestVisible = _current.HoverRise;
+        RiseNearSwitch.Opacity = CurrentSettings.HoverRise ? 1 : 0.45;
+        RiseNearSwitch.IsHitTestVisible = CurrentSettings.HoverRise;
     }
 
     private void OnRiseNearToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.RiseNear = RiseNearSwitch.IsOn;
+        CurrentSettings.RiseNear = RiseNearSwitch.IsOn;
         Changed();
     }
 
     private void OnMagnifyNearToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.MagnifyNear = MagnifyNearSwitch.IsOn;
+        CurrentSettings.MagnifyNear = MagnifyNearSwitch.IsOn;
         Changed();
     }
 
     private void OnRunningToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.ShowRunning = RunningSwitch.IsOn;
+        CurrentSettings.ShowRunning = RunningSwitch.IsOn;
         Changed();
     }
 
     private void OnHideBodyToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.NotifyHideBody = HideBodySwitch.IsOn;
+        CurrentSettings.NotifyHideBody = HideBodySwitch.IsOn;
         Changed();
     }
 
     private void OnImeStatusToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.ImeStatus = ImeStatusSwitch.IsOn;
+        CurrentSettings.ImeStatus = ImeStatusSwitch.IsOn;
         Changed();
     }
 
@@ -1057,7 +1099,7 @@ public sealed partial class MainWindow : Window
     private void OnBarToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.Bar = BarSwitch.IsOn;
+        CurrentSettings.Bar = BarSwitch.IsOn;
         UpdateBarModule();
         Changed();
     }
@@ -1066,8 +1108,8 @@ public sealed partial class MainWindow : Window
     {
         foreach (var part in new FrameworkElement[] { DockContent, DockLayout, SideNotify })
         {
-            part.Opacity = _current.Bar ? 1 : 0.45;
-            part.IsHitTestVisible = _current.Bar;
+            part.Opacity = CurrentSettings.Bar ? 1 : 0.45;
+            part.IsHitTestVisible = CurrentSettings.Bar;
         }
     }
 
@@ -1075,15 +1117,15 @@ public sealed partial class MainWindow : Window
     {
         UpdateGallery();
         if (_loading) return;
-        _current.Widgets = WidgetsSwitch.IsOn;
+        CurrentSettings.Widgets = WidgetsSwitch.IsOn;
         Changed();
     }
 
     // The widgets' material: the map and the gallery show it at once, the core with the preview.
     private void OnWidgetMaterialChecked(object sender, RoutedEventArgs e)
     {
-        if (_loading || sender is not RadioButton { Tag: string tag } || tag == _current.WidgetMaterial) return;
-        _current.WidgetMaterial = tag;
+        if (_loading || sender is not RadioButton { Tag: string tag } || tag == CurrentSettings.WidgetMaterial) return;
+        CurrentSettings.WidgetMaterial = tag;
         Changed();
         if (_page == 4) { ShowWidgetMap(); RefreshGallery(); }
     }
@@ -1091,23 +1133,23 @@ public sealed partial class MainWindow : Window
     private void OnWidgetBackdropChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.WidgetBackdrop = tag;
+        CurrentSettings.WidgetBackdrop = tag;
         Changed();
     }
 
     private void OnHideTaskbarToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.HideTaskbar = HideTaskbarSwitch.IsOn;
+        CurrentSettings.HideTaskbar = HideTaskbarSwitch.IsOn;
         Changed();
     }
 
     private void OnStageToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.StageManager = StageSwitch.IsOn;
+        CurrentSettings.StageManager = StageSwitch.IsOn;
         // The widgets go to the other side.
-        if (_current.StageManager) SetWidgetSide(!_current.StageOnRight);
+        if (CurrentSettings.StageManager) SetWidgetSide(!CurrentSettings.StageOnRight);
         Changed();
         if (_page == 5) ShowStagePreview(true);
     }
@@ -1115,8 +1157,8 @@ public sealed partial class MainWindow : Window
     private void OnStageSideChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.StageOnRight = tag == "right";
-        if (_current.StageManager) SetWidgetSide(!_current.StageOnRight);
+        CurrentSettings.StageOnRight = tag == "right";
+        if (CurrentSettings.StageManager) SetWidgetSide(!CurrentSettings.StageOnRight);
         Changed();
         if (_page == 5) ShowStagePreview(true);
     }
@@ -1124,7 +1166,7 @@ public sealed partial class MainWindow : Window
     private void OnStageModeChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.StageAutoHide = tag == "hover";
+        CurrentSettings.StageAutoHide = tag == "hover";
         Changed();
         if (_page == 5) ShowStagePreview(true);
     }
@@ -1133,7 +1175,7 @@ public sealed partial class MainWindow : Window
     private void OnStartupToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.StartOnLogin = StartupSwitch.IsOn;
+        CurrentSettings.StartOnLogin = StartupSwitch.IsOn;
         Changed();
     }
 
@@ -1172,21 +1214,21 @@ public sealed partial class MainWindow : Window
     private void OnLanguageChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loading) return;
-        _current.Language = (LanguagePicker.SelectedItem as ComboBoxItem)?.Tag as string ?? "auto";
+        CurrentSettings.Language = (LanguagePicker.SelectedItem as ComboBoxItem)?.Tag as string ?? "auto";
         Changed();
     }
 
     private void OnHideBannersToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.HideBanners = HideBannersSwitch.IsOn;
+        CurrentSettings.HideBanners = HideBannersSwitch.IsOn;
         Changed();
     }
 
     private void OnStageMinimizeToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.StageMinimize = StageMinimizeSwitch.IsOn;
+        CurrentSettings.StageMinimize = StageMinimizeSwitch.IsOn;
         Changed();
     }
 
@@ -1195,63 +1237,63 @@ public sealed partial class MainWindow : Window
     private void OnWinKeyToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.WinKeyStart = WinKeySwitch.IsOn;
+        CurrentSettings.WinKeyStart = WinKeySwitch.IsOn;
         Changed();
     }
 
     private void OnStartSizeChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.StartSize = tag;
+        CurrentSettings.StartSize = tag;
         Changed();
     }
 
     private void OnStartIconSizeChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.StartIcon = tag;
+        CurrentSettings.StartIcon = tag;
         Changed();
     }
 
     private void OnWinNumbersToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.WinNumbers = WinNumbersSwitch.IsOn;
+        CurrentSettings.WinNumbers = WinNumbersSwitch.IsOn;
         Changed();
     }
 
     private void OnRemoteVisibleToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _current.RemoteVisible = RemoteVisibleSwitch.IsOn;
+        CurrentSettings.RemoteVisible = RemoteVisibleSwitch.IsOn;
         Changed();
     }
 
     private void OnStatusStyleChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.StatusStyle = tag;
+        CurrentSettings.StatusStyle = tag;
         Changed();
     }
 
     private void OnAutoHideChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.AutoHide = tag;
+        CurrentSettings.AutoHide = tag;
         Changed();
     }
 
     private void OnBarEdgeChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.BarEdge = tag;
+        CurrentSettings.BarEdge = tag;
         Changed();
     }
 
     private void OnTextColorChecked(object sender, RoutedEventArgs e)
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
-        _current.TextColor = tag;
+        CurrentSettings.TextColor = tag;
         Changed();
     }
 
@@ -1261,7 +1303,7 @@ public sealed partial class MainWindow : Window
         NotifyCornerRow.Visibility = corner ? Visibility.Visible : Visibility.Collapsed;
         if (_loading) return;
         // A corner: the one chosen last (top right at first, as before there were four).
-        _current.NotifyPlacement = corner ? _notifyCorner : "dock";
+        CurrentSettings.NotifyPlacement = corner ? _notifyCorner : "dock";
         _notifyEntrancePending = true;
         Changed();
     }
@@ -1269,8 +1311,8 @@ public sealed partial class MainWindow : Window
     private void OnNotifyCornerChecked(object sender, RoutedEventArgs e)
     {
         _notifyCorner = (string)((RadioButton)sender).Tag;
-        if (_loading || _current.NotifyPlacement == _notifyCorner) return;
-        _current.NotifyPlacement = _notifyCorner;
+        if (_loading || CurrentSettings.NotifyPlacement == _notifyCorner) return;
+        CurrentSettings.NotifyPlacement = _notifyCorner;
         _notifyEntrancePending = true;
         Changed();
     }
@@ -1291,7 +1333,7 @@ public sealed partial class MainWindow : Window
     // Title-bar actions appear while there is something to save, and briefly after a save.
     private void UpdateButtons()
     {
-        bool dirty = !_current.SameAs(_saved);
+        bool dirty = !CurrentSettings.SameAs(_saved);
         SaveButton.IsEnabled = dirty;
         RevertButton.IsEnabled = dirty;
         _flashId++;
@@ -1333,7 +1375,7 @@ public sealed partial class MainWindow : Window
         do
         {
             _previewPending = false;
-            await _client.PreviewAsync(_current.Clone());
+            await _client.PreviewAsync(CurrentSettings.Clone());
             await Task.Delay(16);
         } while (_previewPending && !_updatesClosed);
         _previewBusy = false;
@@ -1345,9 +1387,9 @@ public sealed partial class MainWindow : Window
     private async Task<bool> SaveAsync()
     {
         // What is saved is this snapshot: edits made while it is on its way stay unsaved.
-        var sent = _current.Clone();
+        var sent = CurrentSettings.Clone();
         bool languageChanged = sent.Language != _saved.Language;
-        var error = await _client.CommitAsync(sent.Clone());
+        string? error = await _client.CommitAsync(sent.Clone());
         if (_updatesClosed) return false;
         if (error != null)
         {
@@ -1360,21 +1402,21 @@ public sealed partial class MainWindow : Window
         if (languageChanged)
         {
             Loc.Apply(sent.Language);
-            App.ReloadWindow(7, _current, _saved);
+            App.ReloadWindow(7, CurrentSettings, _saved);
             return true;
         }
         Status.IsOpen = false;
         UpdateButtons();
         if (_client.LastSaveWarning is { } warning)
             ShowMessage(InfoBarSeverity.Warning, Loc.T("Settings saved"), warning);
-        else if (_current.SameAs(_saved)) FlashSaved(); // edits made meanwhile keep the capsule as it is
+        else if (CurrentSettings.SameAs(_saved)) FlashSaved(); // edits made meanwhile keep the capsule as it is
         ShowStatus(_client.Connected);
         return true;
     }
 
     private async void OnRevert(object sender, RoutedEventArgs e)
     {
-        _current = _saved.Clone();
+        CurrentSettings = _saved.Clone();
         Status.IsOpen = false;
         LoadIntoControls();
         UpdateButtons();
@@ -1387,17 +1429,17 @@ public sealed partial class MainWindow : Window
         if (sender is not FrameworkElement { Tag: string group }) return;
         var d = BarSettings.Liquid();
         foreach (var (def, _) in _rows)
-            if (def.Group == group) def.Set(_current, def.Get(d));
-        if (group == "clarity") _current.Tint = d.Tint;
-        if (group == "width") _current.AutoWidth = d.AutoWidth;
-        if (group == "size") _current.HoverRise = d.HoverRise;
+            if (def.Group == group) def.Set(CurrentSettings, def.Get(d));
+        if (group == "clarity") CurrentSettings.Tint = d.Tint;
+        if (group == "width") CurrentSettings.AutoWidth = d.AutoWidth;
+        if (group == "size") CurrentSettings.HoverRise = d.HoverRise;
         if (group == "notify")
         {
-            _current.NotifyHideBody = d.NotifyHideBody;
-            _current.NotifyPlacement = d.NotifyPlacement;
+            CurrentSettings.NotifyHideBody = d.NotifyHideBody;
+            CurrentSettings.NotifyPlacement = d.NotifyPlacement;
         }
         if (group is "clarity" or "edge" or "light")
-            _current.Preset = _current.SameMaterial(BarSettings.Liquid()) ? "liquid" : _current.SameMaterial(BarSettings.Frosted()) ? "frosted" : "custom";
+            CurrentSettings.Preset = CurrentSettings.SameMaterial(BarSettings.Liquid()) ? "liquid" : CurrentSettings.SameMaterial(BarSettings.Frosted()) ? "frosted" : "custom";
         LoadIntoControls();
         Changed();
     }
@@ -1405,7 +1447,7 @@ public sealed partial class MainWindow : Window
     // The material back to the Liquid preset (layout, apps and sources stay as they are).
     private void OnDefaults(object sender, RoutedEventArgs e)
     {
-        _current.ApplyMaterial(BarSettings.Liquid());
+        CurrentSettings.ApplyMaterial(BarSettings.Liquid());
         LoadIntoControls();
         Changed();
     }
@@ -1424,7 +1466,7 @@ public sealed partial class MainWindow : Window
         _closePending = true;
         try
         {
-            if (!_current.SameAs(_saved))
+            if (!CurrentSettings.SameAs(_saved))
             {
                 var dialog = new ContentDialog
                 {

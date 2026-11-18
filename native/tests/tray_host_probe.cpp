@@ -23,8 +23,10 @@ bool HIconToImage(HICON icon, IconImage& out)
     ICONINFO ii{};
     if (!GetIconInfo(icon, &ii))
         return false;
-    if (ii.hbmColor) DeleteObject(ii.hbmColor);
-    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+    if (ii.hbmColor)
+        DeleteObject(ii.hbmColor);
+    if (ii.hbmMask)
+        DeleteObject(ii.hbmMask);
     out.width = out.height = 1;
     out.bgra = {0, 0, 0, 255};
     return true;
@@ -44,13 +46,14 @@ int g_failures = 0;
 void Check(bool ok, const char* what)
 {
     std::printf("%s: %s\n", ok ? "ok  " : "FAIL", what);
-    if (!ok) ++g_failures;
+    if (!ok)
+        ++g_failures;
 }
 
 LRESULT CALLBACK IconProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (m == kCallback) {
-        g_got.push_back({w, l});
+        g_got.emplace_back(w, l);
         return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -92,7 +95,8 @@ NOTIFYICONDATAW Data(HWND w, bool v4)
 const HostIcon* Find(const std::vector<HostIcon>& icons, const wchar_t* tip)
 {
     for (const HostIcon& i : icons)
-        if (i.tip == tip) return &i;
+        if (i.tip == tip)
+            return &i;
     return nullptr;
 }
 
@@ -162,7 +166,8 @@ int wmain(int argc, wchar_t** argv)
             PROCESS_INFORMATION pi{};
             DWORD code = 1;
             if (CreateProcessW(self, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-                while (WaitForSingleObject(pi.hProcess, 10) == WAIT_TIMEOUT) Pump(10);
+                while (WaitForSingleObject(pi.hProcess, 10) == WAIT_TIMEOUT)
+                    Pump(10);
                 GetExitCodeProcess(pi.hProcess, &code);
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
@@ -180,7 +185,7 @@ int wmain(int argc, wchar_t** argv)
         const HostIcon* a = Find(icons, L"Atrium probe v0");
         const HostIcon* b = Find(icons, L"Atrium probe v4");
         Check(a && a->image && a->version == 0 && a->callback == kCallback && a->uid == 1, "the host has the protocol 0 icon, its picture and callback");
-        Check(b && b->image && b->version == 4 && b->key.rfind(L"guid:", 0) == 0, "the host has the GUID icon at protocol 4");
+        Check(b && b->image && b->version == 4 && b->key.starts_with(L"guid:"), "the host has the GUID icon at protocol 4");
 
         // A changed tip is live in the host.
         wcscpy_s(v0.szTip, L"Atrium probe v0 changed");
@@ -204,8 +209,8 @@ int wmain(int argc, wchar_t** argv)
             g_got.clear();
             Check(host.Send(b->key, tray::HostAction::Right, at), "send a right click (protocol 4)");
             Pump(150);
-            Check(g_got.size() == 4 && LOWORD(g_got[3].second) == WM_CONTEXTMENU && HIWORD(g_got[3].second) == 2 &&
-                      short(LOWORD(g_got[3].first)) == 321 && short(HIWORD(g_got[3].first)) == 654,
+            Check(g_got.size() == 4 && LOWORD(g_got[3].second) == WM_CONTEXTMENU && HIWORD(g_got[3].second) == 2 && short(LOWORD(g_got[3].first)) == 321 &&
+                      short(HIWORD(g_got[3].first)) == 654,
                   "protocol 4 right click ends in WM_CONTEXTMENU at the pointer");
             g_got.clear();
             host.Send(b->key, tray::HostAction::Double, at);
@@ -221,7 +226,8 @@ int wmain(int argc, wchar_t** argv)
             PROCESS_INFORMATION pi{};
             DWORD code = 0;
             if (CreateProcessW(self, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-                while (WaitForSingleObject(pi.hProcess, 10) == WAIT_TIMEOUT) Pump(10);
+                while (WaitForSingleObject(pi.hProcess, 10) == WAIT_TIMEOUT)
+                    Pump(10);
                 GetExitCodeProcess(pi.hProcess, &code);
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);

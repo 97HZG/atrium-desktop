@@ -17,8 +17,8 @@ struct PopupLayout {
 // A column in a corner of the work area, its full height: the newest card at the corner. The
 // notification centre's controls are at the corner's end (above the cards at the top, below them
 // at the bottom), so scrolling never hides them.
-inline PopupLayout CornerLayout(const RECT& work, float scale, float width, float card, float gap, float edge, size_t count, float controls,
-    bool left, bool bottom)
+inline PopupLayout CornerLayout(const RECT& work, float scale, float width, float card, float gap, float edge, size_t count, float controls, bool left,
+                                bool bottom)
 {
     const int availableW = std::max(1L, work.right - work.left), availableH = std::max(1L, work.bottom - work.top);
     const int margin = std::clamp(int(std::lround(edge * scale)), 0, (std::min(availableW, availableH) - 1) / 2);
@@ -26,8 +26,7 @@ inline PopupLayout CornerLayout(const RECT& work, float scale, float width, floa
     const int h = availableH - 2 * margin;
     const LONG x = left ? work.left + margin : work.right - margin - w, top = work.top + margin;
     const float reserved = std::min(controls, float(h) / scale);
-    return {{x, top, x + w, top + h}, float(h) / scale - reserved,
-        count ? float(count) * card + float(count - 1) * gap : 0.f, bottom ? 0.f : reserved};
+    return {{x, top, x + w, top + h}, float(h) / scale - reserved, count ? float(count) * card + float(count - 1) * gap : 0.f, bottom ? 0.f : reserved};
 }
 
 inline PopupLayout TopRightLayout(const RECT& work, float scale, float width, float card, float gap, float edge, size_t count, float controls = 0)
@@ -35,9 +34,6 @@ inline PopupLayout TopRightLayout(const RECT& work, float scale, float width, fl
     return CornerLayout(work, scale, width, card, gap, edge, count, controls, false, false);
 }
 
-inline float CardTop(size_t index, float card, float gap, float scroll)
-{
-    return float(index) * (card + gap) - scroll;
-}
+inline float CardTop(size_t index, float card, float gap, float scroll) { return float(index) * (card + gap) - scroll; }
 
 } // namespace atrium::notification

@@ -51,9 +51,9 @@ struct KindName {
     WidgetKind kind;
     const wchar_t* name;
 };
-const KindName kKinds[] = {{WidgetKind::Clock, L"clock"},     {WidgetKind::Calendar, L"calendar"},   {WidgetKind::Battery, L"battery"},
-                           {WidgetKind::Digital, L"digital"}, {WidgetKind::System, L"system"},       {WidgetKind::Notes, L"notes"},
-                           {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"},  {WidgetKind::Weather, L"weather"},
+const KindName kKinds[] = {{WidgetKind::Clock, L"clock"},         {WidgetKind::Calendar, L"calendar"}, {WidgetKind::Battery, L"battery"},
+                           {WidgetKind::Digital, L"digital"},     {WidgetKind::System, L"system"},     {WidgetKind::Notes, L"notes"},
+                           {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"},     {WidgetKind::Weather, L"weather"},
                            {WidgetKind::Bluetooth, L"bluetooth"}, {WidgetKind::Network, L"network"}};
 
 const wchar_t* NameOf(WidgetKind k)
@@ -181,10 +181,10 @@ IconImage ReadPhoto(const std::wstring& path, UINT w, UINT h)
         PROPVARIANT v;
         PropVariantInit(&v);
         if (SUCCEEDED(meta->GetMetadataByName(L"System.Photo.Orientation", &v)) && v.vt == VT_UI2)
-            turn = v.uiVal == 3   ? WICBitmapTransformRotate180
-                   : v.uiVal == 6 ? WICBitmapTransformRotate90
-                   : v.uiVal == 8 ? WICBitmapTransformRotate270
-                                  : WICBitmapTransformRotate0;
+            turn = v.uiVal == 3 ? WICBitmapTransformRotate180 :
+                   v.uiVal == 6 ? WICBitmapTransformRotate90 :
+                   v.uiVal == 8 ? WICBitmapTransformRotate270 :
+                                  WICBitmapTransformRotate0;
         PropVariantClear(&v);
     }
     if (turn != WICBitmapTransformRotate0) {
@@ -351,8 +351,8 @@ void DesktopWidgets::SetMonitor(HMONITOR monitor, bool refresh)
 
 void DesktopWidgets::SetStatus(const SystemStatus& status)
 {
-    bool batteryChanged = world_.status.battery != status.battery || world_.status.batteryPercent != status.batteryPercent ||
-                          world_.status.charging != status.charging;
+    bool batteryChanged =
+        world_.status.battery != status.battery || world_.status.batteryPercent != status.batteryPercent || world_.status.charging != status.charging;
     world_.status = status;
     if (batteryChanged)
         for (auto& widget : widgets_)
@@ -423,8 +423,8 @@ RECT DesktopWidgets::CellRect(int col, int row, WidgetSize size) const
     float s = Scale();
     const float step = kWidgetCell + kWidgetGap;
     const int visualCol = VisualCol(col, size);
-    float left = FromRight(col, size) ? float(wa.right - wa.left) / s - kMargin - float(Cols() - visualCol - WidgetCols(size)) * step - WidgetWidth(size)
-                                      : kMargin + float(visualCol) * step;
+    float left = FromRight(col, size) ? float(wa.right - wa.left) / s - kMargin - float(Cols() - visualCol - WidgetCols(size)) * step - WidgetWidth(size) :
+                                        kMargin + float(visualCol) * step;
     int x = wa.left + int(std::lround(left * s));
     int y = wa.top + int(std::lround((kMargin + float(row) * (kWidgetCell + kWidgetGap)) * s));
     return RECT{x, y, x + int(std::lround(WidgetWidth(size) * s)), y + int(std::lround(WidgetHeight(size) * s))};
@@ -432,17 +432,7 @@ RECT DesktopWidgets::CellRect(int col, int row, WidgetSize size) const
 
 bool DesktopWidgets::Fits(int col, int row, WidgetSize size, const Widget* except) const
 {
-    if (col < 0 || row < 0 || col + WidgetCols(size) > Cols() || row + WidgetRows(size) > Rows())
-        return false;
-    for (const auto& w : widgets_) {
-        if (w.get() == except)
-            continue;
-        bool apart = col + WidgetCols(size) <= w->col || w->col + WidgetCols(w->size) <= col || row + WidgetRows(size) <= w->row ||
-                     w->row + WidgetRows(w->size) <= row;
-        if (!apart)
-            return false;
-    }
-    return true;
+    return !(col < 0 || row < 0 || col + WidgetCols(size) > Cols() || row + WidgetRows(size) > Rows());
 }
 
 bool DesktopWidgets::FreeCellNear(float col, float row, WidgetSize size, const Widget* except, int& outCol, int& outRow) const
@@ -468,7 +458,7 @@ void DesktopWidgets::Load()
     unplaced_.clear();
     std::wstring text = ReadTextFile(LayoutPath());
     bool read = false;
-    auto add = [&](WidgetKind k, WidgetSize s, int c, int r, WidgetContent content) {
+    auto add = [&](WidgetKind k, WidgetSize s, int c, int r, const WidgetContent& content) {
         if (!WidgetSupports(k, s))
             s = WidgetSize::Small;
         if (!Fits(c, r, s, nullptr) && !FreeCellNear(float(c), float(r), s, nullptr, c, r))
@@ -501,8 +491,8 @@ void DesktopWidgets::Load()
                         json::JsonObject io = iv.GetObject();
                         content.items.push_back({std::wstring(io.GetNamedString(L"text", L"")), io.GetNamedBoolean(L"done", false)});
                     }
-                if (!add(k, ParseSize(std::wstring(e.GetNamedString(L"size", L"small"))), int(e.GetNamedNumber(L"col", 0)),
-                         int(e.GetNamedNumber(L"row", 0)), std::move(content)))
+                if (!add(k, ParseSize(std::wstring(e.GetNamedString(L"size", L"small"))), int(e.GetNamedNumber(L"col", 0)), int(e.GetNamedNumber(L"row", 0)),
+                         std::move(content)))
                     unplaced_.emplace_back(e.Stringify());
             }
         } else {
@@ -624,7 +614,7 @@ void DesktopWidgets::Place(Widget& w, bool glide)
     RECT current = w.surface->Rect();
     if (current.right - current.left != to.right - to.left || current.bottom - current.top != to.bottom - to.top)
         w.surface->ReserveResize(D2D1::SizeF(WidgetWidth(WidgetSupports(w.kind, WidgetSize::Medium) ? WidgetSize::Medium : WidgetSize::Small),
-                                           WidgetHeight(WidgetSupports(w.kind, WidgetSize::Large) ? WidgetSize::Large : WidgetSize::Small)));
+                                             WidgetHeight(WidgetSupports(w.kind, WidgetSize::Large) ? WidgetSize::Large : WidgetSize::Small)));
     w.glideFrom = w.surface->Rect();
     w.glideTo = to;
     w.glideMs = ClockMs();
@@ -1090,8 +1080,8 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
     case WM_MOUSEWHEEL:
         if (w.kind != WidgetKind::Reminders)
             return false;
-        w.content.scroll = std::clamp(w.content.scroll - float(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA * kReminderRow * 3,
-                                      0.f, ReminderScrollMax(w.content, w.size));
+        w.content.scroll =
+            std::clamp(w.content.scroll - float(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA * kReminderRow * 3, 0.f, ReminderScrollMax(w.content, w.size));
         w.surface->Invalidate();
         return true;
     case WM_SETCURSOR: {
@@ -1124,7 +1114,7 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
         if (w.resizing) {
             EndEdit(w);
             w.surface->ReserveResize(D2D1::SizeF(WidgetWidth(WidgetSupports(w.kind, WidgetSize::Medium) ? WidgetSize::Medium : WidgetSize::Small),
-                                                WidgetHeight(WidgetSupports(w.kind, WidgetSize::Large) ? WidgetSize::Large : WidgetSize::Small)));
+                                                 WidgetHeight(WidgetSupports(w.kind, WidgetSize::Large) ? WidgetSize::Large : WidgetSize::Small)));
         }
         SetCapture(w.surface->Hwnd());
         return true;
@@ -1209,21 +1199,13 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
         }
         return true;
     }
-    case WM_RBUTTONUP:
-        Menu(w);
-        return true;
+    case WM_RBUTTONUP: Menu(w); return true;
     case WM_LBUTTONDBLCLK:
-    case WM_RBUTTONDOWN:
-        return true;
+    case WM_RBUTTONDOWN: return true;
     case WM_CHAR:
-    case WM_KEYDOWN:
-        return w.content.editing && Key(w, m, wp);
-    case WM_KILLFOCUS:
-        EndEdit(w);
-        return false;
-    case WM_IME_STARTCOMPOSITION:
-        PlaceImeWindow(w);
-        return false; // the input method's own window
+    case WM_KEYDOWN: return w.content.editing && Key(w, m, wp);
+    case WM_KILLFOCUS: EndEdit(w); return false;
+    case WM_IME_STARTCOMPOSITION: PlaceImeWindow(w); return false; // the input method's own window
     }
     return false;
 }
@@ -1238,19 +1220,13 @@ void DesktopWidgets::Activate(Widget& w)
     std::wstring open;
     switch (w.kind) {
     case WidgetKind::Clock:
-    case WidgetKind::Digital:
-        open = L"ms-clock:";
-        break;
+    case WidgetKind::Digital: open = L"ms-clock:"; break;
     case WidgetKind::Calendar:
         if (onCalendar)
             onCalendar();
         break;
-    case WidgetKind::Battery:
-        open = world_.status.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep";
-        break;
-    case WidgetKind::System:
-        open = L"taskmgr.exe";
-        break;
+    case WidgetKind::Battery: open = world_.status.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep"; break;
+    case WidgetKind::System: open = L"taskmgr.exe"; break;
     case WidgetKind::Bluetooth:
         open = L"ms-settings:bluetooth"; // Bluetooth & devices: each device with its battery
         break;
@@ -1268,8 +1244,7 @@ void DesktopWidgets::Activate(Widget& w)
         if (INT_PTR(ShellExecuteW(nullptr, L"open", L"msnweather:", nullptr, nullptr, SW_SHOWNORMAL)) <= 32)
             open = L"https://www.msn.cn/zh-cn/weather/forecast";
         break;
-    default:
-        break;
+    default: break;
     }
     if (!open.empty())
         ShellExecuteW(nullptr, L"open", open.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -1291,7 +1266,7 @@ void DesktopWidgets::Click(Widget& w, POINT content)
             break;
         }
     WidgetContent& c = w.content;
-    if (id.rfind(L"toggle:", 0) == 0) {
+    if (id.starts_with(L"toggle:")) {
         size_t i = size_t(_wtoi(id.c_str() + 7));
         if (c.editing && c.item == int(i))
             EndEdit(w);
@@ -1300,7 +1275,7 @@ void DesktopWidgets::Click(Widget& w, POINT content)
             SaveSoon();
         }
         w.surface->Invalidate();
-    } else if (id.rfind(L"item:", 0) == 0) {
+    } else if (id.starts_with(L"item:")) {
         StartEdit(w, _wtoi(id.c_str() + 5));
     } else if (id == L"add") {
         EndEdit(w);
@@ -1383,12 +1358,8 @@ bool DesktopWidgets::Key(Widget& w, UINT m, WPARAM wp)
     bool changed = false;
     if (m == WM_KEYDOWN) {
         switch (wp) {
-        case VK_LEFT:
-            at = back(at);
-            break;
-        case VK_RIGHT:
-            at = ahead(at);
-            break;
+        case VK_LEFT: at = back(at); break;
+        case VK_RIGHT: at = ahead(at); break;
         case VK_HOME: {
             size_t nl = at ? text.rfind(L'\n', at - 1) : std::wstring::npos;
             at = nl == std::wstring::npos ? 0 : nl + 1;
@@ -1405,8 +1376,7 @@ bool DesktopWidgets::Key(Widget& w, UINT m, WPARAM wp)
                 changed = true;
             }
             break;
-        default:
-            return false; // WM_CHAR follows for the rest
+        default: return false; // WM_CHAR follows for the rest
         }
     } else {
         wchar_t ch = wchar_t(wp);
@@ -1439,7 +1409,7 @@ bool DesktopWidgets::Key(Widget& w, UINT m, WPARAM wp)
         } else if (ch == 22) { // Ctrl+V
             if (OpenClipboard(w.surface->Hwnd())) {
                 if (HANDLE data = GetClipboardData(CF_UNICODETEXT))
-                    if (auto* p = static_cast<const wchar_t*>(GlobalLock(data))) {
+                    if (const auto* p = static_cast<const wchar_t*>(GlobalLock(data))) {
                         Insert(w, p);
                         GlobalUnlock(data);
                         changed = true;
@@ -1553,18 +1523,10 @@ void DesktopWidgets::Menu(Widget& w)
         switch (cmd) {
         case kSmall:
         case kMedium:
-        case kLarge:
-            Resize(w, cmd == kSmall ? WidgetSize::Small : cmd == kMedium ? WidgetSize::Medium : WidgetSize::Large);
-            break;
-        case kFolder:
-            PickFolder(w);
-            break;
-        case kCities:
-            PickCity(w, p);
-            break;
-        case kNextPhoto:
-            LoadPhoto(w, true);
-            break;
+        case kLarge: Resize(w, cmd == kSmall ? WidgetSize::Small : cmd == kMedium ? WidgetSize::Medium : WidgetSize::Large); break;
+        case kFolder: PickFolder(w); break;
+        case kCities: PickCity(w, p); break;
+        case kNextPhoto: LoadPhoto(w, true); break;
         case kClearDone:
             std::erase_if(w.content.items, [](const Reminder& r) { return r.done; });
             Save();

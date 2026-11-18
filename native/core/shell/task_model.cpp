@@ -95,15 +95,9 @@ std::wstring FileStem(const std::wstring& path)
     return name;
 }
 
-bool IsLink(const std::wstring& path)
-{
-    return path.size() > 4 && _wcsicmp(path.c_str() + path.size() - 4, L".lnk") == 0;
-}
+bool IsLink(const std::wstring& path) { return path.size() > 4 && _wcsicmp(path.c_str() + path.size() - 4, L".lnk") == 0; }
 
-std::wstring AppsFolderPath(const std::wstring& aumid)
-{
-    return L"shell:AppsFolder\\" + aumid;
-}
+std::wstring AppsFolderPath(const std::wstring& aumid) { return L"shell:AppsFolder\\" + aumid; }
 
 // The app id of a packaged app's executable (under WindowsApps): such a file cannot be run
 // itself (#64, Windows Terminal), its app is started by id. The package folder is
@@ -135,7 +129,11 @@ std::wstring PackagedAumid(const std::wstring& exe)
     CloseHandle(file);
     xml.resize(got);
     std::string rel(relative.begin(), relative.end()); // manifest paths are ASCII in practice
-    auto lowerA = [](std::string s) { for (char& ch : s) ch = char(tolower((unsigned char)ch)); return s; };
+    auto lowerA = [](std::string s) {
+        for (char& ch : s)
+            ch = char(tolower((unsigned char)ch));
+        return s;
+    };
     const std::string lx = lowerA(xml), lrel = lowerA(rel);
     std::string id;
     for (size_t p = lx.find("<application "); p != std::string::npos; p = lx.find("<application ", p + 1)) {
@@ -143,7 +141,8 @@ std::wstring PackagedAumid(const std::wstring& exe)
         const std::string tag = xml.substr(p, close - p), ltag = lx.substr(p, close - p);
         auto attr = [&](const char* name) {
             const size_t a = ltag.find(std::string(" ") + name + "=\"");
-            if (a == std::string::npos) return std::string();
+            if (a == std::string::npos)
+                return std::string();
             const size_t v = a + strlen(name) + 3, q = tag.find('"', v);
             return q == std::string::npos ? std::string() : tag.substr(v, q - v);
         };
@@ -394,7 +393,7 @@ bool ReadLink(const std::wstring& path, std::wstring& target, std::wstring& aumi
     if (args) {
         std::wstring line(1024, L'\0');
         if (SUCCEEDED(link->GetArguments(line.data(), int(line.size()))))
-            *args = line.c_str();
+            *args = line.c_str(); // NOLINT(readability-redundant-string-cstr): up to the terminator, not the whole buffer
     }
     if (auto store = link.try_as<IPropertyStore>())
         aumid = StoreAumid(store.get());
@@ -723,8 +722,8 @@ struct IconKeyHash {
 
 bool Same(const TaskItem& a, const TaskItem& b)
 {
-    return a.key == b.key && a.name == b.name && a.pinned == b.pinned && a.pinIndex == b.pinIndex && a.windows == b.windows &&
-           a.active == b.active && a.attention == b.attention && a.iconVersion == b.iconVersion;
+    return a.key == b.key && a.name == b.name && a.pinned == b.pinned && a.pinIndex == b.pinIndex && a.windows == b.windows && a.active == b.active &&
+           a.attention == b.attention && a.iconVersion == b.iconVersion;
 }
 
 struct ScanRec {
@@ -736,10 +735,7 @@ struct ScanRec {
 
 } // namespace
 
-bool HIconToImage(HICON icon, IconImage& out)
-{
-    return IconToImage(icon, out);
-}
+bool HIconToImage(HICON icon, IconImage& out) { return IconToImage(icon, out); }
 
 struct TaskModel::Impl {
     HWND ui;
@@ -786,7 +782,9 @@ struct TaskModel::Impl {
     static Impl* self;
 
     Impl(HWND window, std::function<void()> changed, std::function<bool(const std::wstring&)> opener)
-        : ui(window), onChanged(std::move(changed)), openExisting(std::move(opener))
+        : ui(window),
+          onChanged(std::move(changed)),
+          openExisting(std::move(opener))
     {
         self = this;
         shellHookMsg = RegisterWindowMessageW(L"SHELLHOOK");
@@ -949,9 +947,11 @@ struct TaskModel::Impl {
             names_.swap(readyNames);
         }
         for (auto& key : icons_)
-            if (meta.contains(key)) ++iconVersion[key];
+            if (meta.contains(key))
+                ++iconVersion[key];
         for (auto& [key, name] : names_)
-            if (meta.contains(key)) names[key] = name;
+            if (meta.contains(key))
+                names[key] = name;
         if (Rebuild()) {
             notify = true;
             ArmTimer();
@@ -1106,9 +1106,8 @@ struct TaskModel::Impl {
             if (m.aumid.empty())
                 m.aumid = r->info.aumid;
             m.hwnds.push_back(r->hwnd);
-            if (std::none_of(m.processTargets.begin(), m.processTargets.end(), [&](const AppProcessIdentity& target) {
-                    return target.exePath == r->info.exePath && target.aumid == r->info.aumid;
-                }))
+            if (std::none_of(m.processTargets.begin(), m.processTargets.end(),
+                             [&](const AppProcessIdentity& target) { return target.exePath == r->info.exePath && target.aumid == r->info.aumid; }))
                 m.processTargets.push_back({r->info.exePath, r->info.aumid});
             if (it->second >= pinCount) {
                 running.insert(key);
@@ -1149,9 +1148,8 @@ struct TaskModel::Impl {
         for (const auto& k : running)
             if (std::find(order.begin(), order.end(), k) == order.end())
                 fresh.push_back(k);
-        std::sort(fresh.begin(), fresh.end(), [&](const std::wstring& a, const std::wstring& b) {
-            return firstSeen[a] != firstSeen[b] ? firstSeen[a] < firstSeen[b] : a < b;
-        });
+        std::sort(fresh.begin(), fresh.end(),
+                  [&](const std::wstring& a, const std::wstring& b) { return firstSeen[a] != firstSeen[b] ? firstSeen[a] < firstSeen[b] : a < b; });
         order.insert(order.end(), fresh.begin(), fresh.end());
 
         std::vector<TaskItem> result(out.begin(), out.begin() + std::ptrdiff_t(pinCount));
@@ -1198,7 +1196,8 @@ struct TaskModel::Impl {
         {
             std::lock_guard g(mutex);
             liveIconKeys.clear();
-            for (const auto& [key, value] : meta) liveIconKeys.insert(key);
+            for (const auto& [key, value] : meta)
+                liveIconKeys.insert(key);
             std::erase_if(latestIconSize, [&](const auto& entry) { return !liveIconKeys.contains(entry.first); });
             PruneIcons();
         }
@@ -1241,9 +1240,11 @@ struct TaskModel::Impl {
             else
                 pinByKey[p.key] = pins.size();
             auto addTarget = [&](const std::wstring& target) {
-                if (target.empty()) return;
+                if (target.empty())
+                    return;
                 auto [it, added] = pinByTarget.emplace(target, pins.size());
-                if (!added && it->second != pins.size()) it->second = size_t(-1);
+                if (!added && it->second != pins.size())
+                    it->second = size_t(-1);
             };
             // A browser profile's or web app's shortcut keeps its explicit identity; the browser's
             // own pin takes its other windows, whichever profile (#52).
@@ -1276,21 +1277,25 @@ struct TaskModel::Impl {
     {
         std::erase_if(icons, [&](const auto& entry) { return !entry.second.loading && !liveIconKeys.contains(entry.first.key); });
         size_t bytes = 0;
-        for (const auto& [key, entry] : icons) bytes += entry.image.bgra.size();
+        for (const auto& [key, entry] : icons)
+            bytes += entry.image.bgra.size();
         while (bytes > 16 * 1024 * 1024 || icons.size() > 512) {
             auto victim = icons.end();
             for (auto it = icons.begin(); it != icons.end(); ++it) {
                 const auto current = latestIconSize.find(it->first.key);
-                if (it->second.loading || (current != latestIconSize.end() && current->second == it->first.size)) continue;
-                if (victim == icons.end() || it->second.used < victim->second.used) victim = it;
+                if (it->second.loading || (current != latestIconSize.end() && current->second == it->first.size))
+                    continue;
+                if (victim == icons.end() || it->second.used < victim->second.used)
+                    victim = it;
             }
-            if (victim == icons.end()) break; // protected live working set only
+            if (victim == icons.end())
+                break; // protected live working set only
             bytes -= victim->second.image.bgra.size();
             icons.erase(victim);
         }
     }
 
-    void Enqueue(Job job)
+    void Enqueue(const Job& job)
     {
         {
             std::lock_guard g(mutex);
@@ -1348,7 +1353,8 @@ struct TaskModel::Impl {
                 job = std::move(jobs.front());
                 jobs.pop_front();
                 if (!liveIconKeys.contains(job.key)) {
-                    if (!job.name) icons.erase(IconKey{job.key, job.size});
+                    if (!job.name)
+                        icons.erase(IconKey{job.key, job.size});
                     continue;
                 }
             }
@@ -1424,10 +1430,15 @@ struct TaskModel::Impl {
         {
             std::lock_guard g(mutex);
             auto found = icons.find(IconKey{job.key, job.size});
-            if (found == icons.end()) return;
-            if (!liveIconKeys.contains(job.key)) { icons.erase(found); return; }
+            if (found == icons.end())
+                return;
+            if (!liveIconKeys.contains(job.key)) {
+                icons.erase(found);
+                return;
+            }
             IconEntry& e = found->second;
-            if (e.sig != job.sig) return;
+            if (e.sig != job.sig)
+                return;
             e.loading = false;
             if (ok) {
                 changed = !e.have || e.image.bgra != img.bgra;
@@ -1468,21 +1479,26 @@ struct TaskModel::Impl {
     // Whether a program shows a window of its own (any visible, unowned, ordinary one).
     static bool ShowsWindow(const std::wstring& exe)
     {
-        struct Look { const std::wstring* exe; bool found = false; } look{&exe};
-        EnumWindows([](HWND h, LPARAM l) -> BOOL {
-            auto& k = *reinterpret_cast<Look*>(l);
-            if (!IsWindowVisible(h) || GetWindow(h, GW_OWNER) || (GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW))
-                return TRUE;
-            DWORD pid = 0;
-            GetWindowThreadProcessId(h, &pid);
-            if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
-                wchar_t path[MAX_PATH * 2];
-                DWORD size = DWORD(std::size(path));
-                k.found = QueryFullProcessImageNameW(p, 0, path, &size) && _wcsicmp(path, k.exe->c_str()) == 0;
-                CloseHandle(p);
-            }
-            return !k.found;
-        }, reinterpret_cast<LPARAM>(&look));
+        struct Look {
+            const std::wstring* exe;
+            bool found = false;
+        } look{&exe};
+        EnumWindows(
+            [](HWND h, LPARAM l) -> BOOL {
+                auto& k = *reinterpret_cast<Look*>(l);
+                if (!IsWindowVisible(h) || GetWindow(h, GW_OWNER) || (GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW))
+                    return TRUE;
+                DWORD pid = 0;
+                GetWindowThreadProcessId(h, &pid);
+                if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+                    wchar_t path[MAX_PATH * 2];
+                    DWORD size = DWORD(std::size(path));
+                    k.found = QueryFullProcessImageNameW(p, 0, path, &size) && _wcsicmp(path, k.exe->c_str()) == 0;
+                    CloseHandle(p);
+                }
+                return !k.found;
+            },
+            reinterpret_cast<LPARAM>(&look));
         return look.found;
     }
 
@@ -1611,7 +1627,8 @@ struct TaskModel::Impl {
     static void BringToFront(HWND h)
     {
         // A closed-to-tray window must be restored by its app, not by the task switcher.
-        if (!IsWindowVisible(h)) return;
+        if (!IsWindowVisible(h))
+            return;
         if (IsIconic(h))
             SysCommand(h, SC_RESTORE);
         HWND target = GetLastActivePopup(h);
@@ -1760,8 +1777,7 @@ struct TaskModel::Impl {
                 ids.push_back(id);
         }
         winrt::com_ptr<IShellItemArray> array;
-        bool ok = !ids.empty() &&
-                  SUCCEEDED(SHCreateShellItemArrayFromIDLists(UINT(ids.size()), const_cast<PCIDLIST_ABSOLUTE_ARRAY>(ids.data()), array.put()));
+        bool ok = !ids.empty() && SUCCEEDED(SHCreateShellItemArrayFromIDLists(UINT(ids.size()), const_cast<PCIDLIST_ABSOLUTE_ARRAY>(ids.data()), array.put()));
         DWORD pid = 0;
         ok = ok && SUCCEEDED(aam->ActivateForFile(aumid.c_str(), array.get(), L"open", &pid));
         if (ok)
@@ -1778,11 +1794,11 @@ TaskModel::Impl* TaskModel::Impl::self = nullptr;
 
 bool PinnedApp::AllowsMultipleWindows() const
 {
-    if (multipleWindows) return *multipleWindows;
+    if (multipleWindows)
+        return *multipleWindows;
     std::wstring exe = Lower(FileStem(path));
-    return exe == L"explorer" || Lower(aumid) == L"microsoft.windows.explorer" ||
-           exe == L"chrome" || exe == L"msedge" || exe == L"firefox" || exe == L"brave" ||
-           exe == L"opera" || exe == L"vivaldi" || exe == L"chromium";
+    return exe == L"explorer" || Lower(aumid) == L"microsoft.windows.explorer" || exe == L"chrome" || exe == L"msedge" || exe == L"firefox" ||
+           exe == L"brave" || exe == L"opera" || exe == L"vivaldi" || exe == L"chromium";
 }
 
 std::wstring AppExecutable(const std::wstring& path)
@@ -1790,7 +1806,8 @@ std::wstring AppExecutable(const std::wstring& path)
     std::wstring target = path;
     if (IsLink(path)) {
         std::wstring aumid;
-        if (!ReadLink(path, target, aumid)) return {};
+        if (!ReadLink(path, target, aumid))
+            return {};
     }
     size_t slash = target.find_last_of(L"\\/");
     if (slash != std::wstring::npos) {
@@ -1830,8 +1847,8 @@ bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out,
                 if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(link.put())))) {
                     auto file = link.as<IPersistFile>();
                     wchar_t iconPath[MAX_PATH * 2]{};
-                    if (SUCCEEDED(file->Load(parsingName.c_str(), STGM_READ)) &&
-                        SUCCEEDED(link->GetIconLocation(iconPath, ARRAYSIZE(iconPath), &index)) && *iconPath)
+                    if (SUCCEEDED(file->Load(parsingName.c_str(), STGM_READ)) && SUCCEEDED(link->GetIconLocation(iconPath, ARRAYSIZE(iconPath), &index)) &&
+                        *iconPath)
                         source = iconPath;
                 }
             }
@@ -1840,7 +1857,10 @@ bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out,
                 IconImage raw;
                 bool ok = IconToImage(icon, raw);
                 DestroyIcon(icon);
-                if (ok) { out = FitToSquare(raw, sizePx); return true; }
+                if (ok) {
+                    out = FitToSquare(raw, sizePx);
+                    return true;
+                }
             }
         }
         return ShellImage(parsingName, sizePx, out, thumbnail);
@@ -1851,7 +1871,7 @@ bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out,
 
 // ---- TaskModel: every entry point is exception-safe -----------------------------
 
-TaskModel::TaskModel(HWND uiWindow, std::function<void()> onChanged, std::function<bool(const std::wstring&)> openExisting)
+TaskModel::TaskModel(HWND uiWindow, std::function<void()> onChanged, const std::function<bool(const std::wstring&)>& openExisting)
 {
     impl_ = std::make_unique<Impl>(uiWindow, std::move(onChanged), std::move(openExisting));
 }
@@ -1877,15 +1897,9 @@ void TaskModel::SetPins(const std::vector<PinnedApp>& pins)
     }
 }
 
-void TaskModel::SetShowRunning(bool show)
-{
-    impl_->SetShowRunning(show);
-}
+void TaskModel::SetShowRunning(bool show) { impl_->SetShowRunning(show); }
 
-void TaskModel::SetOnFlash(std::function<void(HWND)> onFlash)
-{
-    impl_->onFlash = std::move(onFlash);
-}
+void TaskModel::SetOnFlash(std::function<void(HWND)> onFlash) { impl_->onFlash = std::move(onFlash); }
 
 IconImage TaskModel::Icon(const std::wstring& key, int sizePx)
 {
@@ -2025,10 +2039,7 @@ std::wstring TaskModel::FileLocation(const std::wstring& key) const
     }
 }
 
-bool TaskModel::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
-{
-    return impl_->HandleMessage(msg, wp, lp);
-}
+bool TaskModel::HandleMessage(UINT msg, WPARAM wp, LPARAM lp) { return impl_->HandleMessage(msg, wp, lp); }
 
 std::vector<PinnedApp> TaskModel::ImportWindowsPins()
 {

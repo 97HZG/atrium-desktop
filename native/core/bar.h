@@ -48,7 +48,7 @@ public:
     // and freezes the backdrop after the first frame so the glass never samples
     // itself; used to take screenshots of the real surface.
     Bar(HINSTANCE instance, bool debugCapturable, std::wstring display = {});
-    ~Bar();
+    ~Bar() override;
     Bar(const Bar&) = delete;
     Bar& operator=(const Bar&) = delete;
 

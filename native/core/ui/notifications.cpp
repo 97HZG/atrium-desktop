@@ -60,7 +60,6 @@ std::wstring Ago(ULONGLONG t)
     return TrFormat(L"%d h ago", int(s / 3600));
 }
 
-
 } // namespace
 
 Notifications::Notifications(HINSTANCE instance)
@@ -147,9 +146,7 @@ float Notifications::CardHeight() const { return 16 + 16 + 6 + 20 + 4 + 36 + 14;
 void Notifications::ClearPreparedUpdate()
 {
     std::erase_if(notices_, [](const Notice& n) { return n.source == L"atrium-update"; });
-    std::erase_if(popupIds_, [&](uint64_t id) {
-        return std::none_of(notices_.begin(), notices_.end(), [&](const Notice& n) { return n.id == id; });
-    });
+    std::erase_if(popupIds_, [&](uint64_t id) { return std::none_of(notices_.begin(), notices_.end(), [&](const Notice& n) { return n.id == id; }); });
     Changed();
 }
 
@@ -451,8 +448,8 @@ void Notifications::Layout(Mode mode)
             }
         }
         const float scale = PopupScale(work);
-        const auto layout = notification::CornerLayout(work, scale, kW, CardHeight(), kGap, kPopupGapDip,
-            shown.size(), mode == Mode::Center ? kPill + kGap : 0, left_, bottom_);
+        const auto layout = notification::CornerLayout(work, scale, kW, CardHeight(), kGap, kPopupGapDip, shown.size(), mode == Mode::Center ? kPill + kGap : 0,
+                                                       left_, bottom_);
         v.contentH = layout.contentHeight;
         v.viewH = layout.viewHeight;
         v.contentTop = layout.contentTop;
@@ -952,8 +949,9 @@ void Notifications::Paint(Mode mode, Canvas& c)
         const int inset = ((wr.right - wr.left) - (rr.right - rr.left)) / 2;
         const int regionBottom = fromTop && !(dockTop && moving) ? std::min(int(wr.bottom - wr.top), int(std::ceil(bottom * c.scale)) + 2 * inset) : -1;
         if (regionTop != v.regionTop || regionBottom != v.regionBottom) {
-            HRGN rgn = regionTop > 0 || regionBottom >= 0 ? CreateRectRgn(0, std::max(0, regionTop), wr.right - wr.left,
-                regionBottom >= 0 ? regionBottom : wr.bottom - wr.top) : nullptr;
+            HRGN rgn = regionTop > 0 || regionBottom >= 0 ?
+                           CreateRectRgn(0, std::max(0, regionTop), wr.right - wr.left, regionBottom >= 0 ? regionBottom : wr.bottom - wr.top) :
+                           nullptr;
             if (SetWindowRgn(v.surface->Hwnd(), rgn, FALSE)) {
                 v.regionTop = regionTop;
                 v.regionBottom = regionBottom;
@@ -992,13 +990,13 @@ void Notifications::Click(Mode mode, const std::wstring& id)
             Layout(Mode::Center);
         }
         Log(L"notify: expanded");
-    } else if (id.rfind(L"close:", 0) == 0) {
+    } else if (id.starts_with(L"close:")) {
         size_t i = index(6);
         if (i < shown.size()) {
             Log(L"notify: closed %llu", shown[i]->id);
             Remove(shown[i]->id);
         }
-    } else if (id.rfind(L"card:", 0) == 0) {
+    } else if (id.starts_with(L"card:")) {
         size_t i = index(5);
         if (i < shown.size())
             Activate(shown[i]->id);

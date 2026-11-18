@@ -73,8 +73,7 @@ WifiState QueryWifi()
     s.adapter = true;
     DWORD size = 0;
     WLAN_CONNECTION_ATTRIBUTES* conn = nullptr;
-    if (WlanQueryInterface(w.Handle(), itf, wlan_intf_opcode_current_connection, nullptr, &size, reinterpret_cast<void**>(&conn), nullptr) ==
-            ERROR_SUCCESS &&
+    if (WlanQueryInterface(w.Handle(), itf, wlan_intf_opcode_current_connection, nullptr, &size, reinterpret_cast<void**>(&conn), nullptr) == ERROR_SUCCESS &&
         conn) {
         if (conn->isState == wlan_interface_state_connected) {
             s.connected = true;
@@ -124,9 +123,8 @@ std::vector<WifiNetwork> ListWifi(bool rescan)
     WlanFreeMemory(list);
     for (auto& [ssid, n] : bySsid)
         out.push_back(n);
-    std::sort(out.begin(), out.end(), [](const WifiNetwork& a, const WifiNetwork& b) {
-        return a.connected != b.connected ? a.connected : a.signal > b.signal;
-    });
+    std::sort(out.begin(), out.end(),
+              [](const WifiNetwork& a, const WifiNetwork& b) { return a.connected != b.connected ? a.connected : a.signal > b.signal; });
     return out;
 }
 

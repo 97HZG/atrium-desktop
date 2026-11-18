@@ -85,19 +85,21 @@ bool RegisterLogonTask(const std::wstring& exe)
     const std::wstring xml = L"<?xml version=\"1.0\" encoding=\"UTF-16\"?>"
                              L"<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">"
                              L"<RegistrationInfo><Description>Starts Atrium when you sign in.</Description></RegistrationInfo>"
-                             L"<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + sid + L"</UserId></LogonTrigger></Triggers>"
-                             L"<Principals><Principal id=\"Author\"><UserId>" + sid +
+                             L"<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" +
+                             sid +
+                             L"</UserId></LogonTrigger></Triggers>"
+                             L"<Principals><Principal id=\"Author\"><UserId>" +
+                             sid +
                              L"</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>"
                              L"<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
                              L"<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
                              L"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>4</Priority>"
                              L"<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings></Settings>"
-                             L"<Actions Context=\"Author\"><Exec><Command>" + Xml(exe) + L"</Command></Exec></Actions></Task>";
+                             L"<Actions Context=\"Author\"><Exec><Command>" +
+                             Xml(exe) + L"</Command></Exec></Actions></Task>";
     VARIANT none{};
     winrt::com_ptr<IRegisteredTask> task;
-    HRESULT hr = folder->RegisterTask(Bstr(TaskName(sid)),
-                                      Bstr(xml), TASK_CREATE_OR_UPDATE, none, none,
-                                      TASK_LOGON_INTERACTIVE_TOKEN, none, task.put());
+    HRESULT hr = folder->RegisterTask(Bstr(TaskName(sid)), Bstr(xml), TASK_CREATE_OR_UPDATE, none, none, TASK_LOGON_INTERACTIVE_TOKEN, none, task.put());
     if (FAILED(hr))
         Log(L"startup: the logon task could not be registered (0x%08X)", unsigned(hr));
     return SUCCEEDED(hr);
@@ -112,9 +114,8 @@ std::wstring LogonTaskProgram()
     winrt::com_ptr<ITaskDefinition> definition;
     winrt::com_ptr<IActionCollection> actions;
     winrt::com_ptr<IAction> action;
-    if (!folder || FAILED(folder->GetTask(Bstr(TaskName(sid)), task.put())) ||
-        FAILED(task->get_Definition(definition.put())) || FAILED(definition->get_Actions(actions.put())) ||
-        FAILED(actions->get_Item(1, action.put())))
+    if (!folder || FAILED(folder->GetTask(Bstr(TaskName(sid)), task.put())) || FAILED(task->get_Definition(definition.put())) ||
+        FAILED(definition->get_Actions(actions.put())) || FAILED(actions->get_Item(1, action.put())))
         return {};
     auto exec = action.try_as<IExecAction>();
     BSTR path = nullptr;

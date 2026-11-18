@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
@@ -38,12 +37,15 @@ internal sealed record ReleaseInfo(Version Version, string Tag, Uri Page, Uri? D
         Uri? download = null;
         string? digest = null;
         foreach (var asset in release.GetProperty("assets").EnumerateArray())
+        {
             if (asset.GetProperty("name").GetString() == $"Atrium-{number}-win-x64.zip")
             {
                 download = new Uri(asset.GetProperty("browser_download_url").GetString()!);
                 digest = asset.TryGetProperty("digest", out var hash) ? hash.GetString() : null;
                 break;
             }
+        }
+
         return new ReleaseInfo(version, tag, new Uri(release.GetProperty("html_url").GetString()!), download, digest);
     }
 }

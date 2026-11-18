@@ -311,8 +311,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
                 continue;
             auto e = v.GetObject();
             auto str = [&](const wchar_t* k) {
-                return e.HasKey(k) && e.GetNamedValue(k).ValueType() == json::JsonValueType::String ? std::wstring(e.GetNamedString(k))
-                                                                                                    : std::wstring();
+                return e.HasKey(k) && e.GetNamedValue(k).ValueType() == json::JsonValueType::String ? std::wstring(e.GetNamedString(k)) : std::wstring();
             };
             PinnedApp p{str(L"name"), str(L"path"), str(L"args"), str(L"aumid")};
             if (e.HasKey(L"multipleWindows") && e.GetNamedValue(L"multipleWindows").ValueType() == json::JsonValueType::Boolean)
@@ -346,7 +345,7 @@ std::wstring ReadTextFile(const std::wstring& path)
     std::ostringstream ss;
     ss << in.rdbuf();
     std::string bytes = ss.str();
-    if (bytes.size() >= 3 && bytes.compare(0, 3, "\xEF\xBB\xBF") == 0)
+    if (bytes.size() >= 3 && bytes.starts_with("\xEF\xBB\xBF"))
         bytes.erase(0, 3); // UTF-8 BOM, e.g. saved by Notepad or Windows PowerShell
     if (bytes.empty())
         return {};
@@ -406,8 +405,8 @@ bool SetStartOnLogin(bool enabled)
     const std::wstring task = LogonTaskProgram();
     if (!enabled) {
         // Another distribution's entries are not ours to remove.
-        if ((read != ERROR_SUCCESS && read != ERROR_FILE_NOT_FOUND && read != ERROR_PATH_NOT_FOUND) ||
-            (runEntry && _wcsicmp(command.c_str(), current) != 0) || (!task.empty() && _wcsicmp(task.c_str(), exe) != 0))
+        if ((read != ERROR_SUCCESS && read != ERROR_FILE_NOT_FOUND && read != ERROR_PATH_NOT_FOUND) || (runEntry && _wcsicmp(command.c_str(), current) != 0) ||
+            (!task.empty() && _wcsicmp(task.c_str(), exe) != 0))
             return false;
         if (!task.empty() && !RemoveLogonTask())
             return false;
@@ -430,8 +429,8 @@ bool StartupTurnedOff()
     // The first byte is odd when the switch is off (2 on, 3 off).
     BYTE state[12]{};
     DWORD size = sizeof(state);
-    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run", L"Atrium",
-                        RRF_RT_REG_BINARY, nullptr, state, &size) == ERROR_SUCCESS &&
+    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run", L"Atrium", RRF_RT_REG_BINARY,
+                        nullptr, state, &size) == ERROR_SUCCESS &&
            size > 0 && (state[0] & 1);
 }
 
@@ -480,8 +479,10 @@ bool LowIntegrity()
 
 bool SaveSettings(const Settings& s, std::wstring* warning, std::wstring* error)
 {
-    if (warning) warning->clear();
-    if (error) error->clear();
+    if (warning)
+        warning->clear();
+    if (error)
+        error->clear();
     const bool startupChanged = LoadSettings().startOnLogin != s.startOnLogin;
     const std::wstring path = SettingsPath();
     if (!WriteTextFile(path, s.ToJson())) {
@@ -498,13 +499,15 @@ bool SaveSettings(const Settings& s, std::wstring* warning, std::wstring* error)
             *error = TrFormat(L"Could not write %s: %s (error %lu)", path.c_str(), reason.c_str(), code);
             // Below medium integrity (an executable carrying a Low label) nothing in the profile is writable.
             if (LowIntegrity())
-                *error += Tr(L"\nAtrium is running at low integrity and cannot write to your profile. Unzip it to an ordinary folder (such as D:\\\\Atrium), make sure Atrium.exe has no Low integrity label, then start it again.");
+                *error += Tr(L"\nAtrium is running at low integrity and cannot write to your profile. Unzip it to an ordinary folder (such as D:\\\\Atrium), "
+                             L"make sure Atrium.exe has no Low integrity label, then start it again.");
         }
         return false;
     }
     if (startupChanged && !SetStartOnLogin(s.startOnLogin)) {
         Log(L"settings: settings saved, but Windows startup could not be changed");
-        if (warning) *warning = Tr(L"Settings were saved, but Windows startup could not be changed. Toggle Start with Windows again, then save.");
+        if (warning)
+            *warning = Tr(L"Settings were saved, but Windows startup could not be changed. Toggle Start with Windows again, then save.");
     }
     return true;
 }

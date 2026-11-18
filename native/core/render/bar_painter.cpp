@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <set>
 
 #pragma comment(lib, "dxguid.lib") // CLSID_D2D1Shadow
@@ -27,10 +28,7 @@ constexpr double kAlertPulseMs = 4000, kAlertPeriodMs = 1000;
 constexpr double kHopMs = 480;
 constexpr int kAlertHops = 3;
 
-D2D1_COLOR_F InkColor(float dark)
-{
-    return D2D1::ColorF(1.f - 0.93f * dark, 1.f - 0.93f * dark, 1.f - 0.91f * dark, 0.96f - 0.04f * dark);
-}
+D2D1_COLOR_F InkColor(float dark) { return D2D1::ColorF(1.f - 0.93f * dark, 1.f - 0.93f * dark, 1.f - 0.91f * dark, 0.96f - 0.04f * dark); }
 
 // motion::Approach, landing on `target` once the rest is invisible: 0..1 values.
 float Approach(float v, float target, double dtMs, float rate)
@@ -98,10 +96,7 @@ ID2D1Bitmap1* BarPainter::BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& i
     return b.get();
 }
 
-float BarPainter::MapX(float u) const
-{
-    return wave_.MapX(u);
-}
+float BarPainter::MapX(float u) const { return wave_.MapX(u); }
 
 bool BarPainter::Animate(const BarScene& scene, double nowMs)
 {
@@ -183,7 +178,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         if (item->bounceMs > 0) {
             double t = nowMs - item->bounceMs;
             if (t >= 0 && t < kHopMs) {
-                float sn = std::sin(3.14159265f * float(t / kHopMs));
+                float sn = std::sin(std::numbers::pi_v<float> * float(t / kHopMs));
                 m.hop = sn * sn;
                 moving = true;
             }
@@ -192,7 +187,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         if (asks && scene.alertBounce && m.alertSince >= 0 && scene.hoverKey != key && scene.dragKey != key) {
             double t = nowMs - m.alertSince;
             if (t >= 0 && t < kAlertHops * kHopMs) {
-                float sn = std::sin(3.14159265f * float(std::fmod(t, kHopMs) / kHopMs));
+                float sn = std::sin(std::numbers::pi_v<float> * float(std::fmod(t, kHopMs) / kHopMs));
                 m.hop = std::max(m.hop, sn * sn);
                 moving = true;
             }
@@ -259,9 +254,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         s.volumeMix = mix;
         s.brightMix = bmix;
         float volume = st.muted ? 0.f : float(st.volume) / 100.f;
-        float target = showBright ? float(st.brightness) / 100.f
-                       : (showVolume || !st.battery) ? volume
-                                                     : float(std::clamp(st.batteryPercent, 0, 100)) / 100.f;
+        float target = showBright ? float(st.brightness) / 100.f : (showVolume || !st.battery) ? volume : float(std::clamp(st.batteryPercent, 0, 100)) / 100.f;
         if (!s.seen) {
             s.fill = target;
             s.seen = true;
@@ -293,7 +286,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
             float u = float(std::clamp((nowMs - slideStartMs_) / length, 0.0, 1.0));
             float e;
             if (slideDown_) {
-                e = 0.5f - 0.5f * std::cos(3.14159265f * u); // eases in and out
+                e = 0.5f - 0.5f * std::cos(std::numbers::pi_v<float> * u); // eases in and out
             } else {
                 e = motion::EaseOutBack(u, 1.2f); // a slight overshoot
             }
@@ -337,8 +330,7 @@ D2D1_ELLIPSE BarPainter::RunningDot(const BarScene& scene, const SceneItem& item
 bool BarPainter::UpdateDotInk(const BarScene& scene, const Readback& backdrop, const Settings& settings, double nowMs)
 {
     float mix = float(1 - settings.transparency);
-    float tint = (0.2126f * float((settings.tint >> 16) & 255) + 0.7152f * float((settings.tint >> 8) & 255) +
-                  0.0722f * float(settings.tint & 255)) / 255.f;
+    float tint = (0.2126f * float((settings.tint >> 16) & 255) + 0.7152f * float((settings.tint >> 8) & 255) + 0.0722f * float(settings.tint & 255)) / 255.f;
     const EdgeFrame frame = FrameFor(scene);
     bool moving = false;
     for (const auto& item : scene.items) {
@@ -508,7 +500,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     if (m.alert > 0.001f) {
         float pulse = 0;
         if (m.alertSince >= 0 && lastMs_ - m.alertSince < kAlertPulseMs)
-            pulse = 0.5f - 0.5f * std::cos(2 * 3.14159265f * float((lastMs_ - m.alertSince) / kAlertPeriodMs));
+            pulse = 0.5f - 0.5f * std::cos(2 * std::numbers::pi_v<float> * float((lastMs_ - m.alertSince) / kAlertPeriodMs));
         // Icons the magnification wave grows would cover it as well: it gives way to them.
         const float clear = magnifying ? std::clamp(1.f - (grow - 1.f) * 8.f, 0.f, 1.f) : 1.f;
         brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, (0.34f + 0.22f * pulse) * m.alert * m.appear * clear));
@@ -655,7 +647,7 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
     winrt::com_ptr<ID2D1Factory> factory;
     d2d->GetFactory(factory.put());
     ID2D1StrokeStyle* round = RoundStroke(d2d);
-    constexpr float kDeg = 3.14159265f / 180.f;
+    constexpr float kDeg = std::numbers::pi_v<float> / 180.f;
     // An arc from `a0` clockwise over `sweep` degrees (0° = right, 90° = down).
     auto arc = [&](float ox, float oy, float rad, float a0, float sweep, D2D1_COLOR_F c, float width, StatusArc& cached) {
         if (sweep <= 0.01f || c.a <= 0.003f)
@@ -667,8 +659,8 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
                 return;
             float a1 = a0 + sweep;
             sink->BeginFigure(D2D1::Point2F(std::cos(a0 * kDeg), std::sin(a0 * kDeg)), D2D1_FIGURE_BEGIN_HOLLOW);
-            sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(std::cos(a1 * kDeg), std::sin(a1 * kDeg)), D2D1::SizeF(1, 1), 0,
-                                          D2D1_SWEEP_DIRECTION_CLOCKWISE, sweep > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
+            sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(std::cos(a1 * kDeg), std::sin(a1 * kDeg)), D2D1::SizeF(1, 1), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                          sweep > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
             sink->EndFigure(D2D1_FIGURE_END_OPEN);
             sink->Close();
             cached.sweep = sweep;
@@ -809,8 +801,12 @@ void BarPainter::DrawStatusIcons(ID2D1DeviceContext2* d2d, const SystemStatus& s
         winrt::com_ptr<ID2D1PathGeometry> cone;
         winrt::com_ptr<ID2D1GeometrySink> sink;
         if (SUCCEEDED(factory->CreatePathGeometry(cone.put())) && SUCCEEDED(cone->Open(sink.put()))) {
-            const D2D1_POINT_2F pts[] = {{l, mid - 0.10f * h},          {l + 0.11f * h, mid - 0.10f * h}, {l + 0.25f * h, mid - 0.22f * h},
-                                         {l + 0.25f * h, mid + 0.22f * h}, {l + 0.11f * h, mid + 0.10f * h}, {l, mid + 0.10f * h}};
+            const D2D1_POINT_2F pts[] = {{l, mid - 0.10f * h},
+                                         {l + 0.11f * h, mid - 0.10f * h},
+                                         {l + 0.25f * h, mid - 0.22f * h},
+                                         {l + 0.25f * h, mid + 0.22f * h},
+                                         {l + 0.11f * h, mid + 0.10f * h},
+                                         {l, mid + 0.10f * h}};
             sink->BeginFigure(pts[0], D2D1_FIGURE_BEGIN_FILLED);
             for (int i = 1; i < 6; ++i)
                 sink->AddLine(pts[i]);

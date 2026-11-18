@@ -106,10 +106,7 @@ DWORD PidOf(HWND h)
 }
 
 // The shell's process: the desktop's (Explorer, or whatever shell Windows runs).
-DWORD ShellPid()
-{
-    return PidOf(GetShellWindow());
-}
+DWORD ShellPid() { return PidOf(GetShellWindow()); }
 
 const wchar_t* Name(DWORD message)
 {
@@ -160,8 +157,7 @@ TrayHost::~TrayHost()
         SetWindowPos(w, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         Sleep(100);
         PostMessageW(w, quit_, 0, 0);
-    }
-    else if (threadId_)
+    } else if (threadId_)
         PostThreadMessageW(threadId_, WM_QUIT, 0, 0);
     if (thread_.joinable())
         thread_.join();
@@ -184,14 +180,15 @@ void TrayHost::Run(HANDLE ready)
     RECT r{};
     if (HWND shell = ShellTaskbar())
         GetWindowRect(shell, &r);
-    HWND w = registered ? CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"Shell_TrayWnd", L"", WS_POPUP,
-                                          r.left, r.top, r.right - r.left, r.bottom - r.top, nullptr, nullptr, instance, this)
-                        : nullptr;
+    HWND w = registered ? CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"Shell_TrayWnd", L"", WS_POPUP, r.left, r.top, r.right - r.left,
+                                          r.bottom - r.top, nullptr, nullptr, instance, this) :
+                          nullptr;
     if (!w) {
         Log(L"tray host: no window (%lu)", GetLastError());
         UnregisterClassW(L"Shell_TrayWnd", instance);
         UnregisterClassW(L"TrayNotifyWnd", instance);
-        if (ready) SetEvent(ready);
+        if (ready)
+            SetEvent(ready);
         return;
     }
     // Some apps place things by the notification area inside the taskbar.
@@ -205,11 +202,13 @@ void TrayHost::Run(HANDLE ready)
     // goes past the host meanwhile.
     g_host = this;
     HWINEVENTHOOK shown = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, nullptr, ShellEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    HWINEVENTHOOK foreground = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, ShellEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    HWINEVENTHOOK foreground =
+        SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, ShellEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     KeepFirst();
     SetTimer(w, kKeepTimer, kKeepMs, nullptr);
     SetTimer(w, kPruneTimer, kPruneMs, nullptr);
-    if (ready) SetEvent(ready);
+    if (ready)
+        SetEvent(ready);
     if (!yielded_)
         Broadcast();
 
@@ -218,8 +217,10 @@ void TrayHost::Run(HANDLE ready)
         TranslateMessage(&m);
         DispatchMessageW(&m);
     }
-    if (shown) UnhookWinEvent(shown);
-    if (foreground) UnhookWinEvent(foreground);
+    if (shown)
+        UnhookWinEvent(shown);
+    if (foreground)
+        UnhookWinEvent(foreground);
     g_host = nullptr;
     window_ = nullptr;
     UnregisterClassW(L"Shell_TrayWnd", instance);
@@ -306,13 +307,9 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
         // Never shown, whoever asks: it only stands in for Explorer's taskbar.
         reinterpret_cast<WINDOWPOS*>(l)->flags &= ~SWP_SHOWWINDOW;
         return 0;
-    case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
-    default:
-        break;
+    case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
+    case WM_DESTROY: PostQuitMessage(0); return 0;
+    default: break;
     }
     if (m == quit_ && InSendMessageEx(nullptr) == ISMEX_NOSEND) { // posted by ~TrayHost
         RemovePropW(h, kTaskband);
@@ -480,8 +477,8 @@ void TrayHost::Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage
     if ((nid.uFlags & NIF_STATE) && (nid.dwStateMask & NIS_HIDDEN))
         icon.hidden = (nid.dwState & NIS_HIDDEN) != 0;
     if (data->message == NIM_ADD)
-        Log(L"tray host: add '%s' (%s) -> %ld", icon.tip.substr(0, icon.tip.find(L'\n')).c_str(),
-            icon.exe.empty() ? L"-" : PathFindFileNameW(icon.exe.c_str()), long(result));
+        Log(L"tray host: add '%s' (%s) -> %ld", icon.tip.substr(0, icon.tip.find(L'\n')).c_str(), icon.exe.empty() ? L"-" : PathFindFileNameW(icon.exe.c_str()),
+            long(result));
     dirty_ = true;
 }
 
@@ -514,8 +511,7 @@ void TrayHost::KeepFirst()
     HWND shell = ShellTaskbar();
     RECT want{}, have{};
     if (shell && GetWindowRect(shell, &want) && GetWindowRect(w, &have) && !EqualRect(&want, &have))
-        SetWindowPos(w, nullptr, want.left, want.top, want.right - want.left, want.bottom - want.top,
-                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+        SetWindowPos(w, nullptr, want.left, want.top, want.right - want.left, want.bottom - want.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
     // ITaskbarList::HrInit takes Explorer's taskband from the first Shell_TrayWnd, else fails with
     // E_NOTIMPL: apps that show progress on their button would not start (TeraCopy #90, NanaZip #86).
     if (HANDLE band = shell ? GetPropW(shell, kTaskband) : nullptr; band != GetPropW(w, kTaskband))
@@ -555,11 +551,10 @@ void TrayHost::LogList()
         for (const auto& [key, icon] : icons_) {
             keys += key + (icon.hidden ? L"h;" : L";");
             wchar_t line[400];
-            swprintf_s(line, L"tray host:   %s %s v%u cb=0x%X%s%s img=%dx%d '%s'", key.c_str(),
-                       icon.exe.empty() ? L"-" : PathFindFileNameW(icon.exe.c_str()), icon.version, icon.callback,
-                       icon.hidden ? L" hidden" : L"", icon.showTip ? L" showtip" : L"", icon.image ? icon.image->width : 0,
+            swprintf_s(line, L"tray host:   %s %s v%u cb=0x%X%s%s img=%dx%d '%s'", key.c_str(), icon.exe.empty() ? L"-" : PathFindFileNameW(icon.exe.c_str()),
+                       icon.version, icon.callback, icon.hidden ? L" hidden" : L"", icon.showTip ? L" showtip" : L"", icon.image ? icon.image->width : 0,
                        icon.image ? icon.image->height : 0, icon.tip.substr(0, icon.tip.find(L'\n')).substr(0, 60).c_str());
-            lines.push_back(line);
+            lines.emplace_back(line);
         }
     }
     if (keys == loggedKeys_)

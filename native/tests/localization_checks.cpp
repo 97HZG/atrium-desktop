@@ -15,9 +15,12 @@ namespace {
 int failures = 0;
 void Check(bool condition, const char* message)
 {
-    if (!condition) { std::cerr << "FAIL: " << message << '\n'; ++failures; }
+    if (!condition) {
+        std::cerr << "FAIL: " << message << '\n';
+        ++failures;
+    }
 }
-}
+} // namespace
 
 int wmain()
 {
@@ -80,19 +83,24 @@ int wmain()
     SetLanguage(L"ZH-hans");
     Check(LanguageTag() == L"zh-Hans", "language tags and zh aliases are normalized");
     Check(localization::PrintfMatches(L"%*.*f %%", L"%*.*f %%"), "printf stars and literal percent work");
-    Check(!localization::PrintfMatches(L"%s %lu", L"%lu %s") && !localization::PrintfTokens(L"%2$s"), "printf type order and unsupported positional arguments are rejected");
+    Check(!localization::PrintfMatches(L"%s %lu", L"%lu %s") && !localization::PrintfTokens(L"%2$s"),
+          "printf type order and unsupported positional arguments are rejected");
 
     std::atomic_bool good = true, ready = false;
     std::thread reader([&] {
         ready = true;
         for (int i = 0; i < 3000; ++i) {
             const std::wstring text = Tr(L"Open");
-            if (text != L"Open" && text != L"打开" && text != L"Aç") good = false;
-            if (TrFormat(L"Count %d", 5) != L"Count 5") good = false;
+            if (text != L"Open" && text != L"打开" && text != L"Aç")
+                good = false;
+            if (TrFormat(L"Count %d", 5) != L"Count 5")
+                good = false;
         }
     });
-    while (!ready) std::this_thread::yield();
-    for (int i = 0; i < 1500; ++i) SetLanguage(i % 3 == 0 ? L"en" : i % 3 == 1 ? L"zh-Hans" : L"x-test");
+    while (!ready)
+        std::this_thread::yield();
+    for (int i = 0; i < 1500; ++i)
+        SetLanguage(i % 3 == 0 ? L"en" : i % 3 == 1 ? L"zh-Hans" : L"x-test");
     reader.join();
     Check(good, "concurrent formatting and settings changes keep valid text");
     std::cout << "localization checks completed\n";

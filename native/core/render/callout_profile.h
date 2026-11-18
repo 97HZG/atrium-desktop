@@ -16,8 +16,7 @@ inline float CalloutTailEdge(float x, float y, float width, float bottom, float 
         return std::hypot(vx - t * ex, vy - t * ey);
     };
     const float distance = std::min({edge(ax, ay, bx, by), edge(bx, by, cx, cy), edge(cx, cy, ax, ay)});
-    const bool inside = (bx - ax) * (y - ay) - (by - ay) * (x - ax) >= 0 &&
-                        (cx - bx) * (y - by) - (cy - by) * (x - bx) >= 0 &&
+    const bool inside = (bx - ax) * (y - ay) - (by - ay) * (x - ax) >= 0 && (cx - bx) * (y - by) - (cy - by) * (x - bx) >= 0 &&
                         (ax - cx) * (y - cy) - (ay - cy) * (x - cx) >= 0;
     return inside ? -distance : distance;
 }
@@ -25,8 +24,7 @@ inline float CalloutTailEdge(float x, float y, float width, float bottom, float 
 inline float CalloutEdge(float x, float y, float width, float height, float radius, float tipX, float halfWidth, float tailHeight, float overlap)
 {
     const auto corner = CornerFor(width, height, radius);
-    const float body = CornerEdge(std::abs(x - width * 0.5f) - width * 0.5f + corner.reach,
-                                  std::abs(y - height * 0.5f) - height * 0.5f + corner.reach, corner);
+    const float body = CornerEdge(std::abs(x - width * 0.5f) - width * 0.5f + corner.reach, std::abs(y - height * 0.5f) - height * 0.5f + corner.reach, corner);
     return tailHeight > 0 ? std::min(body, CalloutTailEdge(x, y, width, height, tipX, halfWidth, tailHeight, overlap)) : body;
 }
 } // namespace atrium

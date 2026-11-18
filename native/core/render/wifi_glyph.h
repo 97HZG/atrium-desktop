@@ -13,7 +13,6 @@ int WifiSteps(int signal);
 // The symbol centred on (cx, cy), `radius` px from its point to the outer
 // band's edge (its height; it is about 4:3 wide). `lit` steps (0..3) in `on`,
 // the rest in `off`. Sets `brush`'s colour.
-void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx, float cy, float radius, int lit, D2D1_COLOR_F on,
-                 D2D1_COLOR_F off);
+void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx, float cy, float radius, int lit, D2D1_COLOR_F on, D2D1_COLOR_F off);
 
 } // namespace atrium

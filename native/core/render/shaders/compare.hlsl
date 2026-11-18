@@ -17,9 +17,7 @@ cbuffer CompareParams : register(b0)
 groupshared uint GroupCount;
 groupshared uint GroupMax;
 
-[numthreads(16, 16, 1)]
-void CS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID, uint3 group : SV_GroupID)
-{
+[numthreads(16, 16, 1)] void CS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID, uint3 group : SV_GroupID) {
     if (local.x == 0 && local.y == 0) {
         GroupCount = 0;
         GroupMax = 0;

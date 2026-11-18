@@ -14,19 +14,18 @@ namespace Atrium.Settings;
 // recreated after a language change, so statics never cache a stale language.
 internal static class Loc
 {
-    private static string _tag = "en";
     private static readonly Dictionary<string, string> Strings = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Dictionary<string, string>> Plurals = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> Legacy = new(StringComparer.Ordinal);
     private static List<(string Tag, string Name)>? _languages;
     private static bool _legacyLoaded;
-    private static readonly object Sync = new();
+    private static readonly Lock Sync = new();
 
-    public static string Tag => _tag;
+    public static string Tag { get; private set; } = "en";
     // Date and lunar layouts are Chinese or Latin; the Latin branch is also
     // the fallback for a language whose dates are not translated yet.
     public static bool English => !Chinese;
-    public static bool Chinese => _tag.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+    public static bool Chinese => Tag.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
 
     // The picker: manifest order, with the source language first.
     public static IReadOnlyList<(string Tag, string Name)> Languages =>
@@ -38,11 +37,11 @@ internal static class Loc
     {
         lock (Sync)
         {
-            _tag = NormalizeTag(setting);
+            Tag = NormalizeTag(setting);
             Strings.Clear();
             Plurals.Clear();
-            if (_tag != "en" && !LoadLocale(_tag))
-                _tag = "en";
+            if (Tag != "en" && !LoadLocale(Tag))
+                Tag = "en";
             LoadLegacy();
         }
     }
@@ -55,7 +54,9 @@ internal static class Loc
         {
             if (JsonNode.Parse(File.ReadAllText(CoreClient.SettingsPath)) is JsonObject o &&
                 o["language"] is JsonValue v && v.TryGetValue(out string? text) && !string.IsNullOrWhiteSpace(text))
+            {
                 setting = text;
+            }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
         Apply(setting);
@@ -71,7 +72,7 @@ internal static class Loc
                 return text;
             if (Legacy.TryGetValue(key, out string? english))
             {
-                if (_tag == "en")
+                if (Tag == "en")
                     return english;
                 if (Find(english, context) is { } localized)
                     return localized;
@@ -99,7 +100,7 @@ internal static class Loc
         lock (Sync)
         {
             string source = Legacy.TryGetValue(key, out string? english) && LocalizationValidation.CountMatches(key, english) ? english : key;
-            Dictionary<string, string>? forms = FindPlural(source, context) ?? FindPlural(source, null);
+            var forms = FindPlural(source, context) ?? FindPlural(source, null);
             string text;
             if (forms != null && forms.TryGetValue(count == 1 ? "one" : "other", out string? chosen))
                 text = chosen;
@@ -143,7 +144,7 @@ internal static class Loc
             string candidate = Path.Combine(current, "locales");
             if (File.Exists(Path.Combine(candidate, "manifest.json")))
                 return candidate;
-            DirectoryInfo? parent = Directory.GetParent(current);
+            var parent = Directory.GetParent(current);
             if (parent == null)
                 break;
             current = parent.FullName;
@@ -160,17 +161,25 @@ internal static class Loc
             string json = ReadResource(path);
             if (LocalizationValidation.DuplicateKeys(json).Length != 0 || JsonNode.Parse(json) is not JsonObject root ||
                 root["strings"] is not JsonObject strings)
+            {
                 return false;
+            }
+
             foreach (var (key, value) in strings)
             {
                 if (value is JsonValue v && v.TryGetValue(out string? text) && !string.IsNullOrEmpty(text) && !text.Contains('\0'))
+                {
                     Strings[key] = text;
+                }
                 else if (value is JsonObject forms)
                 {
                     var plural = new Dictionary<string, string>(StringComparer.Ordinal);
                     foreach (var (form, formValue) in forms)
+                    {
                         if (formValue is JsonValue fv && fv.TryGetValue(out string? formText) && !string.IsNullOrEmpty(formText) && !formText.Contains('\0'))
                             plural[form] = formText;
+                    }
+
                     if (plural.ContainsKey("other"))
                         Plurals[key] = plural;
                 }
@@ -202,8 +211,10 @@ internal static class Loc
                 root["strings"] is JsonObject strings)
             {
                 foreach (var (key, value) in strings)
+                {
                     if (value is JsonValue v && v.TryGetValue(out string? text) && !string.IsNullOrEmpty(text) && !text.Contains('\0'))
                         Legacy[key] = text;
+                }
             }
             _legacyLoaded = true;
         }
@@ -220,14 +231,16 @@ internal static class Loc
                 root["languages"] is JsonArray list)
             {
                 var found = new List<(string Tag, string Name)>();
-                foreach (JsonNode? entry in list)
+                foreach (var entry in list)
                 {
                     if (entry is JsonObject language &&
                         language["tag"] is JsonValue tagValue && tagValue.TryGetValue(out string? tag) &&
                         language["name"] is JsonValue nameValue && nameValue.TryGetValue(out string? name) &&
                         tag != null && LocalizationValidation.ValidTag(tag) && !string.IsNullOrWhiteSpace(name) &&
                         !found.Any(item => item.Tag.Equals(tag, StringComparison.OrdinalIgnoreCase)))
+                    {
                         found.Add((tag, name));
+                    }
                 }
                 if (found.Count > 0)
                     languages = found;
@@ -239,7 +252,7 @@ internal static class Loc
 
     public static void Localize(DependencyObject root)
     {
-        if (_tag == "en") return;
+        if (Tag == "en") return;
         ApplyTo(root);
         int children = VisualTreeHelper.GetChildrenCount(root);
         for (int i = 0; i < children; i++)

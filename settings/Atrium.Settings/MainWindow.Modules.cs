@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
-using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
@@ -63,7 +62,7 @@ public sealed partial class MainWindow
     }
 
     // The bar preview's apps whose icons are read.
-    private ImageSource[] LoadedIcons() => _previewPins.Select(p => p.Icon).OfType<ImageSource>().ToArray();
+    private ImageSource[] LoadedIcons() => [.. _previewPins.Select(p => p.Icon).OfType<ImageSource>()];
 
     // ---- Motion (native/core/motion.h) ----
 
@@ -147,14 +146,25 @@ public sealed partial class MainWindow
 
     private static TextBlock Words(double size, Brush brush, bool bold = false, TextAlignment align = TextAlignment.Left, bool wrap = false) => new()
     {
-        FontSize = size, Foreground = brush, TextAlignment = align, IsTextScaleFactorEnabled = false, IsHitTestVisible = false,
-        TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = wrap ? 2 : 1,
+        FontSize = size,
+        Foreground = brush,
+        TextAlignment = align,
+        IsTextScaleFactorEnabled = false,
+        IsHitTestVisible = false,
+        TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
+        TextTrimming = TextTrimming.CharacterEllipsis,
+        MaxLines = wrap ? 2 : 1,
         FontFamily = (FontFamily)Application.Current.Resources[bold ? "TitleFont" : "TextFont"],
     };
 
     private static TextBlock Symbol(string glyph, double size, Brush brush) => new()
     {
-        Text = glyph, FontSize = size, Foreground = brush, TextAlignment = TextAlignment.Center, IsTextScaleFactorEnabled = false, IsHitTestVisible = false,
+        Text = glyph,
+        FontSize = size,
+        Foreground = brush,
+        TextAlignment = TextAlignment.Center,
+        IsTextScaleFactorEnabled = false,
+        IsHitTestVisible = false,
         FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
     };
 
@@ -177,7 +187,7 @@ public sealed partial class MainWindow
         Canvas.SetTop(e, y);
     }
 
-    private static readonly Dictionary<(string, double, bool), double> TextWidths = new();
+    private static readonly Dictionary<(string, double, bool), double> TextWidths = [];
 
     // The width of a line of text (Canvas::TextWidth).
     private static double TextWidth(string text, double size, bool bold = false)
@@ -204,7 +214,10 @@ public sealed partial class MainWindow
 
     private static Path RingPath(double width) => new()
     {
-        IsHitTestVisible = false, StrokeThickness = width, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+        IsHitTestVisible = false,
+        StrokeThickness = width,
+        StrokeStartLineCap = PenLineCap.Round,
+        StrokeEndLineCap = PenLineCap.Round,
     };
 
     // ---- A page's scene: the picture, the bar and the popup above it ----
@@ -226,7 +239,7 @@ public sealed partial class MainWindow
         private readonly Canvas _pop = new() { IsHitTestVisible = false };
         protected readonly Canvas Marks = new() { IsHitTestVisible = false };
         private readonly ScaleTransform _marksScale = new();
-        private readonly List<Image> _glass = new();
+        private readonly List<Image> _glass = [];
         private readonly LatestWorker<GlassJob> _worker;
 
         protected double W, H, S;
@@ -242,14 +255,14 @@ public sealed partial class MainWindow
         private string _postedKey = "";
         private bool _postedLow;
         // In motion the glass is rendered at a share of the resolution, smaller if a frame took long.
-        private static readonly double[] MotionScales = { 0.5, 0.35 };
+        private static readonly double[] MotionScales = [0.5, 0.35];
         private int _motion;
         private object? _shown;
 
         // Render thread: the pictures (sharp, and at the motion resolutions), the glass of the last
         // frame, and the bar's at the motion resolutions, ready before anything moves.
-        private readonly Dictionary<string, Backdrop> _backdrops = new();
-        private Dictionary<(GlassTile, GlassSpec, string), GlassOverlay> _cache = new(), _warm = new();
+        private readonly Dictionary<string, Backdrop> _backdrops = [];
+        private Dictionary<(GlassTile, GlassSpec, string), GlassOverlay> _cache = [], _warm = [];
 
         protected ModuleScene(MainWindow m, Border stage, Canvas root)
         {
@@ -282,8 +295,8 @@ public sealed partial class MainWindow
         protected virtual StatusLook BarStatus() => StatusLook.Current();
 
         protected bool HasFrame => _shown != null;
-        protected double BarHeight => M._current.Height;
-        protected double Radius => Math.Clamp(M._current.CornerRadius, 8, Math.Max(8, M._current.Height / 2));
+        protected double BarHeight => M.CurrentSettings.Height;
+        protected double Radius => Math.Clamp(M.CurrentSettings.CornerRadius, 8, Math.Max(8, M.CurrentSettings.Height / 2));
         protected double PopupBottom => Bar!.BarY - PopupGap * S;
         protected double BarRight => Math.Min(Bar!.BarX + Bar.BarW, W - 16); // PopupRect, right-aligned with the bar
 
@@ -350,8 +363,11 @@ public sealed partial class MainWindow
             }
             else
             {
-                var target = M.BarLayout(M._current, W, H, S, false);
-                if (!HasFrame) (Bar, _barTo, _barT) = (target, target, 1); // nothing shown yet: no glide
+                var target = M.BarLayout(M.CurrentSettings, W, H, S, false);
+                if (!HasFrame)
+                {
+                    (Bar, _barTo, _barT) = (target, target, 1); // nothing shown yet: no glide
+                }
                 else if (target != _barTo)
                 {
                     _barFrom = Bar;
@@ -373,7 +389,7 @@ public sealed partial class MainWindow
 
         private double FitScale()
         {
-            var s = M._current;
+            var s = M.CurrentSettings;
             var need = PopupSize;
             double w = _stage.ActualWidth, h = _stage.ActualHeight;
             return Math.Min(1.0, Math.Min(Math.Min((w - 48) / (HeroReferenceW + 2 * GlassSpec.InsetDip), (w - 32) / need.Width),
@@ -390,7 +406,7 @@ public sealed partial class MainWindow
             _root.Width = _pop.Width = w;
             _root.Height = _pop.Height = h;
             _root.Clip = new RectangleGeometry { Rect = new Rect(0, 0, w, h) };
-            Bar = _barTo = M.BarLayout(M._current, w, h, S, false);
+            Bar = _barTo = M.BarLayout(M.CurrentSettings, w, h, S, false);
             _barFrom = null;
             _barT = 1;
             return true;
@@ -446,11 +462,11 @@ public sealed partial class MainWindow
             double rs = Math.Clamp(M.Content.XamlRoot?.RasterizationScale ?? 1, 1, 2);
             if (moving && !_postedLow) _motion = 1; // a motion starts on the smaller one: the first frames come at once
             double r = moving ? rs * MotionScales[_motion] : rs;
-            string key = string.Join(";", all) + $"|{r}|{W}x{H}|{Photo.Generation}|{GlassSpec.For(M._current, S * rs)}";
+            string key = string.Join(";", all) + $"|{r}|{W}x{H}|{Photo.Generation}|{GlassSpec.For(M.CurrentSettings, S * rs)}";
             if (key == _postedKey) return;
             _postedKey = key;
             _postedLow = moving;
-            _worker.Post(new GlassJob(++_posted, W, H, r, moving, S, Photo.Capture(), Photo.Generation, M._current.Clone(), all, (Bar, state)));
+            _worker.Post(new GlassJob(++_posted, W, H, r, moving, S, Photo.Capture(), Photo.Generation, M.CurrentSettings.Clone(), all, (Bar, state)));
         }
 
         private void Render(GlassJob j)
@@ -498,7 +514,7 @@ public sealed partial class MainWindow
             return (bg, key);
         }
 
-        private bool DarkInk(float luma) => M._current.TextColor == "dark" || (M._current.TextColor == "auto" && luma > 0.5f);
+        private bool DarkInk(float luma) => M.CurrentSettings.TextColor == "dark" || (M.CurrentSettings.TextColor == "auto" && luma > 0.5f);
 
         private void Apply(GlassFrame f)
         {
@@ -548,7 +564,7 @@ public sealed partial class MainWindow
 
         private void LayoutBar(BarGeometry L)
         {
-            int running = M._current.ShowRunning && L.N > M._previewPins.Length ? M._previewPins.Length : -1;
+            int running = M.CurrentSettings.ShowRunning && L.N > M._previewPins.Length ? M._previewPins.Length : -1;
             for (int i = 0; i < MaxPreviewApps; i++)
             {
                 var vm = i < M._previewPins.Length ? M._previewPins[i] : M._previewRunning;
@@ -562,7 +578,7 @@ public sealed partial class MainWindow
         protected void SetBarClock()
         {
             var clock = DateTime.Now;
-            Face.SetClock(clock.ToString(M._current.ShowClockSeconds ? "H:mm:ss" : "H:mm"), clock.ToString("yyyy/M/d"));
+            Face.SetClock(clock.ToString(M.CurrentSettings.ShowClockSeconds ? "H:mm:ss" : "H:mm"), clock.ToString("yyyy/M/d"));
         }
 
         // The bar between two layouts: everything glides; an entry that comes or goes does at once.
@@ -572,11 +588,27 @@ public sealed partial class MainWindow
             double Slot(double x, double y) => x < 0 || y < 0 ? y : x + (y - x) * t;
             return b with
             {
-                BaseX = Mix(a.BaseX, b.BaseX), BarX = Mix(a.BarX, b.BarX), BarY = Mix(a.BarY, b.BarY), BarW = Mix(a.BarW, b.BarW), BarH = Mix(a.BarH, b.BarH),
-                Radius = Mix(a.Radius, b.Radius), Icon = Mix(a.Icon, b.Icon), P = Mix(a.P, b.P), PlateR = Mix(a.PlateR, b.PlateR),
-                AppsLeft = Mix(a.AppsLeft, b.AppsLeft), Pitch = Mix(a.Pitch, b.Pitch), PlateY = Mix(a.PlateY, b.PlateY),
-                ClockX = Slot(a.ClockX, b.ClockX), ClockW = Mix(a.ClockW, b.ClockW), SepX = Slot(a.SepX, b.SepX), StartX = Mix(a.StartX, b.StartX),
-                TrayX = Slot(a.TrayX, b.TrayX), ImeX = Slot(a.ImeX, b.ImeX), StatusX = Slot(a.StatusX, b.StatusX), BellX = Slot(a.BellX, b.BellX), StatusExtra = Mix(a.StatusExtra, b.StatusExtra),
+                BaseX = Mix(a.BaseX, b.BaseX),
+                BarX = Mix(a.BarX, b.BarX),
+                BarY = Mix(a.BarY, b.BarY),
+                BarW = Mix(a.BarW, b.BarW),
+                BarH = Mix(a.BarH, b.BarH),
+                Radius = Mix(a.Radius, b.Radius),
+                Icon = Mix(a.Icon, b.Icon),
+                P = Mix(a.P, b.P),
+                PlateR = Mix(a.PlateR, b.PlateR),
+                AppsLeft = Mix(a.AppsLeft, b.AppsLeft),
+                Pitch = Mix(a.Pitch, b.Pitch),
+                PlateY = Mix(a.PlateY, b.PlateY),
+                ClockX = Slot(a.ClockX, b.ClockX),
+                ClockW = Mix(a.ClockW, b.ClockW),
+                SepX = Slot(a.SepX, b.SepX),
+                StartX = Mix(a.StartX, b.StartX),
+                TrayX = Slot(a.TrayX, b.TrayX),
+                ImeX = Slot(a.ImeX, b.ImeX),
+                StatusX = Slot(a.StatusX, b.StatusX),
+                BellX = Slot(a.BellX, b.BellX),
+                StatusExtra = Mix(a.StatusExtra, b.StatusExtra),
             };
         }
 
@@ -654,18 +686,18 @@ public sealed partial class MainWindow
 
     private sealed class StartScene : ModuleScene
     {
-        private static readonly int[] Cols = { 7, 9, 11, 13 }, Rows = { 3, 4, 5, 6 }; // StartLayout::kStartGrids
+        private static readonly int[] Cols = [7, 9, 11, 13], Rows = [3, 4, 5, 6]; // StartLayout::kStartGrids
         // The cells follow the icons' size (startIcon), as in the menu (kStartIcons).
-        private static readonly double[] CellW = { 62, 72, 94, 116 }, CellH = { 82, 88, 100, 112 }, IconPx = { 34, 40, 52, 64 };
+        private static readonly double[] CellW = [62, 72, 94, 116], CellH = [82, 88, 100, 112], IconPx = [34, 40, 52, 64];
         private const double GridTop = 86, GridPad = 28, Foot = 42, Gap = 12;
         // Its tiles, drawn here: a name, a symbol, a colour.
         private static readonly (string Name, string Glyph, uint Top, uint Bottom)[] Apps =
-        {
+        [
             ("File Explorer", "\uE8B7", 0xFFD66B, 0xF2A922), ("Browser", "\uE774", 0x5AC8FA, 0x0A84FF), ("Mail", "\uE715", 0x6AAEFF, 0x2D6BEA),
             ("Calendar", "\uE787", 0xFF7A70, 0xE5383B), ("Photos", "\uEB9F", 0xFFB86B, 0xF0623A), ("Music", "\uE8D6", 0xFF6F91, 0xE0245E),
             ("Settings", "\uE713", 0xA7AFBC, 0x67707D), ("Notepad", "\uE70B", 0x7DD3C0, 0x2BA58C), ("Calculator", "\uE8EF", 0x8E9AAF, 0x4A5568),
             ("Maps", "\uE707", 0x7CDB8A, 0x30B158), ("Camera", "\uE722", 0x9DA6B5, 0x515A68), ("Clock", "\uE823", 0xB39DFF, 0x6E56CF),
-        };
+        ];
 
         private readonly PanelInk _panel = new(), _shelf = new();
         private readonly Border _search, _all;
@@ -730,14 +762,14 @@ public sealed partial class MainWindow
             _initial.Text = Loc.T("U");
             _divider.Fill = _shelf.Divider;
             foreach (var e in new UIElement[] { _avatar, _initial, _user, _divider }) Marks.Children.Add(e);
-            _buttons = new[]
-            {
+            _buttons =
+            [
                 new Shelf { Id = "power", Mark = Symbol("\uE7E8", 16, _shelf.Text) },
                 new Shelf { Id = "tray", Mark = Symbol("\uE70E", 16, _shelf.Text) },
                 new Shelf { Id = "battery", Mark = Symbol("", 16, _shelf.Text), Label = Words(12, _shelf.Sub) },
                 new Shelf { Id = "volume", Mark = Symbol("\uE994", 16, _shelf.Text) },
                 new Shelf { Id = "network", Mark = new WifiFan() },
-            };
+            ];
             foreach (var b in _buttons)
             {
                 Marks.Children.Add(b.Mark);
@@ -747,8 +779,8 @@ public sealed partial class MainWindow
 
         private static Size Panel(int size, int icon) => new(Cols[size] * CellW[icon] + 2 * GridPad, GridTop + Rows[size] * CellH[icon] + Foot);
 
-        private int Chosen => M._current.StartSize switch { "small" => 0, "large" => 2, "xlarge" => 3, _ => 1 };
-        private int ChosenIcon => M._current.StartIcon switch { "small" => 0, "large" => 2, "xlarge" => 3, _ => 1 };
+        private int Chosen => M.CurrentSettings.StartSize switch { "small" => 0, "large" => 2, "xlarge" => 3, _ => 1 };
+        private int ChosenIcon => M.CurrentSettings.StartIcon switch { "small" => 0, "large" => 2, "xlarge" => 3, _ => 1 };
         protected override bool IsOpen => true;
         // The scene keeps one scale whichever size is chosen, that of the large menu (large grid,
         // large icons): the bar stays put and the menu grows or shrinks beside it. A larger menu is
@@ -775,7 +807,7 @@ public sealed partial class MainWindow
             _icon = ChosenIcon;
             (_pw, _mh) = (Panel(_size, _icon).Width, Panel(_size, _icon).Height);
             _pv = _mv = 0;
-            _centered = _wantCentered = M._current.StartCentered;
+            _centered = _wantCentered = M.CurrentSettings.StartCentered;
             _placed = false;
             foreach (var b in _buttons) b.Placed = false;
             _dividerA = -1;
@@ -791,9 +823,9 @@ public sealed partial class MainWindow
             _size = Chosen;
             _icon = ChosenIcon;
             // Moved to the middle or back: it closes and opens there again, out of the start button.
-            if (_wantCentered != M._current.StartCentered)
+            if (_wantCentered != M.CurrentSettings.StartCentered)
             {
-                _wantCentered = M._current.StartCentered;
+                _wantCentered = M.CurrentSettings.StartCentered;
                 Replay(() => _centered = _wantCentered);
             }
         }
@@ -872,7 +904,7 @@ public sealed partial class MainWindow
         private bool ArrangeShelf(double w, double barH, double dt)
         {
             double bh = Math.Min(44, barH - 12), edge = (barH - bh) / 2, cy = -barH / 2;
-            var s = M._current;
+            var s = M.CurrentSettings;
             var look = StatusLook.Current();
             bool moving = false;
             double r = edge, dividerAt = -1;
@@ -892,7 +924,11 @@ public sealed partial class MainWindow
                     ((TextBlock)b.Mark).Text = ((char)((look.Charging ? 0xEBAB : 0xEBA0) + Math.Clamp(look.Percent / 10, 0, 10))).ToString();
                     b.Width = 12 + 20 + 4 + TextWidth(label, 12) + 4 + 12;
                 }
-                else b.Width = bh;
+                else
+                {
+                    b.Width = bh;
+                }
+
                 if (b.Id == "tray" && b.On)
                 {
                     dividerAt = r + 4;
@@ -914,7 +950,11 @@ public sealed partial class MainWindow
                     var on = _shelf.Text.Color;
                     fan.Update(left + bh / 2, cy, 12, 3, on, PanelInk.A(on, 0.28));
                 }
-                else Box((TextBlock)b.Mark, b.Label != null ? left + 10 : left, cy - bh / 2, b.Label != null ? 24 : bh, bh);
+                else
+                {
+                    Box((TextBlock)b.Mark, b.Label != null ? left + 10 : left, cy - bh / 2, b.Label != null ? 24 : bh, bh);
+                }
+
                 if (b.Label != null)
                 {
                     b.Label.Opacity = b.Alpha;
@@ -948,7 +988,7 @@ public sealed partial class MainWindow
     {
         private const double Cell = 40, IconSize = 20, Air = (Cell - IconSize) / 2, Split = 14, FooterH = 24;
         private const int Count = 13, ColsN = 5, RowsN = 3; // TrayPanel::Cols: 13 icons in rows of 5, 5 and 3
-        private static readonly string[] Glyphs = { "\uE753", "\uE702", "\uEA18", "\uE88E", "\uE8BD", "\uE7F4" };
+        private static readonly string[] Glyphs = ["\uE753", "\uE702", "\uEA18", "\uE88E", "\uE8BD", "\uE7F4"];
         private readonly PanelInk _ink = new();
         private readonly FrameworkElement?[] _items = new FrameworkElement?[Count];
         private readonly Rectangle _divider = new() { IsHitTestVisible = false };
@@ -970,8 +1010,8 @@ public sealed partial class MainWindow
         }
 
         private double Margin => Math.Clamp(Radius * 0.65, 14, 22);
-        private Size Panel => new(2 * (Margin - Air) + ColsN * Cell, (Margin - Air) + RowsN * Cell - Air + 2 * Split + FooterH + Margin);
-        protected override bool IsOpen => M._current.ShowTray;
+        private Size Panel => new(2 * (Margin - Air) + ColsN * Cell, Margin - Air + RowsN * Cell - Air + 2 * Split + FooterH + Margin);
+        protected override bool IsOpen => M.CurrentSettings.ShowTray;
         protected override Size PopupSize => Panel;
         protected override Vector2 Anchor => new((float)(Bar!.TrayX >= 0 ? Bar.TrayX + Bar.P / 2 : BarRight), (float)PopupBottom);
 
@@ -1028,7 +1068,7 @@ public sealed partial class MainWindow
 
     private sealed class ImeScene : ModuleScene
     {
-        private static readonly string[] Glyphs = { "中", "a", "A" };
+        private static readonly string[] Glyphs = ["中", "a", "A"];
         private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _tick;
         private int _index;
         private string _prev = "";
@@ -1078,9 +1118,9 @@ public sealed partial class MainWindow
     {
         private const double CW = 340, CGap = 10, TopH = 150, SliderH = 68, StageH = 58, Pad = 14;
         private const double Loop = 12000, LevelShowMs = 1500;
-        private readonly PanelInk[] _inks = { new(), new(), new(), new(), new(), new() };
+        private readonly PanelInk[] _inks = [new(), new(), new(), new(), new(), new()];
         // Connections.
-        private readonly Ellipse[] _discs = { new() { Fill = AccentBrush, IsHitTestVisible = false }, new() { Fill = AccentBrush, IsHitTestVisible = false } };
+        private readonly Ellipse[] _discs = [new() { Fill = AccentBrush, IsHitTestVisible = false }, new() { Fill = AccentBrush, IsHitTestVisible = false }];
         private readonly WifiFan _wifi = new();
         private readonly TextBlock _bt = Symbol("\uE702", 15, WhiteInk);
         private readonly TextBlock[] _rowTitle = new TextBlock[2], _rowSub = new TextBlock[2];
@@ -1152,8 +1192,11 @@ public sealed partial class MainWindow
         {
             var row = new LevelRow
             {
-                Title = Words(12.5, ink.Text, true), Value = Words(11.5, ink.Sub, false, TextAlignment.Right), Glyph = Symbol(glyph, 11, ink.OnFill),
-                Track = Plate(ink.Track, 12), Fill = Plate(ink.Level, 12),
+                Title = Words(12.5, ink.Text, true),
+                Value = Words(11.5, ink.Sub, false, TextAlignment.Right),
+                Glyph = Symbol(glyph, 11, ink.OnFill),
+                Track = Plate(ink.Track, 12),
+                Fill = Plate(ink.Level, 12),
             };
             row.Title.Text = title;
             foreach (var e in new UIElement[] { row.Title, row.Value, row.Track, row.Fill, row.Glyph }) Marks.Children.Add(e);
@@ -1161,20 +1204,20 @@ public sealed partial class MainWindow
         }
 
         private static double MainH => TopH + CGap + StageH + CGap + SliderH + CGap + SliderH; // ControlCenter::MainHeight
-        protected override bool IsOpen => M._current.ShowStatus;
+        protected override bool IsOpen => M.CurrentSettings.ShowStatus;
         protected override Size PopupSize => new(CW, MainH);
         protected override Vector2 Anchor => new((float)(Bar!.StatusX >= 0 ? Bar.StatusX + (Bar.P + Bar.StatusExtra) / 2 : BarRight), (float)PopupBottom);
 
         // ControlCenter::MainShapes: connections; battery over casting; Stage Manager; brightness; sound.
         private static readonly Rect[] Shapes =
-        {
+        [
             new(0, 0, (CW - CGap) / 2, TopH),
             new((CW - CGap) / 2 + CGap, 0, (CW - CGap) / 2, (TopH - CGap) / 2),
             new((CW - CGap) / 2 + CGap, (TopH - CGap) / 2 + CGap, (CW - CGap) / 2, (TopH - CGap) / 2),
             new(0, TopH + CGap, CW, StageH),
             new(0, TopH + CGap + StageH + CGap, CW, SliderH),
             new(0, TopH + CGap + StageH + CGap + SliderH + CGap, CW, SliderH),
-        };
+        ];
 
         protected override (GlassTile[] Tiles, object State) Pieces()
         {
@@ -1310,14 +1353,14 @@ public sealed partial class MainWindow
             // Stage Manager: its symbol lit while on.
             var s = Shapes[3];
             var stageInk = _inks[3];
-            bool on = M._current.StageManager;
+            bool on = M.CurrentSettings.StageManager;
             double sx = s.X + 32, sy = s.Y + s.Height / 2;
             Put(_stageDisc, sx - 18, sy - 18, 36, 36);
             _stageDisc.Fill = on ? AccentBrush : stageInk.Quiet;
             _stageGlyph.Foreground = on ? WhiteInk : stageInk.Text;
             Box(_stageGlyph, sx - 14, sy - 14, 28, 28);
             _stageSub.Text = on
-                ? Loc.T(M._current.StageOnRight ? "On · recent apps on the right" : "On · recent apps on the left")
+                ? Loc.T(M.CurrentSettings.StageOnRight ? "On · recent apps on the right" : "On · recent apps on the left")
                 : Loc.T("Off");
             Box(_stageTitle, sx + 28, sy - 18, s.Right - Pad - sx - 28, 18);
             Box(_stageSub, sx + 28, sy, s.Right - Pad - sx - 28, 18);
@@ -1352,11 +1395,11 @@ public sealed partial class MainWindow
     private sealed class ClockScene : ModuleScene
     {
         private const double CW = 336, Pad = 14, MonthH = 48, WeekH = 26, CellH = 46, Footer = 40, CapGap = 10;
-        private static readonly string[] WeekNames = { "一", "二", "三", "四", "五", "六", "日" };
+        private static readonly string[] WeekNames = ["一", "二", "三", "四", "五", "六", "日"];
         // Weekday and month names as the core writes them in English ("Tue, March 10").
-        private static readonly string[] WeekShort = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-        private static readonly string[] Months = { "January", "February", "March", "April", "May", "June",
-                                                   "July", "August", "September", "October", "November", "December" };
+        private static readonly string[] WeekShort = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        private static readonly string[] Months = [ "January", "February", "March", "April", "May", "June",
+                                                   "July", "August", "September", "October", "November", "December" ];
         private readonly PanelInk _card = new(), _cap = new();
         private readonly TextBlock _title, _prev, _next, _settings, _time, _date, _lunar;
         private readonly TextBlock[] _week = new TextBlock[7], _days = new TextBlock[42], _labels = new TextBlock[42];
@@ -1393,7 +1436,7 @@ public sealed partial class MainWindow
         }
 
         private static double CardH => MonthH + WeekH + 6 * CellH + 8 + Footer;
-        protected override bool IsOpen => M._current.ShowClock;
+        protected override bool IsOpen => M.CurrentSettings.ShowClock;
         protected override Size PopupSize => new(CW, CardH + CapGap + BarHeight);
         protected override Vector2 Anchor => new((float)(Bar!.ClockX >= 0 ? Bar.ClockX + Bar.ClockW / 2 : BarRight), (float)PopupBottom);
         protected override void Entered() => _tick.Start();

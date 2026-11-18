@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <numbers>
 
 namespace atrium {
 
@@ -27,34 +28,63 @@ struct Pal {
 
 Pal GlassPal(const Theme& t)
 {
-    return {t.text, t.subtext, t.faint, Alpha(t.text, 0.10f), Rgba(0xFF453A, 0.98f), Rgba(0xFF9F0A, 0.98f), Rgba(0x30D158, 0.98f),
-            Alpha(t.text, 0.18f), Rgba(0x0A84FF, 0.98f), Rgba(0xFFFFFF, 0.98f), Rgba(0x000000, 0.42f), t.light ? Ink::Dark : Ink::Light};
+    return {t.text,
+            t.subtext,
+            t.faint,
+            Alpha(t.text, 0.10f),
+            Rgba(0xFF453A, 0.98f),
+            Rgba(0xFF9F0A, 0.98f),
+            Rgba(0x30D158, 0.98f),
+            Alpha(t.text, 0.18f),
+            Rgba(0x0A84FF, 0.98f),
+            Rgba(0xFFFFFF, 0.98f),
+            Rgba(0x000000, 0.42f),
+            t.light ? Ink::Dark : Ink::Light};
 }
 
 // Dusk: white only, the accents too (macOS's dimmed widgets are monochrome); a disc's ink is dark.
 Pal DuskPal()
 {
     const D2D1_COLOR_F white = Rgba(0xFFFFFF, 0.96f);
-    return {white, Rgba(0xFFFFFF, 0.72f), Rgba(0xFFFFFF, 0.50f), Rgba(0xFFFFFF, 0.12f), white, white, white, Rgba(0xFFFFFF, 0.22f), white,
-            Rgba(0x1C1C1E, 0.92f), Rgba(0x000000, 0.32f), Ink::Mono};
+    return {white,
+            Rgba(0xFFFFFF, 0.72f),
+            Rgba(0xFFFFFF, 0.50f),
+            Rgba(0xFFFFFF, 0.12f),
+            white,
+            white,
+            white,
+            Rgba(0xFFFFFF, 0.22f),
+            white,
+            Rgba(0x1C1C1E, 0.92f),
+            Rgba(0x000000, 0.32f),
+            Ink::Mono};
 }
 
 // Color, on a white face: dark ink and macOS's light-mode accents.
 Pal PaperPal()
 {
     const D2D1_COLOR_F ink = Rgba(0x1D1D1F, 0.94f);
-    return {ink, Rgba(0x1D1D1F, 0.58f), Rgba(0x1D1D1F, 0.36f), Rgba(0x1D1D1F, 0.05f), Rgba(0xFF3B30, 1), Rgba(0xFF9500, 1), Rgba(0x34C759, 1),
-            Rgba(0x1D1D1F, 0.10f), Rgba(0x007AFF, 1), Rgba(0xFFFFFF, 0.98f), Rgba(0x1C1C1E, 1), Ink::Dark};
+    return {ink,
+            Rgba(0x1D1D1F, 0.58f),
+            Rgba(0x1D1D1F, 0.36f),
+            Rgba(0x1D1D1F, 0.05f),
+            Rgba(0xFF3B30, 1),
+            Rgba(0xFF9500, 1),
+            Rgba(0x34C759, 1),
+            Rgba(0x1D1D1F, 0.10f),
+            Rgba(0x007AFF, 1),
+            Rgba(0xFFFFFF, 0.98f),
+            Rgba(0x1C1C1E, 1),
+            Ink::Dark};
 }
 
 const wchar_t* const kWeekLong[] = {L"星期一", L"星期二", L"星期三", L"星期四", L"星期五", L"星期六", L"星期日"};
 const wchar_t* const kWeekLongEn[] = {L"Monday", L"Tuesday", L"Wednesday", L"Thursday", L"Friday", L"Saturday", L"Sunday"};
 const wchar_t* const kWeekShort[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
 const wchar_t* const kWeekShortEn[] = {L"M", L"T", L"W", L"T", L"F", L"S", L"S"};
-const wchar_t* const kMonths[] = {L"一月", L"二月", L"三月", L"四月", L"五月", L"六月",
-                                  L"七月", L"八月", L"九月", L"十月", L"十一月", L"十二月"};
-const wchar_t* const kMonthsEn[] = {L"January", L"February", L"March", L"April", L"May", L"June",
-                                    L"July", L"August", L"September", L"October", L"November", L"December"};
+const wchar_t* const kMonths[] = {L"一月", L"二月", L"三月", L"四月", L"五月", L"六月", L"七月", L"八月", L"九月", L"十月", L"十一月", L"十二月"};
+const wchar_t* const kMonthsEn[] = {L"January", L"February", L"March",     L"April",   L"May",      L"June",
+                                    L"July",    L"August",   L"September", L"October", L"November", L"December"};
 const wchar_t* WeekLong(int wd) { return LanguageIsEnglish() ? Tr(kWeekLongEn[wd]) : kWeekLong[wd]; }
 const wchar_t* WeekShort(int wd) { return LanguageIsEnglish() ? kWeekShortEn[wd] : kWeekShort[wd]; }
 const wchar_t* MonthName(int m) { return LanguageIsEnglish() ? Tr(kMonthsEn[std::clamp(m, 1, 12) - 1]) : kMonths[std::clamp(m, 1, 12) - 1]; }
@@ -101,8 +131,9 @@ SYSTEMTIME CityTime(const std::wstring& name, const SYSTEMTIME& now, std::wstrin
         hours = b;
     }
     std::wstring offset = (quarters >= 0 ? L"+" : L"") + hours;
-    when = dayDiff > 0 ? TrFormat(L"Tomorrow %s h", offset.c_str())
-                       : dayDiff < 0 ? TrFormat(L"Yesterday %s h", offset.c_str()) : TrFormat(L"Today %s h", offset.c_str());
+    when = dayDiff > 0 ? TrFormat(L"Tomorrow %s h", offset.c_str()) :
+           dayDiff < 0 ? TrFormat(L"Yesterday %s h", offset.c_str()) :
+                         TrFormat(L"Today %s h", offset.c_str());
     return ct;
 }
 
@@ -111,16 +142,21 @@ SYSTEMTIME CityTime(const std::wstring& name, const SYSTEMTIME& now, std::wstrin
 const std::vector<WorldCity>& WorldCities()
 {
     static const std::vector<WorldCity> cities = {
-        {L"北京", L"China Standard Time"},          {L"上海", L"China Standard Time"},        {L"香港", L"China Standard Time"},
-        {L"台北", L"Taipei Standard Time"},         {L"东京", L"Tokyo Standard Time"},        {L"首尔", L"Korea Standard Time"},
-        {L"新加坡", L"Singapore Standard Time"},    {L"曼谷", L"SE Asia Standard Time"},      {L"新德里", L"India Standard Time"},
-        {L"迪拜", L"Arabian Standard Time"},        {L"莫斯科", L"Russian Standard Time"},    {L"伊斯坦布尔", L"Turkey Standard Time"},
-        {L"开罗", L"Egypt Standard Time"},          {L"约翰内斯堡", L"South Africa Standard Time"}, {L"柏林", L"W. Europe Standard Time"},
-        {L"巴黎", L"Romance Standard Time"},        {L"伦敦", L"GMT Standard Time"},          {L"圣保罗", L"E. South America Standard Time"},
-        {L"纽约", L"Eastern Standard Time"},        {L"多伦多", L"Eastern Standard Time"},    {L"芝加哥", L"Central Standard Time"},
-        {L"丹佛", L"Mountain Standard Time"},       {L"洛杉矶", L"Pacific Standard Time"},    {L"温哥华", L"Pacific Standard Time"},
-        {L"安克雷奇", L"Alaskan Standard Time"},    {L"檀香山", L"Hawaiian Standard Time"},   {L"悉尼", L"AUS Eastern Standard Time"},
-        {L"墨尔本", L"AUS Eastern Standard Time"},  {L"奥克兰", L"New Zealand Standard Time"},
+        {L"北京", L"China Standard Time"},         {L"上海", L"China Standard Time"},
+        {L"香港", L"China Standard Time"},         {L"台北", L"Taipei Standard Time"},
+        {L"东京", L"Tokyo Standard Time"},         {L"首尔", L"Korea Standard Time"},
+        {L"新加坡", L"Singapore Standard Time"},   {L"曼谷", L"SE Asia Standard Time"},
+        {L"新德里", L"India Standard Time"},       {L"迪拜", L"Arabian Standard Time"},
+        {L"莫斯科", L"Russian Standard Time"},     {L"伊斯坦布尔", L"Turkey Standard Time"},
+        {L"开罗", L"Egypt Standard Time"},         {L"约翰内斯堡", L"South Africa Standard Time"},
+        {L"柏林", L"W. Europe Standard Time"},     {L"巴黎", L"Romance Standard Time"},
+        {L"伦敦", L"GMT Standard Time"},           {L"圣保罗", L"E. South America Standard Time"},
+        {L"纽约", L"Eastern Standard Time"},       {L"多伦多", L"Eastern Standard Time"},
+        {L"芝加哥", L"Central Standard Time"},     {L"丹佛", L"Mountain Standard Time"},
+        {L"洛杉矶", L"Pacific Standard Time"},     {L"温哥华", L"Pacific Standard Time"},
+        {L"安克雷奇", L"Alaskan Standard Time"},   {L"檀香山", L"Hawaiian Standard Time"},
+        {L"悉尼", L"AUS Eastern Standard Time"},   {L"墨尔本", L"AUS Eastern Standard Time"},
+        {L"奥克兰", L"New Zealand Standard Time"},
     };
     return cities;
 }
@@ -130,8 +166,8 @@ bool HasWorldClocks(WidgetKind kind, WidgetSize size) { return size != WidgetSiz
 std::vector<std::wstring> WidgetCities(WidgetKind kind, const std::vector<std::wstring>& chosen)
 {
     // macOS's medium Clock shows four cities; the digital one lists three beside the local time.
-    std::vector<std::wstring> cities = kind == WidgetKind::Digital ? std::vector<std::wstring>{L"东京", L"伦敦", L"纽约"}
-                                                                  : std::vector<std::wstring>{L"北京", L"东京", L"伦敦", L"纽约"};
+    std::vector<std::wstring> cities =
+        kind == WidgetKind::Digital ? std::vector<std::wstring>{L"东京", L"伦敦", L"纽约"} : std::vector<std::wstring>{L"北京", L"东京", L"伦敦", L"纽约"};
     for (size_t i = 0; i < cities.size() && i < chosen.size(); ++i)
         if (std::any_of(WorldCities().begin(), WorldCities().end(), [&](const WorldCity& c) { return chosen[i] == c.name; }))
             cities[i] = chosen[i];
@@ -160,15 +196,15 @@ int FirstWeekday()
 void ClockFace(Canvas& c, float cx, float cy, float R, const SYSTEMTIME& t, const Pal& p, D2D1_COLOR_F face, D2D1_COLOR_F ink, bool numbers,
                const std::wstring& label, D2D1_COLOR_F labelInk)
 {
-    constexpr float kDeg = 3.14159265f / 180.f;
+    constexpr float kDeg = std::numbers::pi_v<float> / 180.f;
     c.Circle(cx, cy, R, face);
     for (int h = 1; h <= 12; ++h) {
         float a = (float(h) * 30.f - 90.f) * kDeg;
         if (numbers) {
             float r = R * 0.78f, fs = R * 0.21f;
             std::wstring n = std::to_wstring(h);
-            c.Text(n, D2D1::RectF(cx + r * std::cos(a) - fs, cy + r * std::sin(a) - fs * 0.72f, cx + r * std::cos(a) + fs, cy + r * std::sin(a) + fs * 0.72f), fs,
-                   ink, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+            c.Text(n, D2D1::RectF(cx + r * std::cos(a) - fs, cy + r * std::sin(a) - fs * 0.72f, cx + r * std::cos(a) + fs, cy + r * std::sin(a) + fs * 0.72f),
+                   fs, ink, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         } else {
             float r0 = R * 0.80f, r1 = R * 0.92f;
             c.Capsule(cx + r0 * std::cos(a), cy + r0 * std::sin(a), cx + r1 * std::cos(a), cy + r1 * std::sin(a), Alpha(ink, h % 3 ? 0.45f : 0.9f),
@@ -212,7 +248,8 @@ void PaintClock(Canvas& c, WidgetSize size, const WidgetContent& content, const 
         float cx = kPad + colW * (float(i) + 0.5f), cy = (H - 2 * R - 42) / 2 + R - 2;
         D2D1_COLOR_F face = night ? p.nightFace : p.face, ink = night ? Rgba(0xFFFFFF, 0.96f) : p.text;
         ClockFace(c, cx, cy, R, ct, p, face, ink, false, {}, ink);
-        c.Text(Tr(cities[size_t(i)].c_str()), D2D1::RectF(cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26), 12.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(Tr(cities[size_t(i)].c_str()), D2D1::RectF(cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26), 12.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+               1);
         c.Text(when, D2D1::RectF(cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
 }
@@ -231,11 +268,9 @@ void PaintDigital(Canvas& c, WidgetSize size, const WidgetContent& content, cons
     const float timeSize = fit > timeW ? 50 * timeW / fit : 50.f;
     c.Text(HourMinute(w.now), D2D1::RectF(kPad, kPad + 22, kPad + leftW, kPad + 84), timeSize, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     c.Text(WeekLong(wd), D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 13, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    const std::wstring dateText = LanguageIsEnglish()
-                                      ? std::wstring(kMonthsEn[std::clamp(int(w.now.wMonth), 1, 12) - 1]) + L" " + std::to_wstring(w.now.wDay)
-                                      : std::to_wstring(w.now.wMonth) + L"月" + std::to_wstring(w.now.wDay) + L"日";
-    c.Text(dateText, D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 13,
-           p.text, DWRITE_FONT_WEIGHT_NORMAL);
+    const std::wstring dateText = LanguageIsEnglish() ? std::wstring(kMonthsEn[std::clamp(int(w.now.wMonth), 1, 12) - 1]) + L" " + std::to_wstring(w.now.wDay) :
+                                                        std::to_wstring(w.now.wMonth) + L"月" + std::to_wstring(w.now.wDay) + L"日";
+    c.Text(dateText, D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 13, p.text, DWRITE_FONT_WEIGHT_NORMAL);
     if (size == WidgetSize::Small)
         return;
     const float x0 = kPad + leftW + 8, rowH = (H - 2 * kPad) / 3;
@@ -263,15 +298,14 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
     if (size == WidgetSize::Large) {
         c.Text(MonthName(now.wMonth), D2D1::RectF(kPad + 4, kPad, W / 2, kPad + 22), 16, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         std::wstring lunarToday = w.lunar ? w.lunar->MonthDay(now.wYear, now.wMonth, now.wDay) : std::wstring();
-        const std::wstring head = LanguageIsEnglish()
-                                      ? std::to_wstring(now.wYear) + (lunarToday.empty() ? std::wstring() : L" · " + lunarToday)
-                                      : std::to_wstring(now.wYear) + L"年" + (lunarToday.empty() ? std::wstring() : L" · 农历" + lunarToday);
+        const std::wstring head = LanguageIsEnglish() ? std::to_wstring(now.wYear) + (lunarToday.empty() ? std::wstring() : L" · " + lunarToday) :
+                                                        std::to_wstring(now.wYear) + L"年" + (lunarToday.empty() ? std::wstring() : L" · 农历" + lunarToday);
         c.Text(head, D2D1::RectF(W / 2 - 40, kPad, W - kPad - 4, kPad + 22), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 2);
         const float gx = kPad, gw = W - 2 * kPad, cw = gw / 7;
         float y = kPad + 28;
         for (int i = 0; i < 7; ++i)
-            c.Text(WeekShort((first + i) % 7), D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 16), 10.5f, p.sub,
-                   DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+            c.Text(WeekShort((first + i) % 7), D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 16), 10.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                   1);
         y += 20;
         const int rows = (lead + days + 6) / 7;
         const float rh = (H - kPad - y) / float(std::max(rows, 5));
@@ -286,7 +320,10 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
                    1);
             bool festival = false;
             std::wstring label = w.lunar ? w.lunar->DayLabel(now.wYear, now.wMonth, WORD(d), &festival) : std::wstring();
-            c.Text(label, D2D1::RectF(x0, y0 + rh * 0.48f, x0 + cw, y0 + rh - 5), 9, today ? Alpha(p.onAccent, 0.85f) : festival ? p.blue : p.sub,
+            c.Text(label, D2D1::RectF(x0, y0 + rh * 0.48f, x0 + cw, y0 + rh - 5), 9,
+                   today    ? Alpha(p.onAccent, 0.85f) :
+                   festival ? p.blue :
+                              p.sub,
                    DWRITE_FONT_WEIGHT_NORMAL, 1);
         }
         return;
@@ -299,12 +336,12 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
     std::wstring label = w.lunar ? w.lunar->DayLabel(now.wYear, now.wMonth, now.wDay, &festival) : std::wstring();
     std::wstring lunar = w.lunar ? w.lunar->MonthDay(now.wYear, now.wMonth, now.wDay) : std::wstring();
     const std::wstring lunarLine = LanguageIsEnglish() ? lunar : (lunar.empty() ? std::wstring() : L"农历" + lunar);
-    c.Text(lunar.empty() ? std::wstring(MonthName(now.wMonth)) : lunarLine, D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 12.5f,
-           p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(festival ? label : (LanguageIsEnglish() ? std::to_wstring(now.wYear) + L" " + MonthName(now.wMonth)
-                                                   : std::to_wstring(now.wYear) + L"年" + MonthName(now.wMonth)),
-           D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 12,
-           festival ? p.blue : p.sub, DWRITE_FONT_WEIGHT_NORMAL);
+    c.Text(lunar.empty() ? std::wstring(MonthName(now.wMonth)) : lunarLine, D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 12.5f, p.text,
+           DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(festival ?
+               label :
+               (LanguageIsEnglish() ? std::to_wstring(now.wYear) + L" " + MonthName(now.wMonth) : std::to_wstring(now.wYear) + L"年" + MonthName(now.wMonth)),
+           D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 12, festival ? p.blue : p.sub, DWRITE_FONT_WEIGHT_NORMAL);
     if (size == WidgetSize::Small)
         return;
     // The month: weekday initials, the days, today in a red disc.
@@ -433,8 +470,7 @@ void PaintBluetooth(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal&
             if (pct > 0)
                 c.Arc(cx, cy, R, -90, -90 + 360.f * float(pct) / 100.f, colour(pct), 5);
             c.Glyph(BluetoothGlyph(devices[i].kind), D2D1::RectF(cx - R, cy - R, cx + R, cy + R), 15, p.text);
-            c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(cx - cw / 2, cy + R + 4, cx + cw / 2, cy + R + 20), 11.5f, p.text,
-                   DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+            c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(cx - cw / 2, cy + R + 4, cx + cw / 2, cy + R + 20), 11.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         }
         return;
     }
@@ -576,8 +612,7 @@ void PaintNetwork(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p
         const float x = x0 + 2 * arrow + 9;
         c.Text(value, D2D1::RectF(x, top, W - pad, bottom), font, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         const float tw = c.TextWidth(value, font, DWRITE_FONT_WEIGHT_SEMI_BOLD), shift = 0.381f * (font - unitSize);
-        c.Text(unit, D2D1::RectF(x + tw + 4, top + shift, x + tw + 4 + unitSize * 5, bottom + shift), unitSize, p.sub,
-               DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(unit, D2D1::RectF(x + tw + 4, top + shift, x + tw + 4 + unitSize * 5, bottom + shift), unitSize, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     };
     const std::vector<NetworkRate>& history = n->History();
     const float top = GraphTop(history);
@@ -595,8 +630,8 @@ void PaintNetwork(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p
     c.Line(pad, 136, W - pad, 136, p.track);
     GraphLine(c, history, false, pad, 102, W - pad, 136, top, down);
     GraphLine(c, history, true, pad, 102, W - pad, 136, top, up);
-    c.Text(TrFormat(L"Received %s · sent %s", BytesText(n->DownBytes()).c_str(), BytesText(n->UpBytes()).c_str()),
-           D2D1::RectF(pad, 140, W - pad, 154), 10, p.sub);
+    c.Text(TrFormat(L"Received %s · sent %s", BytesText(n->DownBytes()).c_str(), BytesText(n->UpBytes()).c_str()), D2D1::RectF(pad, 140, W - pad, 154), 10,
+           p.sub);
 }
 
 // A note: its title, then the text; while editing, the caret, and the text
@@ -637,7 +672,7 @@ void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, fl
     const float bottom = H - kReminderBottom, view = bottom - kReminderTop;
     const float limit = std::max(0.f, float(r.items.size() + 1) * kReminderRow - view);
     const float scroll = std::clamp(r.scroll, 0.f, limit);
-    auto hit = [&](D2D1_RECT_F rect, std::wstring id) {
+    auto hit = [&](D2D1_RECT_F rect, const std::wstring& id) {
         rect.top = std::max(rect.top, kReminderTop);
         rect.bottom = std::min(rect.bottom, bottom);
         if (rect.bottom > rect.top)
@@ -731,12 +766,10 @@ struct IconInk {
 IconInk IconColors(Ink ink)
 {
     switch (ink) {
-    case Ink::Dark:
-        return {Rgba(0xFFD60A, 1), Rgba(0xF5C451, 1), Rgba(0xA4ADB8, 1), Rgba(0x7D8794, 1), Rgba(0x64D2FF, 1), Rgba(0x6E7681, 1)};
+    case Ink::Dark: return {Rgba(0xFFD60A, 1), Rgba(0xF5C451, 1), Rgba(0xA4ADB8, 1), Rgba(0x7D8794, 1), Rgba(0x64D2FF, 1), Rgba(0x6E7681, 1)};
     case Ink::Mono:
         return {Rgba(0xFFFFFF, 0.72f), Rgba(0xFFFFFF, 0.9f), Rgba(0xFFFFFF, 0.96f), Rgba(0xFFFFFF, 0.8f), Rgba(0xFFFFFF, 0.85f), Rgba(0xFFFFFF, 0.96f)};
-    default:
-        return {Rgba(0xFFD60A, 1), Rgba(0xF2F2F7, 1), Rgba(0xF7F8FA, 1), Rgba(0xD1D5DB, 1), Rgba(0x64D2FF, 1), Rgba(0xF2F5F9, 1)};
+    default: return {Rgba(0xFFD60A, 1), Rgba(0xF2F2F7, 1), Rgba(0xF7F8FA, 1), Rgba(0xD1D5DB, 1), Rgba(0x64D2FF, 1), Rgba(0xF2F5F9, 1)};
     }
 }
 
@@ -751,7 +784,7 @@ void Cloud(Canvas& c, float cx, float cy, float s, D2D1_COLOR_F ink)
 
 void Sun(Canvas& c, float cx, float cy, float s, D2D1_COLOR_F gold)
 {
-    constexpr float kDeg = 3.14159265f / 180.f;
+    constexpr float kDeg = std::numbers::pi_v<float> / 180.f;
     c.Circle(cx, cy, 0.2f * s, gold);
     for (int i = 0; i < 8; ++i) {
         float a = float(i) * 45.f * kDeg;
@@ -760,10 +793,7 @@ void Sun(Canvas& c, float cx, float cy, float s, D2D1_COLOR_F gold)
     }
 }
 
-void Moon(Canvas& c, float cx, float cy, float s, D2D1_COLOR_F ink)
-{
-    c.Crescent(cx, cy, 0.3f * s, 0.17f * s, -0.12f * s, 0.25f * s, ink);
-}
+void Moon(Canvas& c, float cx, float cy, float s, D2D1_COLOR_F ink) { c.Crescent(cx, cy, 0.3f * s, 0.17f * s, -0.12f * s, 0.25f * s, ink); }
 
 // macOS's weather symbols in their colours: a yellow sun, a pale moon, white clouds, blue rain
 // (IconColors: grey clouds over bright glass, all white on the dimmed glass).
@@ -784,16 +814,12 @@ void WeatherIcon(Canvas& c, int code, bool day, float cx, float cy, float s, int
         return;
     }
     switch (SkyOf(code)) {
-    case Sky::Clear:
-        day ? Sun(c, cx, cy, s, k.sun) : Moon(c, cx, cy, s, k.moon);
-        break;
+    case Sky::Clear: day ? Sun(c, cx, cy, s, k.sun) : Moon(c, cx, cy, s, k.moon); break;
     case Sky::Partly:
         day ? Sun(c, cx - 0.16f * s, cy - 0.14f * s, s * 0.78f, k.sun) : Moon(c, cx - 0.14f * s, cy - 0.14f * s, s * 0.8f, k.moon);
         Cloud(c, cx + 0.08f * s, cy + 0.06f * s, s * 0.82f, k.cloud);
         break;
-    case Sky::Cloudy:
-        Cloud(c, cx, cy - 0.04f * s, s, k.cloud);
-        break;
+    case Sky::Cloudy: Cloud(c, cx, cy - 0.04f * s, s, k.cloud); break;
     case Sky::Fog:
         for (int i = 0; i < 3; ++i) {
             float y = cy - 0.2f * s + float(i) * 0.2f * s, inset = i == 1 ? 0.f : 0.08f * s;
@@ -832,13 +858,10 @@ std::pair<uint32_t, uint32_t> SkyFace(const Weather& w)
         return {0x2F7BD6, 0x63A9EA};
     switch (SkyOf(w.code)) {
     case Sky::Clear:
-    case Sky::Partly:
-        return w.day ? std::pair<uint32_t, uint32_t>{0x2F7BD6, 0x63A9EA} : std::pair<uint32_t, uint32_t>{0x0C1631, 0x2A3E68};
+    case Sky::Partly: return w.day ? std::pair<uint32_t, uint32_t>{0x2F7BD6, 0x63A9EA} : std::pair<uint32_t, uint32_t>{0x0C1631, 0x2A3E68};
     case Sky::Cloudy:
-    case Sky::Fog:
-        return w.day ? std::pair<uint32_t, uint32_t>{0x6A7E92, 0x98A8B8} : std::pair<uint32_t, uint32_t>{0x262F3C, 0x47525F};
-    case Sky::Snow:
-        return w.day ? std::pair<uint32_t, uint32_t>{0x7F95AC, 0xAFC0D0} : std::pair<uint32_t, uint32_t>{0x2B3646, 0x4C5868};
+    case Sky::Fog: return w.day ? std::pair<uint32_t, uint32_t>{0x6A7E92, 0x98A8B8} : std::pair<uint32_t, uint32_t>{0x262F3C, 0x47525F};
+    case Sky::Snow: return w.day ? std::pair<uint32_t, uint32_t>{0x7F95AC, 0xAFC0D0} : std::pair<uint32_t, uint32_t>{0x2B3646, 0x4C5868};
     default: // rain, storms
         return w.day ? std::pair<uint32_t, uint32_t>{0x4A5D70, 0x728699} : std::pair<uint32_t, uint32_t>{0x1D2530, 0x3A4552};
     }
@@ -877,8 +900,8 @@ void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pa
     const std::wstring city = w.city.empty() ? (world.city.empty() ? Tr(L"Weather") : world.city) : w.city;
     c.Text(city, D2D1::RectF(pad, 12, W - pad - (size == WidgetSize::Small ? 0 : 120), 32), 14.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     if (!w.ok) {
-        c.Text(w.error.empty() ? Tr(L"Fetching weather…") : w.error, D2D1::RectF(pad, H / 2 - 10, W - pad, H / 2 + 10), 13, sub,
-               DWRITE_FONT_WEIGHT_SEMI_BOLD, size == WidgetSize::Small ? 0 : 1);
+        c.Text(w.error.empty() ? Tr(L"Fetching weather…") : w.error, D2D1::RectF(pad, H / 2 - 10, W - pad, H / 2 + 10), 13, sub, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+               size == WidgetSize::Small ? 0 : 1);
         return;
     }
     c.Text(Degrees(w.temp), D2D1::RectF(pad - 2, 30, W / 2 + 40, 82), 44, text, DWRITE_FONT_WEIGHT_LIGHT);
@@ -982,17 +1005,13 @@ float ReminderScrollMax(const WidgetContent& content, WidgetSize size)
 bool WidgetSupports(WidgetKind kind, WidgetSize size)
 {
     switch (kind) {
-    case WidgetKind::Battery:
-        return size == WidgetSize::Small;
+    case WidgetKind::Battery: return size == WidgetSize::Small;
     case WidgetKind::Bluetooth:
-    case WidgetKind::Network:
-        return size != WidgetSize::Large;
+    case WidgetKind::Network: return size != WidgetSize::Large;
     case WidgetKind::Clock:
     case WidgetKind::Digital:
-    case WidgetKind::System:
-        return size != WidgetSize::Large;
-    default:
-        return true;
+    case WidgetKind::System: return size != WidgetSize::Large;
+    default: return true;
     }
 }
 
@@ -1003,39 +1022,17 @@ void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial mat
     const Pal p = Face(c, kind, material, world, H);
     hits.clear();
     switch (kind) {
-    case WidgetKind::Clock:
-        PaintClock(c, size, content, world, p, W, H);
-        break;
-    case WidgetKind::Digital:
-        PaintDigital(c, size, content, world, p, W, H);
-        break;
-    case WidgetKind::Calendar:
-        PaintCalendar(c, size, world, p, W, H);
-        break;
-    case WidgetKind::Battery:
-        PaintBattery(c, world, p, W, H);
-        break;
-    case WidgetKind::System:
-        PaintSystem(c, size, world, p, W, H);
-        break;
-    case WidgetKind::Notes:
-        PaintNotes(c, content, p, W, H, hits);
-        break;
-    case WidgetKind::Reminders:
-        PaintReminders(c, content, p, W, H, hits);
-        break;
-    case WidgetKind::Photos:
-        PaintPhotos(c, content, p, W, H);
-        break;
-    case WidgetKind::Weather:
-        PaintWeather(c, size, world, p, W, H);
-        break;
-    case WidgetKind::Bluetooth:
-        PaintBluetooth(c, size, world, p, W, H);
-        break;
-    case WidgetKind::Network:
-        PaintNetwork(c, size, world, p, W, H);
-        break;
+    case WidgetKind::Clock: PaintClock(c, size, content, world, p, W, H); break;
+    case WidgetKind::Digital: PaintDigital(c, size, content, world, p, W, H); break;
+    case WidgetKind::Calendar: PaintCalendar(c, size, world, p, W, H); break;
+    case WidgetKind::Battery: PaintBattery(c, world, p, W, H); break;
+    case WidgetKind::System: PaintSystem(c, size, world, p, W, H); break;
+    case WidgetKind::Notes: PaintNotes(c, content, p, W, H, hits); break;
+    case WidgetKind::Reminders: PaintReminders(c, content, p, W, H, hits); break;
+    case WidgetKind::Photos: PaintPhotos(c, content, p, W, H); break;
+    case WidgetKind::Weather: PaintWeather(c, size, world, p, W, H); break;
+    case WidgetKind::Bluetooth: PaintBluetooth(c, size, world, p, W, H); break;
+    case WidgetKind::Network: PaintNetwork(c, size, world, p, W, H); break;
     }
 }
 

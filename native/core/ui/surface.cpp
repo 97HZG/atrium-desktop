@@ -20,6 +20,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
+#include <numbers>
 #include <thread>
 #include <vector>
 
@@ -166,7 +167,6 @@ private:
 uint32_t g_tint = 0xFFFFFF;
 double g_transparency = 0.95;
 
-
 } // namespace
 
 GlassHost* Surface::host_ = nullptr;
@@ -220,12 +220,12 @@ Theme Theme::Mix(float darkInk)
     if (darkInk <= 0.001f || darkInk >= 0.999f)
         return For(darkInk >= 0.5f);
     Theme a = For(false), b = For(true), t = b;
-    auto mix = [&](D2D1_COLOR_F Theme::*c) {
+    auto mix = [&](D2D1_COLOR_F Theme::* c) {
         const D2D1_COLOR_F &x = a.*c, &y = b.*c;
         t.*c = D2D1::ColorF(x.r + (y.r - x.r) * darkInk, x.g + (y.g - x.g) * darkInk, x.b + (y.b - x.b) * darkInk, x.a + (y.a - x.a) * darkInk);
     };
-    for (auto c : {&Theme::border, &Theme::text, &Theme::subtext, &Theme::faint, &Theme::hover, &Theme::press, &Theme::divider, &Theme::card,
-                   &Theme::cardHot, &Theme::halo})
+    for (auto c : {&Theme::border, &Theme::text, &Theme::subtext, &Theme::faint, &Theme::hover, &Theme::press, &Theme::divider, &Theme::card, &Theme::cardHot,
+                   &Theme::halo})
         mix(c);
     t.light = darkInk >= 0.5f;
     return t;
@@ -264,30 +264,35 @@ void Canvas::Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c)
 
 void Canvas::Callout(D2D1_RECT_F body, float radius, float tipX, float halfWidth, float tailHeight, float tailInset, D2D1_COLOR_F color)
 {
-    if (tailHeight <= 0) { Fill(body, radius, color); return; }
+    if (tailHeight <= 0) {
+        Fill(body, radius, color);
+        return;
+    }
     auto rect = Px(body);
     rect = D2D1::RectF(std::round(rect.left), std::round(rect.top), std::round(rect.right), std::round(rect.bottom));
     const float width = rect.right - rect.left, height = rect.bottom - rect.top;
-    if (width <= 0 || height <= 0) return;
-    const std::array<float, 7> key{width, height, radius * scale, std::round(tipX * scale) - rect.left,
-                                  halfWidth * scale, tailHeight * scale, tailInset * scale};
+    if (width <= 0 || height <= 0)
+        return;
+    const std::array<float, 7> key{
+        width, height, radius * scale, std::round(tipX * scale) - rect.left, halfWidth * scale, tailHeight * scale, tailInset * scale};
     if (!s_.calloutMask_ || key != s_.calloutMaskKey_) {
         const UINT32 w = UINT32(std::ceil(width)), h = UINT32(std::ceil(height + key[5]));
         std::vector<BYTE> pixels(size_t(w) * h);
         for (UINT32 y = 0; y < h; ++y)
             for (UINT32 x = 0; x < w; ++x)
-                pixels[size_t(y) * w + x] = BYTE(std::lround(255 * std::clamp(0.5f - CalloutEdge(float(x) + 0.5f, float(y) + 0.5f,
-                    key[0], key[1], key[2], key[3], key[4], key[5], key[6]), 0.f, 1.f)));
+                pixels[size_t(y) * w + x] = BYTE(std::lround(
+                    255 * std::clamp(0.5f - CalloutEdge(float(x) + 0.5f, float(y) + 0.5f, key[0], key[1], key[2], key[3], key[4], key[5], key[6]), 0.f, 1.f)));
         s_.calloutMask_ = nullptr;
         const auto properties = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
-        if (FAILED(d2d_->CreateBitmap(D2D1::SizeU(w, h), pixels.data(), w, properties, s_.calloutMask_.put()))) return;
+        if (FAILED(d2d_->CreateBitmap(D2D1::SizeU(w, h), pixels.data(), w, properties, s_.calloutMask_.put())))
+            return;
         s_.calloutMaskKey_ = key;
     }
     const auto antialias = d2d_->GetAntialiasMode();
     d2d_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
     const auto size = s_.calloutMask_->GetSize();
     d2d_->FillOpacityMask(s_.calloutMask_.get(), Brush(color), D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
-        D2D1::RectF(rect.left, rect.top, rect.left + size.width, rect.top + size.height), D2D1::RectF(0, 0, size.width, size.height));
+                          D2D1::RectF(rect.left, rect.top, rect.left + size.width, rect.top + size.height), D2D1::RectF(0, 0, size.width, size.height));
     d2d_->SetAntialiasMode(antialias);
 }
 
@@ -369,7 +374,7 @@ void Canvas::Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLO
     winrt::com_ptr<ID2D1GeometrySink> sink;
     if (FAILED(f->CreatePathGeometry(g.put())) || FAILED(g->Open(sink.put())))
         return;
-    const float k = 3.14159265f / 180.f, r = radius * scale;
+    const float k = std::numbers::pi_v<float> / 180.f, r = radius * scale;
     a1 = std::min(a1, a0 + 359.9f);
     sink->BeginFigure(D2D1::Point2F(cx * scale + r * std::cos(a0 * k), cy * scale + r * std::sin(a0 * k)), D2D1_FIGURE_BEGIN_HOLLOW);
     sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(cx * scale + r * std::cos(a1 * k), cy * scale + r * std::sin(a1 * k)), D2D1::SizeF(r, r), 0,
@@ -512,8 +517,7 @@ ID2D1Bitmap* Canvas::Bitmap(const std::wstring& key, const IconImage& image)
         if (image.empty())
             return nullptr;
         D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-        if (FAILED(d2d_->CreateBitmap(D2D1::SizeU(UINT32(image.width), UINT32(image.height)), image.bgra.data(), UINT32(image.width * 4), &bp,
-                                      b.put())))
+        if (FAILED(d2d_->CreateBitmap(D2D1::SizeU(UINT32(image.width), UINT32(image.height)), image.bgra.data(), UINT32(image.width * 4), &bp, b.put())))
             return nullptr;
     }
     return b.get();
@@ -557,11 +561,14 @@ D2D1_RECT_F Canvas::Caret(const std::wstring& s, D2D1_RECT_F r, float size, DWRI
 
 void Canvas::ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius)
 {
-    if (!Cached(key)) Image(key, image, D2D1::RectF(), 0);
+    if (!Cached(key))
+        Image(key, image, D2D1::RectF(), 0);
     auto found = s_.bitmaps_.find(key);
-    if (found == s_.bitmaps_.end() || !found->second) return;
+    if (found == s_.bitmaps_.end() || !found->second)
+        return;
     const auto p = Px(r);
-    if (!s_.roundedImageBrush_ && FAILED(d2d_->CreateBitmapBrush(found->second.get(), s_.roundedImageBrush_.put()))) return;
+    if (!s_.roundedImageBrush_ && FAILED(d2d_->CreateBitmapBrush(found->second.get(), s_.roundedImageBrush_.put())))
+        return;
     auto* brush = s_.roundedImageBrush_.get();
     brush->SetBitmap(found->second.get());
     const auto size = found->second->GetSize();
@@ -577,9 +584,8 @@ void Canvas::ImageCircle(const std::wstring& key, const IconImage& image, D2D1_R
     d2d_->GetFactory(f.put());
     winrt::com_ptr<ID2D1EllipseGeometry> g;
     D2D1_RECT_F p = Px(r);
-    if (FAILED(f->CreateEllipseGeometry(D2D1::Ellipse(D2D1::Point2F((p.left + p.right) / 2, (p.top + p.bottom) / 2), (p.right - p.left) / 2,
-                                                      (p.bottom - p.top) / 2),
-                                        g.put())))
+    if (FAILED(f->CreateEllipseGeometry(
+            D2D1::Ellipse(D2D1::Point2F((p.left + p.right) / 2, (p.top + p.bottom) / 2), (p.right - p.left) / 2, (p.bottom - p.top) / 2), g.put())))
         return;
     d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE), nullptr);
     Image(key, image, r);
@@ -593,7 +599,8 @@ void Canvas::Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1
     float reach = std::hypot(r.right - r.left, r.bottom - r.top) * scale;
     float rr = std::max(1.f, reach * (1 - (1 - t) * (1 - t) * (1 - t)));
     float a = c.a * alpha_ * (1 - t) * (1 - t);
-    D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(c.r, c.g, c.b, a * 0.55f)}, {0.75f, D2D1::ColorF(c.r, c.g, c.b, a)}, {1.f, D2D1::ColorF(c.r, c.g, c.b, 0)}};
+    D2D1_GRADIENT_STOP stops[] = {
+        {0.f, D2D1::ColorF(c.r, c.g, c.b, a * 0.55f)}, {0.75f, D2D1::ColorF(c.r, c.g, c.b, a)}, {1.f, D2D1::ColorF(c.r, c.g, c.b, 0)}};
     winrt::com_ptr<ID2D1GradientStopCollection> coll;
     winrt::com_ptr<ID2D1RadialGradientBrush> brush;
     D2D1_POINT_2F centre = D2D1::Point2F(x * scale, y * scale);
@@ -647,8 +654,7 @@ void Canvas::MaskRounded(D2D1_RECT_F r, float radius)
     const auto p = Px(r);
     const float rp = radius * scale;
     const auto& old = s_.roundedMaskRect_;
-    if (!s_.roundedMask_ || old.left != p.left || old.top != p.top || old.right != p.right || old.bottom != p.bottom ||
-        s_.roundedMaskRadius_ != rp) {
+    if (!s_.roundedMask_ || old.left != p.left || old.top != p.top || old.right != p.right || old.bottom != p.bottom || s_.roundedMaskRadius_ != rp) {
         winrt::com_ptr<ID2D1CommandList> mask;
         if (FAILED(d2d_->CreateCommandList(mask.put())))
             return;
@@ -667,8 +673,7 @@ void Canvas::MaskRounded(D2D1_RECT_F r, float radius)
         s_.roundedMaskRect_ = p;
         s_.roundedMaskRadius_ = rp;
     }
-    d2d_->DrawImage(s_.roundedMask_.get(), nullptr, nullptr, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-                   D2D1_COMPOSITE_MODE_DESTINATION_IN);
+    d2d_->DrawImage(s_.roundedMask_.get(), nullptr, nullptr, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_DESTINATION_IN);
 }
 
 void Canvas::Continue() { s_.frameWanted_ = true; }
@@ -705,7 +710,11 @@ struct Surface::Shared {
     winrt::com_ptr<ID2D1Factory1> d2dFactory;
     winrt::com_ptr<ID2D1Device> d2d;
     bool lost = false;
-    ~Shared() { if (d2d) ForgetContinuousMaskDomain(d2d.as<IUnknown>().get()); }
+    ~Shared()
+    {
+        if (d2d)
+            ForgetContinuousMaskDomain(d2d.as<IUnknown>().get());
+    }
 };
 
 std::shared_ptr<Surface::Shared> Surface::SharedDevice()
@@ -717,8 +726,8 @@ std::shared_ptr<Surface::Shared> Surface::SharedDevice()
     // WARP (software): popups are small 2D content, and a second hardware
     // device costs 70-100 MB of driver memory and wakes the GPU (V16).
     D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0};
-    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 2,
-                                            D3D11_SDK_VERSION, s->d3d.put(), nullptr, nullptr))) {
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 2, D3D11_SDK_VERSION, s->d3d.put(), nullptr,
+                                 nullptr))) {
         Log(L"surface: no D3D11 device");
         return nullptr;
     }
@@ -738,7 +747,9 @@ std::shared_ptr<Surface::Shared> Surface::SharedDevice()
 }
 
 Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip, bool desktopLayer)
-    : activatable_(activatable), desktopLayer_(desktopLayer), insetDip_(insetDip)
+    : activatable_(activatable),
+      desktopLayer_(desktopLayer),
+      insetDip_(insetDip)
 {
     static bool registered = false;
     if (!registered) {
@@ -801,7 +812,7 @@ D2D1_SIZE_U Surface::BufferSize() const
 {
     const int inset = 2 * InsetPx();
     return D2D1::SizeU(UINT32(std::max({1, int(window_.right - window_.left), int(std::lround(resizeReserve_.width * scale_)) + inset})),
-                      UINT32(std::max({1, int(window_.bottom - window_.top), int(std::lround(resizeReserve_.height * scale_)) + inset})));
+                       UINT32(std::max({1, int(window_.bottom - window_.top), int(std::lround(resizeReserve_.height * scale_)) + inset})));
 }
 
 POINT Surface::ScreenToContent(POINT p) const { return POINT{p.x - rect_.left, p.y - rect_.top}; }
@@ -819,11 +830,13 @@ void Surface::SetRadius(float dip)
 void Surface::SetShapes(const std::vector<ShapeDip>& shapes, bool animating)
 {
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
-        auto sameRect = [](const D2D1_RECT_F& x, const D2D1_RECT_F& y) { return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom; };
+        auto sameRect = [](const D2D1_RECT_F& x, const D2D1_RECT_F& y) {
+            return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom;
+        };
         auto samePart = [&](const ShapeDip::Part& x, const ShapeDip::Part& y) { return sameRect(x.rect, y.rect) && std::equal(x.radii, x.radii + 4, y.radii); };
-        return a.radius == b.radius && a.fade == b.fade && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix &&
-               a.tailX == b.tailX && a.tailHalfWidth == b.tailHalfWidth && a.tailHeight == b.tailHeight && a.tailInset == b.tailInset &&
-               a.parts.size() == b.parts.size() && std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
+        return a.radius == b.radius && a.fade == b.fade && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix && a.tailX == b.tailX &&
+               a.tailHalfWidth == b.tailHalfWidth && a.tailHeight == b.tailHeight && a.tailInset == b.tailInset && a.parts.size() == b.parts.size() &&
+               std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
     };
     if (!animating && !shapesAnimating_ && shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
         return;
@@ -853,7 +866,10 @@ void Surface::PublishPanel()
         auto px = [&](float v) { return std::round(v * scale_) + p.inset; };
         GlassShape g{px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_, s.fade};
         for (const ShapeDip::Part& part : s.parts)
-            g.parts.push_back({px(part.rect.left), px(part.rect.top), px(part.rect.right), px(part.rect.bottom),
+            g.parts.push_back({px(part.rect.left),
+                               px(part.rect.top),
+                               px(part.rect.right),
+                               px(part.rect.bottom),
                                {part.radii[0] * scale_, part.radii[1] * scale_, part.radii[2] * scale_, part.radii[3] * scale_}});
         g.melt = s.melt * scale_;
         g.partMix = s.partMix;
@@ -953,9 +969,7 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
                 self->onReady();
         }
         return 0;
-    case WM_GLASS_INK:
-        self->SetInk(w != 0, InkFor(h));
-        return 0;
+    case WM_GLASS_INK: self->SetInk(w != 0, InkFor(h)); return 0;
     }
     // Mouse positions in content coordinates; presses on the margin are the caller's to decide.
     const bool mouse = (m >= WM_MOUSEFIRST && m <= WM_MBUTTONDBLCLK && m != WM_MOUSEWHEEL) || m == WM_MOUSEHWHEEL;
@@ -982,17 +996,13 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
             return result;
     }
     switch (m) {
-    case WM_MOUSEACTIVATE:
-        return self->activatable_ ? MA_ACTIVATE : MA_NOACTIVATE;
+    case WM_MOUSEACTIVATE: return self->activatable_ ? MA_ACTIVATE : MA_NOACTIVATE;
     case WM_PAINT:
         ValidateRect(h, nullptr);
         self->Paint();
         return 0;
-    case WM_ERASEBKGND:
-        return 1;
-    case WM_DPICHANGED:
-        self->Invalidate();
-        return 0;
+    case WM_ERASEBKGND: return 1;
+    case WM_DPICHANGED: self->Invalidate(); return 0;
     case WM_CLOSE:
         if (self->onDismiss)
             self->onDismiss();
@@ -1017,8 +1027,8 @@ void Surface::ApplyPlacement()
         GetMonitorInfoW(MonitorFromRect(&rect_, MONITOR_DEFAULTTONEAREST), &monitor);
         if (!EqualRect(&nativeWindow_, &monitor.rcMonitor)) {
             nativeWindow_ = monitor.rcMonitor;
-            SetWindowPos(hwnd_, nullptr, nativeWindow_.left, nativeWindow_.top,
-                         nativeWindow_.right - nativeWindow_.left, nativeWindow_.bottom - nativeWindow_.top, SWP_NOACTIVATE | SWP_NOZORDER);
+            SetWindowPos(hwnd_, nullptr, nativeWindow_.left, nativeWindow_.top, nativeWindow_.right - nativeWindow_.left,
+                         nativeWindow_.bottom - nativeWindow_.top, SWP_NOACTIVATE | SWP_NOZORDER);
             inputRegion_ = {};
         }
         // The host has no full-screen bitmap. Its region admits only the
@@ -1094,8 +1104,7 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
         ++pop_;
         popOpen_ = true;
         if (EnsureDevice())
-            PopVisual(shared_->dcomp.get(), visual_.get(), true,
-                      float(anchor.x - (desktopLayer_ ? nativeWindow_.left : window_.left)),
+            PopVisual(shared_->dcomp.get(), visual_.get(), true, float(anchor.x - (desktopLayer_ ? nativeWindow_.left : window_.left)),
                       float(anchor.y - (desktopLayer_ ? nativeWindow_.top : window_.top)));
     } else {
         popOpen_ = true;
@@ -1160,8 +1169,7 @@ void Surface::Hide(bool animate)
     hiding_ = true;
     ++pop_;
     popOpen_ = false;
-    PopVisual(shared_->dcomp.get(), visual_.get(), false,
-              float(anchor_.x - (desktopLayer_ ? nativeWindow_.left : window_.left)),
+    PopVisual(shared_->dcomp.get(), visual_.get(), false, float(anchor_.x - (desktopLayer_ ? nativeWindow_.left : window_.left)),
               float(anchor_.y - (desktopLayer_ ? nativeWindow_.top : window_.top)));
     PublishPanel();
     SetTimer(hwnd_, kHideTimer, kHideMs, nullptr);

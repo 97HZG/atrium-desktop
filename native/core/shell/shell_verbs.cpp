@@ -25,8 +25,7 @@ bool ShowShellProperties(HWND owner, const std::wstring& path)
 
 // PKEY_AppUserModel_ID, declared here so the shell's property key headers (and
 // their PROPERTYKEY definitions) stay out of this file.
-static const PROPERTYKEY kAppUserModelId = {
-    {0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5};
+static const PROPERTYKEY kAppUserModelId = {{0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5};
 
 std::wstring ShellAppId(const std::wstring& path)
 {
@@ -71,10 +70,7 @@ std::wstring ShellAppIdOfProcess(const std::wstring& exePath)
     return id;
 }
 
-std::vector<ShellRecent> ShellRecentDocuments(const std::wstring& appId, int max)
-{
-    return ShellDocumentList(appId, ADLT_RECENT, max);
-}
+std::vector<ShellRecent> ShellRecentDocuments(const std::wstring& appId, int max) { return ShellDocumentList(appId, ADLT_RECENT, max); }
 
 std::vector<ShellRecent> ShellDocumentList(const std::wstring& appId, int kind, int max)
 {
@@ -82,8 +78,7 @@ std::vector<ShellRecent> ShellDocumentList(const std::wstring& appId, int kind, 
     if (appId.empty() || max <= 0)
         return out;
     winrt::com_ptr<IApplicationDocumentLists> lists;
-    if (FAILED(CoCreateInstance(CLSID_ApplicationDocumentLists, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(lists.put()))) || !lists)
+    if (FAILED(CoCreateInstance(CLSID_ApplicationDocumentLists, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(lists.put()))) || !lists)
         return out;
     if (FAILED(lists->SetAppID(appId.c_str())))
         return out;
@@ -98,8 +93,8 @@ std::vector<ShellRecent> ShellDocumentList(const std::wstring& appId, int kind, 
             continue;
         PWSTR name = nullptr;
         PWSTR path = nullptr;
-        if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &name)) && name &&
-            SUCCEEDED(item->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &path)) && path) {
+        if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &name)) && name && SUCCEEDED(item->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &path)) &&
+            path) {
             out.push_back({name, path});
         }
         CoTaskMemFree(name);

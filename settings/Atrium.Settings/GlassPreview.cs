@@ -1,6 +1,6 @@
 using System.Numerics;
-using System.Runtime.Intrinsics;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 
 namespace Atrium.Settings;
 
@@ -31,7 +31,7 @@ internal sealed class Backdrop
     // visible point is (x0, y0) DIP, at ppd pixels per DIP.
     public static Backdrop Create(int pw, int ph, double artW, double artH, double x0, double y0, double ppd, Photo? photo = null)
     {
-        var l0 = new byte[pw * ph * 4];
+        byte[] l0 = new byte[pw * ph * 4];
         (photo ?? Photo.Default).Paint(l0, pw, ph, (float)artW, (float)artH, (float)x0, (float)y0, (float)ppd);
 
         var mips = new List<byte[]> { l0 };
@@ -39,10 +39,10 @@ internal sealed class Backdrop
         var mh = new List<int> { ph };
         while (mw[^1] > 1 || mh[^1] > 1)
         {
-            var src = mips[^1];
+            byte[] src = mips[^1];
             int sw = mw[^1], sh = mh[^1];
             int w = Math.Max(1, (sw + 1) / 2), h = Math.Max(1, (sh + 1) / 2);
-            var dst = new byte[w * h * 4];
+            byte[] dst = new byte[w * h * 4];
             void Row(int y)
             {
                 int y0r = Math.Min(2 * y, sh - 1), y1r = Math.Min(2 * y + 1, sh - 1);
@@ -62,7 +62,7 @@ internal sealed class Backdrop
             mips.Add(dst); mw.Add(w); mh.Add(h);
         }
 
-        return new Backdrop(pw, ph, mips.ToArray(), mw.ToArray(), mh.ToArray());
+        return new Backdrop(pw, ph, [.. mips], [.. mw], [.. mh]);
     }
 }
 
@@ -112,7 +112,7 @@ internal static class GlassRenderer
                                  : GlassSpec.For(material, rs) with { Radius = (float)(t.Radius * rs), Rim = 0.12f };
             int inset = (int)spec.Inset, w = (int)Math.Round(t.W * rs), h = (int)Math.Round(t.H * rs);
             int pw = w + 2 * inset, ph = h + 2 * inset;
-            var px = new byte[pw * ph * 4];
+            byte[] px = new byte[pw * ph * 4];
             DrawOverlay(bg, px, (int)Math.Round(t.X * rs) - inset, (int)Math.Round(t.Y * rs) - inset, pw, ph, spec);
             result[i] = new GlassOverlay(pw, ph, px, MeanLuma(px, pw, inset, inset, inset + w, inset + h));
         }
@@ -124,20 +124,22 @@ internal static class GlassRenderer
                                     IReadOnlyList<GlassTile> tiles, GlassTile? bar)
     {
         Buffer.BlockCopy(bg.Base, 0, pixels, 0, pixels.Length);
-        var lumas = new float[tiles.Count];
+        float[] lumas = new float[tiles.Count];
         var spec = GlassSpec.For(material, scale * rs);
         int inset = (int)spec.Inset;
         for (int i = 0; i < tiles.Count + (bar.HasValue ? 1 : 0); i++)
         {
             var t = i < tiles.Count ? tiles[i] : bar!.Value;
             // Keep the same DIP-to-pixel arithmetic as GlassSpec.For with this tile's radius.
-            var shape = spec with { Radius = (float)((t.Radius / scale) * (scale * rs)) };
+            var shape = spec with { Radius = (float)(t.Radius / scale * (scale * rs)) };
             int x = (int)Math.Round(t.X * rs), y = (int)Math.Round(t.Y * rs);
             int w = (int)Math.Round(t.W * rs), h = (int)Math.Round(t.H * rs);
             Draw(bg, pixels, x - inset, y - inset, w + 2 * inset, h + 2 * inset, shape);
             if (i < tiles.Count)
+            {
                 lumas[i] = MeanLuma(pixels, bg.Width, Math.Clamp(x, 0, bg.Width - 1), Math.Clamp(y, 0, bg.Height - 1),
                                    Math.Clamp(x + w, 1, bg.Width), Math.Clamp(y + h, 1, bg.Height));
+            }
         }
         return lumas;
     }
@@ -241,7 +243,9 @@ internal static class GlassRenderer
             if (needSharp)
             {
                 if (ox == 0 && oy == 0)
+                {
                     sharp = Tex(bg, ix, iy, 0);
+                }
                 else
                 {
                     sharp.X = Tex(bg, ix + ox * (1 + p.Dispersion), iy + oy * (1 + p.Dispersion), 0).X;
@@ -256,7 +260,7 @@ internal static class GlassRenderer
                      + (Tex(bg, qx + blurStep, qy, p.BlurLod) + Tex(bg, qx - blurStep, qy, p.BlurLod)
                       + Tex(bg, qx, qy + blurStep, p.BlurLod) + Tex(bg, qx, qy - blurStep, p.BlurLod)) * 0.15f;
             }
-            Vector3 col = sharp + (soft - sharp) * p.BlurMix;
+            var col = sharp + (soft - sharp) * p.BlurMix;
 
             // Vibrancy, then tint.
             float luma = Vector3.Dot(col, new Vector3(0.2126f, 0.7152f, 0.0722f));
@@ -298,12 +302,15 @@ internal static class GlassRenderer
     {
         double sum = 0; int n = 0;
         for (int y = y0; y < y1; y += 2)
+        {
             for (int x = x0; x < x1; x += 3)
             {
                 int i = (y * stride + x) * 4;
                 sum += 0.0722 * bgra[i] + 0.7152 * bgra[i + 1] + 0.2126 * bgra[i + 2];
                 n++;
             }
+        }
+
         return n == 0 ? 0.5f : (float)(sum / n / 255.0);
     }
 
@@ -368,7 +375,7 @@ internal static class GlassRenderer
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector3 Bilerp(Backdrop bg, int level, float x, float y)
     {
-        var m = bg.Mips[level];
+        byte[] m = bg.Mips[level];
         int w = bg.MipW[level], h = bg.MipH[level];
         float s = 1f / (1 << level);
         x = x * s - 0.5f; y = y * s - 0.5f;
@@ -401,12 +408,15 @@ internal static class GlassRenderer
 internal sealed class LatestWorker<T> where T : class
 {
     private readonly Action<T> _run;
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private T? _next;
     private bool _busy;
     private bool _stopped;
 
-    public LatestWorker(Action<T> run) => _run = run;
+    public LatestWorker(Action<T> run)
+    {
+        _run = run;
+    }
 
     public void Post(T job)
     {
@@ -445,8 +455,8 @@ internal sealed class LatestWorker<T> where T : class
 // Two BGRA buffers: the worker renders into one and swaps, the UI thread copies from the other.
 internal sealed class FrameBuffers
 {
-    private readonly object _lock = new();
-    private byte[] _front, _back;
+    private readonly Lock _lock = new();
+    private byte[] _front;
     public int Width { get; }
     public int Height { get; }
     // What came with the front buffer: its mean luminance, where it goes (DIP; an overlay's
@@ -458,14 +468,14 @@ internal sealed class FrameBuffers
     {
         Width = w; Height = h;
         _front = new byte[w * h * 4];
-        _back = new byte[w * h * 4];
+        Back = new byte[w * h * 4];
     }
 
-    public byte[] Back => _back;
+    public byte[] Back { get; private set; }
 
     public void Publish(float luma, double x = 0, double y = 0, double scale = 1)
     {
-        lock (_lock) { (_front, _back) = (_back, _front); _placed = new Placement(luma, x, y, scale); }
+        lock (_lock) { (_front, Back) = (Back, _front); _placed = new Placement(luma, x, y, scale); }
     }
 
     // The front buffer's pixels and its placement, read together (the next frame may be published meanwhile).

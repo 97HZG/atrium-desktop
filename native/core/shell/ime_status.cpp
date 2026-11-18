@@ -205,7 +205,7 @@ void ImeWatcher::Run()
             last = status;
         if (status.empty() || !status.reliable)
             continue; // never announce a read that did not finish
-        auto sample = std::make_unique<Sample>(Sample{foreground, std::move(status)});
+        auto sample = std::make_unique<Sample>(Sample{foreground, status});
         if (PostMessageW(window_, message_, 0, reinterpret_cast<LPARAM>(sample.get())))
             (void)sample.release();
     }
@@ -221,7 +221,7 @@ void CALLBACK ImeWatcher::OnWinEvent(HWINEVENTHOOK, DWORD event, HWND, LONG, LON
 
 bool ImeWatcher::OnKey(void* context, DWORD vk, DWORD /*scan*/, bool /*extended*/, bool down, bool /*injected*/, ULONG_PTR extraInfo)
 {
-    ImeWatcher* self = static_cast<ImeWatcher*>(context);
+    auto* self = static_cast<ImeWatcher*>(context);
     if (!self)
         return false;
     if (vk == VK_CAPITAL) {

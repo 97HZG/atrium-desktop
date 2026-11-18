@@ -58,7 +58,11 @@ public:
         return std::clamp(pointer.x, bar.left, bar.right);
     }
 
-    void Reset() { on_ = released_ = false; nearest_ = 0; }
+    void Reset()
+    {
+        on_ = released_ = false;
+        nearest_ = 0;
+    }
 
 private:
     bool on_ = false, released_ = false;

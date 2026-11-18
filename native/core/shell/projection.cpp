@@ -26,20 +26,43 @@ struct DisplaySubscription {
     event_token added{}, updated{}, removed{}, completed{}, stopped{};
     ~DisplaySubscription()
     {
-        if (!watcher) return;
+        if (!watcher)
+            return;
         // Revoke before Stop, outside State::lock: a callback may be finishing.
-        try { if (added.value) watcher.Added(added); } catch (...) {}
-        try { if (updated.value) watcher.Updated(updated); } catch (...) {}
-        try { if (removed.value) watcher.Removed(removed); } catch (...) {}
-        try { if (completed.value) watcher.EnumerationCompleted(completed); } catch (...) {}
-        try { if (stopped.value) watcher.Stopped(stopped); } catch (...) {}
+        try {
+            if (added.value)
+                watcher.Added(added);
+        } catch (...) {
+        }
+        try {
+            if (updated.value)
+                watcher.Updated(updated);
+        } catch (...) {
+        }
+        try {
+            if (removed.value)
+                watcher.Removed(removed);
+        } catch (...) {
+        }
+        try {
+            if (completed.value)
+                watcher.EnumerationCompleted(completed);
+        } catch (...) {
+        }
+        try {
+            if (stopped.value)
+                watcher.Stopped(stopped);
+        } catch (...) {
+        }
         try {
             auto status = watcher.Status();
-            if (status == DeviceWatcherStatus::Started || status == DeviceWatcherStatus::EnumerationCompleted) watcher.Stop();
-        } catch (...) {}
+            if (status == DeviceWatcherStatus::Started || status == DeviceWatcherStatus::EnumerationCompleted)
+                watcher.Stop();
+        } catch (...) {
+        }
     }
 };
-}
+} // namespace
 
 struct DisplayFinder::State {
     mutable std::mutex lock;
@@ -100,21 +123,25 @@ void DisplayFinder::Start(HWND hwnd, UINT msg)
                 std::wstring id(u.Id());
                 changed([&](State& s) { s.found.erase(id); });
             });
-            subscription->completed = w.EnumerationCompleted([changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
-            subscription->stopped = w.Stopped([changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
+            subscription->completed = w.EnumerationCompleted(
+                [changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
+            subscription->stopped =
+                w.Stopped([changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
             // Start before publishing. If Stop invalidates this generation while
             // Start is in progress, the unpublished subscription stops itself.
             w.Start();
             if (auto s = weak.lock()) {
                 std::lock_guard g(s->lock);
-                if (s->gen == gen) s->subscription = subscription;
+                if (s->gen == gen)
+                    s->subscription = subscription;
             }
         } catch (...) {
             Log(L"cast: watching for wireless displays failed");
             if (auto s = weak.lock()) {
                 {
                     std::lock_guard g(s->lock);
-                    if (s->gen != gen) return;
+                    if (s->gen != gen)
+                        return;
                     s->searching = false;
                 }
                 s->Notify(gen);
@@ -190,20 +217,11 @@ ProjectionMode CurrentProjectionMode(int* displays)
         DISPLAYCONFIG_TOPOLOGY_ID topology{};
         if (QueryDisplayConfig(QDC_DATABASE_CURRENT, &paths, p.data(), &modes, m.data(), &topology) == ERROR_SUCCESS) {
             switch (topology) {
-            case DISPLAYCONFIG_TOPOLOGY_INTERNAL:
-                mode = ProjectionMode::Internal;
-                break;
-            case DISPLAYCONFIG_TOPOLOGY_CLONE:
-                mode = ProjectionMode::Clone;
-                break;
-            case DISPLAYCONFIG_TOPOLOGY_EXTEND:
-                mode = ProjectionMode::Extend;
-                break;
-            case DISPLAYCONFIG_TOPOLOGY_EXTERNAL:
-                mode = ProjectionMode::External;
-                break;
-            default:
-                break;
+            case DISPLAYCONFIG_TOPOLOGY_INTERNAL: mode = ProjectionMode::Internal; break;
+            case DISPLAYCONFIG_TOPOLOGY_CLONE: mode = ProjectionMode::Clone; break;
+            case DISPLAYCONFIG_TOPOLOGY_EXTEND: mode = ProjectionMode::Extend; break;
+            case DISPLAYCONFIG_TOPOLOGY_EXTERNAL: mode = ProjectionMode::External; break;
+            default: break;
             }
         }
     }
@@ -225,11 +243,11 @@ ProjectionMode CurrentProjectionMode(int* displays)
 
 bool SetProjectionMode(ProjectionMode mode)
 {
-    UINT32 flag = mode == ProjectionMode::Internal ? SDC_TOPOLOGY_INTERNAL
-                  : mode == ProjectionMode::Clone  ? SDC_TOPOLOGY_CLONE
-                  : mode == ProjectionMode::Extend ? SDC_TOPOLOGY_EXTEND
-                  : mode == ProjectionMode::External ? SDC_TOPOLOGY_EXTERNAL
-                                                     : 0;
+    UINT32 flag = mode == ProjectionMode::Internal ? SDC_TOPOLOGY_INTERNAL :
+                  mode == ProjectionMode::Clone    ? SDC_TOPOLOGY_CLONE :
+                  mode == ProjectionMode::Extend   ? SDC_TOPOLOGY_EXTEND :
+                  mode == ProjectionMode::External ? SDC_TOPOLOGY_EXTERNAL :
+                                                     0;
     if (!flag)
         return false;
     LONG r = SetDisplayConfig(0, nullptr, 0, nullptr, SDC_APPLY | flag);

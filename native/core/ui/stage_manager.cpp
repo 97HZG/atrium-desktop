@@ -101,8 +101,8 @@ bool Transient(HWND h)
         return true;
     MONITORINFO mi{sizeof(mi)};
     RECT r{};
-    return !IsZoomed(h) && GetWindowRect(h, &r) && GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi) &&
-           r.left <= mi.rcMonitor.left && r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
+    return !IsZoomed(h) && GetWindowRect(h, &r) && GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi) && r.left <= mi.rcMonitor.left &&
+           r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
 }
 
 bool Has(const std::vector<std::wstring>& set, const std::wstring& key) { return std::find(set.begin(), set.end(), key) != set.end(); }
@@ -125,8 +125,8 @@ std::wstring AppOf(const std::wstring& key)
 bool AppsDark()
 {
     DWORD light = 1, size = sizeof(light);
-    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD,
-                 nullptr, &light, &size);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr,
+                 &light, &size);
     return light == 0;
 }
 
@@ -170,7 +170,9 @@ constexpr motion::Spring kFadeSpring{0.30f, 1.f};
 } // namespace
 
 StageManager::StageManager(HINSTANCE instance, TaskModel& tasks)
-    : tasks_(tasks), surface_(instance, L"Atrium Stage Manager", false), flight_(instance, L"Atrium Stage Flight", false, 0),
+    : tasks_(tasks),
+      surface_(instance, L"Atrium Stage Manager", false),
+      flight_(instance, L"Atrium Stage Flight", false, 0),
       snapshots_(surface_.Hwnd(), WM_STAGE_PICTURE)
 {
     surface_.SetGlassless(true);
@@ -448,8 +450,7 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, c
             // A window filling the screen (a game, a video) is left alone: minimized, a full-screen
             // game comes back to its screen mode first, and flashes up before it goes.
             for (auto h = t.windows.rbegin(); h != t.windows.rend(); ++h)
-                if (!parked_.contains(*h) && IsWindowVisible(*h) && !IsIconic(*h) && OnMonitor(*h, monitor_) && !Transient(*h) &&
-                    !FillsScreen(*h)) {
+                if (!parked_.contains(*h) && IsWindowVisible(*h) && !IsIconic(*h) && OnMonitor(*h, monitor_) && !Transient(*h) && !FillsScreen(*h)) {
                     Park(*h, t.key);
                     any = true;
                 }
@@ -578,7 +579,7 @@ void StageManager::PutDown(HWND window, bool fly)
     it->second.since = GetTickCount64();
     std::wstring key;
     auto picture = fly ? PictureOf(window, it->second.key, key) : nullptr;
-    if (!picture || !picture->ok || key.rfind(L"stage|w|", 0) != 0) {
+    if (!picture || !picture->ok || !key.starts_with(L"stage|w|")) {
         Transitions(window, true); // no picture to fly: Windows' own animation
         ShowWindowAsync(window, SW_SHOWMINNOACTIVE);
         return;
@@ -601,7 +602,8 @@ void StageManager::PictureTaken()
 {
     for (WindowSnapshots::Result& r : snapshots_.Take()) {
         if (parked_.contains(r.window))
-            Log(L"stage: picture of %p %s", r.window, r.picture.ok ? (std::to_wstring(r.picture.width) + L"x" + std::to_wstring(r.picture.height)).c_str() : L"(none)");
+            Log(L"stage: picture of %p %s", r.window,
+                r.picture.ok ? (std::to_wstring(r.picture.width) + L"x" + std::to_wstring(r.picture.height)).c_str() : L"(none)");
         if (r.picture.ok) {
             Picture& p = pictures_[r.window];
             if (p.gen) {
@@ -946,9 +948,8 @@ void StageManager::Prune()
         return false;
     });
     for (Set& set : recent_)
-        std::erase_if(set, [&](const std::wstring& k) {
-            return std::none_of(parked_.begin(), parked_.end(), [&](const auto& kv) { return kv.second.key == k; });
-        });
+        std::erase_if(set,
+                      [&](const std::wstring& k) { return std::none_of(parked_.begin(), parked_.end(), [&](const auto& kv) { return kv.second.key == k; }); });
     std::erase_if(recent_, [](const Set& set) { return set.empty(); });
     // Pictures of windows no longer waiting are old by the time they wait again; but not those of the
     // stage's (on their way back from the strip, or up): minimized, they go back with them.
@@ -958,8 +959,8 @@ void StageManager::Prune()
             if (Has(stage_, t.key))
                 staged.insert(t.windows.begin(), t.windows.end());
     std::erase_if(pictures_, [&](const auto& kv) {
-        if (parked_.contains(kv.first) || (IsWindow(kv.first) && now - kv.second.taken < kFreshMs) || up_.contains(kv.first) ||
-            Flying(kv.first) || (staged.contains(kv.first) && IsWindow(kv.first)))
+        if (parked_.contains(kv.first) || (IsWindow(kv.first) && now - kv.second.taken < kFreshMs) || up_.contains(kv.first) || Flying(kv.first) ||
+            (staged.contains(kv.first) && IsWindow(kv.first)))
             return false;
         std::wstring key = L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(kv.first)) + L"|" + std::to_wstring(kv.second.gen);
         surface_.ForgetImage(key);
@@ -1051,9 +1052,8 @@ void StageManager::Load()
         if (std::none_of(recent_.begin(), recent_.end(), [&](const Set& set) { return Has(set, p.key); }))
             recent_.push_back(Set{p.key});
     for (Set& set : recent_)
-        std::erase_if(set, [&](const std::wstring& k) {
-            return std::none_of(parked_.begin(), parked_.end(), [&](const auto& kv) { return kv.second.key == k; });
-        });
+        std::erase_if(set,
+                      [&](const std::wstring& k) { return std::none_of(parked_.begin(), parked_.end(), [&](const auto& kv) { return kv.second.key == k; }); });
     std::erase_if(recent_, [](const Set& set) { return set.empty(); });
 }
 
@@ -1192,8 +1192,8 @@ void StageManager::Rebuild(bool keepAnchor)
     if (next.size() > size_t(Capacity()))
         next.resize(size_t(Capacity()));
     // An index can now name another group. Check identity before the old keys are moved/cleared.
-    if (pressed_ >= 0 && (size_t(pressed_) >= next.size() || size_t(pressed_) >= entries_.size() ||
-                         next[size_t(pressed_)].keys != entries_[size_t(pressed_)].keys)) {
+    if (pressed_ >= 0 &&
+        (size_t(pressed_) >= next.size() || size_t(pressed_) >= entries_.size() || next[size_t(pressed_)].keys != entries_[size_t(pressed_)].keys)) {
         pressed_ = -1;
     }
     const bool visible = shown_ && surface_.Visible();
@@ -1429,8 +1429,8 @@ void StageManager::Watch()
     GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
     // Anywhere along the edge above the bar; not while dragging (a window to snap, a selection).
     const bool dragging = (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
-    const bool atEdge = !dragging && (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) && p.y >= mi.rcMonitor.top &&
-                        p.y < mi.rcWork.bottom;
+    const bool atEdge =
+        !dragging && (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) && p.y >= mi.rcMonitor.top && p.y < mi.rcWork.bottom;
     edgeSince_ = atEdge ? (edgeSince_ ? edgeSince_ : now) : 0;
     if (!autoHide_ && !Covered()) {
         peek_ = false;
@@ -1684,8 +1684,8 @@ void StageManager::PaintFlights(Canvas& c)
         float opacity = 1;
         if (f.toStrip && !StripPose(f.window, b)) {
             // The strip is not out: into the screen's edge.
-            const D2D1_SIZE_F screen = D2D1::SizeF(float(flight_.Rect().right - flight_.Rect().left) / c.scale,
-                                                   float(flight_.Rect().bottom - flight_.Rect().top) / c.scale);
+            const D2D1_SIZE_F screen =
+                D2D1::SizeF(float(flight_.Rect().right - flight_.Rect().left) / c.scale, float(flight_.Rect().bottom - flight_.Rect().top) / c.scale);
             const float x = onRight_ ? screen.width + kBoxW / 2 : -kBoxW / 2, y = StripOffset().y + size_.height / 2;
             b.rect = D2D1::RectF(x - kBoxW / 2, y - kBoxH / 2, x + kBoxW / 2, y + kBoxH / 2);
             b.cx = b.ox = x;
@@ -1781,9 +1781,7 @@ bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     (void)result;
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     switch (m) {
-    case WM_STAGE_PICTURE:
-        PictureTaken();
-        return true;
+    case WM_STAGE_PICTURE: PictureTaken(); return true;
     case WM_TIMER:
         if (w == kWatchTimer) {
             Watch();

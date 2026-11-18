@@ -44,6 +44,5 @@ struct Result {
 };
 std::wstring Title(const std::wstring& tip);
 std::wstring Key(const std::wstring& text);
-Result Match(const std::vector<Button>& buttons, const std::vector<Record>& records,
-             const std::vector<Program>& programs = {});
+Result Match(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<Program>& programs = {});
 } // namespace atrium::tray

@@ -17,8 +17,7 @@ std::wstring RootOf(wchar_t letter) { return std::wstring(1, letter) + L":\\"; }
 bool OnUsbBus(wchar_t letter)
 {
     const std::wstring path = L"\\\\.\\" + std::wstring(1, letter) + L":";
-    HANDLE raw = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                nullptr, OPEN_EXISTING, 0, nullptr);
+    HANDLE raw = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
     if (raw == INVALID_HANDLE_VALUE)
         return false;
     std::unique_ptr<void, decltype(&CloseHandle)> volume(raw, CloseHandle);
@@ -28,12 +27,10 @@ bool OnUsbBus(wchar_t letter)
     STORAGE_DESCRIPTOR_HEADER header{};
     DWORD bytes = 0;
     bool usb = false;
-    if (DeviceIoControl(volume.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query),
-                        &header, sizeof(header), &bytes, nullptr) &&
+    if (DeviceIoControl(volume.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), &header, sizeof(header), &bytes, nullptr) &&
         bytes >= sizeof(header) && header.Size >= sizeof(STORAGE_DEVICE_DESCRIPTOR) && header.Size <= 65536) {
         std::vector<BYTE> buffer(header.Size);
-        if (DeviceIoControl(volume.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), buffer.data(),
-                            DWORD(buffer.size()), &bytes, nullptr) &&
+        if (DeviceIoControl(volume.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), buffer.data(), DWORD(buffer.size()), &bytes, nullptr) &&
             bytes >= offsetof(STORAGE_DEVICE_DESCRIPTOR, RawDeviceProperties)) {
             const auto* device = reinterpret_cast<const STORAGE_DEVICE_DESCRIPTOR*>(buffer.data());
             usb = device->BusType == BusTypeUsb;
@@ -83,8 +80,8 @@ std::vector<RemovedVolume> UsbVolumes::Sync(const UsbVolumeSnapshot& snapshot)
         const wchar_t letter = it->first;
         const unsigned bit = 1u << (letter - L'A');
         const auto next = snapshot.volumes.find(letter);
-        const bool replaced = next != snapshot.volumes.end() && !it->second.identity.empty() &&
-                              !next->second.identity.empty() && it->second.identity != next->second.identity;
+        const bool replaced =
+            next != snapshot.volumes.end() && !it->second.identity.empty() && !next->second.identity.empty() && it->second.identity != next->second.identity;
         if (!(snapshot.present & bit) || replaced) {
             removed.push_back({letter, it->second.label, !replaced && (ejecting_ & bit) != 0});
             ejecting_ &= ~bit;
@@ -99,7 +96,9 @@ std::vector<RemovedVolume> UsbVolumes::Sync(const UsbVolumeSnapshot& snapshot)
 }
 
 UsbVolumeMonitor::UsbVolumeMonitor(std::function<void()> ready, Reader reader)
-    : ready_(std::move(ready)), reader_(std::move(reader)), worker_([this] { Worker(); })
+    : ready_(std::move(ready)),
+      reader_(std::move(reader)),
+      worker_([this] { Worker(); })
 {
 }
 

@@ -8,8 +8,18 @@ namespace atrium {
 class StageScroll {
 public:
     size_t Offset() const { return offset_; }
-    void Reset() { offset_ = 0; vertical_ = horizontal_ = 0; }
-    void Fit(size_t count) { if (count) offset_ %= count; else Reset(); }
+    void Reset()
+    {
+        offset_ = 0;
+        vertical_ = horizontal_ = 0;
+    }
+    void Fit(size_t count)
+    {
+        if (count)
+            offset_ %= count;
+        else
+            Reset();
+    }
     void Anchor(size_t offset, size_t count) { offset_ = count ? offset % count : 0; }
     size_t Index(size_t slot, size_t count) const { return count ? (offset_ + slot) % count : 0; }
 

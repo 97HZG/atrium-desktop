@@ -15,7 +15,7 @@ public sealed partial class MainWindow
 {
     private async void ExportStageArtIfAsked()
     {
-        var args = Environment.GetCommandLineArgs();
+        string[] args = Environment.GetCommandLineArgs();
         int at = Array.IndexOf(args, "--export-stage-art");
         if (at < 0 || at + 1 >= args.Length) return;
         string folder = args[at + 1];
@@ -24,7 +24,9 @@ public sealed partial class MainWindow
         // Out of the window while drawn (RootGrid is a Grid: moved by a transform).
         var host = new Canvas
         {
-            IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
             RenderTransform = new TranslateTransform { X = -8000 },
         };
         RootGrid.Children.Insert(0, host);
@@ -43,7 +45,7 @@ public sealed partial class MainWindow
             host.Children.Add(live);
             live.UpdateLayout();
             RenderTargetBitmap shot = new();
-            byte[] pixels = Array.Empty<byte>();
+            byte[] pixels = [];
             for (int attempt = 0; attempt < 6; attempt++)
             {
                 await NextFrame();
@@ -58,7 +60,7 @@ public sealed partial class MainWindow
             var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
             encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)shot.PixelWidth, (uint)shot.PixelHeight, 96, 96, pixels);
             await encoder.FlushAsync();
-            var bytes = new byte[stream.Size];
+            byte[] bytes = new byte[stream.Size];
             stream.Seek(0);
             await stream.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, Windows.Storage.Streams.InputStreamOptions.None);
             await File.WriteAllBytesAsync(path, bytes);
@@ -68,12 +70,12 @@ public sealed partial class MainWindow
     private static Task NextFrame()
     {
         var done = new TaskCompletionSource();
-        EventHandler<object>? rendered = null;
-        rendered = (_, _) =>
+        void rendered(object? _1, object _2)
         {
             CompositionTarget.Rendering -= rendered;
             done.TrySetResult();
-        };
+        }
+
         CompositionTarget.Rendering += rendered;
         return done.Task;
     }
@@ -82,8 +84,11 @@ public sealed partial class MainWindow
     {
         if (w < 4 || h < 4 || pixels.Length < w * h * 4) return false;
         for (int gy = 1; gy < 8; gy++)
+        {
             for (int gx = 1; gx < 8; gx++)
-                if (pixels[((h * gy / 8) * w + w * gx / 8) * 4 + 3] < 250) return false;
+                if (pixels[(h * gy / 8 * w + w * gx / 8) * 4 + 3] < 250) return false;
+        }
+
         return true;
     }
 }

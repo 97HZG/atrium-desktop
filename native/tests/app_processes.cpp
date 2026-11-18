@@ -29,8 +29,8 @@ Handle Spawn(const fs::path& exe, const std::vector<std::wstring>& arguments)
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
-    Require(CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
-        nullptr, nullptr, &startup, &process) != FALSE, "start isolated probe process");
+    Require(CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process) != FALSE,
+            "start isolated probe process");
     CloseHandle(process.hThread);
     return Handle(process.hProcess, CloseHandle);
 }
@@ -45,8 +45,8 @@ Handle FindProcess(const fs::path& exe)
         Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, entry.th32ProcessID), CloseHandle);
         wchar_t path[32768]{};
         DWORD length = ARRAYSIZE(path);
-        if (process && WaitForSingleObject(process.get(), 0) == WAIT_TIMEOUT &&
-            QueryFullProcessImageNameW(process.get(), 0, path, &length) && _wcsicmp(path, exe.c_str()) == 0)
+        if (process && WaitForSingleObject(process.get(), 0) == WAIT_TIMEOUT && QueryFullProcessImageNameW(process.get(), 0, path, &length) &&
+            _wcsicmp(path, exe.c_str()) == 0)
             return process;
     }
     return Handle(nullptr, CloseHandle);
@@ -148,7 +148,7 @@ int wmain(int argc, wchar_t** argv)
             if (argc > 3) {
                 std::vector<std::wstring> arguments{L"--probe", argv[2]};
                 for (int i = 4; i < argc; ++i)
-                    arguments.push_back(argv[i]);
+                    arguments.emplace_back(argv[i]);
                 auto child = Spawn(argv[3], arguments);
             } else {
                 Handle ready(OpenEventW(EVENT_MODIFY_STATE, FALSE, argv[2]), CloseHandle);

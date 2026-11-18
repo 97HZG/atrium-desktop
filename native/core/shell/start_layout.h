@@ -15,7 +15,7 @@ struct StartTile {
     std::wstring id;   // an app: its catalog id (CatalogApp::id); a folder: "folder:<n>"
     std::wstring name; // an app: its name when saved (shown when it is not found); a folder: its name
     std::vector<StartTile> apps; // a folder's apps, in order
-    bool Folder() const { return id.rfind(L"folder:", 0) == 0; }
+    bool Folder() const { return id.starts_with(L"folder:"); }
 };
 
 struct StartLayout {

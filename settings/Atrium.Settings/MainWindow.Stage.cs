@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
@@ -7,9 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Microsoft.UI.Xaml.Media.Media3D;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Windows.System;
@@ -27,26 +24,26 @@ public sealed partial class MainWindow
     private sealed record StageApp(string Name, Color Accent, bool Dark);
 
     private static readonly StageApp[] StageApps =
-    {
+    [
         new("Notes", Color.FromArgb(255, 0xFF, 0xC6, 0x0A), false),
         new("Mail", Color.FromArgb(255, 0x1E, 0x7B, 0xFF), false),
         new("Calendar", Color.FromArgb(255, 0xFF, 0x3B, 0x30), false),
         new("Photos", Color.FromArgb(255, 0xFF, 0x95, 0x00), false),
         new("Terminal", Color.FromArgb(255, 0x2C, 0x2C, 0x2E), true),
-    };
+    ];
 
     // Preview DIP: the desktop's boxes (172 x 112, 22 from the edge, turned 22 degrees) at about 0.6.
     private const double StageBoxW = 100, StageBoxH = 64, StageSlotGap = 26, StageEdge = 16, StageMargin = 16;
     private const double StageTilt = 22, StageHoverTilt = 7;
     private const double StageBarH = 34, StageBarRoom = 56, StageWinGap = 30;
 
-    private List<int> _stageFront = new() { 0 };
-    private readonly List<List<int>> _stageStrip = new() { new() { 1, 2 }, new() { 3 }, new() { 4 } };
-    private readonly Dictionary<string, Grid> _stageCards = new();
-    private readonly Dictionary<string, Visual> _stageTilts = new();
+    private List<int> _stageFront = [0];
+    private readonly List<List<int>> _stageStrip = [new() { 1, 2 }, new() { 3 }, new() { 4 }];
+    private readonly Dictionary<string, Grid> _stageCards = [];
+    private readonly Dictionary<string, Visual> _stageTilts = [];
     // The apps' windows and icons as pictures (assets/stage, made by --export-stage-art from the
     // elements below): one image instead of a hundred elements, with an exact outline for its shadow.
-    private readonly Dictionary<string, BitmapImage> _stageArt = new();
+    private readonly Dictionary<string, BitmapImage> _stageArt = [];
     private Task? _stageArtLoading;
     private int _stageResize;
     private Grid? _stageCenter, _stageBar;
@@ -57,7 +54,7 @@ public sealed partial class MainWindow
     private int _stageHideId;
 
     private static string StageKey(List<int> set) => string.Join(",", set);
-    private double StageSide => _current.StageOnRight ? -1 : 1; // +1: the strip on the left
+    private double StageSide => CurrentSettings.StageOnRight ? -1 : 1; // +1: the strip on the left
 
     private void OnStagePreviewSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -81,6 +78,7 @@ public sealed partial class MainWindow
     private async Task LoadAll()
     {
         for (int a = 0; a < StageApps.Length; a++)
+        {
             foreach (string name in new[] { $"window-{a}", $"icon-{a}" })
             {
                 try
@@ -93,6 +91,7 @@ public sealed partial class MainWindow
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException or FileNotFoundException or System.Runtime.InteropServices.COMException) { }
             }
+        }
     }
 
     private async void OnStageReplay(object sender, RoutedEventArgs e)
@@ -124,10 +123,10 @@ public sealed partial class MainWindow
         double W = Math.Max(StagePreview.ActualWidth, 420), H = Math.Max(StagePreview.ActualHeight, 300);
         StageCanvas.Width = W;
         StageCanvas.Height = H;
-        bool on = _current.StageManager;
-        string side = _current.StageOnRight ? Loc.T("Right") : Loc.T("Left");
+        bool on = CurrentSettings.StageManager;
+        string side = CurrentSettings.StageOnRight ? Loc.T("Right") : Loc.T("Left");
         StageCaption.Text = !on ? Loc.T("Stage Manager is off: windows stack on the desktop as usual")
-            : _current.StageAutoHide ? Loc.F("Rest the pointer at the preview's {0} edge to slide the cards out; click to bring one forward, Shift-click to add it to this group", side)
+            : CurrentSettings.StageAutoHide ? Loc.F("Rest the pointer at the preview's {0} edge to slide the cards out; click to bring one forward, Shift-click to add it to this group", side)
             : Loc.F("Click a card on the {0} to bring it forward; Shift-click to add it to the current group", side);
         StageReplay.IsEnabled = on;
 
@@ -164,7 +163,10 @@ public sealed partial class MainWindow
                 _stageLayer.Children.Add(StageCard(_stageStrip[i], StageBox(i, _stageStrip.Count, W, H)));
             StageCanvas.Children.Add(_stageLayer);
             if (animate) StageAppear(_stageCenter, 0.96f);
-            if (_current.StageAutoHide) StageReveal(false, false);
+            if (CurrentSettings.StageAutoHide)
+            {
+                StageReveal(false, false);
+            }
             else
             {
                 StageReveal(false, false);
@@ -193,7 +195,7 @@ public sealed partial class MainWindow
     {
         double slot = StageBoxH + StageSlotGap, used = n * slot - StageSlotGap;
         double top = Math.Max(16, (H - StageBarRoom - used) / 2);
-        double x = _current.StageOnRight ? W - StageEdge - StageBoxW : StageEdge;
+        double x = CurrentSettings.StageOnRight ? W - StageEdge - StageBoxW : StageEdge;
         return new Rect(x, top + i * slot, StageBoxW, StageBoxH);
     }
 
@@ -201,8 +203,8 @@ public sealed partial class MainWindow
     private Rect StageRoom(double W, double H)
     {
         double strip = StageEdge + StageBoxW + StageWinGap;
-        double left = _current.StageOnRight ? StageWinGap : strip;
-        double right = _current.StageOnRight ? W - strip : W - StageWinGap;
+        double left = CurrentSettings.StageOnRight ? StageWinGap : strip;
+        double right = CurrentSettings.StageOnRight ? W - strip : W - StageWinGap;
         return new Rect(left, 22, Math.Max(40, right - left), Math.Max(40, H - StageBarRoom - 22 - 12));
     }
 
@@ -213,7 +215,7 @@ public sealed partial class MainWindow
         int photoGeneration = Photo.Generation;
         PostTiles(StageCanvas, W, H, 1, new List<GlassTile> { StageBarTile(W, H) }, null, f =>
         {
-            if (_stageBarGlass != null) _stageBarGlass.Source = f.Overlay(0);
+            _stageBarGlass?.Source = f.Overlay(0);
             Ready("stage", photoGeneration);
         }, overlays: true);
     }
@@ -252,24 +254,27 @@ public sealed partial class MainWindow
 
     private void OnStagePointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_current.StageManager || !_current.StageAutoHide || _stageLayer == null) return;
+        if (!CurrentSettings.StageManager || !CurrentSettings.StageAutoHide || _stageLayer == null) return;
         double x = e.GetCurrentPoint(StageCanvas).Position.X, W = StageCanvas.Width, reach = StageEdge + StageBoxW + StageMargin;
-        bool atEdge = _current.StageOnRight ? x >= W - 12 : x <= 12;
-        bool inStrip = _current.StageOnRight ? x >= W - reach : x <= reach;
+        bool atEdge = CurrentSettings.StageOnRight ? x >= W - 12 : x <= 12;
+        bool inStrip = CurrentSettings.StageOnRight ? x >= W - reach : x <= reach;
         if (atEdge && !_stageOut) StageReveal(true, true);
         if (!_stageOut) return;
         if (inStrip) { _stageHideId++; _stageHidePending = false; }
-        else if (!_stageHidePending) StageHideSoon();
+        else if (!_stageHidePending)
+        {
+            StageHideSoon();
+        }
     }
 
     // Auto-hidden: back into the edge once the pointer has been away for a moment.
     private async void StageHideSoon()
     {
-        if (!_stageOut || !_current.StageAutoHide || !_current.StageManager) return;
+        if (!_stageOut || !CurrentSettings.StageAutoHide || !CurrentSettings.StageManager) return;
         int id = ++_stageHideId;
         _stageHidePending = true;
         await Task.Delay(350);
-        if (id != _stageHideId || !_stageOut || !_current.StageAutoHide) return;
+        if (id != _stageHideId || !_stageOut || !CurrentSettings.StageAutoHide) return;
         _stageHidePending = false;
         StageReveal(false, true);
     }
@@ -299,9 +304,13 @@ public sealed partial class MainWindow
         tilt.Children.Add(windows);
         var icons = new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = -5, FlowDirection = side > 0 ? FlowDirection.LeftToRight : FlowDirection.RightToLeft,
-            HorizontalAlignment = side > 0 ? HorizontalAlignment.Left : HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(m - 9, 0, m - 9, m - 11), IsHitTestVisible = false,
+            Orientation = Orientation.Horizontal,
+            Spacing = -5,
+            FlowDirection = side > 0 ? FlowDirection.LeftToRight : FlowDirection.RightToLeft,
+            HorizontalAlignment = side > 0 ? HorizontalAlignment.Left : HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(m - 9, 0, m - 9, m - 11),
+            IsHitTestVisible = false,
         };
         foreach (int a in set.Take(3)) icons.Children.Add(Shadowed(StageIcon(a, 24), 24, 24, 5.5, 8, 0.32f, 2));
         // Seen from 340 DIP in front of the screen, as on the desktop (at the preview's scale), the eye
@@ -310,7 +319,10 @@ public sealed partial class MainWindow
         double middle = (StageCanvas.Height - StageBarRoom) / 2, cy = box.Y + box.Height / 2;
         var card = new Grid
         {
-            Width = box.Width + 2 * m, Height = box.Height + 2 * m, Tag = key, Background = new SolidColorBrush(Colors.Transparent),
+            Width = box.Width + 2 * m,
+            Height = box.Height + 2 * m,
+            Tag = key,
+            Background = new SolidColorBrush(Colors.Transparent),
         };
         var eye = new Vector3((float)(card.Width / 2), (float)(card.Height / 2 + 0.45 * (middle - cy)), 0);
         var perspective = Matrix4x4.Identity;
@@ -372,7 +384,10 @@ public sealed partial class MainWindow
         // A picture casts the shadow of its own outline; anything else that of a rounded rectangle
         // (under it, the same size, so none of it shows).
         CompositionBrush mask;
-        if (content is Image image) mask = image.GetAlphaMask();
+        if (content is Image image)
+        {
+            mask = image.GetAlphaMask();
+        }
         else
         {
             var shape = new Rectangle { Width = w, Height = h, RadiusX = radius, RadiusY = radius, Fill = new SolidColorBrush(Colors.Black), Opacity = 0.01 };
@@ -414,78 +429,117 @@ public sealed partial class MainWindow
         }
         Border Plate(Brush fill) => new()
         {
-            Width = 64, Height = 64, CornerRadius = new CornerRadius(14.5), Background = fill,
-            BorderBrush = new SolidColorBrush(Color.FromArgb(30, 0, 0, 0)), BorderThickness = new Thickness(0.6),
+            Width = 64,
+            Height = 64,
+            CornerRadius = new CornerRadius(14.5),
+            Background = fill,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(30, 0, 0, 0)),
+            BorderThickness = new Thickness(0.6),
         };
         switch (app)
         {
             case 0: // 备忘录: ruled paper under a yellow band
-            {
-                Put(Plate(Vertical(Rgb(0xFFFFFF), Rgb(0xF1F1F4))), 0, 0);
-                Put(new Border { Width = 64, Height = 21, CornerRadius = new CornerRadius(14.5, 14.5, 0, 0), Background = Vertical(Rgb(0xFFE14D), Rgb(0xFFC300)) }, 0, 0);
-                Put(new Line { X1 = 7, X2 = 57, Y1 = 0, Y2 = 0, Stroke = new SolidColorBrush(Rgb(0xD9A600)), StrokeThickness = 1.4,
-                               StrokeDashArray = new DoubleCollection { 1, 1.6 } }, 0, 21.5);
-                foreach (double y in new[] { 32.0, 41, 50 })
-                    Put(new Rectangle { Width = 46, Height = 1.3, Fill = new SolidColorBrush(Rgb(0xD5D5DB)) }, 9, y);
-                Put(new Rectangle { Width = 30, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = new SolidColorBrush(Rgb(0x8E8E93)), Opacity = 0.55 }, 10, 27);
-                Put(new Rectangle { Width = 22, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = new SolidColorBrush(Rgb(0x8E8E93)), Opacity = 0.55 }, 10, 36);
-                break;
-            }
-            case 1: // 邮件: a white envelope on blue
-            {
-                Put(Plate(Vertical(Rgb(0x5AC8FA), Rgb(0x1468F0))), 0, 0);
-                Put(new Border { Width = 42, Height = 29, CornerRadius = new CornerRadius(4.5), Background = Vertical(Rgb(0xFFFFFF), Rgb(0xE9F1FF)) }, 11, 18);
-                Put(new Polyline
                 {
-                    Points = { new Point(12.5, 20), new Point(32, 35), new Point(51.5, 20) }, Stroke = new SolidColorBrush(Rgb(0x8DBBF5)),
-                    StrokeThickness = 2.4, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
-                }, 0, 0);
-                break;
-            }
-            case 2: // 日历: the weekday in red over the day of the month
-            {
-                Put(Plate(Vertical(Rgb(0xFFFFFF), Rgb(0xF3F3F6))), 0, 0);
-                Put(new TextBlock
-                {
-                    Text = Loc.T("Wed"), Width = 64, TextAlignment = TextAlignment.Center, FontSize = 10.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Rgb(0xFF3B30)), IsTextScaleFactorEnabled = false,
-                }, 0, 6);
-                Put(new TextBlock
-                {
-                    Text = "14", Width = 64, TextAlignment = TextAlignment.Center, FontSize = 31, FontWeight = Microsoft.UI.Text.FontWeights.Light,
-                    Foreground = new SolidColorBrush(Rgb(0x1C1C1E)), IsTextScaleFactorEnabled = false,
-                }, 0, 17);
-                break;
-            }
-            case 3: // 照片: a flower of eight translucent petals
-            {
-                Put(Plate(new SolidColorBrush(Colors.White)), 0, 0);
-                uint[] petals = { 0xFFCC00, 0xFF9500, 0xFF3B30, 0xFF2D55, 0xAF52DE, 0x007AFF, 0x5AC8FA, 0x34C759 };
-                for (int i = 0; i < petals.Length; i++)
-                    Put(new Ellipse
+                    Put(Plate(Vertical(Rgb(0xFFFFFF), Rgb(0xF1F1F4))), 0, 0);
+                    Put(new Border { Width = 64, Height = 21, CornerRadius = new CornerRadius(14.5, 14.5, 0, 0), Background = Vertical(Rgb(0xFFE14D), Rgb(0xFFC300)) }, 0, 0);
+                    Put(new Line
                     {
-                        Width = 13, Height = 24, Fill = new SolidColorBrush(Rgb(petals[i], 0xC8)),
-                        RenderTransform = new RotateTransform { Angle = i * 45, CenterX = 6.5, CenterY = 25 },
-                    }, 25.5, 7);
-                break;
-            }
+                        X1 = 7,
+                        X2 = 57,
+                        Y1 = 0,
+                        Y2 = 0,
+                        Stroke = new SolidColorBrush(Rgb(0xD9A600)),
+                        StrokeThickness = 1.4,
+                        StrokeDashArray = [1, 1.6]
+                    }, 0, 21.5);
+                    foreach (double y in new[] { 32.0, 41, 50 })
+                        Put(new Rectangle { Width = 46, Height = 1.3, Fill = new SolidColorBrush(Rgb(0xD5D5DB)) }, 9, y);
+                    Put(new Rectangle { Width = 30, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = new SolidColorBrush(Rgb(0x8E8E93)), Opacity = 0.55 }, 10, 27);
+                    Put(new Rectangle { Width = 22, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = new SolidColorBrush(Rgb(0x8E8E93)), Opacity = 0.55 }, 10, 36);
+                    break;
+                }
+            case 1: // 邮件: a white envelope on blue
+                {
+                    Put(Plate(Vertical(Rgb(0x5AC8FA), Rgb(0x1468F0))), 0, 0);
+                    Put(new Border { Width = 42, Height = 29, CornerRadius = new CornerRadius(4.5), Background = Vertical(Rgb(0xFFFFFF), Rgb(0xE9F1FF)) }, 11, 18);
+                    Put(new Polyline
+                    {
+                        Points = { new Point(12.5, 20), new Point(32, 35), new Point(51.5, 20) },
+                        Stroke = new SolidColorBrush(Rgb(0x8DBBF5)),
+                        StrokeThickness = 2.4,
+                        StrokeLineJoin = PenLineJoin.Round,
+                        StrokeStartLineCap = PenLineCap.Round,
+                        StrokeEndLineCap = PenLineCap.Round,
+                    }, 0, 0);
+                    break;
+                }
+            case 2: // 日历: the weekday in red over the day of the month
+                {
+                    Put(Plate(Vertical(Rgb(0xFFFFFF), Rgb(0xF3F3F6))), 0, 0);
+                    Put(new TextBlock
+                    {
+                        Text = Loc.T("Wed"),
+                        Width = 64,
+                        TextAlignment = TextAlignment.Center,
+                        FontSize = 10.5,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(Rgb(0xFF3B30)),
+                        IsTextScaleFactorEnabled = false,
+                    }, 0, 6);
+                    Put(new TextBlock
+                    {
+                        Text = "14",
+                        Width = 64,
+                        TextAlignment = TextAlignment.Center,
+                        FontSize = 31,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Light,
+                        Foreground = new SolidColorBrush(Rgb(0x1C1C1E)),
+                        IsTextScaleFactorEnabled = false,
+                    }, 0, 17);
+                    break;
+                }
+            case 3: // 照片: a flower of eight translucent petals
+                {
+                    Put(Plate(new SolidColorBrush(Colors.White)), 0, 0);
+                    uint[] petals = [0xFFCC00, 0xFF9500, 0xFF3B30, 0xFF2D55, 0xAF52DE, 0x007AFF, 0x5AC8FA, 0x34C759];
+                    for (int i = 0; i < petals.Length; i++)
+                    {
+                        Put(new Ellipse
+                        {
+                            Width = 13,
+                            Height = 24,
+                            Fill = new SolidColorBrush(Rgb(petals[i], 0xC8)),
+                            RenderTransform = new RotateTransform { Angle = i * 45, CenterX = 6.5, CenterY = 25 },
+                        }, 25.5, 7);
+                    }
+
+                    break;
+                }
             default: // 终端: a prompt on a dark screen
-            {
-                Put(Plate(Vertical(Rgb(0x56565B), Rgb(0x2A2A2D))), 0, 0);
-                Put(new Border
                 {
-                    Width = 52, Height = 44, CornerRadius = new CornerRadius(7), Background = Vertical(Rgb(0x141416), Rgb(0x050506)),
-                    BorderBrush = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)), BorderThickness = new Thickness(0.8),
-                }, 6, 9);
-                Put(new Polyline
-                {
-                    Points = { new Point(14, 21), new Point(21, 27.5), new Point(14, 34) }, Stroke = new SolidColorBrush(Rgb(0xF2F2F7)),
-                    StrokeThickness = 3, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
-                }, 0, 0);
-                Put(new Rectangle { Width = 12, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = new SolidColorBrush(Rgb(0xF2F2F7)) }, 24, 32.5);
-                Put(new Border { Width = 64, Height = 5, Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)) }, 0, 0);
-                break;
-            }
+                    Put(Plate(Vertical(Rgb(0x56565B), Rgb(0x2A2A2D))), 0, 0);
+                    Put(new Border
+                    {
+                        Width = 52,
+                        Height = 44,
+                        CornerRadius = new CornerRadius(7),
+                        Background = Vertical(Rgb(0x141416), Rgb(0x050506)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)),
+                        BorderThickness = new Thickness(0.8),
+                    }, 6, 9);
+                    Put(new Polyline
+                    {
+                        Points = { new Point(14, 21), new Point(21, 27.5), new Point(14, 34) },
+                        Stroke = new SolidColorBrush(Rgb(0xF2F2F7)),
+                        StrokeThickness = 3,
+                        StrokeLineJoin = PenLineJoin.Round,
+                        StrokeStartLineCap = PenLineCap.Round,
+                        StrokeEndLineCap = PenLineCap.Round,
+                    }, 0, 0);
+                    Put(new Rectangle { Width = 12, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = new SolidColorBrush(Rgb(0xF2F2F7)) }, 24, 32.5);
+                    Put(new Border { Width = 64, Height = 5, Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)) }, 0, 0);
+                    break;
+                }
         }
         return new Viewbox { Width = size, Height = size, Child = c, IsHitTestVisible = false };
     }
@@ -526,8 +580,13 @@ public sealed partial class MainWindow
         titleBar.Children.Add(name);
         titleBar.Children.Add(new TextBlock
         {
-            Text = "\uE921   \uE922   \uE8BB", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 8, Foreground = new SolidColorBrush(faint),
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, IsTextScaleFactorEnabled = false,
+            Text = "\uE921   \uE922   \uE8BB",
+            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+            FontSize = 8,
+            Foreground = new SolidColorBrush(faint),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextScaleFactorEnabled = false,
         });
         body.Children.Add(titleBar);
         var main = StageContent(index);
@@ -535,15 +594,23 @@ public sealed partial class MainWindow
         body.Children.Add(main);
         var frame = new Border
         {
-            Width = 320, Height = 200, CornerRadius = new CornerRadius(radius * 320 / w), Background = new SolidColorBrush(bg),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)), BorderThickness = new Thickness(1), Child = body,
+            Width = 320,
+            Height = 200,
+            CornerRadius = new CornerRadius(radius * 320 / w),
+            Background = new SolidColorBrush(bg),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)),
+            BorderThickness = new Thickness(1),
+            Child = body,
         };
         return new Viewbox { Width = w, Height = h, Stretch = Stretch.Fill, Child = frame, IsHitTestVisible = false };
     }
 
     private static TextBlock StageText(string text, double size) => new()
     {
-        Text = text, FontSize = size, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Rgb(0x1C1C1E)),
+        Text = text,
+        FontSize = size,
+        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        Foreground = new SolidColorBrush(Rgb(0x1C1C1E)),
         IsTextScaleFactorEnabled = false,
     };
 
@@ -557,130 +624,157 @@ public sealed partial class MainWindow
         switch (app)
         {
             case 0: // 备忘录: the notes, one picked, beside the open one
-            {
-                var g = new Grid { ColumnSpacing = 0 };
-                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(104) });
-                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                var list = new StackPanel { Spacing = 6, Padding = new Thickness(8, 8, 8, 0), Background = new SolidColorBrush(Rgb(0xFAFAF7)) };
-                for (int i = 0; i < 4; i++)
                 {
-                    var row = new StackPanel { Spacing = 4, Padding = new Thickness(6, 5, 6, 5), CornerRadius = new CornerRadius(5),
-                                               Background = new SolidColorBrush(i == 0 ? Rgb(0xFFE38A) : Colors.Transparent) };
-                    row.Children.Add(Bar(60 - 8 * (i % 2), 5, Rgb(0x8E8E93)));
-                    row.Children.Add(Bar(44 + 6 * (i % 3), 4, Rgb(0xA0A0A5)));
-                    list.Children.Add(row);
-                }
-                g.Children.Add(list);
-                var paper = new StackPanel { Spacing = 9, Padding = new Thickness(16, 12, 16, 0) };
-                paper.Children.Add(StageText(Loc.T("Weekend plans"), 13));
-                foreach (double lw in new[] { 0.95, 0.8, 0.9, 0.6, 0.85, 0.4 }) paper.Children.Add(Bar(176 * lw, 5, line));
-                Grid.SetColumn(paper, 1);
-                g.Children.Add(paper);
-                return g;
-            }
-            case 1: // 邮件: mailboxes, messages, the one open
-            {
-                var g = new Grid();
-                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
-                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(112) });
-                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                var boxes = new StackPanel { Spacing = 9, Padding = new Thickness(8, 10, 6, 0), Background = new SolidColorBrush(Rgb(0xEEF4FF)) };
-                foreach (double bw in new[] { 34.0, 28, 38, 24 }) boxes.Children.Add(Bar(bw, 5, Rgb(0x9DB9E8)));
-                g.Children.Add(boxes);
-                var mails = new StackPanel { Spacing = 0 };
-                for (int i = 0; i < 4; i++)
-                {
-                    var row = new Grid { Padding = new Thickness(7, 6, 6, 6), ColumnSpacing = 6, Background = new SolidColorBrush(i == 0 ? Rgb(0x1E7BFF) : Colors.Transparent) };
-                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
-                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    uint[] avatars = { 0xFF9500, 0x34C759, 0xAF52DE, 0x5AC8FA };
-                    row.Children.Add(new Ellipse { Width = 16, Height = 16, Fill = new SolidColorBrush(Rgb(avatars[i])) });
-                    var text = new StackPanel { Spacing = 3 };
-                    text.Children.Add(Bar(52, 4, i == 0 ? Colors.White : Rgb(0x6E6E73)));
-                    text.Children.Add(Bar(70, 3, i == 0 ? Color.FromArgb(170, 255, 255, 255) : Rgb(0xB0B0B5)));
-                    Grid.SetColumn(text, 1);
-                    row.Children.Add(text);
-                    mails.Children.Add(row);
-                }
-                Grid.SetColumn(mails, 1);
-                g.Children.Add(mails);
-                var read = new StackPanel { Spacing = 8, Padding = new Thickness(12, 10, 12, 0) };
-                read.Children.Add(StageText(Loc.T("Quarterly review"), 11));
-                foreach (double lw in new[] { 0.9, 0.95, 0.7, 0.85, 0.5 }) read.Children.Add(Bar(128 * lw, 4, line));
-                Grid.SetColumn(read, 2);
-                g.Children.Add(read);
-                return g;
-            }
-            case 2: // 日历: the month, today in red, a few events
-            {
-                var g = new Grid { Padding = new Thickness(12, 8, 12, 10), RowSpacing = 3, ColumnSpacing = 3 };
-                g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
-                for (int r = 0; r < 5; r++) g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-                for (int col = 0; col < 7; col++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                var month = new TextBlock { Text = Loc.T("Nov"), FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Rgb(0x1C1C1E)), IsTextScaleFactorEnabled = false };
-                Grid.SetColumnSpan(month, 7);
-                g.Children.Add(month);
-                for (int d = 0; d < 35; d++)
-                {
-                    int day = d - 5;
-                    var cell = new Grid { CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(Rgb(0xF5F5F7)) };
-                    if (day >= 1 && day <= 30)
+                    var g = new Grid { ColumnSpacing = 0 };
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(104) });
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    var list = new StackPanel { Spacing = 6, Padding = new Thickness(8, 8, 8, 0), Background = new SolidColorBrush(Rgb(0xFAFAF7)) };
+                    for (int i = 0; i < 4; i++)
                     {
-                        bool today = day == 14;
-                        var num = new Border { Width = 11, Height = 11, CornerRadius = new CornerRadius(5.5), HorizontalAlignment = HorizontalAlignment.Right,
-                                               VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 2, 0),
-                                               Background = new SolidColorBrush(today ? Rgb(0xFF3B30) : Colors.Transparent) };
-                        num.Child = new TextBlock { Text = day.ToString(), FontSize = 6, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                                                    Foreground = new SolidColorBrush(today ? Colors.White : Rgb(0x6E6E73)), IsTextScaleFactorEnabled = false };
-                        cell.Children.Add(num);
-                        uint? ev = day switch { 3 => 0x34C759, 11 => 0x1E7BFF, 14 => 0xFF9500, 19 => 0xAF52DE, 24 => 0x1E7BFF, _ => null };
-                        if (ev is uint color)
-                            cell.Children.Add(new Border { Height = 4, CornerRadius = new CornerRadius(2), Margin = new Thickness(3, 0, 3, 3), VerticalAlignment = VerticalAlignment.Bottom,
-                                                           Background = new SolidColorBrush(Rgb(color)) });
+                        var row = new StackPanel
+                        {
+                            Spacing = 4,
+                            Padding = new Thickness(6, 5, 6, 5),
+                            CornerRadius = new CornerRadius(5),
+                            Background = new SolidColorBrush(i == 0 ? Rgb(0xFFE38A) : Colors.Transparent)
+                        };
+                        row.Children.Add(Bar(60 - 8 * (i % 2), 5, Rgb(0x8E8E93)));
+                        row.Children.Add(Bar(44 + 6 * (i % 3), 4, Rgb(0xA0A0A5)));
+                        list.Children.Add(row);
                     }
-                    Grid.SetRow(cell, 1 + d / 7);
-                    Grid.SetColumn(cell, d % 7);
-                    g.Children.Add(cell);
+                    g.Children.Add(list);
+                    var paper = new StackPanel { Spacing = 9, Padding = new Thickness(16, 12, 16, 0) };
+                    paper.Children.Add(StageText(Loc.T("Weekend plans"), 13));
+                    foreach (double lw in new[] { 0.95, 0.8, 0.9, 0.6, 0.85, 0.4 }) paper.Children.Add(Bar(176 * lw, 5, line));
+                    Grid.SetColumn(paper, 1);
+                    g.Children.Add(paper);
+                    return g;
                 }
-                return g;
-            }
-            case 3: // 照片: a grid of pictures
-            {
-                var g = new Grid { Padding = new Thickness(8), RowSpacing = 4, ColumnSpacing = 4 };
-                for (int r = 0; r < 3; r++) g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-                for (int col = 0; col < 5; col++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                (uint Top, uint Bottom)[] shots =
+            case 1: // 邮件: mailboxes, messages, the one open
                 {
+                    var g = new Grid();
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(112) });
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    var boxes = new StackPanel { Spacing = 9, Padding = new Thickness(8, 10, 6, 0), Background = new SolidColorBrush(Rgb(0xEEF4FF)) };
+                    foreach (double bw in new[] { 34.0, 28, 38, 24 }) boxes.Children.Add(Bar(bw, 5, Rgb(0x9DB9E8)));
+                    g.Children.Add(boxes);
+                    var mails = new StackPanel { Spacing = 0 };
+                    for (int i = 0; i < 4; i++)
+                    {
+                        var row = new Grid { Padding = new Thickness(7, 6, 6, 6), ColumnSpacing = 6, Background = new SolidColorBrush(i == 0 ? Rgb(0x1E7BFF) : Colors.Transparent) };
+                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        uint[] avatars = [0xFF9500, 0x34C759, 0xAF52DE, 0x5AC8FA];
+                        row.Children.Add(new Ellipse { Width = 16, Height = 16, Fill = new SolidColorBrush(Rgb(avatars[i])) });
+                        var text = new StackPanel { Spacing = 3 };
+                        text.Children.Add(Bar(52, 4, i == 0 ? Colors.White : Rgb(0x6E6E73)));
+                        text.Children.Add(Bar(70, 3, i == 0 ? Color.FromArgb(170, 255, 255, 255) : Rgb(0xB0B0B5)));
+                        Grid.SetColumn(text, 1);
+                        row.Children.Add(text);
+                        mails.Children.Add(row);
+                    }
+                    Grid.SetColumn(mails, 1);
+                    g.Children.Add(mails);
+                    var read = new StackPanel { Spacing = 8, Padding = new Thickness(12, 10, 12, 0) };
+                    read.Children.Add(StageText(Loc.T("Quarterly review"), 11));
+                    foreach (double lw in new[] { 0.9, 0.95, 0.7, 0.85, 0.5 }) read.Children.Add(Bar(128 * lw, 4, line));
+                    Grid.SetColumn(read, 2);
+                    g.Children.Add(read);
+                    return g;
+                }
+            case 2: // 日历: the month, today in red, a few events
+                {
+                    var g = new Grid { Padding = new Thickness(12, 8, 12, 10), RowSpacing = 3, ColumnSpacing = 3 };
+                    g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
+                    for (int r = 0; r < 5; r++) g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    for (int col = 0; col < 7; col++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    var month = new TextBlock { Text = Loc.T("Nov"), FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Rgb(0x1C1C1E)), IsTextScaleFactorEnabled = false };
+                    Grid.SetColumnSpan(month, 7);
+                    g.Children.Add(month);
+                    for (int d = 0; d < 35; d++)
+                    {
+                        int day = d - 5;
+                        var cell = new Grid { CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(Rgb(0xF5F5F7)) };
+                        if (day is >= 1 and <= 30)
+                        {
+                            bool today = day == 14;
+                            var num = new Border
+                            {
+                                Width = 11,
+                                Height = 11,
+                                CornerRadius = new CornerRadius(5.5),
+                                HorizontalAlignment = HorizontalAlignment.Right,
+                                VerticalAlignment = VerticalAlignment.Top,
+                                Margin = new Thickness(0, 2, 2, 0),
+                                Background = new SolidColorBrush(today ? Rgb(0xFF3B30) : Colors.Transparent),
+                                Child = new TextBlock
+                                {
+                                    Text = day.ToString(),
+                                    FontSize = 6,
+                                    HorizontalAlignment = HorizontalAlignment.Center,
+                                    VerticalAlignment = VerticalAlignment.Center,
+                                    Foreground = new SolidColorBrush(today ? Colors.White : Rgb(0x6E6E73)),
+                                    IsTextScaleFactorEnabled = false
+                                }
+                            };
+                            cell.Children.Add(num);
+                            uint? ev = day switch { 3 => 0x34C759, 11 => 0x1E7BFF, 14 => 0xFF9500, 19 => 0xAF52DE, 24 => 0x1E7BFF, _ => null };
+                            if (ev is uint color)
+                            {
+                                cell.Children.Add(new Border
+                                {
+                                    Height = 4,
+                                    CornerRadius = new CornerRadius(2),
+                                    Margin = new Thickness(3, 0, 3, 3),
+                                    VerticalAlignment = VerticalAlignment.Bottom,
+                                    Background = new SolidColorBrush(Rgb(color))
+                                });
+                            }
+                        }
+                        Grid.SetRow(cell, 1 + d / 7);
+                        Grid.SetColumn(cell, d % 7);
+                        g.Children.Add(cell);
+                    }
+                    return g;
+                }
+            case 3: // 照片: a grid of pictures
+                {
+                    var g = new Grid { Padding = new Thickness(8), RowSpacing = 4, ColumnSpacing = 4 };
+                    for (int r = 0; r < 3; r++) g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    for (int col = 0; col < 5; col++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    (uint Top, uint Bottom)[] shots =
+                    [
                     (0x7FC8F8, 0xF6D365), (0x2E8B57, 0xA8E063), (0xFF7E5F, 0xFEB47B), (0x355C7D, 0xC06C84), (0x89F7FE, 0x66A6FF),
                     (0xF7971E, 0xFFD200), (0x56AB2F, 0xA8E063), (0x4B79A1, 0x283E51), (0xEE9CA7, 0xFFDDE1), (0x00B4DB, 0x0083B0),
                     (0xF953C6, 0xB91D73), (0x99F2C8, 0x1F4037), (0xFFB75E, 0xED8F03), (0xA1C4FD, 0xC2E9FB), (0x6A3093, 0xA044FF),
-                };
-                for (int i = 0; i < shots.Length; i++)
-                {
-                    var tile = new Border { CornerRadius = new CornerRadius(3), Background = Vertical(Rgb(shots[i].Top), Rgb(shots[i].Bottom)) };
-                    Grid.SetRow(tile, i / 5);
-                    Grid.SetColumn(tile, i % 5);
-                    g.Children.Add(tile);
+                ];
+                    for (int i = 0; i < shots.Length; i++)
+                    {
+                        var tile = new Border { CornerRadius = new CornerRadius(3), Background = Vertical(Rgb(shots[i].Top), Rgb(shots[i].Bottom)) };
+                        Grid.SetRow(tile, i / 5);
+                        Grid.SetColumn(tile, i % 5);
+                        g.Children.Add(tile);
+                    }
+                    return g;
                 }
-                return g;
-            }
             default: // 终端: a session
-            {
-                var lines = new StackPanel { Spacing = 7, Padding = new Thickness(12, 10, 12, 0) };
-                var green = Rgb(0x32D74B, 220);
-                var white = Color.FromArgb(150, 255, 255, 255);
-                (double W, Color C, double Indent)[] rows =
                 {
+                    var lines = new StackPanel { Spacing = 7, Padding = new Thickness(12, 10, 12, 0) };
+                    var green = Rgb(0x32D74B, 220);
+                    var white = Color.FromArgb(150, 255, 255, 255);
+                    (double W, Color C, double Indent)[] rows =
+                    [
                     (70, green, 0), (180, white, 10), (150, white, 10), (90, green, 0), (210, white, 10), (120, white, 10), (40, green, 0),
-                };
-                foreach (var (lw, c, indent) in rows)
-                {
-                    var b = Bar(lw, 5, c, 2);
-                    b.Margin = new Thickness(indent, 0, 0, 0);
-                    lines.Children.Add(b);
+                ];
+                    foreach (var (lw, c, indent) in rows)
+                    {
+                        var b = Bar(lw, 5, c, 2);
+                        b.Margin = new Thickness(indent, 0, 0, 0);
+                        lines.Children.Add(b);
+                    }
+                    return lines;
                 }
-                return lines;
-            }
         }
     }
 
@@ -743,14 +837,16 @@ public sealed partial class MainWindow
 
     private void StagePick(List<int> picked, bool add)
     {
-        if (!_current.StageManager || !_stageBuilt || _stageLayer == null) return;
+        if (!CurrentSettings.StageManager || !_stageBuilt || _stageLayer == null) return;
         double W = StageCanvas.Width, H = StageCanvas.Height;
         var oldFront = _stageFront;
         int at = _stageStrip.IndexOf(picked);
         if (at < 0) return;
         _stageStrip.RemoveAt(at);
         if (add)
-            _stageFront = oldFront.Concat(picked).ToList();
+        {
+            _stageFront = [.. oldFront, .. picked];
+        }
         else
         {
             _stageStrip.Insert(0, oldFront);
@@ -771,7 +867,10 @@ public sealed partial class MainWindow
         string oldKey = StageKey(oldFront);
         if (oldCenter != null)
         {
-            if (add) go.Add(() => StageLeave(oldCenter, StageCanvas, 1f, new Vector3((float)(room.Width / 2), (float)(room.Height / 2), 0)));
+            if (add)
+            {
+                go.Add(() => StageLeave(oldCenter, StageCanvas, 1f, new Vector3((float)(room.Width / 2), (float)(room.Height / 2), 0)));
+            }
             else
             {
                 var from = StageFront(oldFront.Count, W, H);

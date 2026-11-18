@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <numbers>
 #include <thread>
 #include <utility>
 
@@ -79,7 +80,7 @@ IconImage SoftShadow(int w, int h)
     s.bgra.assign(size_t(s.width) * s.height * 4, 0);
     const float sigma = float(pad) / 2.6f;
     auto edge = [&](float v, float len) {
-        auto erfAt = [&](float t) { return 0.5f * (1 + std::erf(t / (sigma * 1.41421356f))); };
+        auto erfAt = [&](float t) { return 0.5f * (1 + std::erf(t / (sigma * std::numbers::sqrt2_v<float>))); };
         return erfAt(v) - erfAt(v - len);
     };
     std::vector<float> fx(static_cast<size_t>(s.width)), fy(static_cast<size_t>(s.height));
@@ -145,8 +146,7 @@ WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, in
     RECT win{}, frame{};
     if (!GetWindowRect(window, &win) || win.right <= win.left || win.bottom <= win.top)
         return {};
-    if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) || frame.right <= frame.left ||
-        frame.bottom <= frame.top)
+    if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) || frame.right <= frame.left || frame.bottom <= frame.top)
         frame = win;
     const int ww = win.right - win.left, wh = win.bottom - win.top;
     BITMAPINFO bi{};

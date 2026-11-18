@@ -75,20 +75,22 @@ void RefitMaximizedLater()
 {
     std::thread([] {
         Sleep(500);
-        EnumWindows([](HWND w, LPARAM) -> BOOL {
-            MONITORINFO mi{sizeof(mi)};
-            RECT r{}, f{};
-            if (!IsWindowVisible(w) || !IsZoomed(w) || !GetMonitorInfoW(MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST), &mi) ||
-                !GetWindowRect(w, &r) || FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &f, sizeof(f))))
+        EnumWindows(
+            [](HWND w, LPARAM) -> BOOL {
+                MONITORINFO mi{sizeof(mi)};
+                RECT r{}, f{};
+                if (!IsWindowVisible(w) || !IsZoomed(w) || !GetMonitorInfoW(MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST), &mi) || !GetWindowRect(w, &r) ||
+                    FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &f, sizeof(f))))
+                    return TRUE;
+                const RECT& a = mi.rcWork;
+                if (f.left <= a.left + 1 && f.top <= a.top + 1 && f.right >= a.right - 1 && f.bottom >= a.bottom - 1)
+                    return TRUE;
+                Log(L"chrome: a maximized window stopped short of the work area (%ld,%ld,%ld,%ld); fitted", f.left, f.top, f.right, f.bottom);
+                SetWindowPos(w, nullptr, r.left + a.left - f.left, r.top + a.top - f.top, (r.right + a.right - f.right) - (r.left + a.left - f.left),
+                             (r.bottom + a.bottom - f.bottom) - (r.top + a.top - f.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
                 return TRUE;
-            const RECT& a = mi.rcWork;
-            if (f.left <= a.left + 1 && f.top <= a.top + 1 && f.right >= a.right - 1 && f.bottom >= a.bottom - 1)
-                return TRUE;
-            Log(L"chrome: a maximized window stopped short of the work area (%ld,%ld,%ld,%ld); fitted", f.left, f.top, f.right, f.bottom);
-            SetWindowPos(w, nullptr, r.left + a.left - f.left, r.top + a.top - f.top, (r.right + a.right - f.right) - (r.left + a.left - f.left),
-                         (r.bottom + a.bottom - f.bottom) - (r.top + a.top - f.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
-            return TRUE;
-        }, 0);
+            },
+            0);
     }).detach();
 }
 
@@ -106,8 +108,7 @@ void ShowTaskbars()
 // Not Disturb). Its per-app "show banners" switch still applies: with the banner
 // off the toast stays in the notification centre, where Atrium's listener reads
 // it for a card, but Windows shows no banner.
-constexpr wchar_t kAutoPlayKey[] =
-    L"Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\Windows.SystemToast.AutoPlay";
+constexpr wchar_t kAutoPlayKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\Windows.SystemToast.AutoPlay";
 constexpr wchar_t kShowBanner[] = L"ShowBanner";
 
 bool AutoPlayBannerShown()
@@ -243,7 +244,8 @@ SystemChrome::~SystemChrome()
 
 void SystemChrome::RestoreForExit()
 {
-    if (exiting_) return;
+    if (exiting_)
+        return;
     exiting_ = true;
     g_taskbarVisibility.stopping = true;
     SetTaskbarHidden(false);
@@ -252,7 +254,8 @@ void SystemChrome::RestoreForExit()
 
 void SystemChrome::SetTaskbarHidden(bool hidden)
 {
-    if (hidden && exiting_) return;
+    if (hidden && exiting_)
+        return;
     if (hidden == g_taskbarVisibility.hidden)
         return;
     g_taskbarVisibility.hidden = hidden;
@@ -283,7 +286,8 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
 
 void SystemChrome::SetBannersHidden(bool hidden)
 {
-    if (hidden && exiting_) return;
+    if (hidden && exiting_)
+        return;
     // The setting is idempotent. A failed attempt (the service was unavailable)
     // or a setting the user changed since is retried on the next apply; turning
     // it off retries a restore that failed.
@@ -364,7 +368,8 @@ void SystemChrome::SetBannersHidden(bool hidden)
 
 void SystemChrome::Enforce()
 {
-    if (exiting_) return;
+    if (exiting_)
+        return;
     if (g_taskbarVisibility.ShouldHide()) {
         // Hidden but not auto-hide, the taskbar keeps its strip of the work area and maximized
         // windows stop its height short of the bottom. Auto-hide can be lost after it was set:

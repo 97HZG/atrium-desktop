@@ -6,28 +6,28 @@ cbuffer GlassParams : register(b0)
     float2 Size;        // window size in px
     float2 RoiOrigin;   // window origin inside the background ROI texture
     float2 RoiSize;     // ROI texture size
-    float  Radius;      // corner radius in px
-    float  Edge;        // width of the refracting rim in px
-    float  Refract;     // max sample displacement in px
-    float  Dispersion;  // relative channel spread of the displacement
-    float  BlurLod;     // mip level used for the blurred backdrop
-    float  TintMix;
+    float Radius;      // corner radius in px
+    float Edge;        // width of the refracting rim in px
+    float Refract;     // max sample displacement in px
+    float Dispersion;  // relative channel spread of the displacement
+    float BlurLod;     // mip level used for the blurred backdrop
+    float TintMix;
     float4 Tint;
-    float  Highlight;
-    float  Shadow;
+    float Highlight;
+    float Shadow;
     float2 LightDir;    // unit vector pointing towards the light
-    float  Inset;       // shadow room around the shape (sets the shadow's softness)
-    float  BlurMix;     // 0 = sharp backdrop, 1 = fully blurred
-    float  Fade;        // 0 = the glass as is, 1 = gone (a piece of glass fading out)
-    float  Pad0;
+    float Inset;       // shadow room around the shape (sets the shadow's softness)
+    float BlurMix;     // 0 = sharp backdrop, 1 = fully blurred
+    float Fade;        // 0 = the glass as is, 1 = gone (a piece of glass fading out)
+    float Pad0;
     float4 Shape;       // the glass shape in window px: left, top, right, bottom
     float4 Ripple;      // press ripple: centre x, y (window px), ring radius, strength (0 = none)
     float4 PartRect[6]; // melting parts (PartCount > 0): rectangles in window px, left, top, right, bottom
     float4 PartRadii[6]; // their corner radii: top left, top right, bottom right, bottom left
-    float  PartCount;
-    float  Melt;        // width of the smooth union in px
-    float  PartMix;     // 0: the parts, 1: the rounded rectangle Shape (the parts' union has seams inside where they meet)
-    float  Pad1;
+    float PartCount;
+    float Melt;        // width of the smooth union in px
+    float PartMix;     // 0: the parts, 1: the rounded rectangle Shape (the parts' union has seams inside where they meet)
+    float Pad1;
     float4 Tail;        // Dock label pointer: tip x, base half width, height below Shape.w, overlap inside the body
     float4 Wave;        // Dock hover: centre x, support half width, upward height, unused (px)
     float4 FromArea;    // EdgeFrame::FromAreaMatrix: _11, _12, _21, _22
@@ -38,8 +38,7 @@ cbuffer GlassParams : register(b0)
 Texture2D Bg : register(t0);
 SamplerState Linear : register(s0);
 
-struct VSOut
-{
+struct VSOut {
     float4 pos : SV_Position;
     float2 uv : TEXCOORD0;
 };
@@ -68,7 +67,8 @@ float2 cornerProfile(float2 b, float r)
 float cornerEdge(float2 q, float2 profile)
 {
     float r = profile.x, a = profile.y;
-    if (r <= 0 || min(q.x, q.y) <= 0) return max(q.x, q.y) - r;
+    if (r <= 0 || min(q.x, q.y) <= 0)
+        return max(q.x, q.y) - r;
     float2 v = q / r, v2 = v * v;
     float2 den = a + (1 - a) * v2;
     float2 derivative = 2 * v * v2 * (2 * a + (1 - a) * v2) / (den * den);
@@ -85,7 +85,8 @@ float sdCorner(float2 q, float r, float a)
         return length(q);
     float n = length(q);
     float2 v, derivative;
-    [unroll] for (int i = 0; i < 2; ++i) {
+    [unroll] for (int i = 0; i < 2; ++i)
+    {
         v = q / n;
         float2 v2 = v * v;
         float2 denominator = a + (1 - a) * v2;
@@ -114,8 +115,10 @@ float sdRoundRect4(float2 p, float2 b, float4 r, bool edge)
 // Smooth minimum: two shapes melt where they come within k px of each other.
 float smin(float a, float b, float k)
 {
-    if (a - b <= -k) return a;
-    if (a - b >= k) return b;
+    if (a - b <= -k)
+        return a;
+    if (a - b >= k)
+        return b;
     float x = (a - b) / k, x2 = x * x;
     // C3 at both ends, with the original blend width and k/4 centre depth.
     float p = (8 + x2 * (3 + x2 * (13 + x2 * (-11 + 3 * x2)))) / 32;
@@ -141,10 +144,7 @@ float sdTail(float2 px)
     return inside ? -distance : distance;
 }
 
-float2 fromArea(float2 px)
-{
-    return px.x * FromArea.xy + px.y * FromArea.zw + FromAreaOffset;
-}
+float2 fromArea(float2 px) { return px.x * FromArea.xy + px.y * FromArea.zw + FromAreaOffset; }
 
 float2 toArea(float2 p)
 {
@@ -173,7 +173,8 @@ float ShapeDistance(float2 px, bool edge, bool basic)
     if (!basic && PartCount > 0.5) {
         float card = d;
         d = 1e6;
-        [unroll] for (int i = 0; i < 6; ++i) {
+        [unroll] for (int i = 0; i < 6; ++i)
+        {
             if (float(i) < PartCount) {
                 float4 pr = PartRect[i];
                 float di = sdRoundRect4(px - (pr.xy + pr.zw) * 0.5, max((pr.zw - pr.xy) * 0.5, 1), PartRadii[i], edge);
@@ -189,10 +190,7 @@ float ShapeDistance(float2 px, bool edge, bool basic)
 
 float Dist(float2 px, bool basic) { return ShapeDistance(px, false, basic); }
 
-float3 bg(float2 px, float lod)
-{
-    return Bg.SampleLevel(Linear, (px + RoiOrigin) / RoiSize, lod).rgb;
-}
+float3 bg(float2 px, float lod) { return Bg.SampleLevel(Linear, (px + RoiOrigin) / RoiSize, lod).rgb; }
 
 float3 blurred(float2 px)
 {
@@ -240,8 +238,7 @@ float4 PSImpl(VSOut i, bool basic)
         return float4(0, 0, 0, shadowA);
 
     float e = 1.0;
-    float2 g = float2(Dist(px + float2(e, 0), basic) - Dist(px - float2(e, 0), basic),
-                      Dist(px + float2(0, e), basic) - Dist(px - float2(0, e), basic));
+    float2 g = float2(Dist(px + float2(e, 0), basic) - Dist(px - float2(e, 0), basic), Dist(px + float2(0, e), basic) - Dist(px - float2(0, e), basic));
     float gl = length(g);
     float2 n = gl > 1e-5 ? g / gl : float2(0, 0);
 

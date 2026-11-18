@@ -21,10 +21,7 @@ void Check(bool ok, const char* what)
 
 constexpr unsigned kC = 1u << 2, kE = 1u << 4;
 
-atrium::UsbVolumeSnapshot Attached(const wchar_t* identity = L"volume-A")
-{
-    return {kC | kE, {{L'E', {L"BACKUP", identity}}}};
-}
+atrium::UsbVolumeSnapshot Attached(const wchar_t* identity = L"volume-A") { return {kC | kE, {{L'E', {L"BACKUP", identity}}}}; }
 
 void CheckReconciliation()
 {
@@ -74,25 +71,27 @@ void CheckWorker()
     bool reading = false, release = false, ready = false;
     unsigned reads = 0;
     std::thread::id readerThread;
-    UsbVolumeMonitor monitor([&] {
-        std::lock_guard lock(mutex);
-        ready = true;
-        changed.notify_all();
-    }, [&]() -> std::optional<UsbVolumeSnapshot> {
-        std::unique_lock lock(mutex);
-        const unsigned call = ++reads;
-        readerThread = std::this_thread::get_id();
-        changed.notify_all();
-        if (call == 1) {
-            reading = true;
+    UsbVolumeMonitor monitor(
+        [&] {
+            std::lock_guard lock(mutex);
+            ready = true;
             changed.notify_all();
-            changed.wait(lock, [&] { return release; }); // a slow disk, held until Changed has returned
-            return Attached();
-        }
-        if (call == 2)
-            return std::nullopt; // transient enumeration failure
-        return UsbVolumeSnapshot{kC, {}};
-    });
+        },
+        [&]() -> std::optional<UsbVolumeSnapshot> {
+            std::unique_lock lock(mutex);
+            const unsigned call = ++reads;
+            readerThread = std::this_thread::get_id();
+            changed.notify_all();
+            if (call == 1) {
+                reading = true;
+                changed.notify_all();
+                changed.wait(lock, [&] { return release; }); // a slow disk, held until Changed has returned
+                return Attached();
+            }
+            if (call == 2)
+                return std::nullopt; // transient enumeration failure
+            return UsbVolumeSnapshot{kC, {}};
+        });
     {
         std::unique_lock lock(mutex);
         Check(changed.wait_for(lock, 3s, [&] { return reading; }), "startup disk query runs asynchronously");
@@ -111,8 +110,7 @@ void CheckWorker()
         Check(changed.wait_for(lock, 3s, [&] { return ready; }), "the UI is notified after a successful background reconciliation");
     }
     const auto removed = monitor.TakeRemoved();
-    Check(removed.size() == 1 && removed[0].letter == L'E' && removed[0].label == L"BACKUP",
-          "background results retain the original disk identity and label");
+    Check(removed.size() == 1 && removed[0].letter == L'E' && removed[0].label == L"BACKUP", "background results retain the original disk identity and label");
     Check(monitor.TakeRemoved().empty(), "results are consumed once");
 }
 
@@ -133,8 +131,8 @@ int main(int argc, char** argv)
             SetThreadErrorMode(before, nullptr);
         if (!snapshot)
             return 1;
-        std::printf("read-only system scan: %zu drive letters, %zu removable/USB volumes, %llu ms\n",
-                    RemovedLetters(snapshot->present, 0).size(), snapshot->volumes.size(), GetTickCount64() - start);
+        std::printf("read-only system scan: %zu drive letters, %zu removable/USB volumes, %llu ms\n", RemovedLetters(snapshot->present, 0).size(),
+                    snapshot->volumes.size(), GetTickCount64() - start);
         return 0;
     }
 

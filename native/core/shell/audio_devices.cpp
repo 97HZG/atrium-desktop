@@ -190,19 +190,12 @@ std::vector<AudioOutput> ListAudioOutputs()
                 if (SUCCEEDED(props->GetValue(kFormFactor, &v)) && v.vt == VT_UI4) {
                     switch (v.ulVal) {
                     case Speakers:
-                    case LineLevel:
-                        o.kind = AudioOutput::Speakers;
-                        break;
+                    case LineLevel: o.kind = AudioOutput::Speakers; break;
                     case Headphones:
                     case Headset:
-                    case Handset:
-                        o.kind = AudioOutput::Headphones;
-                        break;
-                    case DigitalAudioDisplayDevice:
-                        o.kind = AudioOutput::Display;
-                        break;
-                    default:
-                        break;
+                    case Handset: o.kind = AudioOutput::Headphones; break;
+                    case DigitalAudioDisplayDevice: o.kind = AudioOutput::Display; break;
+                    default: break;
                     }
                 }
                 PropVariantClear(&v);

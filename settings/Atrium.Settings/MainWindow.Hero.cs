@@ -1,9 +1,6 @@
 using System.Runtime.InteropServices.WindowsRuntime;
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
@@ -50,7 +47,7 @@ public sealed partial class MainWindow
 
     private const int MaxPreviewApps = 8;
     private PinVm _previewRunning = null!;
-    private PinVm[] _previewPins = Array.Empty<PinVm>();
+    private PinVm[] _previewPins = [];
 
     private double _heroW, _heroH;
     private readonly ImageBrush _heroBrush = new() { Stretch = Stretch.Fill };
@@ -74,7 +71,7 @@ public sealed partial class MainWindow
     private string _mainKey = "", _loupeKey = "";
 
     private BarFace _face = null!, _loupeFace = null!;
-    private readonly List<UIElement> _annotations = new();
+    private readonly List<UIElement> _annotations = [];
 
     private void InitHero()
     {
@@ -91,8 +88,10 @@ public sealed partial class MainWindow
         _face = new BarFace(HeroCanvas, MaxPreviewApps);
         _loupeFace = new BarFace(LoupeCanvas, MaxPreviewApps);
         for (int i = 0; i < MaxPreviewApps; i++)
+        {
             foreach (var icon in new[] { _face.Icons[i], _loupeFace.Icons[i] })
                 icon.SetBinding(Image.SourceProperty, new Microsoft.UI.Xaml.Data.Binding { Path = new PropertyPath(nameof(PinVm.Icon)) });
+        }
 
         // The two presets are fixed swatches; the custom one follows the current material.
         var liquid = BarSettings.Liquid();
@@ -107,7 +106,7 @@ public sealed partial class MainWindow
         PhotoChanged += () =>
         {
             _fixedSwatchWorker.Post(new SwatchPhoto(Photo.Generation, Photo.Capture()));
-            _swatchSettings = _current.Clone();
+            _swatchSettings = CurrentSettings.Clone();
             _swatchWorker?.Post(_swatchSettings);
         };
     }
@@ -213,7 +212,7 @@ public sealed partial class MainWindow
     {
         UpdateReadout();
         if (HeroBlock.Visibility != Visibility.Visible || _renderWorker == null) return;
-        var L = ComputeLayout(_current);
+        var L = ComputeLayout(CurrentSettings);
         if (L == null) return;
         bool loupe = Loupe.Visibility == Visibility.Visible;
         if (loupe)
@@ -224,14 +223,14 @@ public sealed partial class MainWindow
         }
         PositionTaskbar(L, loupe);
         DrawAnnotations(L);
-        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale, loupe, Photo.Capture(), Photo.Generation));
+        _renderWorker.Post(new RenderJob(CurrentSettings.Clone(), L, _heroW, _heroH, RasterScale, loupe, Photo.Capture(), Photo.Generation));
     }
 
-    private bool DarkInk() => _current.TextColor == "dark" || (_current.TextColor == "auto" && _darkInk);
+    private bool DarkInk() => CurrentSettings.TextColor == "dark" || (CurrentSettings.TextColor == "auto" && _darkInk);
 
     private void PositionTaskbar(BarGeometry L, bool loupe)
     {
-        int running = _current.ShowRunning && L.N > _previewPins.Length ? _previewPins.Length : -1;
+        int running = CurrentSettings.ShowRunning && L.N > _previewPins.Length ? _previewPins.Length : -1;
         for (int i = 0; i < MaxPreviewApps; i++)
         {
             var vm = i < _previewPins.Length ? _previewPins[i] : _previewRunning;
@@ -239,14 +238,14 @@ public sealed partial class MainWindow
             if (_loupeFace.Icons[i].DataContext != vm) _loupeFace.Icons[i].DataContext = vm;
         }
         var clock = DateTime.Now;
-        string time = clock.ToString(_current.ShowClockSeconds ? "H:mm:ss" : "H:mm"), date = clock.ToString("yyyy/M/d");
+        string time = clock.ToString(CurrentSettings.ShowClockSeconds ? "H:mm:ss" : "H:mm"), date = clock.ToString("yyyy/M/d");
         _face.SetClock(time, date);
         var status = StatusLook.Current();
-        _face.Layout(L, DarkInk(), L.N, running, _current.Magnify, 1, 0, 0, status);
+        _face.Layout(L, DarkInk(), L.N, running, CurrentSettings.Magnify, 1, 0, 0, status);
         if (loupe)
         {
             _loupeFace.SetClock(time, date);
-            _loupeFace.Layout(L, DarkInk(), L.N, running, _current.Magnify, LoupeZoom, L.LoupeX0, L.LoupeY0, status);
+            _loupeFace.Layout(L, DarkInk(), L.N, running, CurrentSettings.Magnify, LoupeZoom, L.LoupeX0, L.LoupeY0, status);
         }
     }
 
@@ -261,7 +260,7 @@ public sealed partial class MainWindow
         void Line(double x1, double y1, double x2, double y2, bool dashed = false)
         {
             var l = new Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, Stroke = white, StrokeThickness = 1.5, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, IsHitTestVisible = false };
-            if (dashed) l.StrokeDashArray = new DoubleCollection { 3, 3 };
+            if (dashed) l.StrokeDashArray = [3, 3];
             _annotations.Add(l);
             HeroCanvas.Children.Add(l);
         }
@@ -269,7 +268,9 @@ public sealed partial class MainWindow
         {
             var chip = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)), CornerRadius = new CornerRadius(6), Padding = new Thickness(7, 2, 7, 3),
+                Background = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(7, 2, 7, 3),
                 Child = new TextBlock { Text = text, FontSize = 11, FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"], Foreground = new SolidColorBrush(Color.FromArgb(255, 22, 24, 29)) },
                 IsHitTestVisible = false,
             };
@@ -286,52 +287,52 @@ public sealed partial class MainWindow
         {
             double x = L.BarX - 14;
             Line(x, L.BarY, x, barBottom); Line(x - 4, L.BarY, x + 4, L.BarY); Line(x - 4, barBottom, x + 4, barBottom);
-            Chip($"{Math.Round(_current.Height)} px", x - 30, L.BarY + L.BarH / 2 - 10);
+            Chip($"{Math.Round(CurrentSettings.Height)} px", x - 30, L.BarY + L.BarH / 2 - 10);
         }
         else if (_engaged == Loc.T("Edge spacing"))
         {
             double x = L.BarX + L.BarW * 0.5;
             Line(x, barBottom, x, _heroH); Line(x - 4, barBottom, x + 4, barBottom); Line(x - 4, _heroH - 1, x + 4, _heroH - 1);
-            Chip($"{Math.Round(_current.Margin)} px", x + 34, (barBottom + _heroH) / 2 - 10);
+            Chip($"{Math.Round(CurrentSettings.Margin)} px", x + 34, (barBottom + _heroH) / 2 - 10);
         }
         else if (_engaged == Loc.T("Maximum width"))
         {
             double y = L.BarY - 12, x0 = (_heroW - L.MaxW) / 2, x1 = x0 + L.MaxW;
             Line(x0, y, x1, y, dashed: true); Line(x0, y - 4, x0, y + 4); Line(x1, y - 4, x1, y + 4);
-            Chip($"{Math.Round(_current.Width)} px", _heroW / 2, y - 24);
+            Chip($"{Math.Round(CurrentSettings.Width)} px", _heroW / 2, y - 24);
         }
         else if (_engaged == Loc.T("Enter distance") || _engaged == Loc.T("Leave distance"))
         {
             // The band above the bar that answers a pointer coming down onto it (栏上方提前拱起 /
             // 提前放大图标): a dashed line at the enter distance, and the leave one while it is set.
             double x0 = L.BarX + 8, x1 = Math.Max(x0 + 1, barRight - 8);
-            double enterY = L.BarY - _current.NearEnter * L.S, leaveY = L.BarY - _current.NearLeave * L.S;
+            double enterY = L.BarY - CurrentSettings.NearEnter * L.S, leaveY = L.BarY - CurrentSettings.NearLeave * L.S;
             Line(x0, enterY, x1, enterY, dashed: true);
-            Chip(Loc.F("Enter {0} px", Math.Round(_current.NearEnter)), x0 + 44, enterY - 22);
+            Chip(Loc.F("Enter {0} px", Math.Round(CurrentSettings.NearEnter)), x0 + 44, enterY - 22);
             if (_engaged == Loc.T("Leave distance"))
             {
                 Line(x0, leaveY, x1, leaveY, dashed: true);
-                Chip(Loc.F("Leave {0} px", Math.Round(_current.NearLeave)), x0 + 44, leaveY - 22);
+                Chip(Loc.F("Leave {0} px", Math.Round(CurrentSettings.NearLeave)), x0 + 44, leaveY - 22);
             }
         }
         else if (_engaged == Loc.T("Corner radius"))
         {
             // The circle the corner is an arc of, and its radius.
             double r = Math.Max(L.Radius, 2);
-            var circle = new Ellipse { Width = 2 * r, Height = 2 * r, Stroke = white, StrokeThickness = 1.25, StrokeDashArray = new DoubleCollection { 3, 3 }, IsHitTestVisible = false };
+            var circle = new Ellipse { Width = 2 * r, Height = 2 * r, Stroke = white, StrokeThickness = 1.25, StrokeDashArray = [3, 3], IsHitTestVisible = false };
             Canvas.SetLeft(circle, L.BarX);
             Canvas.SetTop(circle, L.BarY);
             _annotations.Add(circle);
             HeroCanvas.Children.Add(circle);
             Line(L.BarX + r, L.BarY + r, L.BarX + r - r * 0.7071, L.BarY + r - r * 0.7071);
-            Chip($"R {Math.Round(Math.Min(_current.CornerRadius, _current.Height / 2))} px", L.BarX + r, L.BarY - 30);
+            Chip($"R {Math.Round(Math.Min(CurrentSettings.CornerRadius, CurrentSettings.Height / 2))} px", L.BarX + r, L.BarY - 30);
         }
         else if (_engaged == Loc.T("Icon size"))
         {
             if (L.N == 0) return;
             double x = L.PlateX(0) + L.P / 2 - L.Icon / 2 - 4, y0 = L.PlateY + L.P / 2 - L.Icon / 2, y1 = y0 + L.Icon;
             Line(x, y0, x, y1); Line(x - 3, y0, x + 3, y0); Line(x - 3, y1, x + 3, y1);
-            Chip($"{Math.Round(_current.IconSize)} px", L.PlateX(0) + L.P / 2, L.BarY - 28);
+            Chip($"{Math.Round(CurrentSettings.IconSize)} px", L.PlateX(0) + L.P / 2, L.BarY - 28);
         }
     }
 
@@ -445,7 +446,7 @@ public sealed partial class MainWindow
                 if (dark != _darkInk)
                 {
                     _darkInk = dark;
-                    if (_current.TextColor == "auto") UpdateHero();
+                    if (CurrentSettings.TextColor == "auto") UpdateHero();
                 }
             }
         }
@@ -468,14 +469,14 @@ public sealed partial class MainWindow
 
     private const double SwatchW = 240, SwatchH = 72;
     private static (int Gen, Backdrop Bg)? s_swatchBg;
-    private static readonly object s_swatchLock = new();
+    private static readonly Lock s_swatchLock = new();
 
     private BarSettings? _swatchSettings;
 
     private void UpdateCustomSwatch()
     {
-        if (_page != 0 || (_swatchSettings?.SameMaterial(_current) ?? false)) return;
-        _swatchSettings = _current.Clone();
+        if (_page != 0 || (_swatchSettings?.SameMaterial(CurrentSettings) ?? false)) return;
+        _swatchSettings = CurrentSettings.Clone();
         _swatchWorker?.Post(_swatchSettings);
     }
 
@@ -502,7 +503,7 @@ public sealed partial class MainWindow
         int inset = (int)spec.Inset;
         int bw = (int)Math.Round(170 * rs), bh = (int)Math.Round(36 * rs);
         int bx = (w - bw) / 2, by = (h - bh) / 2;
-        var pixels = new byte[bg.Base.Length];
+        byte[] pixels = new byte[bg.Base.Length];
         Buffer.BlockCopy(bg.Base, 0, pixels, 0, pixels.Length);
         GlassRenderer.Draw(bg, pixels, bx - inset, by - inset, bw + 2 * inset, bh + 2 * inset, spec);
         DispatcherQueue.TryEnqueue(() =>

@@ -63,14 +63,16 @@ void StopFollow()
         UnhookWinEvent(g_follow.hook);
     g_follow.hook = nullptr;
     g_follow.menu = nullptr;
-    if (g_follow.timer) KillTimer(nullptr, g_follow.timer);
+    if (g_follow.timer)
+        KillTimer(nullptr, g_follow.timer);
     g_follow.timer = 0;
     g_follow.pid = 0;
 }
 
 void CALLBACK FollowExpired(HWND, UINT, UINT_PTR timer, DWORD)
 {
-    if (timer == g_follow.timer && GetTickCount64() >= g_follow.until) StopFollow();
+    if (timer == g_follow.timer && GetTickCount64() >= g_follow.until)
+        StopFollow();
 }
 
 // Next to the click: above and to the right of it, else below or to the left; in the work area.
@@ -101,34 +103,41 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
     }
     if (!hwnd || idObject != OBJID_WINDOW || idChild != CHILDID_SELF)
         return;
-    if (!g_follow.menu && event != EVENT_OBJECT_SHOW) return;
+    if (!g_follow.menu && event != EVENT_OBJECT_SHOW)
+        return;
     // Revalidate ownership even on subsequent location events: HWNDs can be reused.
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
-    if (!pid || (g_follow.menu && (hwnd != g_follow.menu || pid != g_follow.pid))) return;
+    if (!pid || (g_follow.menu && (hwnd != g_follow.menu || pid != g_follow.pid)))
+        return;
     std::wstring path;
     bool elevated = true; // an unqueryable token must not authorize a move
     if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
-        wchar_t buf[32768]; DWORD size = DWORD(std::size(buf));
-        if (QueryFullProcessImageNameW(process, 0, buf, &size)) path.assign(buf, size);
+        wchar_t buf[32768];
+        DWORD size = DWORD(std::size(buf));
+        if (QueryFullProcessImageNameW(process, 0, buf, &size))
+            path.assign(buf, size);
         HANDLE token = nullptr;
         if (OpenProcessToken(process, TOKEN_QUERY, &token)) {
-            TOKEN_ELEVATION e{}; DWORD got = 0;
-            if (GetTokenInformation(token, TokenElevation, &e, sizeof(e), &got)) elevated = e.TokenIsElevated != 0;
+            TOKEN_ELEVATION e{};
+            DWORD got = 0;
+            if (GetTokenInformation(token, TokenElevation, &e, sizeof(e), &got))
+                elevated = e.TokenIsElevated != 0;
             CloseHandle(token);
         }
         CloseHandle(process);
     }
-    if (g_follow.exe.empty() || path.empty() || elevated ||
-        CompareStringOrdinal(path.c_str(), -1, g_follow.exe.c_str(), -1, TRUE) != CSTR_EQUAL) return;
+    if (g_follow.exe.empty() || path.empty() || elevated || CompareStringOrdinal(path.c_str(), -1, g_follow.exe.c_str(), -1, TRUE) != CSTR_EQUAL)
+        return;
     wchar_t cls[64]{};
-    if (!GetClassNameW(hwnd, cls, 64)) return;
+    if (!GetClassNameW(hwnd, cls, 64))
+        return;
     const bool nativeMenu = wcscmp(cls, L"#32768") == 0;
     const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE), ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    const bool customMenu = (style & WS_POPUP) && !(style & WS_CAPTION) &&
-        (ex & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST)) && !(ex & WS_EX_APPWINDOW) &&
-        _wcsicmp(cls, L"tooltips_class32") != 0;
-    if (!nativeMenu && !customMenu) return;
+    const bool customMenu = (style & WS_POPUP) && !(style & WS_CAPTION) && (ex & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST)) && !(ex & WS_EX_APPWINDOW) &&
+                            _wcsicmp(cls, L"tooltips_class32") != 0;
+    if (!nativeMenu && !customMenu)
+        return;
     const wchar_t* name = PathFindFileNameW(path.c_str());
     RECT r{};
     if (g_follow.menu) {
@@ -170,24 +179,30 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
     g_follow.placed = p;
     g_follow.moves = 0;
     g_follow.until = GetTickCount64() + 800;
-    if (g_follow.timer) KillTimer(nullptr, g_follow.timer);
+    if (g_follow.timer)
+        KillTimer(nullptr, g_follow.timer);
     g_follow.timer = SetTimer(nullptr, 0, 800, FollowExpired);
-    if (!g_follow.timer) StopFollow();
+    if (!g_follow.timer)
+        StopFollow();
 }
 
 void FollowMenu(POINT at, const std::wstring& exe)
 {
     StopFollow();
-    if (exe.empty() || _wcsicmp(PathFindFileNameW(exe.c_str()), L"explorer.exe") == 0) return;
+    if (exe.empty() || _wcsicmp(PathFindFileNameW(exe.c_str()), L"explorer.exe") == 0)
+        return;
     LASTINPUTINFO input{sizeof(input)};
-    if (!GetLastInputInfo(&input)) return;
+    if (!GetLastInputInfo(&input))
+        return;
     g_follow.clickInput = input.dwTime;
     g_follow.at = at;
     g_follow.exe = exe;
     g_follow.until = GetTickCount64() + 3000; // slow apps take a while to show it
     g_follow.hook = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_LOCATIONCHANGE, nullptr, MenuShown, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    if (g_follow.hook) g_follow.timer = SetTimer(nullptr, 0, 3000, FollowExpired);
-    if (!g_follow.timer) StopFollow();
+    if (g_follow.hook)
+        g_follow.timer = SetTimer(nullptr, 0, 3000, FollowExpired);
+    if (!g_follow.timer)
+        StopFollow();
 }
 } // namespace
 
@@ -204,7 +219,8 @@ float TrayPanel::Margin() const { return std::clamp(radius_ * 0.65f, 14.f, 22.f)
 
 int TrayPanel::Cols() const
 {
-    if (columns_) return columns_;
+    if (columns_)
+        return columns_;
     // At most six across, the rows as even as they can be (13 icons: 5, 5, 3), and wide enough for the footer.
     const int n = int(icons_.size()), rows = std::max(1, (n + 5) / 6);
     return std::clamp((n + rows - 1) / rows, 4, 6);
@@ -274,14 +290,18 @@ void TrayPanel::Refresh()
 {
     if (!surface_.Visible())
         return;
-    if (!pressed_.empty()) return; // freeze hit cells until mouse-up
+    if (!pressed_.empty())
+        return; // freeze hit cells until mouse-up
     auto fresh = model_.Icons();
     std::vector<tray::TargetKey> oldKeys, freshKeys;
-    for (const auto& icon : icons_) oldKeys.push_back(icon.Target());
-    for (const auto& icon : fresh) freshKeys.push_back(icon.Target());
+    for (const auto& icon : icons_)
+        oldKeys.push_back(icon.Target());
+    for (const auto& icon : fresh)
+        freshKeys.push_back(icon.Target());
     const auto order = tray::StableOrder(oldKeys, freshKeys);
     icons_.clear();
-    for (size_t i : order) icons_.push_back(std::move(fresh[i]));
+    for (size_t i : order)
+        icons_.push_back(std::move(fresh[i]));
     Place();
     surface_.Invalidate();
     if (!tipFor_.empty() && tip_ && IsWindowVisible(tip_))
@@ -319,8 +339,8 @@ void TrayPanel::ShowTip()
     if (!tip_) {
         INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_WIN95_CLASSES};
         InitCommonControlsEx(&icc);
-        tip_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
-                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, surface_.Hwnd(), nullptr, nullptr, nullptr);
+        tip_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT,
+                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, surface_.Hwnd(), nullptr, nullptr, nullptr);
         if (!tip_)
             return;
         TTTOOLINFOW ti{sizeof(ti)};
@@ -400,8 +420,13 @@ void TrayPanel::LeaveHover()
 void TrayPanel::SetAttention(const std::vector<TaskItem>& tasks)
 {
     std::vector<std::wstring> next;
-    for (const auto& task : tasks) if (task.attention) next.push_back(task.key);
-    if (next != attention_) { attention_ = std::move(next); surface_.Invalidate(); }
+    for (const auto& task : tasks)
+        if (task.attention)
+            next.push_back(task.key);
+    if (next != attention_) {
+        attention_ = std::move(next);
+        surface_.Invalidate();
+    }
 }
 
 float TrayPanel::Hover(Canvas& c, const std::wstring& id, bool on)
@@ -444,7 +469,8 @@ void TrayPanel::Paint(Canvas& c)
         if (pressed_ == id)
             c.Fill(plate, plateR, t.press);
         if (rippleId_ == id && c.now - rippleMs_ < kRippleMs) {
-            c.Ripple(plate, plateR, rippleX_, rippleY_, float((c.now - rippleMs_) / kRippleMs), t.light ? D2D1::ColorF(1, 1, 1, 0.6f) : D2D1::ColorF(1, 1, 1, 0.22f));
+            c.Ripple(plate, plateR, rippleX_, rippleY_, float((c.now - rippleMs_) / kRippleMs),
+                     t.light ? D2D1::ColorF(1, 1, 1, 0.6f) : D2D1::ColorF(1, 1, 1, 0.22f));
             c.Continue();
         }
         float cx = (cell.left + cell.right) / 2, cy = (cell.top + cell.bottom) / 2;
@@ -475,8 +501,7 @@ void TrayPanel::Paint(Canvas& c)
         // Only an existing task attention signal for the exact executable. No guessed unread count.
         if (icon.flashing || (!icon.exe.empty() && std::find(attention_.begin(), attention_.end(), icon.exe) != attention_.end())) {
             const float pulse = 0.72f + 0.28f * float(std::sin((c.now - openedMs_) * 0.006));
-            c.Fill(D2D1::RectF(ir.right - 3, ir.top - 3, ir.right + 4, ir.top + 4), 3.5f,
-                D2D1::ColorF(0.96f, 0.22f, 0.25f, pulse));
+            c.Fill(D2D1::RectF(ir.right - 3, ir.top - 3, ir.right + 4, ir.top + 4), 3.5f, D2D1::ColorF(0.96f, 0.22f, 0.25f, pulse));
             c.Continue();
         }
         hits_.push_back({cell, id});
@@ -485,7 +510,7 @@ void TrayPanel::Paint(Canvas& c)
     // Below the grid: the name under the pointer, and the system's own tray.
     c.Line(m, divider, w - m, divider, t.divider);
     std::wstring label;
-    if (hover_.rfind(L"icon:", 0) == 0) {
+    if (hover_.starts_with(L"icon:")) {
         size_t i = size_t(std::stoul(hover_.substr(5)));
         if (i < icons_.size())
             label = private_ ? Tr(L"Tray icon") : TrayModel::Title(icons_[i].tip);
@@ -495,7 +520,7 @@ void TrayPanel::Paint(Canvas& c)
     std::wstring sys = Tr(L"System tray");
     float bw = c.TextWidth(sys, 11.5f) + 20;
     D2D1_RECT_F b = D2D1::RectF(w - m - bw, footTop, w - m, footTop + kFooterH);
-    c.Text(label, D2D1::RectF(m, footTop, b.left - 10, footTop + kFooterH), 12, hover_.rfind(L"icon:", 0) == 0 ? t.text : t.subtext);
+    c.Text(label, D2D1::RectF(m, footTop, b.left - 10, footTop + kFooterH), 12, hover_.starts_with(L"icon:") ? t.text : t.subtext);
     float hv = Hover(c, L"system", hover_ == L"system");
     c.Fill(b, (b.bottom - b.top) / 2, Alpha(pressed_ == L"system" ? t.press : t.hover, 0.45f + 0.55f * hv));
     c.Text(sys, b, 11.5f, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
@@ -521,7 +546,7 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
         }
         return;
     }
-    if (id.rfind(L"icon:", 0) != 0)
+    if (!id.starts_with(L"icon:"))
         return;
     size_t i = size_t(std::stoul(id.substr(5)));
     if (i >= icons_.size())
@@ -533,18 +558,20 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
         FollowMenu(at, selected.exe);
     }
     if (!right) {
-        POINT at{}; GetCursorPos(&at);
+        POINT at{};
+        GetCursorPos(&at);
         const bool second = lastClick_ && tray::SameGestureTarget(lastClick_->Target(), selected.Target()) &&
-            GetTickCount64() - lastWhen_ <= GetDoubleClickTime() &&
-            std::abs(at.x - lastAt_.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
-            std::abs(at.y - lastAt_.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
+                            GetTickCount64() - lastWhen_ <= GetDoubleClickTime() && std::abs(at.x - lastAt_.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
+                            std::abs(at.y - lastAt_.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
         if (second) {
             model_.DoubleClick(selected, true); // first click already delivered
             lastClick_.reset();
             Close(); // the panel has done its part
         } else {
             model_.Click(selected, false); // immediate; no double-click timer
-            lastClick_ = selected; lastAt_ = at; lastWhen_ = GetTickCount64();
+            lastClick_ = selected;
+            lastAt_ = at;
+            lastWhen_ = GetTickCount64();
             // Some apps open only on a double click: the panel waits for the second one.
             SetTimer(surface_.Hwnd(), kClickTimer, GetDoubleClickTime(), nullptr);
         }
@@ -568,10 +595,12 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             KillTimer(surface_.Hwnd(), kSettleTimer);
             HWND fg = GetForegroundWindow();
             wchar_t cls[64] = {};
-            if (fg) GetClassNameW(fg, cls, 64);
-            const bool shell = !wcscmp(cls, L"TopLevelWindowForOverflowXamlIsland") || !wcscmp(cls, L"Shell_TrayWnd") ||
-                               !wcscmp(cls, L"Shell_SecondaryTrayWnd");
-            if (fg != surface_.Hwnd() && !shell) Close(); // a window of the app took it: the click opened it
+            if (fg)
+                GetClassNameW(fg, cls, 64);
+            const bool shell =
+                !wcscmp(cls, L"TopLevelWindowForOverflowXamlIsland") || !wcscmp(cls, L"Shell_TrayWnd") || !wcscmp(cls, L"Shell_SecondaryTrayWnd");
+            if (fg != surface_.Hwnd() && !shell)
+                Close(); // a window of the app took it: the click opened it
             return true;
         }
         if (w == kClickTimer) {
@@ -582,7 +611,8 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             return true;
         }
         if (w == kRefreshTimer) {
-            if (surface_.Visible()) model_.Refresh();
+            if (surface_.Visible())
+                model_.Refresh();
             return true;
         }
         if (w == kHoverTimer) {
@@ -639,9 +669,10 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         HideTip(); // a click ends the tooltip, as in the system tray
         pressed_ = HitAt(pt);
         pressedIcon_.reset();
-        if (pressed_.rfind(L"icon:", 0) == 0) {
+        if (pressed_.starts_with(L"icon:")) {
             const size_t i = size_t(std::stoul(pressed_.substr(5)));
-            if (i < icons_.size()) pressedIcon_ = icons_[i];
+            if (i < icons_.size())
+                pressedIcon_ = icons_[i];
         }
         if (!pressed_.empty()) {
             float s = surface_.Scale();

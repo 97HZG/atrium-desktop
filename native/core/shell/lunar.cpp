@@ -75,8 +75,8 @@ bool ChineseCalendar::Lunar(int y, int m, int d, int& lm, int& ld, bool& leap, i
 {
     if (!Available())
         return false;
-    UCalendar* g = static_cast<UCalendar*>(gregorian_);
-    UCalendar* c = static_cast<UCalendar*>(chinese_);
+    auto* g = static_cast<UCalendar*>(gregorian_);
+    auto* c = static_cast<UCalendar*>(chinese_);
     UErrorCode e = U_ZERO_ERROR;
     ucal_clear(g);
     ucal_setDateTime(g, y, m - 1, d, 12, 0, 0, &e);
@@ -138,8 +138,8 @@ std::wstring ChineseCalendar::DayLabel(int y, int m, int d, bool* festival) cons
         int m, d;
         const wchar_t* name;
     };
-    static const F festivals[] = {{1, 1, L"春节"}, {1, 15, L"元宵节"}, {5, 5, L"端午节"}, {7, 7, L"七夕"},
-                                  {8, 15, L"中秋节"}, {9, 9, L"重阳节"}, {12, 8, L"腊八节"}};
+    static const F festivals[] = {{1, 1, L"春节"},    {1, 15, L"元宵节"}, {5, 5, L"端午节"}, {7, 7, L"七夕"},
+                                  {8, 15, L"中秋节"}, {9, 9, L"重阳节"},  {12, 8, L"腊八节"}};
     for (const F& f : festivals)
         if (!leap && f.m == lm && f.d == ld)
             return mark(f.name);

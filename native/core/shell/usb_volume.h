@@ -70,10 +70,7 @@ struct UsbVolumeSnapshot {
 };
 
 // DBTF_MEDIA describes a change of media, not the bus a disk is attached to.
-inline bool WatchUsbVolume(UINT driveType, bool usbBus)
-{
-    return driveType == DRIVE_REMOVABLE || (driveType == DRIVE_FIXED && usbBus);
-}
+inline bool WatchUsbVolume(UINT driveType, bool usbBus) { return driveType == DRIVE_REMOVABLE || (driveType == DRIVE_FIXED && usbBus); }
 
 // May perform device I/O. Only the monitor's worker calls this in production.
 std::optional<UsbVolumeSnapshot> ReadUsbVolumeSnapshot();

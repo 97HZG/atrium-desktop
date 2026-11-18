@@ -1,6 +1,6 @@
+using System.Globalization;
 using Atrium.Settings;
 using Microsoft.UI.Xaml.Controls;
-using System.Globalization;
 
 static void Require(bool condition, string message)
 {

@@ -24,8 +24,7 @@ std::wstring Fold(const std::wstring& s)
 {
     std::wstring out(s);
     if (!out.empty())
-        LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_LOWERCASE, s.c_str(), int(s.size()), out.data(), int(out.size()), nullptr,
-                      nullptr, 0);
+        LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_LOWERCASE, s.c_str(), int(s.size()), out.data(), int(out.size()), nullptr, nullptr, 0);
     return out;
 }
 
@@ -95,7 +94,7 @@ std::wstring ReadUtf8File(const std::wstring& path)
     DWORD read = 0;
     if (!bytes.empty() && ReadFile(f, bytes.data(), DWORD(bytes.size()), &read, nullptr)) {
         bytes.resize(read);
-        size_t skip = bytes.rfind("\xEF\xBB\xBF", 0) == 0 ? 3 : 0;
+        size_t skip = bytes.starts_with("\xEF\xBB\xBF") ? 3 : 0;
         int n = MultiByteToWideChar(CP_UTF8, 0, bytes.data() + skip, int(bytes.size() - skip), nullptr, 0);
         text.resize(size_t(std::max(n, 0)));
         MultiByteToWideChar(CP_UTF8, 0, bytes.data() + skip, int(bytes.size() - skip), text.data(), n);
@@ -116,8 +115,10 @@ std::wstring ExportStartLayout()
     std::wstring quoted; // a PowerShell single-quoted string
     for (wchar_t ch : file)
         quoted += ch == L'\'' ? L"''" : std::wstring(1, ch);
-    std::wstring cmd = L"\"" + std::wstring(sys) + L"\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -ExecutionPolicy Bypass "
-                       L"-Command \"Export-StartLayout -Path '" + quoted + L"'\"";
+    std::wstring cmd = L"\"" + std::wstring(sys) +
+                       L"\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -ExecutionPolicy Bypass "
+                       L"-Command \"Export-StartLayout -Path '" +
+                       quoted + L"'\"";
     DeleteFileW(file.c_str());
     STARTUPINFOW si{sizeof(si)};
     PROCESS_INFORMATION pi{};
@@ -271,15 +272,14 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
     return out;
 }
 
-
 // Not an app of a folder: an uninstaller ("卸载微信", "Uninstall Git", unins000.exe), or a shortcut
 // to a document ("7-Zip Help", release notes, a web page, a folder). A shortcut with no target path
 // (a packaged app, an installer's advertised shortcut) is an app.
 bool NotAnApp(const CatalogApp& app)
 {
     const std::wstring name = Fold(app.name), target = Fold(app.target.substr(app.target.find_last_of(L"\\/") + 1));
-    if (name.find(L"uninstall") != std::wstring::npos || name.find(L"卸载") != std::wstring::npos ||
-        name.find(L"解除安装") != std::wstring::npos || target.rfind(L"unins", 0) == 0)
+    if (name.find(L"uninstall") != std::wstring::npos || name.find(L"卸载") != std::wstring::npos || name.find(L"解除安装") != std::wstring::npos ||
+        target.starts_with(L"unins"))
         return true;
     return !target.empty() && !target.ends_with(L".exe");
 }
@@ -312,8 +312,8 @@ void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, s
 // (Accessibility, Windows Tools' parts, Startup) are left out.
 std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
 {
-    static const wchar_t* const kSystem[] = {L"accessibility", L"accessories", L"administrative tools", L"maintenance",
-                                             L"startup", L"system tools", L"windows powershell", L"windows tools"};
+    static const wchar_t* const kSystem[] = {L"accessibility", L"accessories",  L"administrative tools", L"maintenance",
+                                             L"startup",       L"system tools", L"windows powershell",   L"windows tools"};
     std::vector<std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>>> found; // shown name, its links
     for (const KNOWNFOLDERID* id : {&FOLDERID_CommonPrograms, &FOLDERID_Programs}) {
         PWSTR root = nullptr;
@@ -436,7 +436,8 @@ void AppCatalog::QueuePrefetch()
         return;
     auto queue = [&](const std::wstring& id) {
         auto key = std::make_pair(id, prefetchPx_);
-        if (!icons_.contains(key)) QueueIcon(key, true);
+        if (!icons_.contains(key))
+            QueueIcon(key, true);
     };
     for (const CatalogApp& app : startPins_)
         queue(app.id);
@@ -454,17 +455,22 @@ IconImage AppCatalog::Icon(const std::wstring& id, int px)
         it->second.used = ++iconUse_;
         return it->second.image;
     }
-    if (QueueIcon(key, false)) cv_.notify_one();
+    if (QueueIcon(key, false))
+        cv_.notify_one();
     return {};
 }
 
 bool AppCatalog::QueueIcon(const std::pair<std::wstring, int>& key, bool prefetch)
 {
-    if (requested_.contains(key)) return false;
-    if (auto it = failed_.find(key); it != failed_.end() &&
-        (it->second.attempts >= 3 || GetTickCount64() - it->second.time < 2000)) return false;
+    if (requested_.contains(key))
+        return false;
+    if (auto it = failed_.find(key); it != failed_.end() && (it->second.attempts >= 3 || GetTickCount64() - it->second.time < 2000))
+        return false;
     requested_.insert(key);
-    if (prefetch) iconJobs_.push_front(key); else iconJobs_.push_back(key);
+    if (prefetch)
+        iconJobs_.push_front(key);
+    else
+        iconJobs_.push_back(key);
     return true;
 }
 
@@ -480,18 +486,21 @@ void AppCatalog::PruneIcons()
 {
     auto protectedIcon = [&](const auto& key) {
         return visibleIcons_.contains(key) || requested_.contains(key) ||
-            (key.second == prefetchPx_ && (startIds_.contains(key.first) ||
-                                           std::any_of(startPins_.begin(), startPins_.end(), [&](const auto& app) { return app.id == key.first; })));
+               (key.second == prefetchPx_ &&
+                (startIds_.contains(key.first) || std::any_of(startPins_.begin(), startPins_.end(), [&](const auto& app) { return app.id == key.first; })));
     };
     std::erase_if(icons_, [&](const auto& entry) { return loaded_ && !liveIds_.contains(entry.first.first) && !protectedIcon(entry.first); });
     std::erase_if(failed_, [&](const auto& entry) { return loaded_ && !liveIds_.contains(entry.first.first) && !protectedIcon(entry.first); });
     size_t bytes = 0;
-    for (const auto& [key, icon] : icons_) bytes += icon.image.bgra.size();
+    for (const auto& [key, icon] : icons_)
+        bytes += icon.image.bgra.size();
     while (bytes > 16 * 1024 * 1024 || icons_.size() > 512) {
         auto victim = icons_.end();
         for (auto it = icons_.begin(); it != icons_.end(); ++it)
-            if (!protectedIcon(it->first) && (victim == icons_.end() || it->second.used < victim->second.used)) victim = it;
-        if (victim == icons_.end()) break;
+            if (!protectedIcon(it->first) && (victim == icons_.end() || it->second.used < victim->second.used))
+                victim = it;
+        if (victim == icons_.end())
+            break;
         bytes -= victim->second.image.bgra.size();
         icons_.erase(victim);
     }
@@ -566,8 +575,10 @@ void AppCatalog::Worker()
                 startPins_ = std::move(pins);
                 startFolders_ = std::move(folders);
                 liveIds_.clear();
-                for (const auto& app : apps_) liveIds_.insert(app.id);
-                for (const auto& app : startPins_) liveIds_.insert(app.id);
+                for (const auto& app : apps_)
+                    liveIds_.insert(app.id);
+                for (const auto& app : startPins_)
+                    liveIds_.insert(app.id);
                 failed_.clear(); // catalogue changes allow another bounded attempt
                 loaded_ = true;
                 PruneIcons();
@@ -656,8 +667,7 @@ PinnedApp AppCatalog::PinFor(const CatalogApp& app)
     if (!app.target.empty() && lower.size() > 4 && lower.substr(lower.size() - 4) == L".exe") {
         p.path = app.target;
         p.args = app.args;
-    }
-    else if (IsPath(app.id))
+    } else if (IsPath(app.id))
         p.path = app.id; // a shortcut outside the catalog
     else
         p.aumid = !app.aumid.empty() ? app.aumid : app.id;
@@ -673,9 +683,12 @@ bool AppCatalog::Matches(const CatalogApp& app, const std::wstring& query)
         return true;
     // Localised names hide the English one ("计算器"); the id and the exe
     // usually carry it (Microsoft.WindowsCalculator_..., notepad.exe).
-    if (std::all_of(q.begin(), q.end(), [](wchar_t c) { return c < 128 && iswalnum(c); }) && NameInitials(app.name).rfind(q, 0) == 0)
+    if (std::all_of(q.begin(), q.end(), [](wchar_t c) { return c < 128 && iswalnum(c); }) && NameInitials(app.name).starts_with(q))
         return true;
-    auto tail = [](const std::wstring& s) { size_t p = s.find_last_of(L"\\/"); return p == std::wstring::npos ? s : s.substr(p + 1); };
+    auto tail = [](const std::wstring& s) {
+        size_t p = s.find_last_of(L"\\/");
+        return p == std::wstring::npos ? s : s.substr(p + 1);
+    };
     return q.size() >= 3 && (Fold(tail(app.id)).find(q) != std::wstring::npos || Fold(tail(app.target)).find(q) != std::wstring::npos);
 }
 

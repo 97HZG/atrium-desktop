@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace atrium {
 
@@ -17,14 +18,14 @@ float Approach(float value, float target, double dtMs)
 // Integral of the raised cosine over [-1, 1], from zero to x.
 float WaveArea(float x)
 {
-    constexpr float pi = 3.14159265f;
+    constexpr float pi = std::numbers::pi_v<float>;
     if (x >= 1)
         return 0.5f;
     if (x <= -1)
         return -0.5f;
     return x / 2 + std::sin(pi * x) / (2 * pi);
 }
-}
+} // namespace
 
 bool HoverWave::Update(const BarScene& scene, double dtMs)
 {

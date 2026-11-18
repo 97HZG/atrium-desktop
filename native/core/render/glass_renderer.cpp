@@ -50,8 +50,8 @@ void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool op
     winrt::com_ptr<IDCompositionScaleTransform> scale;
     winrt::com_ptr<IDCompositionAnimation> s, o;
     winrt::com_ptr<IDCompositionEffectGroup> fx;
-    if (FAILED(device->CreateScaleTransform(scale.put())) || FAILED(device->CreateAnimation(s.put())) ||
-        FAILED(device->CreateAnimation(o.put())) || FAILED(device->CreateEffectGroup(fx.put())))
+    if (FAILED(device->CreateScaleTransform(scale.put())) || FAILED(device->CreateAnimation(s.put())) || FAILED(device->CreateAnimation(o.put())) ||
+        FAILED(device->CreateEffectGroup(fx.put())))
         return;
     if (open) {
         SpringTo(s.get(), motion::kPop, 0.92f, 1.0f, 0.6, 12); // a hint past full size, then rest
@@ -76,7 +76,10 @@ void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool op
 void GlassRenderer::Pop(bool open, float cx, float cy) { PopVisual(dcomp_.get(), visual_.get(), open, cx, cy); }
 
 GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost, bool overlay, bool alignedBackdrop)
-    : gpu_(gpu), w_(width), h_(height), alignedBackdrop_(alignedBackdrop)
+    : gpu_(gpu),
+      w_(width),
+      h_(height),
+      alignedBackdrop_(alignedBackdrop)
 {
     sync_ = overlay ? 1 : 0; // the bar draws its content over the glass; a popup's content is its own
     auto* dev = gpu_.device.get();
@@ -265,7 +268,8 @@ void GlassRenderer::UpdateBackdrop(ID3D11Texture2D* frame, int x, int y)
     roiOrigin_ = POINT{x - x0, y - y0};
     int x1 = x0 + int(roiW_), y1 = y0 + int(roiH_);
     int cx0 = std::max(0, x0), cy0 = std::max(0, y0), cx1 = std::min(int(fd.Width), x1), cy1 = std::min(int(fd.Height), y1);
-    if (!fd.Width || !fd.Height) return;
+    if (!fd.Width || !fd.Height)
+        return;
     if (cx1 > cx0 && cy1 > cy0) {
         D3D11_BOX box{UINT(cx0), UINT(cy0), 0, UINT(cx1), UINT(cy1), 1};
         gpu_.context->CopySubresourceRegion(roi_.get(), 0, UINT(cx0 - x0), UINT(cy0 - y0), 0, frame, 0, &box);
@@ -295,10 +299,14 @@ void GlassRenderer::ExtendBackdropEdges(ID3D11Texture2D* frame, const D3D11_TEXT
         D3D11_BOX box{UINT(left), UINT(top), 0, UINT(right), UINT(bottom), 1};
         ctx->CopySubresourceRegion(edgeSource_.get(), 0, dx, dy, 0, frame, 0, &box);
     };
-    if (y < 0) copy(0, 0, l, t, r, t + 1);
-    if (y + int(roiH_) > int(source.Height)) copy(0, UINT(height - 1), l, b - 1, r, b);
-    if (x < 0) copy(0, 0, l, t, l + 1, b);
-    if (x + int(roiW_) > int(source.Width)) copy(UINT(width - 1), 0, r - 1, t, r, b);
+    if (y < 0)
+        copy(0, 0, l, t, r, t + 1);
+    if (y + int(roiH_) > int(source.Height))
+        copy(0, UINT(height - 1), l, b - 1, r, b);
+    if (x < 0)
+        copy(0, 0, l, t, l + 1, b);
+    if (x + int(roiW_) > int(source.Width))
+        copy(UINT(width - 1), 0, r - 1, t, r, b);
 
     const int params[] = {x - l, y - t, width, height};
     ctx->UpdateSubresource(edgeCb_.get(), 0, nullptr, params, 0, 0);
@@ -317,7 +325,8 @@ void GlassRenderer::ExtendBackdropEdges(ID3D11Texture2D* frame, const D3D11_TEXT
     ID3D11ShaderResourceView* resource = edgeSourceSrv_.get();
     ctx->PSSetShaderResources(0, 1, &resource);
     auto draw = [&](int left, int top, int right, int bottom) {
-        if (right <= left || bottom <= top) return;
+        if (right <= left || bottom <= top)
+            return;
         D3D11_RECT rect{left, top, right, bottom};
         ctx->RSSetScissorRects(1, &rect);
         ctx->Draw(3, 0);

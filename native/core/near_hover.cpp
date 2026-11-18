@@ -16,8 +16,7 @@ bool NearHover::Sample(BarScene& scene, D2D1_POINT_2F current, double enterDip, 
     // Of its height only the side of the glass's top edge matters (HoverWave): moves within one
     // side are not published again.
     const bool pointerChanged = scene.pointerX >= 0 && (scene.pointerY < scene.bar.top) != (current.y < scene.bar.top);
-    const bool changed = std::fabs(lead - scene.nearX) >= 1.f || rise != scene.nearRise ||
-        magnify != scene.nearMagnify || pointerChanged;
+    const bool changed = std::fabs(lead - scene.nearX) >= 1.f || rise != scene.nearRise || magnify != scene.nearMagnify || pointerChanged;
     // Publish these together: a new Y with old near flags could briefly lower the wave.
     if (scene.pointerX >= 0)
         scene.pointerY = current.y;
