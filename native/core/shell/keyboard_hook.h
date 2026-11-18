@@ -10,7 +10,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -46,7 +45,9 @@ private:
     static LRESULT CALLBACK HookProc(int code, WPARAM wparam, LPARAM lparam);
     void Run();
 
-    std::shared_mutex handlersMutex_; // dispatch takes it shared, Add/Remove exclusive
+    // Recursive: a handler may send keys (WinKey replays Win + a shortcut), and
+    // the hook sees those on this same thread before the handler returns.
+    std::recursive_mutex handlersMutex_;
     std::vector<Entry> handlers_;
     int nextToken_ = 1;
     std::thread thread_;

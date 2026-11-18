@@ -14,6 +14,22 @@ namespace {
 
 ImeWatcher* g_watcher = nullptr; // one watcher, installed on the UI thread
 
+// CapsLock's latch as the system has it now. This thread's own queue may have
+// missed every toggle (it is not the foreground thread); the foreground
+// thread's queue knows. Attached for this one read, then detached again.
+bool ForegroundCapsLock()
+{
+    const HWND foreground = GetForegroundWindow();
+    const DWORD foregroundThread = foreground ? GetWindowThreadProcessId(foreground, nullptr) : 0;
+    const DWORD current = GetCurrentThreadId();
+    bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+    if (foregroundThread && foregroundThread != current && AttachThreadInput(current, foregroundThread, TRUE)) {
+        caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+        AttachThreadInput(current, foregroundThread, FALSE);
+    }
+    return caps;
+}
+
 // The focus window of the foreground thread (it can differ from the top-level
 // window in an Electron/WebView2/WinUI3 host): the IME state belongs to it.
 HWND FocusWindow(HWND foreground)
@@ -100,7 +116,7 @@ ImeStatus QueryImeStatus(HWND foreground, bool askIme)
 ImeWatcher::ImeWatcher(HWND window, UINT message) : window_(window), message_(message)
 {
     g_watcher = this;
-    caps_ = (GetKeyState(VK_CAPITAL) & 0x0001) != 0; // the latch already on; every press flips it
+    caps_ = ForegroundCapsLock(); // the latch as it already is; every press then flips it
     wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     foreground_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT);
     // CHANGE is not watched: it fires for every composition and candidate

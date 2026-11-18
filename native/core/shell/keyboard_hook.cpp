@@ -34,7 +34,7 @@ int KeyboardHook::Add(Handler handler, void* context)
 {
     int token = 0;
     {
-        const std::unique_lock lock(handlersMutex_);
+        const std::lock_guard lock(handlersMutex_);
         token = nextToken_++;
         handlers_.push_back({token, handler, context});
         if (handlers_.size() == 1) {
@@ -53,7 +53,7 @@ void KeyboardHook::Remove(int token)
 {
     std::thread finished;
     {
-        const std::unique_lock lock(handlersMutex_);
+        const std::lock_guard lock(handlersMutex_);
         std::erase_if(handlers_, [&](const Entry& entry) { return entry.token == token; });
         if (!handlers_.empty())
             return;
@@ -110,10 +110,11 @@ LRESULT CALLBACK KeyboardHook::HookProc(int code, WPARAM wparam, LPARAM lparam)
         return CallNextHookEx(nullptr, code, wparam, lparam);
     const bool injected = (key->flags & LLKHF_INJECTED) != 0;
     // A handler may have the key kept from Windows. Handlers run under the
-    // shared lock: Remove waits for the one in flight, so a destroyed handler
-    // is never called.
+    // recursive lock: Remove waits for the one in flight, so a destroyed handler
+    // is never called, and a handler that sends a key (WinKey's replay) may
+    // re-enter this hook on this same thread without deadlocking.
     const bool extended = (key->flags & LLKHF_EXTENDED) != 0;
-    const std::shared_lock lock(self->handlersMutex_);
+    const std::lock_guard lock(self->handlersMutex_);
     for (const Entry& entry : self->handlers_)
         if (entry.handler(entry.context, key->vkCode, key->scanCode, extended, down, injected, key->dwExtraInfo))
             return 1;
