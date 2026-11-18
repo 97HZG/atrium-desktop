@@ -6,11 +6,14 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI;
+using Microsoft.UI.Composition.SystemBackdrops;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI;
 
 namespace Atrium.Settings;
@@ -94,6 +97,16 @@ public sealed partial class MainWindow : Window
     public MainWindow(int startPage = -1)
     {
         InitializeComponent();
+        // Windows 10 (#106): no Mica there, and a bitmap decoded during the first frame takes its XAML
+        // renderer down; the logos come once the window is up.
+        if (MicaController.IsSupported())
+            SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+        RootGrid.Loaded += (_, _) => DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            var logo = new BitmapImage(new Uri("ms-appx:///Assets/atrium-256.png"));
+            TitleLogo.Source = logo;
+            AboutLogo.Source = logo;
+        });
         PopulateLanguagePicker();
         Title = App.WindowTitle;
         Loc.Localize(RootGrid);
@@ -113,7 +126,8 @@ public sealed partial class MainWindow : Window
         RootGrid.Loaded += (_, _) => ExportStageArtIfAsked();
 #endif
         ExtendsContentIntoTitleBar = true;
-        AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+        if (AppWindowTitleBar.IsCustomizationSupported())
+            AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "atrium.ico"));
         double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
