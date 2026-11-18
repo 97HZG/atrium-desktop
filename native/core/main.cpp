@@ -18,6 +18,7 @@
 #include "shell/task_model.h"
 #include "shell/notification_listener.h"
 #include "shell/system_chrome.h"
+#include "shell/ime_status.h"
 #include "shell/system_status.h"
 #include "shell/tray_model.h"
 #include "shell/usb_volume.h"
@@ -70,6 +71,7 @@ constexpr UINT WM_STATUS = WM_APP + 10;       // lParam: SystemStatus*, read off
 constexpr UINT WM_UPDATE_READY = WM_APP + 11; // background package is validated and ready
 constexpr UINT WM_WIN_KEY = WM_APP + 12;      // the Windows key alone (wParam 0, winKeyStart), Win + 1..9, 0 (1..10, winNumbers)
 constexpr UINT WM_USB = WM_APP + 13;          // the device worker has queued removal notices
+constexpr UINT WM_IME_STATE = WM_APP + 20;    // the input method may have changed (ImeWatcher)
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
 constexpr UINT_PTR kDisplaySettleTimer = 0x56; // once more after a display change, the topology settled
@@ -119,6 +121,9 @@ struct App {
     std::unique_ptr<WindowPreview> preview;
     std::unique_ptr<StageManager> stage;
     std::unique_ptr<WinKey> winKey;
+    std::unique_ptr<ImeWatcher> imeWatcher; // the events that may change the input method (issue #56)
+    ImeWatch imeWatch;                     // what announces (a foreground change only reseeds it)
+    bool imeOn = true;                     // the "show the input language" setting, as last applied
     HANDLE guard = nullptr; // the guard process (EnsureGuard)
     bool winKeyStart = false, winNumbers = false; // what it watches
     bool widgetsOn = false;
@@ -140,6 +145,41 @@ template<class Action> void ForBars(Action action)
     action(*g_app.bar);
     for (const auto& bar : g_app.secondaryBars)
         action(*bar);
+}
+
+// A settled input method change shows in the status icon of the bar on the
+// foreground window's display. While the bar is hidden there is nothing to
+// show it (the bottom bubble is a separate change).
+void AnnounceIme(HWND foreground, const ImeStatus& status)
+{
+    const HMONITOR monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
+    Bar* bar = g_app.bar && g_app.bar->Monitor() == monitor ? g_app.bar.get() : nullptr;
+    if (!bar)
+        for (const auto& secondary : g_app.secondaryBars)
+            if (secondary->Monitor() == monitor) {
+                bar = secondary.get();
+                break;
+            }
+    if (bar && bar->ShownOnScreen())
+        bar->AnnounceIme(ImeGlyph(status));
+}
+
+// A finished read from the watcher's worker thread: the case is filled in here
+// (the latch comes from the keyboard hook; Shift's key-down is global), then a
+// settled change announces in the status icon of the bar on that display.
+void OnImeSample(ImeWatcher::Sample& sample)
+{
+    if (!g_app.imeOn || !g_app.imeWatcher)
+        return;
+    ImeStatus status = std::move(sample.status);
+    const bool caps = g_app.imeWatcher->CapsLock();
+    status.caps = caps;
+    status.upper = caps != ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
+    if (!g_app.imeWatch.Update(sample.foreground, status))
+        return;
+    const ImeStatus& shown = g_app.imeWatch.state();
+    AnnounceIme(sample.foreground, shown);
+    Log(L"ime: %s in the status icon (layout %08lX)", ImeGlyph(shown).c_str(), shown.layout);
 }
 
 void ConfigureBar(Bar& bar);
@@ -558,6 +598,17 @@ void ApplySettings(const Settings& s)
 {
     if (SetLanguage(s.language) && g_app.widgets)
         g_app.widgets->ReloadLanguage();
+    // The input method status: the watcher lives only while the setting is on.
+    // It reads the state already in front when it starts, so the icon is right
+    // before the user changes anything.
+    g_app.imeOn = s.imeStatus;
+    if (g_app.imeOn && !g_app.imeWatcher) {
+        g_app.imeWatcher = std::make_unique<ImeWatcher>(g_app.host, WM_IME_STATE);
+        g_app.imeWatch.reset();
+    } else if (!g_app.imeOn && g_app.imeWatcher) {
+        g_app.imeWatcher.reset();
+        g_app.imeWatch.reset();
+    }
     g_app.desktopDisplay = s.desktopDisplay;
     g_app.displaySettings = s;
     // Popups share the bar's material and corner radius (concentric inside).
@@ -1232,6 +1283,13 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_OPEN_SETTINGS:
         OpenSettings();
         return 0;
+    case WM_IME_STATE: {
+        // A finished read from the watcher's thread (see ImeWatcher::Run).
+        std::unique_ptr<ImeWatcher::Sample> sample(reinterpret_cast<ImeWatcher::Sample*>(l));
+        if (sample)
+            OnImeSample(*sample);
+        return 0;
+    }
     case WM_WIN_KEY:
         if (!g_app.barOn.value_or(true))
             return 0;
