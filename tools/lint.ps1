@@ -90,8 +90,8 @@ $banned = [ordered]@{
     'include-guard' = @('^#ifndef\s+\w+_H\w*\s*$', 'use #pragma once')
     'print'         = @('\b(w?printf|std::w?cout|std::w?cerr|OutputDebugString\w*)\s*[(<]', 'use Log (tests print their results)')
     'nolint'        = @('NOLINT(NEXTLINE|BEGIN|END)?(?!\([\w.,*-]+\): \S)', 'name the check and the reason: NOLINT(check): why')
-    'narration'     = @('//\s*(Check|Get|Set|Call|Loop|Iterate|Increment|Decrement|Initialize|Create|Return|Update|Add|Remove|Handle)\s+(if|the|a|an|whether|over|through)\b',
-        'say why, not what the next line does')
+    'narration'     = @(('//\s*(Check|Get|Set|Call|Loop|Iterate|Increment|Decrement|Initialize|Create|Return|Update|Add|Remove|Handle)' +
+        '\s+(if|the|a|an|whether|over|through)\b'), 'say why, not what the next line does')
 }
 # Counted per file; a file may never hold more than its baseline.
 $ratcheted = [ordered]@{
@@ -120,7 +120,8 @@ foreach ($rel in $native) {
             }
         }
         if ($line -match '^\s*using\s+namespace\b' -and $rel -match '\.h$') { Fail $where 'using-in-header' 'qualify names in headers' }
-        if ($line -match '^\s*#define\s+(\w+)' -and $configMacros -notcontains $Matches[1] -and ($i -eq 0 -or $lines[$i - 1] -notmatch "^\s*#ifndef\s+$($Matches[1])\b")) {
+        $guarded = $i -and $lines[$i - 1] -match '^\s*#ifndef\s+(\w+)' -and $line -match "^\s*#define\s+$($Matches[1])\b"
+        if ($line -match '^\s*#define\s+(\w+)' -and $configMacros -notcontains $Matches[1] -and -not $guarded) {
             Fail $where 'define' 'use constexpr (a macro only to supply what an older SDK lacks, under #ifndef)'
         }
         if ($from -and $line -match '^\s*#include\s+"([^"]+)"') {
@@ -140,6 +141,20 @@ foreach ($rel in $native) {
     }
     if ($lines.Count -gt $fileLines) { $counts["$key|file-lines"] = $lines.Count }
 }
+
+# --- One version: the native project, the settings app and both manifests --------------------------------------
+$versions = [ordered]@{
+    'native/CMakeLists.txt'                        = 'project\(\w+ VERSION (\d+\.\d+\.\d+)'
+    'settings/Atrium.Settings/Atrium.Settings.csproj' = '<Version>(\d+\.\d+\.\d+)</Version>'
+    'native/core/core.manifest'                    = '<assemblyIdentity type="win32" name="Atrium" version="(\d+\.\d+\.\d+)\.0"'
+    'settings/Atrium.Settings/app.manifest'        = '<assemblyIdentity version="(\d+\.\d+\.\d+)\.0"'
+}
+$found = foreach ($file in $versions.Keys) {
+    $m = [regex]::Match([IO.File]::ReadAllText((Join-Path $Root $file)), $versions[$file])
+    [pscustomobject]@{ File = $file; Version = if ($m.Success) { $m.Groups[1].Value } else { '?' } }
+}
+$expected = $found[0].Version
+foreach ($f in $found | Where-Object Version -ne $expected) { Fail $f.File 'version' "$($f.Version), the project is $expected" }
 
 # --- clang-format: the whole native tree ----------------------------------------------------------------------
 if (-not $clangFormat) { $errors.Add('lint: clang-format not found') }
@@ -233,7 +248,9 @@ foreach ($key in $counts.Keys) {
 foreach ($key in $baseline.Keys) {
     $tidyKey = $key -match '\|(complexity|function-lines)\|'
     if (($tidyKey -and -not $Tidy) -or ($Base -and $tidyKey)) { continue }
-    if (-not $counts.Contains($key) -or $counts[$key] -lt $baseline[$key]) { $errors.Add("lint: $key is below its baseline; run ./tools/lint.ps1 -Tidy -UpdateBaseline") }
+    if (-not $counts.Contains($key) -or $counts[$key] -lt $baseline[$key]) {
+        $errors.Add("lint: $key is below its baseline; run ./tools/lint.ps1 -Tidy -UpdateBaseline")
+    }
 }
 
 # --- The change itself --------------------------------------------------------------------------------------------
@@ -242,8 +259,8 @@ if ($Base) {
     foreach ($path in $changed) {
         if ($Paths -and -not ($Paths | Where-Object { $path -like $_ })) { Fail $path 'scope' "outside the allowed paths ($($Paths -join ', '))" }
     }
-    $total = (git -C $Root diff --numstat $Base -- . | ForEach-Object { $a, $d, $null = $_ -split "`t"; [int]($a -replace '-', '0') + [int]($d -replace '-', '0') } |
-        Measure-Object -Sum).Sum
+    $numbers = git -C $Root diff --numstat $Base -- . | ForEach-Object { ($_ -split "`t")[0..1] -replace '-', '0' }
+    $total = ($numbers | ForEach-Object { [int]$_ } | Measure-Object -Sum).Sum
     if ($MaxLines -and $total -gt $MaxLines) { $errors.Add("diff: $total changed lines > budget $MaxLines") }
 }
 

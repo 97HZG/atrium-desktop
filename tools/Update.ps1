@@ -64,7 +64,8 @@ function Get-CrashCause([datetime]$Since) {
     $log = Join-Path $env:LOCALAPPDATA 'Atrium\logs\settings.log'
     try {
         if (!(Test-Path -LiteralPath $log) -or (Get-Item -LiteralPath $log).LastWriteTime -lt $Since) { return '' }
-        $last = Get-Content -LiteralPath $log -Tail 60 -Encoding UTF8 | Where-Object { $_ -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ' } | Select-Object -Last 1
+        $last = Get-Content -LiteralPath $log -Tail 60 -Encoding UTF8 |
+            Where-Object { $_ -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ' } | Select-Object -Last 1
         if (!$last) { return '' }
         $cause = $last.Substring(20).Trim()
         if ($cause.Length -gt 200) { $cause = $cause.Substring(0, 200) + '...' }
@@ -88,7 +89,8 @@ function Start-Verified([string]$Executable, [string]$Kind, [string]$Arguments) 
     try {
         $startedAt = (Get-Date).AddSeconds(-1)
         try {
-            $process = Start-Process -FilePath $Executable -ArgumentList "$Arguments --ready-event $eventName" -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
+            $process = Start-Process -FilePath $Executable -ArgumentList "$Arguments --ready-event $eventName" -WorkingDirectory $workingDirectory `
+                -WindowStyle Hidden -PassThru
         } catch {
             if (!(Test-AppControlBlock $_.Exception.Message)) { throw }
             # The release is not code-signed; each version's new files have no reputation yet.
@@ -204,7 +206,8 @@ try {
         if ($coreStopped -and $StartCore -eq '1') {
             Start-Process -FilePath (Join-Path $install 'Atrium.exe') -WorkingDirectory $workingDirectory -WindowStyle Hidden
         }
-        Start-Process -FilePath (Join-Path $install 'Settings\Atrium.Settings.exe') -ArgumentList '--page about' -WorkingDirectory $workingDirectory -WindowStyle Hidden
+        Start-Process -FilePath (Join-Path $install 'Settings\Atrium.Settings.exe') -ArgumentList '--page about' -WorkingDirectory $workingDirectory `
+            -WindowStyle Hidden
     }
     if ($confirmed) {
         $work = $package

@@ -67,7 +67,8 @@ foreach ($file in $settingsFiles) {
 }
 foreach ($file in (Get-ChildItem (Join-Path $root 'settings/Atrium.Settings') -File -Filter *.xaml)) {
     $text = Get-Content -LiteralPath $file.FullName -Raw -Encoding utf8
-    foreach ($match in [regex]::Matches($text, '(?:Text|Title|Note|Content|SwitchName|Header|PlaceholderText|AutomationProperties\.Name|ToolTipService\.ToolTip)="([^"]*[A-Za-z][^"]*)"')) {
+    $attributes = 'Text|Title|Note|Content|SwitchName|Header|PlaceholderText|AutomationProperties\.Name|ToolTipService\.ToolTip'
+    foreach ($match in [regex]::Matches($text, "(?:$attributes)=`"([^`"]*[A-Za-z][^`"]*)`"")) {
         $value = [System.Net.WebUtility]::HtmlDecode($match.Groups[1].Value)
         if (-not $value.StartsWith('{')) { Add-Key $value 'raw' }
     }

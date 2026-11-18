@@ -19,7 +19,8 @@ TrFormat(L"Read %s: %lu", L"file", 7ul);
 TrPlural(L"{0} items", 1);
 TrPlural(L"{0} files", 2);
 '@
-    Set-Content -LiteralPath "$directory/settings/Atrium.Settings/Probe.cs" -Encoding utf8 -Value 'Loc.F("Item {0}", 1); Loc.F("Values {0} {1}", 1, 2); Loc.F("Issue #{0}", 1);'
+    Set-Content -LiteralPath "$directory/settings/Atrium.Settings/Probe.cs" -Encoding utf8 `
+        -Value 'Loc.F("Item {0}", 1); Loc.F("Values {0} {1}", 1, 2); Loc.F("Issue #{0}", 1);'
     Set-Content -LiteralPath "$directory/settings/Atrium.Settings/Probe.xaml" -Encoding utf8 -Value '<TextBlock Text="Open" />'
     @{source='en';languages=@(@{tag='en';name='English'},@{tag='zh-Hans';name='中文'},@{tag='fr';name='Français'})} |
         ConvertTo-Json -Depth 10 | Set-Content -LiteralPath "$directory/locales/manifest.json" -Encoding utf8
