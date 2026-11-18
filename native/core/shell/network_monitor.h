@@ -14,6 +14,9 @@ namespace atrium {
 
 constexpr size_t kNetworkPoints = 60; // a minute of history, one point a second
 
+// Converts MIB_IF_ROW2::ReceiveLinkSpeed (bits/s) to Mbps; NDIS_LINK_SPEED_UNKNOWN (~0) is 0.
+inline double LinkSpeedMbps(uint64_t bitsPerSecond) { return bitsPerSecond == ~uint64_t{0} ? 0.0 : double(bitsPerSecond) / 1000000.0; }
+
 // One second of the link, bytes in and out.
 struct NetworkRate {
     float down = 0, up = 0;

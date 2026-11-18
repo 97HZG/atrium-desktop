@@ -575,9 +575,11 @@ public sealed partial class MainWindow
 
         // Match the selected desktop's grid, including mixed scaling.
         var displays = DesktopDisplay.Read();
-        var display = displays.First(d => d.Id == CurrentSettings.DesktopDisplay ||
-            (d.Primary && !displays.Any(other => other.Id == CurrentSettings.DesktopDisplay)));
-        double workW = display.WorkWidth / display.Scale, workH = display.WorkHeight / display.Scale;
+        var display = displays.FirstOrDefault(d => d.Id == CurrentSettings.DesktopDisplay)
+            ?? displays.FirstOrDefault(d => d.Primary)
+            ?? displays.FirstOrDefault();
+        double workW = display is { WorkWidth: > 0, WorkHeight: > 0, Scale: > 0 } ? display.WorkWidth / display.Scale : 1920;
+        double workH = display is { WorkWidth: > 0, WorkHeight: > 0, Scale: > 0 } ? display.WorkHeight / display.Scale : 1032;
         int cols = Math.Max(1, (int)((workW - 2 * WMargin + WGap) / (WCell + WGap)));
         int rows = Math.Max(1, (int)((workH - 2 * WMargin - 90 + WGap) / (WCell + WGap)));
         double stageW = WidgetStage.ActualWidth > 0 ? WidgetStage.ActualWidth : 760;

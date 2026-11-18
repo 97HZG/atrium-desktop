@@ -81,7 +81,7 @@ void NetworkMonitor::Sample()
         linked_ = true;
         luid_ = pick->InterfaceLuid.Value;
         name_ = pick->Alias[0] ? pick->Alias : pick->Description;
-        linkMbps_ = double(pick->ReceiveLinkSpeed) / 1000000.0;
+        linkMbps_ = LinkSpeedMbps(pick->ReceiveLinkSpeed);
         down_ = up_ = 0;
         if (dt > 0) {
             if (auto it = before.find(luid_); it != before.end()) {

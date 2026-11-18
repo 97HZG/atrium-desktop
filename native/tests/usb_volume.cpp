@@ -58,6 +58,19 @@ void CheckReconciliation()
 
     volumes.Sync(Attached());
     volumes.Observe({DBT_DEVICEREMOVEPENDING, kE});
+    Check(volumes.Sync({kC | kE, {{L'E', {}}}}).empty(), "an unreadable ejecting volume stays watched");
+    removed = volumes.Sync({kC, {}});
+    Check(removed.size() == 1 && removed[0].label == L"BACKUP" && removed[0].ejected, "a failed query during eject keeps the cached label and eject hint");
+
+    volumes.Sync(Attached());
+    volumes.Observe({DBT_DEVICEREMOVEPENDING, kE});
+    Check(volumes.Sync({kC | kE, {{L'E', {L"", L"volume-A"}}}}).empty(), "a partial query during eject stays watched");
+    removed = volumes.Sync({kC, {}});
+    Check(removed.size() == 1 && removed[0].label == L"BACKUP" && removed[0].ejected,
+          "a failed label query with identity still present keeps the cached label");
+
+    volumes.Sync(Attached());
+    volumes.Observe({DBT_DEVICEREMOVEPENDING, kE});
     removed = volumes.Sync(Attached(L"volume-B"));
     Check(removed.size() == 1 && !removed[0].ejected, "drive-letter reuse removes the old identity without a safe-eject claim");
 }

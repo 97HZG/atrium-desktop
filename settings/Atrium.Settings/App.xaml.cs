@@ -5,13 +5,20 @@ namespace Atrium.Settings;
 
 public partial class App : Application
 {
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string? cls, string title);
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lparam);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc proc, IntPtr lparam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetProp(IntPtr hwnd, string name);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int cmd);
     [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, uint message, UIntPtr wparam, IntPtr lparam);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int MessageBox(IntPtr hwnd, string text, string title, uint type);
-    internal const uint OpenAboutMessage = 0x8000 + 31;
+    [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, char[] buffer, ref uint size);
+    internal const string WindowProp = "Atrium.Settings.Window";
+    internal const uint OpenPageMessage = 0x8000 + 31;
 
     public static string WindowTitle => Loc.T("Atrium Settings");
     internal static MainWindow? CurrentWindow { get; private set; }
@@ -47,17 +54,11 @@ public partial class App : Application
         {
             _instance.Dispose();
             _instance = null;
-            nint other = FindWindow(null, WindowTitle);
+            nint other = FindSettingsWindow();
             if (other != IntPtr.Zero)
             {
                 _ = GetWindowThreadProcessId(other, out uint pid);
-                bool same = false;
-                try
-                {
-                    using var process = System.Diagnostics.Process.GetProcessById((int)pid);
-                    same = string.Equals(process.MainModule?.FileName, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase);
-                }
-                catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                bool same = string.Equals(ProcessPath(pid), Environment.ProcessPath, StringComparison.OrdinalIgnoreCase);
                 if (!same)
                 {
                     _ = MessageBox(IntPtr.Zero,
@@ -68,10 +69,8 @@ public partial class App : Application
                 }
                 ShowWindow(other, 9 /* SW_RESTORE */);
                 SetForegroundWindow(other);
-                string[] command = Environment.GetCommandLineArgs();
-                int page = Array.IndexOf(command, "--page");
-                if (page >= 0 && page + 1 < command.Length && command[page + 1] == "about")
-                    PostMessage(other, OpenAboutMessage, UIntPtr.Zero, IntPtr.Zero);
+                if (PageFromArgs(Environment.GetCommandLineArgs()) is int page)
+                    PostMessage(other, OpenPageMessage, (UIntPtr)page, IntPtr.Zero);
             }
             Exit();
             return;
@@ -110,6 +109,56 @@ public partial class App : Application
         var state = (_pendingCurrent, _pendingSaved);
         _pendingCurrent = _pendingSaved = null;
         return state;
+    }
+
+    internal static int? PageFromArgs(string[] args)
+    {
+        int i = Array.IndexOf(args, "--page");
+        if (i < 0 || i + 1 >= args.Length) return null;
+        return args[i + 1] switch
+        {
+            "material" => 0,
+            "shape" => 1,
+            "dock" => 2,
+            "notify" => 3,
+            "widgets" => 4,
+            "stage" => 5,
+            "displays" => 6,
+            "system" => 7,
+            "design" => 8,
+            "about" => 9,
+            "start" => 10,
+            "tray" => 11,
+            "status" => 12,
+            "clock" => 13,
+            "ime" => 14,
+            _ => null,
+        };
+    }
+
+    private static nint FindSettingsWindow()
+    {
+        nint found = IntPtr.Zero;
+        EnumWindows((hwnd, _) =>
+        {
+            if (GetProp(hwnd, WindowProp) == IntPtr.Zero) return true;
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    private static string? ProcessPath(uint pid)
+    {
+        nint process = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
+        if (process == IntPtr.Zero) return null;
+        try
+        {
+            char[] buffer = new char[1024];
+            uint size = (uint)buffer.Length;
+            return QueryFullProcessImageName(process, 0, buffer, ref size) ? new string(buffer, 0, (int)size) : null;
+        }
+        finally { CloseHandle(process); }
     }
 
     internal static void SignalStartupReady(bool coreReady)

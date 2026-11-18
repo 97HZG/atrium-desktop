@@ -118,3 +118,7 @@ target_include_directories(ime_status_tests PRIVATE ../core)
 target_compile_definitions(ime_status_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(ime_status_tests PRIVATE user32 imm32)
 add_test(NAME ime_status COMMAND ime_status_tests)
+
+add_executable(network_monitor_tests network_monitor.cpp)
+target_include_directories(network_monitor_tests PRIVATE ../core)
+add_test(NAME network_monitor COMMAND network_monitor_tests)

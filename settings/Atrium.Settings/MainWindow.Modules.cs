@@ -52,6 +52,7 @@ public sealed partial class MainWindow
 
     private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
     {
+        if (args.DidPositionChange) UpdateWindowMinimumSize();
         bool minimized = sender.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
         if (minimized == _minimized) return;
         _minimized = minimized;

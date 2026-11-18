@@ -90,8 +90,13 @@ std::vector<RemovedVolume> UsbVolumes::Sync(const UsbVolumeSnapshot& snapshot)
             ++it; // keep the cached identity if a still-present disk could not be queried
         }
     }
-    for (const auto& [letter, volume] : snapshot.volumes)
-        watched_[letter] = volume;
+    for (const auto& [letter, volume] : snapshot.volumes) {
+        auto& cached = watched_[letter];
+        if (!volume.identity.empty())
+            cached.identity = volume.identity;
+        if (!volume.label.empty())
+            cached.label = volume.label;
+    }
     return removed;
 }
 

@@ -20,7 +20,17 @@ namespace Atrium.Settings;
 
 public sealed partial class MainWindow : Window, IDisposable
 {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorRect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo { public int Size; public MonitorRect Bounds, Work; public uint Flags; }
+
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromRect(IntPtr rect, uint flags);
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool SetProp(IntPtr hwnd, string name, IntPtr data);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr RemoveProp(IntPtr hwnd, string name);
     private delegate IntPtr SubclassProc(IntPtr hwnd, uint message, UIntPtr wparam, IntPtr lparam, UIntPtr id, UIntPtr data);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(IntPtr hwnd, SubclassProc proc, UIntPtr id, UIntPtr data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(IntPtr hwnd, SubclassProc proc, UIntPtr id);
@@ -84,7 +94,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private BarSettings _saved = new();
     private bool _loading;
     private bool _previewBusy, _previewPending;
-    private bool _closePending;
+    private bool _closePending, _closeAfterCore;
     private ContentDialog? _dialog; // the one shown (AskAsync)
     private readonly FrameworkElement[] _mains = [];
     private readonly FrameworkElement?[] _sides = [];
@@ -131,30 +141,38 @@ public sealed partial class MainWindow : Window, IDisposable
             AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "atrium.ico"));
-        double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
+        nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        SetProp(hwnd, App.WindowProp, 1);
+        uint dpi = GetDpiForWindow(hwnd);
+        double scale = (dpi > 0 ? dpi : 96) / 96.0;
         // A roomy default (the preview is the centre of the window), never larger than the screen.
-        var work = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-        int width = Math.Min((int)(1440 * scale), work.Width * 92 / 100), height = Math.Min((int)(920 * scale), work.Height * 92 / 100);
-        AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(work.X + (work.Width - width) / 2, work.Y + (work.Height - height) / 2, width, height));
-        if (AppWindow.Presenter is OverlappedPresenter presenter)
+        if (DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary) is { } area)
         {
-            presenter.PreferredMinimumWidth = (int)(980 * scale);
-            presenter.PreferredMinimumHeight = (int)(680 * scale);
+            var work = area.WorkArea;
+            int width = Math.Min((int)(1440 * scale), work.Width * 92 / 100), height = Math.Min((int)(920 * scale), work.Height * 92 / 100);
+            AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(work.X + (work.Width - width) / 2, work.Y + (work.Height - height) / 2, width, height));
         }
+        UpdateWindowMinimumSize();
         AppWindow.Closing += OnClosing;
         AppWindow.Changed += OnAppWindowChanged;
-        nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _updateMessage = (handle, message, wparam, lparam, id, data) =>
         {
-            if (message == App.OpenAboutMessage) { SelectPage(9); return IntPtr.Zero; }
+            if (message == App.OpenPageMessage)
+            {
+                ulong page = wparam.ToUInt64();
+                if (page < (ulong)_mains.Length) SelectPage((int)page);
+                return IntPtr.Zero;
+            }
+            if (message == 0x02E0) UpdateWindowMinimumSize((uint)(wparam.ToUInt64() & 0xFFFF), lparam);
             if (message is 0x007E or 0x02E0 || (message == 0x001A && wparam.ToUInt64() == 0x002F))
-                DispatcherQueue.TryEnqueue(RefreshDisplays); // hotplug, DPI or work-area changed
+                DispatcherQueue.TryEnqueue(() => { RefreshDisplays(); UpdateWindowMinimumSize(); }); // hotplug, DPI or work-area changed
             return DefSubclassProc(handle, message, wparam, lparam);
         };
         SetWindowSubclass(hwnd, _updateMessage, 1, UIntPtr.Zero);
         Closed += (_, _) =>
         {
             Dispose();
+            RemoveProp(hwnd, App.WindowProp);
             RemoveWindowSubclass(hwnd, _updateMessage, 1);
             _updateCheck?.Cancel();
             _updatesClosed = true;
@@ -201,35 +219,48 @@ public sealed partial class MainWindow : Window, IDisposable
         VersionText.Text = Loc.F("Version {0}", v?.ToString(3) ?? "1.0.0");
         ShowStatus(false);
         // `--page widgets` (the widgets' menu): open on that page.
-        string[] args = Environment.GetCommandLineArgs();
-        int page = startPage >= 0 ? startPage
-            : Array.IndexOf(args, "--page") is int i && i >= 0 && i + 1 < args.Length
-            ? args[i + 1] switch
-            {
-                "shape" => 1,
-                "dock" => 2,
-                "notify" => 3,
-                "widgets" => 4,
-                "stage" => 5,
-                "displays" => 6,
-                "system" => 7,
-                "about" => 9,
-                "start" => 10,
-                "tray" => 11,
-                "status" => 12,
-                "clock" => 13,
-                "ime" => 14,
-                _ => 0
-            } : 0;
+        int page = startPage >= 0 ? startPage : App.PageFromArgs(Environment.GetCommandLineArgs()) ?? 0;
         SelectPage(page);
         _ = ConnectAndLoadAsync();
         _ = CheckForUpdatesAsync(); // once per settings window; no resident polling
+    }
+
+    private void UpdateWindowMinimumSize(uint dpi = 0, IntPtr suggestedRect = 0)
+    {
+        if (AppWindow.Presenter is not OverlappedPresenter presenter) return;
+        if (dpi == 0) dpi = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        double scale = (dpi > 0 ? dpi : 96) / 96.0;
+        int minWidth = (int)(980 * scale), minHeight = (int)(680 * scale);
+        int workW = 0, workH = 0;
+        if (suggestedRect != IntPtr.Zero)
+        {
+            nint monitor = MonitorFromRect(suggestedRect, 2 /* MONITOR_DEFAULTTONEAREST */);
+            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
+            {
+                workW = info.Work.Right - info.Work.Left;
+                workH = info.Work.Bottom - info.Work.Top;
+            }
+        }
+        else if (DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary) is { } area)
+        {
+            workW = area.WorkArea.Width;
+            workH = area.WorkArea.Height;
+        }
+        if (workW > 0 && workH > 0)
+        {
+            minWidth = Math.Min(minWidth, workW);
+            minHeight = Math.Min(minHeight, workH);
+        }
+        presenter.PreferredMinimumWidth = minWidth;
+        presenter.PreferredMinimumHeight = minHeight;
     }
 
     // A language switch builds the new settings window while this one is
     // still open; release the core pipe first so the new window can connect.
     internal void ReleaseForReload()
     {
+        RemoveProp(WinRT.Interop.WindowNative.GetWindowHandle(this), App.WindowProp);
         _updatesClosed = true;
         _updateCheck?.Cancel();
         _downloadTimer?.Stop();
@@ -665,6 +696,12 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private async Task ConnectAndLoadAsync()
     {
+        try { await LoadFromCoreAsync(); }
+        finally { FinishCoreChange(); }
+    }
+
+    private async Task LoadFromCoreAsync()
+    {
         await _client.ConnectAsync(800);
         var (saved, current) = await _client.GetAsync();
         if (_updatesClosed) return;
@@ -694,6 +731,15 @@ public sealed partial class MainWindow : Window, IDisposable
             _reconnectTimer.Tick += async (_, _) => await ReconnectAsync();
             _reconnectTimer.Start();
         }
+    }
+
+    private void FinishCoreChange(bool watch = false)
+    {
+        _coreChanging = false;
+        if (_updatesClosed) return;
+        if (watch) WatchCore();
+        ShowStatus(_client.Connected);
+        if (_closeAfterCore) { _closeAfterCore = false; _ = CloseRequestedAsync(); }
     }
 
     // The core started again on its own (an update, the guard after a crash, a launch from
@@ -835,7 +881,9 @@ public sealed partial class MainWindow : Window, IDisposable
                 WatchCore();
                 using var quit = Process.Start(new ProcessStartInfo(exe, "--exit") { UseShellExecute = false, CreateNoWindow = true })
                     ?? throw new InvalidOperationException(Loc.T("Could not send the quit request."));
-                await quit.WaitForExitAsync();
+                using var waitTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                try { await quit.WaitForExitAsync(waitTimeout.Token); }
+                catch (OperationCanceledException) { throw new TimeoutException(Loc.T("Atrium has not quit yet. Try again later.")); }
                 if (quit.ExitCode != 0) throw new InvalidOperationException(Loc.T("Atrium has not quit yet. Try again later."));
                 _client.Disconnect(coreStopped: true);
             }
@@ -844,12 +892,7 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             ShowMessage(InfoBarSeverity.Error, start ? Loc.T("Could not start") : Loc.T("Could not close"), error.Message);
         }
-        finally
-        {
-            _coreChanging = false;
-            WatchCore();
-            ShowStatus(_client.Connected);
-        }
+        finally { FinishCoreChange(watch: true); }
     }
 
     // ---- Changes made elsewhere ----
@@ -1528,7 +1571,8 @@ public sealed partial class MainWindow : Window, IDisposable
     // and update button explicitly use the same save/exit path before calling it.
     private async Task CloseRequestedAsync()
     {
-        if (_closePending || _coreChanging) return;
+        if (_closePending) return;
+        if (_coreChanging) { _closeAfterCore = true; return; }
         if (_dialog != null) // a close while a dialog is up dismisses the dialog
         {
             _dialog.Hide();
