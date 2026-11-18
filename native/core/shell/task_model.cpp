@@ -1591,11 +1591,15 @@ struct TaskModel::Impl {
         return std::nullopt;
     }
 
+    // A hung window never reads the command: Windows carries it out. A slow one still reads it after
+    // the timeout, and a second restore would take a maximized window back to its normal size (#84).
     static void SysCommand(HWND h, WPARAM command)
     {
         DWORD_PTR ignored = 0;
-        if (IsHungAppWindow(h) || !SendMessageTimeoutW(h, WM_SYSCOMMAND, command, 0, SMTO_ABORTIFHUNG, 500, &ignored))
+        if (IsHungAppWindow(h))
             ShowWindowAsync(h, command == SC_RESTORE ? SW_RESTORE : SW_MINIMIZE);
+        else
+            SendMessageTimeoutW(h, WM_SYSCOMMAND, command, 0, SMTO_ABORTIFHUNG, 500, &ignored);
     }
 
     static void BringToFront(HWND h)
