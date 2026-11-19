@@ -11,50 +11,108 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   package:
     # Visual Studio 2022 (MSVC 14.4x), as the developers': windows-latest moved to Visual Studio 18, whose
     # standard library refuses clang-tidy 19. A newer toolchain is an upgrade of its own (LLVM 20, the baseline).
     runs-on: windows-2022
+    timeout-minutes: 25
     steps:
+      # Pin actions/* to 40-char commit SHAs in a networked pass.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Cache LLVM 19 tools
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/llvm-19.1.0-19.1.5
+          key: llvm-19.1.0-19.1.5-win-x64
       # Visual Studio's LLVM is 19, the runner's newer: the same clang-tidy and clang-format as the developers'.
       - name: Pin clang-tidy and clang-format to 19
         shell: pwsh
+        env:
+          LLVM_DIR: ${{ runner.tool_cache }}/llvm-19.1.0-19.1.5
+          LLVM_CACHE_HIT: ${{ steps.llvm-cache.outputs.cache-hit }}
         run: |
-          python -m pip install --quiet --target "$env:RUNNER_TEMP\llvm" clang-tidy==19.1.0 clang-format==19.1.5
+          function Find-LlvmExes([string]$dir) {
+            if (-not (Test-Path -LiteralPath $dir)) { return @() }
+            @(Get-ChildItem $dir -Recurse -Include clang-tidy.exe, clang-format.exe |
+                Where-Object FullName -Match '\\data\\')
+          }
+          $exes = Find-LlvmExes $env:LLVM_DIR
+          $hasTidy = [bool]($exes | Where-Object Name -eq 'clang-tidy.exe')
+          $hasFormat = [bool]($exes | Where-Object Name -eq 'clang-format.exe')
+          if ($env:LLVM_CACHE_HIT -ne 'true' -or -not ($hasTidy -and $hasFormat)) {
+            if (Test-Path -LiteralPath $env:LLVM_DIR) { Remove-Item -LiteralPath $env:LLVM_DIR -Recurse -Force }
+            python -m pip install --quiet --only-binary=:all: --target "$env:LLVM_DIR" clang-tidy==19.1.0 clang-format==19.1.5
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            $exes = Find-LlvmExes $env:LLVM_DIR
+            if (-not ($exes | Where-Object Name -eq 'clang-tidy.exe') -or -not ($exes | Where-Object Name -eq 'clang-format.exe')) {
+              throw "Expected clang-tidy.exe and clang-format.exe under $env:LLVM_DIR"
+            }
+          }
           # The binaries the wheels carry, not their Python launchers.
-          Get-ChildItem "$env:RUNNER_TEMP\llvm" -Recurse -Include clang-tidy.exe, clang-format.exe | Where-Object FullName -Match '\\data\\' |
-              ForEach-Object DirectoryName | Sort-Object -Unique | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: Lint (text, native rules, clang-format, clang-tidy)
-        shell: pwsh
-        # A push or a pull request: what it changed (and the units including a changed header).
-        run: >-
-          ./tools/lint.ps1 -Tidy ${{ github.event_name == 'pull_request' && format('-Base origin/{0}', github.base_ref)
-          || github.event_name == 'push' && format('-Base {0}', github.event.before) || '' }}
+          $exes | ForEach-Object DirectoryName | Sort-Object -Unique | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Check localization tables
         shell: pwsh
         run: ./tools/check-localization.ps1
       - name: Test localization validation
         shell: pwsh
         run: ./tools/tests/check-localization.tests.ps1
+      - name: Test updater and package scripts
+        shell: pwsh
+        run: ./tools/tests/update.tests.ps1
       - name: Build native, settings, the tests and the portable package
         shell: pwsh
-        run: ./tools/build.ps1 -Zip -Tests
+        run: ./tools/build.ps1 -Zip -Tests -Ninja
+      - name: Lint (text, native rules, clang-format, clang-tidy, .NET)
+        shell: pwsh
+        env:
+          GH_EVENT: ${{ github.event_name }}
+          GH_BASE_REF: ${{ github.base_ref }}
+          GH_BEFORE: ${{ github.event.before }}
+        # A push or a pull request: what it changed (and the units including a changed header).
+        run: |
+          $baseArgs = @()
+          if ($env:GH_EVENT -eq 'pull_request') {
+            $baseArgs = @('-Base', "origin/$env:GH_BASE_REF")
+          } elseif ($env:GH_EVENT -eq 'push') {
+            $before = $env:GH_BEFORE
+            if ($before -and $before -notmatch '^0+$') {
+              git rev-parse --verify --quiet "$before^{commit}" *> $null
+              if ($LASTEXITCODE -eq 0) {
+                git merge-base --is-ancestor $before HEAD *> $null
+                if ($LASTEXITCODE -eq 0) { $baseArgs = @('-Base', $before) }
+              }
+            }
+          }
+          ./tools/lint.ps1 -Tidy -DotNet -BuildDir native/build/win-x64 @baseArgs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Test lint rules
+        shell: pwsh
+        run: ./tools/tests/lint.tests.ps1
       - name: Run native and settings regression checks
         shell: pwsh
         run: |
-          ctest --test-dir native/build/win-x64 -C Release --output-on-failure --timeout 60
+          ctest --test-dir native/build/win-x64 --output-on-failure --timeout 60
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          dotnet run --project tests/SettingsChecks/SettingsChecks.csproj -c Release
+          dotnet run --project tests/SettingsChecks/SettingsChecks.csproj -c Release -- --core-normalizer native/build/win-x64/tests/display_settings_tests.exe
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet run --project tests/LocalizationChecks/LocalizationChecks.csproj -c Release
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify packaged portable zip
+        shell: pwsh
+        run: ./tools/verify-package.ps1 -SmokeStart
       - uses: actions/upload-artifact@v7
         with:
           name: Atrium-win-x64
