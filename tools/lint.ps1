@@ -13,6 +13,7 @@ param(
     [string]$Base,
     [string[]]$Paths,
     [int]$MaxLines = 0,
+    [string[]]$SeedMetric,
     [switch]$Tidy,
     [switch]$DotNet,
     [switch]$Fix,
@@ -25,12 +26,37 @@ $baselinePath = Join-Path $Root 'tools/lint-baseline.json'
 $errors = [System.Collections.Generic.List[string]]::new()
 $counts = [ordered]@{}
 $Paths = @($Paths | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+$SeedMetric = @($SeedMetric | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 if ($UpdateBaseline -and ($Base -or $Paths -or $MaxLines -or -not $Tidy)) {
     throw 'lint: -UpdateBaseline requires -Tidy and cannot be used with -Base, -Paths, or -MaxLines'
+}
+if ($SeedMetric -and -not $UpdateBaseline) {
+    throw 'lint: -SeedMetric requires -UpdateBaseline -Tidy and cannot be used with -Base, -Paths, or -MaxLines'
 }
 
 function Rel([string]$path) { [IO.Path]::GetRelativePath($Root, $path).Replace('\', '/') }
 function Fail([string]$where, [string]$rule, [string]$why) { $errors.Add("${where}: ${rule}: $why") }
+function BaselineFile([string]$keyFile) { if ($keyFile -match '^(?:settings|tools)/') { $keyFile } else { "native/$keyFile" } }
+function Get-KeyMetricTag([string]$key) {
+    $p = $key.Split('|', 3)
+    if ($p[1] -eq 'file-lines' -and $p[0] -match '^(settings|tools)/') { "$($Matches[1])/file-lines" } else { $p[1] }
+}
+function Read-Baseline([hashtable]$map) {
+    foreach ($k in @($map.Keys)) {
+        $v = $map[$k]
+        if (($v -is [int] -or $v -is [long]) -and $v -gt 0 -and $v -le [int]::MaxValue) { $map[$k] = [int]$v }
+        else { Fail 'tools/lint-baseline.json' 'baseline' "$k must be a positive integer"; $map[$k] = 0 }
+    }
+    $map
+}
+$baseline = Read-Baseline $(if (Test-Path $baselinePath) { Get-Content $baselinePath -Raw | ConvertFrom-Json -AsHashtable } else { @{} })
+if ($SeedMetric) {
+    $existingTags = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($k in $baseline.Keys) { [void]$existingTags.Add((Get-KeyMetricTag $k)) }
+    foreach ($tag in $SeedMetric) {
+        if ($existingTags.Contains($tag)) { throw "lint: -SeedMetric '$tag' already has entries in tools/lint-baseline.json" }
+    }
+}
 function Tail([string[]]$lines, [int]$n = 15) {
     if (-not $lines -or -not $lines.Count) { return '(no output)' }
     ($lines | Select-Object -Last $n) -join "`n"
@@ -140,18 +166,21 @@ if ($Fix) {
 }
 
 # --- Text: every source and configuration file ---------------------------------------------------------------
+$fileLines = 800 # a file longer than this is split by what it does
 $text = '\.(cpp|h|hlsl|cs|xaml|ps1|csproj|props|json|yml|md|cmake|txt|manifest|rc)$|(^|/)(CMakeLists\.txt|\.[a-z-]+)$'
 $code = '\.(cpp|h|hlsl|cs|xaml|ps1)$'
 foreach ($rel in $files | Where-Object { $_ -match $text -and $_ -notmatch '^tests/fixtures/' }) {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $Root $rel))
     if (-not $bytes.Length) { continue }
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF -and $rel -notmatch '\.ps1$') {
-        Fail $rel 'bom' 'UTF-8 without a byte order mark'
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    if ($hasBom -and $rel -notmatch '\.ps1$') { Fail $rel 'bom' 'UTF-8 without a byte order mark' }
+    if (-not $hasBom -and $rel -in @('tools/Uninstall.ps1', 'tools/Update.ps1')) {
+        Fail $rel 'bom' 'UTF-8 with BOM required for PowerShell 5.1'
     }
     if ($bytes[-1] -ne 10) { Fail $rel 'final-newline' 'end the file with a newline' }
     $content = [Text.Encoding]::UTF8.GetString($bytes)
     $crlf = $rel -match '\.(ps1|sln)$'
-    $lines = $content.TrimEnd("`n").Split("`n")
+    $lines = ($content -replace '\n\z', '').Split("`n")
     $blank = 0
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
@@ -164,10 +193,13 @@ foreach ($rel in $files | Where-Object { $_ -match $text -and $_ -notmatch '^tes
         if ($line -match '\s$' -and $rel -notmatch '\.md$') { Fail $where 'trailing-space' 'delete it' }
         # A line of one XAML attribute or one string (a sentence to translate) cannot be wrapped further.
         $unbreakable = ($rel.EndsWith('.xaml') -and $line -match '^\s*[\w:.]+="[^"]*"\s*/?>?\s*$') -or
-            ($rel -match '\.(cs|cpp|h)$' -and $line -match '^\s*((Loc\.[TF]|Tr|TrFormat)\()?L?"(?:[^"\\]|\\.)*"\)?[,;)]*\s*$')
+            ($rel -match '\.(cs|cpp|h)$' -and $line -match '^\s*((Loc\.(?:T|F|Plural)|Tr(?:Format|Plural)?)\()?L?"(?:[^"\\]|\\.)*"\)?[,;)]*\s*$')
         if ($rel -match $code -and $line.Length -gt 160 -and -not $unbreakable) { Fail $where 'line-length' "$($line.Length) > 160 columns" }
         $blank = if ($line.Trim()) { 0 } else { $blank + 1 }
         if ($blank -eq 2 -and $rel -match $code) { Fail $where 'blank-lines' 'one blank line at most' }
+    }
+    if ($rel -match '^(?:settings/.*\.(?:cs|xaml)|tools/.*\.ps1)$' -and $lines.Count -gt $fileLines) {
+        $counts["$rel|file-lines"] = $lines.Count
     }
 }
 
@@ -176,88 +208,300 @@ foreach ($rel in $files | Where-Object { $_ -match '\.xaml$' }) {
     $lines = [IO.File]::ReadAllLines((Join-Path $Root $rel))
     $depth = 0
     $open = $false
+    $inComment = $false
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        $s = $lines[$i].Trim()
+        $raw = $lines[$i]
+        $s = $raw.Trim()
+        if ($inComment) {
+            if ($s.Contains('-->')) { $inComment = $false }
+            continue
+        }
+        if (-not $s.StartsWith('<!--')) {
+            if ($s -match '<!--(?!.*-->)') { $inComment = $true; $s = ($s -replace '\s*<!--.*$', '').Trim() }
+            else { $s = ($s -replace '\s*<!--.*?-->', '').Trim() }
+        }
         if ($open) {
             if ($s.EndsWith('/>') -or $s -match '</[\w:.]+>$') { $open = $false } elseif ($s.EndsWith('>')) { $open = $false; $depth++ }
             continue
         }
         if (-not $s.StartsWith('<') -or $s.StartsWith('<?')) { continue }
         if ($s.StartsWith('</')) { $depth-- }
-        $indent = $lines[$i].Length - $lines[$i].TrimStart(' ').Length
+        $indent = $raw.Length - $raw.TrimStart(' ').Length
         if ($indent -ne 4 * $depth) { Fail "${rel}:$($i + 1)" 'xaml-indent' "indent $(4 * $depth) spaces, the element's depth" }
-        if ($s.StartsWith('</') -or $s.StartsWith('<!--') -or $s.EndsWith('/>') -or $s -match '</[\w:.]+>$') { continue }
+        if ($s.StartsWith('<!--')) {
+            if (-not $s.Contains('-->')) { $inComment = $true }
+            continue
+        }
+        if ($s.StartsWith('</') -or $s.EndsWith('/>') -or $s -match '</[\w:.]+>$') { continue }
         if ($s.EndsWith('>')) { $depth++ } else { $open = $true }
     }
 }
 
-# --- Native: layers, banned and ratcheted constructs ----------------------------------------------------------
+# --- C# layer: pure logic/model files stay free of WinUI; LocalizationValidation compiles standalone ----------
+$csLayer = 'BarSettings.cs', 'BitsTransfer.cs', 'CoreClient.cs', 'CornerProfile.cs', 'DesktopDisplay.cs', 'GameFinder.cs',
+    'GlassPreview.cs', 'LocalizationValidation.cs', 'Photo.cs', 'ReleaseInfo.cs', 'ReleaseInstaller.cs', 'ShellIcons.cs'
+foreach ($rel in $files | Where-Object { $_ -match '^settings/Atrium\.Settings/.*\.cs$' }) {
+    $name = [IO.Path]::GetFileName($rel)
+    if ($csLayer -notcontains $name) { continue }
+    $lines = [IO.File]::ReadAllLines((Join-Path $Root $rel))
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $codeLine = $lines[$i] -replace '//.*$', ''
+        if ($codeLine -cmatch '\b(?:Microsoft\.UI|Microsoft\.Graphics|Windows\.UI)\b') {
+            Fail "${rel}:$($i + 1)" 'csharp-layer' "$name may not reference WinUI/UI namespaces"
+        } elseif ($name -eq 'LocalizationValidation.cs' -and (
+            $codeLine -cmatch '^\s*(?:global\s+)?using\s+(?!var\b|\()(?:static\s+)?(?!(?:System\b|[A-Za-z_]\w*\s*=\s*System\b))' -or
+            $codeLine -cmatch '\b(?:Microsoft|Windows)\.[A-Za-z_]')) {
+            Fail "${rel}:$($i + 1)" 'csharp-layer' 'LocalizationValidation.cs may only use System namespaces'
+        }
+    }
+    if ($name -eq 'LocalizationValidation.cs' -and (-not $Paths -or (Test-Glob $rel $Paths))) {
+        $tmpDll = Join-Path ([IO.Path]::GetTempPath()) "atrium-loc-$([Guid]::NewGuid().ToString('N')).dll"
+        try {
+            $prelude = "#nullable enable`nglobal using System;`nglobal using System.Collections.Generic;`nglobal using System.Linq;`n"
+            Add-Type -TypeDefinition ($prelude + ($lines -join "`n")) -OutputAssembly $tmpDll -ErrorAction Stop
+        } catch {
+            Fail $rel 'csharp-layer' "LocalizationValidation.cs must compile standalone: $($_.Exception.Message)"
+        } finally {
+            Remove-Item $tmpDll -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# --- Native: layers, header cycles, banned and ratcheted constructs -------------------------------------------
+function Get-NativeCodeLines([string[]]$lines) {
+    $out = [string[]]::new($lines.Count)
+    $inComment = $false
+    $rawEnd = $null
+    $special = [char[]]@('/', '"', "'")
+    $sb = [System.Text.StringBuilder]::new()
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $len = $line.Length
+        $pos = 0
+        $null = $sb.Clear()
+        while ($pos -lt $len) {
+            if ($inComment) {
+                $end = $line.IndexOf('*/', $pos, [StringComparison]::Ordinal)
+                if ($end -lt 0) { $null = $sb.Append(' '); break }
+                $null = $sb.Append(' '); $pos = $end + 2; $inComment = $false; continue
+            }
+            if ($null -ne $rawEnd) {
+                $end = $line.IndexOf($rawEnd, $pos, [StringComparison]::Ordinal)
+                if ($end -lt 0) { break }
+                $pos = $end + $rawEnd.Length; $rawEnd = $null; continue
+            }
+            $hit = $line.IndexOfAny($special, $pos)
+            if ($hit -lt 0) { $null = $sb.Append($line, $pos, $len - $pos); break }
+            $ch = $line[$hit]
+            if ($ch -eq '/') {
+                if ($hit + 1 -lt $len -and $line[$hit + 1] -eq '/') { $null = $sb.Append($line, $pos, $hit - $pos); break }
+                if ($hit + 1 -lt $len -and $line[$hit + 1] -eq '*') {
+                    $null = $sb.Append($line, $pos, $hit - $pos).Append(' ')
+                    $end = $line.IndexOf('*/', $hit + 2, [StringComparison]::Ordinal)
+                    if ($end -lt 0) { $inComment = $true; break }
+                    $pos = $end + 2; continue
+                }
+                $null = $sb.Append($line, $pos, $hit - $pos + 1); $pos = $hit + 1; continue
+            }
+            $seg = $line.Substring($pos, $hit - $pos)
+            if ($ch -eq "'") {
+                $hasPrefix = $seg -cmatch '(?:^|[^0-9A-Za-z_])(u8|[LuU])$'
+                if ($hit -gt 0 -and $line[$hit - 1] -cmatch '[0-9A-Za-z_]' -and -not $hasPrefix) {
+                    $null = $sb.Append($seg).Append("'"); $pos = $hit + 1; continue
+                }
+                if ($hasPrefix) { $seg = $seg.Substring(0, $seg.Length - $Matches[1].Length) }
+                $null = $sb.Append($seg).Append("''")
+                $j = $hit + 1
+                while ($j -lt $len) { if ($line[$j] -eq '\') { $j += 2 } elseif ($line[$j] -eq "'") { $j++; break } else { $j++ } }
+                $pos = [Math]::Min($j, $len); continue
+            }
+            if ($seg -cmatch '(?:^|[^0-9A-Za-z_])((?:u8|[LuU])?R)$') {
+                $pfx = $Matches[1]
+                if ($line.Substring($hit) -cmatch '^"([^()\\\s]{0,16})\(') {
+                    $delim = $Matches[1]
+                    $null = $sb.Append($seg, 0, $seg.Length - $pfx.Length).Append('""')
+                    $rawEnd = ")$delim`""
+                    $end = $line.IndexOf($rawEnd, $hit + 2 + $delim.Length, [StringComparison]::Ordinal)
+                    if ($end -lt 0) { break }
+                    $pos = $end + $rawEnd.Length; $rawEnd = $null; continue
+                }
+            }
+            if ($seg -cmatch '(?:^|[^0-9A-Za-z_])(u8|[LuU])$') { $seg = $seg.Substring(0, $seg.Length - $Matches[1].Length) }
+            $null = $sb.Append($seg).Append('""')
+            $j = $hit + 1
+            while ($j -lt $len) { if ($line[$j] -eq '\') { $j += 2 } elseif ($line[$j] -eq '"') { $j++; break } else { $j++ } }
+            $pos = [Math]::Min($j, $len)
+        }
+        $out[$i] = $sb.ToString()
+    }
+    return ,$out
+}
+
 # Who may include whom. Root headers are either foundation (anyone) or composition (root only).
 $foundation = 'bar_edge.h', 'clock.h', 'icon_image.h', 'localization.h', 'localization_format.h', 'log.h', 'motion.h', 'notice.h', 'posted.h', 'resource.h',
     'pinned_app.h', 'settings.h', 'stage_excluded.h', 'status.h', 'win32_path.h'
 $layers = @{ render = @(); shell = @(); ui = @('render', 'shell') }
 # Configuration macros set before the headers that read them; any other value is a constexpr.
 $configMacros = 'SECURITY_WIN32', 'WIN32_LEAN_AND_MEAN', 'NOMINMAX', 'IDI_ATRIUM'
-$banned = [ordered]@{
-    'null-macro'    = @('\bNULL\b', 'use nullptr')
+$rawBanned = [ordered]@{
     'todo'          = @('\b(TODO|FIXME|XXX|HACK)\b', 'open an issue instead')
-    'endl'          = @('std::endl', "use '\n'")
-    'assert'        = @('\bassert\s*\(', 'handle the case or let it crash in a test')
-    'using-std'     = @('using\s+namespace\s+std\b', 'qualify std::')
-    'include-guard' = @('^#ifndef\s+\w+_H\w*\s*$', 'use #pragma once')
-    'print'         = @('\b(w?printf|std::w?cout|std::w?cerr|OutputDebugString\w*)\s*[(<]', 'use Log (tests print their results)')
-    'nolint'        = @('NOLINT(NEXTLINE|BEGIN|END)?(?!\([\w.,*-]+\): \S)', 'name the check and the reason: NOLINT(check): why')
+    'include-guard' = @('^\s*#\s*ifndef\s+\w+_H\w*\s*$', 'use #pragma once')
+    'nolint'        = @('\bNOLINT(?:NEXTLINE|BEGIN)?\b(?!\([\w.,*-]+\): \S)', 'name the check and the reason: NOLINT(check): why')
     'narration'     = @(('//\s*(Check|Get|Set|Call|Loop|Iterate|Increment|Decrement|Initialize|Create|Return|Update|Add|Remove|Handle)' +
         '\s+(if|the|a|an|whether|over|through)\b'), 'say why, not what the next line does')
+}
+$banned = [ordered]@{
+    'null-macro' = @('\bNULL\b', 'use nullptr')
+    'endl'       = @('std::endl', "use '\n'")
+    'assert'     = @('\bassert\s*\(', 'handle the case or let it crash in a test')
+    'using-std'  = @('using\s+namespace\s+std\b', 'qualify std::')
+    'print'      = @('\b(w?printf|std::w?cout|std::w?cerr|OutputDebugString\w*)\s*[(<]', 'use Log (tests print their results)')
+    'raw-new'    = @('(?<!\boperator\s)\bnew\s+(?:\([^)]*\)\s*)?[A-Za-z_:]', 'own it with std::unique_ptr / winrt::com_ptr')
+    'raw-delete' = @('(?<!\boperator\s)\bdelete(?:\s*\[\s*\])?(?:\s+[A-Za-z_*&]|\s*\()', 'own it with std::unique_ptr / winrt::com_ptr')
+    'pragma-lib' = @('#\s*pragma\s+comment\s*\(\s*lib\b', 'declare link libraries in native/core/CMakeLists.txt')
 }
 # Counted per file; a file may never hold more than its baseline.
 $ratcheted = [ordered]@{
     'catch-all'      = @('catch\s*\(\.\.\.\)', 'catch what can be thrown, at the boundary that can act on it')
     'try'            = @('\btry\s*\{', 'exceptions belong at API boundaries (WinRT, std::stoi), not around internal calls')
     'sleep'          = @('\bSleep\s*\(', 'wait on an event or a timer')
-    'raw-new'        = @('(=|return)\s*new\s', 'own it with std::unique_ptr / winrt::com_ptr')
-    'raw-delete'     = @('\bdelete\s+[\w\[]', 'own it with std::unique_ptr / winrt::com_ptr')
     'goto'           = @('\bgoto\b', 'structure the loop')
-    'commented-code' = @('^\s*//\s*([\w:.<>\[\]]+(->\w+)*\s*(\(.*\)|[+\-*/]?=[^=].*)|return\b.*|[{}])\s*;?\s*$', 'delete it; git keeps history')
+    'detach'         = @('\.detach\s*\(', 'join threads on shutdown or manage lifetime explicitly')
+    'commented-code' = @('^\s*//\s*([A-Za-z_][\w:]*(?:(?:\.|->)[A-Za-z_]\w*)*\s*(?:\([^;]*\)|[+\-*/]?=[^=][^;]*);|return\b[^;]*;|[{}])\s*$',
+        'delete it; git keeps history')
 }
-$fileLines = 800 # a file longer than this is split by what it does
+$headerEdges = @{}
+foreach ($rel in $native) { if ($rel -match '^native/core/.*\.h$') { $headerEdges[$rel.Substring(12)] = [System.Collections.Generic.List[string]]::new() } }
 
 foreach ($rel in $native) {
     $path = Join-Path $Root $rel
     $lines = [IO.File]::ReadAllLines($path)
+    $codeLines = Get-NativeCodeLines $lines
     $coreRel = if ($rel.StartsWith('native/core/')) { $rel.Substring(12) } else { '' }
     $from = if ($coreRel.Contains('/')) { $coreRel.Split('/')[0] } else { '' }
+    $isCoreHeader = $coreRel -and $rel -match '\.h$'
     if ($rel -match '\.h$' -and $lines.Count -and $lines[0] -notmatch '^// ') { Fail "${rel}:1" 'header-comment' 'begin with what the header is for' }
+    $ppStack = [System.Collections.Generic.List[string]]::new()
+    $rsState = 0
+    $rsDepth = 0
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
+        $codeLine = $codeLines[$i]
         $where = "${rel}:$($i + 1)"
+        foreach ($rule in $rawBanned.Keys) { if ($line -cmatch $rawBanned[$rule][0]) { Fail $where $rule $rawBanned[$rule][1] } }
         foreach ($rule in $banned.Keys) {
-            if ($line -cmatch $banned[$rule][0] -and -not ($rule -eq 'print' -and ($rel -match '^native/tests/' -or $coreRel -eq 'log.cpp'))) {
+            if ($codeLine -cmatch $banned[$rule][0] -and -not ($rule -eq 'print' -and ($rel -match '^native/tests/' -or $coreRel -eq 'log.cpp'))) {
                 Fail $where $rule $banned[$rule][1]
             }
         }
         if ($line -match '^\s*using\s+namespace\b' -and $rel -match '\.h$') { Fail $where 'using-in-header' 'qualify names in headers' }
-        $guarded = $i -and $lines[$i - 1] -match '^\s*#ifndef\s+(\w+)' -and $line -match "^\s*#define\s+$($Matches[1])\b"
-        if ($line -match '^\s*#define\s+(\w+)' -and $configMacros -notcontains $Matches[1] -and -not $guarded) {
-            Fail $where 'define' 'use constexpr (a macro only to supply what an older SDK lacks, under #ifndef)'
+        if ($line -match '^\s*#\s*ifndef\s+(\w+)') { $ppStack.Add($(if ($Matches[1] -ne 'ATRIUM_DEVELOPMENT') { $Matches[1] } else { '' })) }
+        elseif ($line -match '^\s*#\s*(?:if|ifdef)\b') { $ppStack.Add('') }
+        elseif ($line -match '^\s*#\s*(?:else|elif)\b') { if ($ppStack.Count) { $ppStack[$ppStack.Count - 1] = '' } }
+        elseif ($line -match '^\s*#\s*endif\b') { if ($ppStack.Count) { $ppStack.RemoveAt($ppStack.Count - 1) } }
+        if ($line -match '^\s*#\s*define\s+(\w+)') {
+            $macro = $Matches[1]
+            $isConst = $line -cmatch '^\s*#\s*define\s+[A-Z][A-Z0-9_]*\b(?!\()'
+            $guarded = $ppStack.Count -gt 0 -and $ppStack[-1]
+            if (-not $isConst -or (-not $guarded -and $configMacros -notcontains $macro)) {
+                Fail $where 'define' 'use constexpr (only uppercase constant macros under non-ATRIUM_DEVELOPMENT #ifndef)'
+            }
         }
-        if ($from -and $line -match '^\s*#include\s+"([^"]+)"') {
-            $target = [IO.Path]::GetFullPath((Join-Path (Split-Path $path) $Matches[1]))
-            if (-not (Test-Path $target)) { $target = [IO.Path]::GetFullPath((Join-Path $core $Matches[1])) }
-            if (-not (Test-Path $target)) { continue }
-            $to = [IO.Path]::GetRelativePath($core, $target).Replace('\', '/')
-            $toLayer = if ($to.Contains('/')) { $to.Split('/')[0] } else { '' }
-            $allowed = if ($toLayer) { $toLayer -eq $from -or $layers[$from] -contains $toLayer } else { $foundation -contains $to }
-            if (-not $allowed) { Fail $where 'layer' "$from/ may not include $to" }
+        if ($coreRel -and $line -match '^\s*#\s*include\s*([<"])([^>"]+)[>"]') {
+            $inc = $Matches[2]
+            if (-not $from -and $foundation -contains $coreRel -and $inc -match '^(?:winrt/|d3d|dcomp|uiautomation)') {
+                Fail $where 'layer' "$coreRel may not include <$inc>"
+            }
+            $target = [IO.Path]::GetFullPath((Join-Path (Split-Path $path) $inc))
+            if (-not (Test-Path $target)) { $target = [IO.Path]::GetFullPath((Join-Path $core $inc)) }
+            if (Test-Path $target) {
+                $to = [IO.Path]::GetRelativePath($core, $target).Replace('\', '/')
+                if (-not $to.StartsWith('..') -and -not [IO.Path]::IsPathRooted($to)) {
+                    if ($isCoreHeader -and $headerEdges.ContainsKey($to)) { [void]$headerEdges[$coreRel].Add($to) }
+                    $toLayer = if ($to.Contains('/')) { $to.Split('/')[0] } else { '' }
+                    if ($from) {
+                        if (-not $(if ($toLayer) { $toLayer -eq $from -or $layers[$from] -contains $toLayer } else { $foundation -contains $to })) {
+                            Fail $where 'layer' "$from/ may not include $to"
+                        }
+                    } elseif ($foundation -contains $coreRel -and ($toLayer -or $foundation -notcontains $to)) {
+                        Fail $where 'layer' "$coreRel may not include $to"
+                    }
+                }
+            }
+        }
+        if ($coreRel -eq 'bar.cpp') {
+            if ($rsState -eq 0 -and $codeLine -cmatch '\bBar::RenderSession\s*\([^;]*$') { $rsState = 1 }
+            if ($rsState -gt 0) {
+                foreach ($ch in $codeLine.ToCharArray()) {
+                    if ($ch -eq '{') { if ($rsState -eq 1) { $rsState = 2; $rsDepth = 1 } else { $rsDepth++ } }
+                    elseif ($ch -eq '}' -and $rsState -eq 2) { $rsDepth--; if ($rsDepth -eq 0) { $rsState = 0; break } }
+                }
+            }
+        }
+        if ($coreRel) {
+            foreach ($m in [regex]::Matches($codeLine, '\bSendMessage[AW]?\s*\(')) {
+                $tail = $codeLine.Substring($m.Index + $m.Length)
+                if ($i + 1 -lt $codeLines.Count) { $tail += ' ' + $codeLines[$i + 1] }
+                if ($i + 2 -lt $codeLines.Count) { $tail += ' ' + $codeLines[$i + 2] }
+                $pd = 1; $ok = $false
+                for ($k = 0; $k -lt $tail.Length; $k++) {
+                    $c = $tail[$k]
+                    if ($c -eq '(') { $pd++ }
+                    elseif ($c -eq ')') { $pd--; if ($pd -le 0) { break } }
+                    elseif ($c -eq ',' -and $pd -eq 1) { $ok = $tail.Substring($k + 1) -cmatch '^\s*TTM_'; break }
+                }
+                if (-not $ok) {
+                    Fail $where 'send-message' 'use SendMessageTimeoutW(..., SMTO_ABORTIFHUNG, ...) or PostMessageW (only TTM_* tooltip calls are exempt)'
+                }
+            }
+            if ($coreRel -ne 'shell/shell_taskbar.h') {
+                if ($codeLine -cmatch '\bSHAppBarMessage\s*\(') { Fail $where 'appbar-message' 'use AppBarMessage in shell/shell_taskbar.h' }
+                if ($codeLine -cmatch '\bShell_NotifyIconGetRect\s*\(') { Fail $where 'notify-icon-rect' 'use ShellNotifyIconRect in shell/shell_taskbar.h' }
+            }
+            if ($from -eq 'shell' -and $codeLine -cmatch '\bShowWindow\s*\(') {
+                Fail $where 'show-foreign-window' 'use ShowWindowAsync for windows owned by other processes'
+            }
+            if ($codeLine -cmatch '\bAttachThreadInput\s*\((?:[^()]|\([^()]*\))*,\s*(?:TRUE|true|1)\s*\)' -and
+                ($codeLines[[Math]::Max(0, $i - 10)..$i] -join "`n") -cnotmatch '\bIsHungAppWindow\b') {
+                Fail $where 'attach-thread-input' 'check IsHungAppWindow before AttachThreadInput(..., TRUE)'
+            }
+            if (($from -eq 'ui' -or $coreRel -eq 'main.cpp' -or ($coreRel -eq 'bar.cpp' -and $rsState -ne 2)) -and
+                $codeLine -cmatch '\b(?:Msg)?WaitFor(?:Single|Multiple)Objects?(?:Ex)?\s*\([^;]*\bINFINITE\b') {
+                Fail $where 'ui-infinite-wait' 'never wait with INFINITE on the UI thread'
+            }
+            if (($from -eq 'ui' -or $coreRel -in @('main.cpp', 'bar.cpp')) -and $codeLine -cmatch '\b\w*Async\([^;]*\)\.get\s*\(') {
+                Fail $where 'ui-winrt-blocking-get' 'do not block the UI thread with .get() on WinRT async operations'
+            }
+            if ($codeLine -cmatch '\bstd::thread\s*\(\s*\[\s*[=&]\s*(?:,|\])') {
+                Fail $where 'thread-default-capture' 'capture explicitly in std::thread lambdas; [=]/[&] captures this implicitly'
+            }
         }
     }
     $key = $rel.Substring(7)
     foreach ($rule in $ratcheted.Keys) {
-        $n = @($lines | Where-Object { $_ -cmatch $ratcheted[$rule][0] }).Count
+        if ($rule -eq 'detach' -and -not $coreRel) { continue }
+        $targetLines = if ($rule -eq 'commented-code') { $lines } else { $codeLines }
+        $n = @($targetLines | Where-Object { $_ -cmatch $ratcheted[$rule][0] }).Count
         if ($n) { $counts["$key|$rule"] = $n }
     }
     if ($lines.Count -gt $fileLines) { $counts["$key|file-lines"] = $lines.Count }
 }
+$cycleState = @{}
+function Find-HeaderCycle([string]$u, [string[]]$stack) {
+    $cycleState[$u] = 1
+    foreach ($v in $headerEdges[$u]) {
+        if ($cycleState[$v] -eq 1) {
+            $idx = [Array]::IndexOf($stack, $v)
+            $loop = $stack[$idx..($stack.Length - 1)]
+            $desc = ($loop + @($v)) -join ' -> '
+            foreach ($node in $loop) { Fail "native/core/$node" 'header-cycle' "include cycle: $desc" }
+        } elseif (-not $cycleState.ContainsKey($v)) {
+            Find-HeaderCycle $v ($stack + @($v))
+        }
+    }
+    $cycleState[$u] = 2
+}
+foreach ($h in ($headerEdges.Keys | Sort-Object)) { if (-not $cycleState.ContainsKey($h)) { Find-HeaderCycle $h @($h) } }
 
 # --- One version: the native project, the settings app and both manifests --------------------------------------
 $versions = [ordered]@{
@@ -298,7 +542,8 @@ elseif ($sources) {
 # --- clang-tidy: .clang-tidy over a Ninja build of the native tree --------------------------------------------
 if ($Tidy) {
     $build = Join-Path $Root 'native/build/tidy'
-    if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+    $cl = Get-Command cl.exe -ErrorAction SilentlyContinue
+    if (-not $cl -or $cl.Source -notmatch '[\\/]x64[\\/]cl\.exe$') {
         $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
         $vs = if (Test-Path $vswhere) { & $vswhere -latest -products * -property installationPath 2>$null } else { $null }
         $vcvars = if ($vs) { Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat' } else { $null }
@@ -409,35 +654,28 @@ if ($DotNet) {
 }
 
 # --- Ratchets ---------------------------------------------------------------------------------------------------
-function Read-Baseline([hashtable]$map) {
-    foreach ($k in @($map.Keys)) {
-        $v = $map[$k]
-        if (($v -is [int] -or $v -is [long]) -and $v -gt 0 -and $v -le [int]::MaxValue) { $map[$k] = [int]$v }
-        else { Fail 'tools/lint-baseline.json' 'baseline' "$k must be a positive integer"; $map[$k] = 0 }
-    }
-    $map
-}
 function Match-BaselineMoves([System.Collections.IDictionary]$oldMap, [System.Collections.IDictionary]$newMap) {
     $shrank = @{}
     $isShrank = {
-        param([string]$relNative)
-        if ($shrank.Contains($relNative)) { return $shrank[$relNative] }
-        $full = Join-Path $Root "native/$relNative"
-        if (-not (Test-Path $full)) { return ($shrank[$relNative] = $true) }
+        param([string]$keyFile)
+        if ($shrank.Contains($keyFile)) { return $shrank[$keyFile] }
+        $repoRel = BaselineFile $keyFile
+        $full = Join-Path $Root $repoRel
+        if (-not (Test-Path $full)) { return ($shrank[$keyFile] = $true) }
         $cur = [IO.File]::ReadAllLines($full).Count
         $rev = if ($Base) { $mergeBase } else { 'HEAD' }
-        $res = Invoke-Tool 'git' @('-C', $Root, 'show', "${rev}:native/$relNative") -AllowNonZero
+        $res = Invoke-Tool 'git' @('-C', $Root, 'show', "${rev}:$repoRel") -AllowNonZero
         # A file added and split in the same change has no prior version here; it cannot count as shrunk.
         $old = if ($res.ExitCode -eq 0) { $res.Lines.Count }
-            elseif ($oldMap.Contains("$relNative|file-lines")) { [int]$oldMap["$relNative|file-lines"] } else { 0 }
-        $shrank[$relNative] = ($cur -lt $old)
-        $shrank[$relNative]
+            elseif ($oldMap.Contains("$keyFile|file-lines")) { [int]$oldMap["$keyFile|file-lines"] } else { 0 }
+        $shrank[$keyFile] = ($cur -lt $old)
+        $shrank[$keyFile]
     }
     $added = @($newMap.Keys | Where-Object { -not $oldMap.Contains($_) } | Sort-Object { -[int]$newMap[$_] }, { $_ })
     $removed = [System.Collections.Generic.List[string]]::new()
     foreach ($k in ($oldMap.Keys | Sort-Object)) { if (-not $newMap.Contains($k)) { $removed.Add($k) } }
     $matched = @{}
-    foreach ($samePass in @($false, $true)) {
+    foreach ($samePass in @($true, $false)) {
         foreach ($k in $added) {
             if ($matched.Contains($k)) { continue }
             $p = $k.Split('|', 3)
@@ -456,7 +694,6 @@ function Match-BaselineMoves([System.Collections.IDictionary]$oldMap, [System.Co
     }
     $matched
 }
-$baseline = Read-Baseline $(if (Test-Path $baselinePath) { Get-Content $baselinePath -Raw | ConvertFrom-Json -AsHashtable } else { @{} })
 if ($Base) {
     $tree = Invoke-Tool 'git' @('-C', $Root, 'ls-tree', $mergeBase, '--', 'tools/lint-baseline.json') -AllowNonZero
     $gitOk = $tree.ExitCode -eq 0
@@ -473,6 +710,9 @@ if ($Base) {
         }
     }
     if ($gitOk) {
+        $baseTags = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($k in $baseBaseline.Keys) { [void]$baseTags.Add((Get-KeyMetricTag $k)) }
+        $lintChanged = $touchedFiles -contains 'tools/lint.ps1'
         foreach ($k in $baseline.Keys) {
             if ($baseBaseline.Contains($k) -and [int]$baseline[$k] -gt [int]$baseBaseline[$k]) {
                 Fail 'tools/lint-baseline.json' 'baseline' "$k rose ($($baseBaseline[$k]) -> $($baseline[$k]))"
@@ -481,6 +721,7 @@ if ($Base) {
         $baseMoves = Match-BaselineMoves $baseBaseline $baseline
         foreach ($k in $baseline.Keys) {
             if (-not $baseBaseline.Contains($k) -and -not $baseMoves.Contains($k)) {
+                if ($lintChanged -and -not $baseTags.Contains((Get-KeyMetricTag $k))) { continue }
                 Fail 'tools/lint-baseline.json' 'baseline' "$k added without a matching removed key"
             }
         }
@@ -490,12 +731,12 @@ $updateMoves = if ($UpdateBaseline) { Match-BaselineMoves $baseline $counts } el
 $advice = @{ 'file-lines' = "split it by what it does (at most $fileLines lines)"; 'complexity' = 'simplify it (cognitive complexity 40 at most)'
     'function-lines' = 'split it (120 lines at most)' }
 foreach ($key in $counts.Keys) {
-    if ($UpdateBaseline -and $updateMoves.Contains($key)) { continue }
+    if ($UpdateBaseline -and ($updateMoves.Contains($key) -or ($SeedMetric -contains (Get-KeyMetricTag $key)))) { continue }
     $limit = if ($baseline.Contains($key)) { [int]$baseline[$key] } else { 0 }
     if ([int]$counts[$key] -gt $limit) {
         $parts = $key.Split('|')
         $why = if ($ratcheted.Contains($parts[1])) { $ratcheted[$parts[1]][1] } else { $advice[$parts[1]] }
-        Fail "native/$($parts[0])" "$($parts[1..($parts.Count - 1)] -join ' ')" "$($counts[$key]) > $limit; $why"
+        Fail (BaselineFile $parts[0]) "$($parts[1..($parts.Count - 1)] -join ' ')" "$($counts[$key]) > $limit; $why"
     }
 }
 if (-not $UpdateBaseline -and (-not $Paths -or (Test-Glob 'tools/lint-baseline.json' $Paths))) {
@@ -504,7 +745,7 @@ if (-not $UpdateBaseline -and (-not $Paths -or (Test-Glob 'tools/lint-baseline.j
         if ($tidyKey -and -not $Tidy) { continue }
         if ($Base -and $tidyKey -and -not $fullRun) {
             $keyFile = $key.Split('|')[0]
-            if ((Test-Path (Join-Path $Root "native/$keyFile")) -and -not $analysed.Contains($keyFile)) { continue }
+            if ((Test-Path (Join-Path $Root (BaselineFile $keyFile))) -and -not $analysed.Contains($keyFile)) { continue }
         }
         if (-not $counts.Contains($key) -or [int]$counts[$key] -lt [int]$baseline[$key]) {
             $errors.Add("lint: $key is below its baseline; run ./tools/lint.ps1 -Tidy -UpdateBaseline")
@@ -542,7 +783,7 @@ if ($UpdateBaseline) {
     $next = [ordered]@{}
     foreach ($key in $counts.Keys | Sort-Object) {
         if ($baseline.Contains($key)) { $next[$key] = [Math]::Min([int]$baseline[$key], [int]$counts[$key]) }
-        elseif ($updateMoves.Contains($key)) { $next[$key] = [int]$counts[$key] }
+        elseif ($updateMoves.Contains($key) -or ($SeedMetric -contains (Get-KeyMetricTag $key))) { $next[$key] = [int]$counts[$key] }
     }
     [IO.File]::WriteAllText($baselinePath, ($next | ConvertTo-Json).Replace("`r`n", "`n") + "`n")
     "baseline: $($next.Count) entries"
