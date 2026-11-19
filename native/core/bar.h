@@ -149,9 +149,12 @@ private:
         std::shared_ptr<const IconImage> image;
     };
 
+    enum class SessionEnd { Exit, Switch, Retry };
+
     static LRESULT CALLBACK VisualProc(HWND, UINT, WPARAM, LPARAM);
     static LRESULT CALLBACK InputProc(HWND, UINT, WPARAM, LPARAM);
     LRESULT OnInput(HWND h, UINT m, WPARAM w, LPARAM l);
+    void ReadDisplays();
     void Bounce(const std::wstring& key);
     POINT LayoutPoint(POINT client) const;
     RECT EdgeZone() const;
@@ -170,7 +173,7 @@ private:
     std::wstring FileDragOver(POINT screen); // returns the app under the point
     void FileDragLeave();
     void RenderThread();
-    bool RenderSession(); // returns false to stop, true to rebuild (device lost, monitor changed)
+    SessionEnd RenderSession();
     void SetRegion(bool extended); // input region: the shape, plus the room above it while magnified
     static void CALLBACK WinEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD thread, DWORD time);
     void GuardStacking(const wchar_t* why);
@@ -261,6 +264,7 @@ private:
     RECT monitor_{};
     HMONITOR hmonitor_ = nullptr;
     std::vector<DisplayInfo> displays_;
+    std::vector<UINT> displayDpis_;
     std::wstring activeDisplay_;
     std::wstring displayOverride_; // an extra taskbar in all-displays mode
     HMONITOR summonMonitor_ = nullptr;

@@ -548,8 +548,9 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
     ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
     hasPresented_ = hasBackdrop_;
     HRESULT hr = swap_->Present(sync_, 0);
-    ready_ = false;
-    return hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET;
+    if (SUCCEEDED(hr))
+        ready_ = false;
+    return SUCCEEDED(hr);
 }
 
 } // namespace atrium

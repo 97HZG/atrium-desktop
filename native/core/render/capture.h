@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 namespace atrium {
@@ -37,6 +38,7 @@ public:
     virtual ID3D11Texture2D* Again() { return nullptr; }
     // Whether Atrium's windows may show in other captures while this one runs.
     virtual bool KeepsOwnWindowsOut() const = 0;
+    virtual void SetPaused(bool) {}
 };
 
 class MonitorCapture : public BackdropSource {
@@ -80,6 +82,7 @@ public:
     void Release() override;
     bool Lost() const override { return lost_; }
     bool KeepsOwnWindowsOut() const override { return true; }
+    void SetPaused(bool paused) override;
     static bool Temporary(HRESULT why);
 
 private:
@@ -93,7 +96,9 @@ private:
     HANDLE frameEvent_ = nullptr;
     HANDLE released_ = nullptr; // the render thread copied and released the frame
     HANDLE stop_ = nullptr;
-    std::atomic<bool> ready_{false}, lost_{false};
+    HANDLE resume_ = nullptr;
+    std::atomic<bool> ready_{false}, lost_{false}, paused_{false};
+    std::mutex mu_;
     std::thread thread_;
 };
 

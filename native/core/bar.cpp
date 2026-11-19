@@ -46,27 +46,16 @@ UINT AppBarNotice()
 
 constexpr wchar_t kVisualClass[] = L"AtriumBarVisual";
 constexpr wchar_t kInputClass[] = L"AtriumBarInput";
-constexpr wchar_t kClockKey[] = L"#clock";
-constexpr wchar_t kStartKey[] = L"#start";
-constexpr wchar_t kNotifyKey[] = L"#notify";
-constexpr wchar_t kTrayKey[] = L"#tray";
-constexpr wchar_t kImeKey[] = L"#ime";
-constexpr wchar_t kStatusKey[] = L"#status";
-constexpr wchar_t kMoreKey[] = L"#more";
-constexpr wchar_t kDesktopKey[] = L"#desktop";
+constexpr wchar_t kClockKey[] = L"#clock", kStartKey[] = L"#start", kNotifyKey[] = L"#notify", kTrayKey[] = L"#tray", kImeKey[] = L"#ime",
+                  kStatusKey[] = L"#status", kMoreKey[] = L"#more", kDesktopKey[] = L"#desktop";
 // Bar entries and the clock start with '#'; app keys are AUMIDs or paths.
 bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
 constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
-constexpr UINT_PTR kTooltipTimer = 1;
-constexpr UINT kTooltipDelayMs = 450;
+constexpr UINT_PTR kTooltipTimer = 1, kFileHoverTimer = 2, kGuardTimer = 3;
+constexpr UINT kTooltipDelayMs = 450, kPreviewSwapMs = 60, kFileHoverDelayMs = 600, kGuardMs = 1000;
 constexpr float kTooltipFont = 12.5f, kTooltipPadX = 12, kTooltipPadY = 6, kTooltipMinH = 28;
 constexpr float kTooltipTailH = 5, kTooltipTailHalfW = 12, kTooltipTailInset = 8;
-constexpr UINT kPreviewSwapMs = 60;
-constexpr UINT_PTR kFileHoverTimer = 2;
-constexpr UINT kFileHoverDelayMs = 600;
-constexpr UINT_PTR kGuardTimer = 3;
-constexpr UINT kGuardMs = 1000;
 constexpr UINT kGuardFastMs = 150; // while below a system taskbar the user is using
 constexpr UINT_PTR kSlideTimer = 4;   // the slide out is over: hide the windows
 constexpr UINT_PTR kPointerTimer = 5; // while covered: watch the pointer
@@ -387,15 +376,12 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display)
     }
 
     // Stacking guard: raised again when covered, hidden behind full-screen apps.
-    hooks_[0] =
-        SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, &Bar::WinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    hooks_[1] =
-        SetWinEventHook(EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND, nullptr, &Bar::WinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    // Maximizing, restoring and entering full screen move the window without a move-size loop.
-    hooks_[2] = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, &Bar::WinEvent, 0, 0,
-                                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    for (HWINEVENTHOOK hook : hooks_)
-        g_guards[hook] = this;
+    const DWORD evs[] = {EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MOVESIZEEND, EVENT_OBJECT_LOCATIONCHANGE};
+    for (int i = 0; i < 3; ++i) {
+        hooks_[i] = SetWinEventHook(evs[i], evs[i], nullptr, &Bar::WinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        if (hooks_[i])
+            g_guards[hooks_[i]] = this;
+    }
     SetTimer(input_, kGuardTimer, kGuardMs, nullptr);
 
     render_ = std::thread([this] { RenderThread(); });
@@ -625,30 +611,25 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         if (w == kDisplayTimer) {
             WatchDisplays();
             return 0;
-        }
-        if (w == kCoverTimer) {
+        } else if (w == kCoverTimer) {
             KillTimer(h, kCoverTimer);
             coverPending_ = false;
             UpdateCover();
             return 0;
-        }
-        if (w == kTooltipTimer) {
+        } else if (w == kTooltipTimer) {
             KillTimer(h, kTooltipTimer);
             if (pressed_.empty() && !dragging_)
                 ShowTooltip();
             return 0;
-        }
-        if (w == kFileHoverTimer) {
+        } else if (w == kFileHoverTimer) {
             KillTimer(h, kFileHoverTimer);
             if (!fileHoverKey_.empty() && !IsEntry(fileHoverKey_) && onFileDragHover)
                 onFileDragHover(fileHoverKey_);
             return 0;
-        }
-        if (w == kGuardTimer) {
+        } else if (w == kGuardTimer) {
             GuardStacking(nullptr);
             return 0;
-        }
-        if (w == kSlideTimer) {
+        } else if (w == kSlideTimer) {
             KillTimer(h, kSlideTimer);
             if (tucked_ && !slidOut_) {
                 slidOut_ = true;
@@ -675,6 +656,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             scene_.pressedKey.clear();
             scene_.pointerX = scene_.pointerY = -1;
             pressed_.clear();
+            pressedLeft_ = false;
             Publish();
         }
         return 0;
@@ -713,12 +695,12 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             }
             return 0;
         }
-        ReleaseCapture();
         std::wstring key = HitTest(pt);
         bool same = !pressed_.empty() && key == pressed_;
         pressed_.clear();
         pressedLeft_ = false;
         scene_.pressedKey.clear();
+        ReleaseCapture();
         Publish();
         if (!same)
             return 0;
@@ -727,23 +709,15 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         if (IsEntry(key)) {
             if (m != WM_LBUTTONUP)
                 return 0;
-            RECT anchor = EntryRect(key);
-            if (key == kClockKey && onClockClick)
-                onClockClick();
-            else if (key == kStartKey && onStartClick)
-                onStartClick(anchor);
-            else if (key == kNotifyKey && onNotifyClick)
-                onNotifyClick(anchor);
-            else if (key == kTrayKey && onTrayClick)
-                onTrayClick(anchor);
-            else if (key == kDesktopKey && onDesktopClick)
-                onDesktopClick();
-            else if (key == kStatusKey && onStatusClick)
-                onStatusClick(anchor);
-            else if (key == kImeKey && onImeClick)
-                onImeClick();
-            else if (key == kMoreKey && onOverflow)
+            const RECT anchor = EntryRect(key);
+            if (key == kMoreKey && onOverflow)
                 onOverflow(hidden_, anchor);
+            for (auto [k, f] : {std::pair{kStartKey, &onStartClick}, {kNotifyKey, &onNotifyClick}, {kTrayKey, &onTrayClick}, {kStatusKey, &onStatusClick}})
+                if (key == k && *f)
+                    (*f)(anchor);
+            for (auto [k, f] : {std::pair{kClockKey, &onClockClick}, {kDesktopKey, &onDesktopClick}, {kImeKey, &onImeClick}})
+                if (key == k && *f)
+                    (*f)();
         } else if (launch ? bool(onLaunch) : bool(onActivate)) {
             // Starting an app (or another instance) hops its icon, as in the macOS Dock.
             auto t = std::ranges::find_if(items_, [&](const TaskItem& i) { return i.key == key; });
@@ -754,9 +728,14 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     }
     case WM_CAPTURECHANGED:
-        if (dragging_ && reinterpret_cast<HWND>(l) != h) {
+        if (reinterpret_cast<HWND>(l) != h && dragging_) {
             EndDrag(false); // capture taken away (e.g. a system menu opened)
             SetRegion(false);
+        } else if (reinterpret_cast<HWND>(l) != h && (!pressed_.empty() || pressedLeft_)) {
+            pressed_.clear();
+            pressedLeft_ = false;
+            scene_.pressedKey.clear();
+            Publish();
         }
         return 0;
     case WM_MOUSEWHEEL: { // over the status icon: the volume
@@ -877,12 +856,21 @@ void Bar::FileDragLeave()
     Publish();
 }
 
+void Bar::ReadDisplays()
+{
+    displays_ = ConnectedDisplays();
+    displayDpis_.assign(displays_.size(), 96);
+    for (size_t i = 0; i < displays_.size(); ++i)
+        if (UINT dx = 96, dy = 96; SUCCEEDED(GetDpiForMonitor(displays_[i].monitor, MDT_EFFECTIVE_DPI, &dx, &dy)))
+            displayDpis_[i] = dx;
+}
+
 void Bar::Apply(const Settings& s)
 {
     const bool changed = settings_.dockDisplayMode != s.dockDisplayMode || settings_.dockDisplay != s.dockDisplay;
     settings_ = s;
     if (displays_.empty())
-        displays_ = ConnectedDisplays();
+        ReadDisplays();
     if (changed)
         activeDisplay_.clear();
     summonMonitor_ = nullptr;
@@ -901,15 +889,15 @@ void Bar::WatchDisplaysIfNeeded()
         KillTimer(input_, kDisplayTimer);
 }
 
-void Bar::RefreshDisplays(bool workAreaOnly)
+void Bar::RefreshDisplays(bool)
 {
-    std::vector<DisplayInfo> before = std::move(displays_);
-    displays_ = ConnectedDisplays();
+    auto before = std::exchange(displays_, {});
+    auto beforeDpis = std::exchange(displayDpis_, {});
+    ReadDisplays();
     WatchDisplaysIfNeeded();
-    const bool same = workAreaOnly && std::ranges::equal(before, displays_, [](const DisplayInfo& a, const DisplayInfo& b) {
-                          return a.monitor == b.monitor && a.id == b.id && EqualRect(&a.bounds, &b.bounds) && a.primary == b.primary;
-                      });
-    if (!same)
+    if (beforeDpis != displayDpis_ || !std::ranges::equal(before, displays_, [](const DisplayInfo& a, const DisplayInfo& b) {
+            return a.monitor == b.monitor && a.id == b.id && EqualRect(&a.bounds, &b.bounds) && a.primary == b.primary;
+        }))
         ++displayGeneration_; // HMONITOR can be reused after a mode or adapter change.
     summonMonitor_ = nullptr;
     if (dragging_)
@@ -958,6 +946,7 @@ void Bar::WatchDisplays()
     revealed_ = true;
     leftAt_ = now;
     UpdateAutoHide();
+    UpdateNearWatch();
     Raise();
 }
 
@@ -1272,15 +1261,15 @@ void Bar::Relayout()
             keep[t.key] = c;
         }
         scene.items.push_back(std::move(it));
-        // Hit cells split the gaps; the last one reaches the separator.
-        int hl = k == 0 ? appsMin - gap / 2 : appsLeft + k * pitch - gap / 2;
-        int hr = k == slots - 1 ? rightLeft - groupGap : appsLeft + k * pitch + plate + (gap - gap / 2);
+        // Hit cells split the gaps.
+        int hl = appsLeft + k * pitch - gap / 2;
+        int hr = appsLeft + k * pitch + plate + (gap - gap / 2);
         hits_.push_back({t.key, RECT{hl, hitTop, hr, hitBottom}});
     }
     if (more) {
         int left = appsLeft + n * pitch;
         scene.extras.push_back(entry(kMoreKey, left, L"\uE712"));
-        hits_.push_back({kMoreKey, RECT{n ? left - gap / 2 : appsMin - gap / 2, hitTop, rightLeft - groupGap, hitBottom}});
+        hits_.push_back({kMoreKey, RECT{left - gap / 2, hitTop, left + plate + gap / 2, hitBottom}});
     }
     icons_ = std::move(keep);
     appsLeft_ = appsLeft;
@@ -1381,7 +1370,8 @@ void Bar::SetRegion(bool extended)
         CombineRgn(rgn, rgn, top, RGN_OR);
         DeleteObject(top);
     }
-    SetWindowRgn(input_, rgn, FALSE);
+    if (!SetWindowRgn(input_, rgn, FALSE))
+        DeleteObject(rgn);
     appliedRgn_[0] = barW;
     appliedRgn_[1] = barH;
     appliedRgn_[2] = radius_;
@@ -1548,6 +1538,7 @@ void Bar::UpdateAutoHide()
         SetRegion(false);
         // The painter's slide out takes kSlideOutMs; then the windows go.
         SetTimer(input_, kSlideTimer, UINT(BarPainter::kSlideOutMs) + 60, nullptr);
+        UpdateNearWatch();
         Publish();
         return;
     }
@@ -1558,6 +1549,7 @@ void Bar::UpdateAutoHide()
     } else {
         Publish();
     }
+    UpdateNearWatch();
     Raise();
 }
 
@@ -1618,7 +1610,7 @@ void Bar::WatchNear(bool publish)
 void Bar::UpdateNearWatch()
 {
     const bool wanted = settings_.magnify > 1.001f && ((settings_.hoverRise && settings_.riseNear) || settings_.magnifyNear);
-    if (visible_ && wanted)
+    if (visible_ && !tucked_ && !slidOut_ && wanted)
         SetTimer(input_, kNearTimer, kNearMs, nullptr);
     else {
         KillTimer(input_, kNearTimer);
@@ -1977,20 +1969,40 @@ void Bar::RenderThread()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     while (WaitForSingleObject(quit_, 0) == WAIT_TIMEOUT) {
-        bool rebuild = false;
+        SessionEnd end = SessionEnd::Retry;
         try {
-            rebuild = RenderSession();
+            end = RenderSession();
         } catch (const winrt::hresult_error& e) {
             Log(L"render: 0x%08X %s; rebuilding in 1 s", static_cast<unsigned>(e.code()), e.message().c_str());
-            rebuild = true;
         }
-        if (!rebuild || WaitForSingleObject(quit_, 1000) != WAIT_TIMEOUT)
+        if (end == SessionEnd::Exit || (end == SessionEnd::Retry && WaitForSingleObject(quit_, 1000) != WAIT_TIMEOUT))
             break;
     }
     winrt::uninit_apartment();
 }
 
 namespace {
+
+void SampleBarInks(const BarScene& s, const Settings& st, RECT w, const Readback& rb, bool& darkClock, bool& darkApps)
+{
+    const EdgeFrame ef{s.edge, D2D1::RectF(0, 0, float(w.right - w.left), float(w.bottom - w.top))};
+    auto decide = [&](bool& dark, D2D1_RECT_F r) {
+        if (r.right <= r.left)
+            return;
+        r = ef.ToArea(r);
+        const float p = float(GlassRenderer::kPad), lum = GlassLuma(st, rb.RegionLuma(r.left + p, r.top + p, r.right + p, r.bottom + p));
+        dark = lum > kDarkInkAbove ? true : lum < kLightInkBelow ? false : dark;
+    };
+    D2D1_RECT_F r = s.clock;
+    for (const auto& it : s.extras)
+        if (s.clock.right <= s.clock.left && it.key != kStartKey && it.key != kMoreKey)
+            r = r.right <= r.left ? it.plate : D2D1::RectF(std::min(r.left, it.plate.left), s.bar.top, std::max(r.right, it.plate.right), s.bar.bottom);
+    if (r.right <= r.left)
+        r = D2D1::RectF(std::max(s.bar.left, s.bar.right - (s.bar.bottom - s.bar.top)), s.bar.top, s.bar.right, s.bar.bottom);
+    decide(darkClock, r);
+    decide(darkApps, s.items.empty() ? D2D1::RectF(s.bar.left, s.bar.top, s.separatorX > s.bar.left ? s.separatorX : s.bar.right, s.bar.bottom) :
+                                       D2D1::RectF(s.items.front().icon.left, s.bar.top, s.items.back().icon.right, s.bar.bottom));
+}
 
 // Whether the screen on the inner side of `bar` (screen px), as GDI reads it, has any light in it: the
 // capture's picture of the same place coming all black then means the capture is what is black
@@ -2027,7 +2039,7 @@ bool ScreenLitAbove(BarEdge edge, RECT bar)
 
 } // namespace
 
-bool Bar::RenderSession()
+Bar::SessionEnd Bar::RenderSession()
 {
     // Wait for the first layout.
     HANDLE first[] = {quit_, wake_};
@@ -2040,7 +2052,7 @@ bool Bar::RenderSession()
         if (snap.hmonitor)
             break;
         if (WaitForMultipleObjects(2, first, FALSE, INFINITE) == WAIT_OBJECT_0)
-            return false;
+            return SessionEnd::Exit;
     }
 
     Gpu gpu = Gpu::ForMonitor(snap.hmonitor);
@@ -2067,7 +2079,7 @@ bool Bar::RenderSession()
             if (tries == 0)
                 Log(L"render: desktop duplication unavailable for now (0x%08X), trying again every second", static_cast<unsigned>(why));
             if (WaitForSingleObject(quit_, 1000) != WAIT_TIMEOUT)
-                return false;
+                return SessionEnd::Exit;
         }
         if (!capture && elsewhere)
             PreferPowerSavingGpu();
@@ -2085,7 +2097,7 @@ bool Bar::RenderSession()
     }
     // --debug-capturable with Windows.Graphics.Capture: a frozen backdrop (later frames contain the glass).
     const bool freeze = debugCapturable_ && !capture->KeepsOwnWindowsOut();
-    DesktopBackdrop desktop(gpu, frame_); // the widgets' backdrop (D38)
+    DesktopBackdrop desktop(gpu, wake_); // the widgets' backdrop (D38)
     GlassRenderer renderer(gpu, visual_, snap.window.right - snap.window.left, snap.window.bottom - snap.window.top);
     BarPainter painter(renderer.D2D(), renderer.DWrite());
 
@@ -2467,7 +2479,7 @@ bool Bar::RenderSession()
     };
 
     HANDLE handles[] = {quit_, wake_, frame_};
-    bool panelsMoving = false, barOwed = false;
+    bool panelsMoving = false, barOwed = false, paused = false, pendingSnap = !snap.visible;
     for (;;) {
         // Animations, and glass owed a frame (not Ready last time), run on the compositor's
         // clock (D45): one wake-up per composed frame, at the display's rate. A timeout would
@@ -2477,29 +2489,32 @@ bool Bar::RenderSession()
         bool paced = animating || panelsMoving || owed;
         bool readback =
             renderer.ReadbackPending() || std::ranges::any_of(panels, [](const auto& e) { return e.second.renderer && e.second.renderer->ReadbackPending(); });
-        DWORD w = WAIT_FAILED;
-        if (paced && kWaitForCompositorClock) {
-            w = kWaitForCompositorClock(3, handles, 100);
-            if (w == WAIT_OBJECT_0 + 3 || w == WAIT_TIMEOUT) {
+        const DWORD hc = 3 - DWORD(paused);
+        DWORD w = WAIT_OBJECT_0 + 1;
+        if (pendingSnap)
+            pendingSnap = false;
+        else if (paced && kWaitForCompositorClock) {
+            w = kWaitForCompositorClock(hc, handles, 100);
+            if (w == WAIT_OBJECT_0 + hc || w == WAIT_TIMEOUT)
                 ++tick;
-            } else if (w > WAIT_OBJECT_0 + 3) {
-                w = WaitForMultipleObjects(3, handles, FALSE, 6); // no clock (the display is off)
+            else if (w > WAIT_OBJECT_0 + hc) {
+                w = WaitForMultipleObjects(hc, handles, FALSE, 6); // no clock (the display is off)
                 ++tick;
             }
         } else {
             // Idle, a clock with seconds wakes just past the next whole second: a plain second's
             // timeout drifts by the work of each pass, and every so often a second is skipped.
-            DWORD idle = 1000;
-            if (snap.settings.showClock && snap.settings.showClockSeconds) {
+            DWORD idle = paused ? INFINITE : 1000;
+            if (!paused && snap.settings.showClock && snap.settings.showClockSeconds) {
                 SYSTEMTIME t{};
                 GetLocalTime(&t);
                 idle = DWORD(1000 - t.wMilliseconds) + 16;
             }
-            w = WaitForMultipleObjects(3, handles, FALSE, paced ? 6 : readback ? 3 : idle);
+            w = WaitForMultipleObjects(hc, handles, FALSE, paced ? 6 : readback ? 3 : idle);
             ++tick;
         }
         if (w == WAIT_OBJECT_0)
-            return false;
+            return SessionEnd::Exit;
         if (GetTickCount64() - statsStart >= 60000) {
             std::ranges::sort(workMs);
             auto pct = [&](double q) { return workMs.empty() ? 0.0 : workMs[std::min(workMs.size() - 1, size_t(q * double(workMs.size())))]; };
@@ -2530,13 +2545,18 @@ bool Bar::RenderSession()
             std::lock_guard g(lock_);
             snap = snapshot_;
         }
-        ID3D11Texture2D* frame = capture->Acquire();
+        if (snap.hmonitor != captureMonitor || snap.displayGeneration != captureGeneration || RemoteVisible() != remote)
+            return SessionEnd::Switch; // selected display or its capture source changed
+        const bool needScreen = snap.visible || std::ranges::any_of(snap.panels, [](const GlassPanel& p) { return p.visible && !p.desktop; });
+        if (paused != !needScreen)
+            capture->SetPaused(paused = !needScreen), missedFrame |= paused;
+        ID3D11Texture2D* frame = needScreen ? capture->Acquire() : nullptr;
         if (capture->Lost())
-            return true; // a new source (display mode change, secure desktop)
+            return SessionEnd::Retry; // a new source (display mode change, secure desktop)
         // On Windows.Graphics.Capture after Desktop Duplication failed (it can after a lock or sleep):
         // Desktop Duplication again once it works, not only after a restart (#19).
         // One that came back black is not tried again on the same displays: it would start fine and be black again.
-        if (!remote && duplicationFailed_ && !capture->KeepsOwnWindowsOut() && GetTickCount64() >= duplicationRetryAt_ &&
+        if (needScreen && !remote && duplicationFailed_ && !capture->KeepsOwnWindowsOut() && GetTickCount64() >= duplicationRetryAt_ &&
             captureGeneration != blackGeneration_) {
             duplicationRetryAt_ = GetTickCount64() + 30000;
             HRESULT why = S_OK;
@@ -2544,14 +2564,12 @@ bool Bar::RenderSession()
             if (DuplicationCapture::Create(gpu, snap.hmonitor, frame_, why, elsewhere)) {
                 duplicationFailed_ = false;
                 Log(L"render: desktop duplication available again");
-                return true;
+                return SessionEnd::Switch;
             }
         }
-        if (snap.hmonitor != captureMonitor || snap.displayGeneration != captureGeneration || RemoteVisible() != remote)
-            return true; // selected display or its capture source changed
         if (blackOut && GetTickCount64() >= wallpaperUntil_) {
             Log(L"render: back to capturing the screen");
-            return true;
+            return SessionEnd::Switch;
         }
         if (!snap.visible) {
             // Retire the bar's reads even while hidden. Otherwise its last pending
@@ -2583,10 +2601,10 @@ bool Bar::RenderSession()
             // Submit the copies from the duplicated frame before handing it back: AcquireNextFrame
             // waits for the GPU to be done with the last frame while it holds the shared device's
             // lock, so unsubmitted copies would wait for a Flush that can no longer get the lock.
-            gpu.context->Flush();
-            capture->Release();
+            if (needScreen)
+                gpu.context->Flush(), capture->Release();
             if (lost)
-                return true;
+                return SessionEnd::Retry;
             animating = barOwed = false; // drawn afresh when the bar shows again
             continue;
         }
@@ -2636,7 +2654,7 @@ bool Bar::RenderSession()
                 panelsMs.push_back(elapsedMs() - p0);
             if (lost) {
                 Log(L"render: device lost (popup glass)");
-                return true;
+                return SessionEnd::Retry;
             }
         }
         source = nullptr;
@@ -2675,7 +2693,7 @@ bool Bar::RenderSession()
                     } else {
                         Log(L"render: the capture is black over a lit screen; starting it again");
                     }
-                    return true;
+                    return SessionEnd::Retry;
                 }
             }
         }
@@ -2684,28 +2702,7 @@ bool Bar::RenderSession()
             changed |= rb->changed;
             if (!rb->luma.empty())
                 backdropBrightest = *std::max_element(rb->luma.begin(), rb->luma.end());
-            // Ink per region, from what the glass shows there: the backdrop
-            // luminance mixed with the tint. Hysteresis avoids flicker.
-            float tm = float(1.0 - snap.settings.transparency);
-            uint32_t tint = snap.settings.tint;
-            float tintLuma = (0.2126f * float((tint >> 16) & 0xFF) + 0.7152f * float((tint >> 8) & 0xFF) + 0.0722f * float(tint & 0xFF)) / 255.f;
-            const EdgeFrame edgeFrame{snap.scene.edge,
-                                      D2D1::RectF(0, 0, float(snap.window.right - snap.window.left), float(snap.window.bottom - snap.window.top))};
-            auto decide = [&](bool& dark, D2D1_RECT_F r) {
-                if (r.right <= r.left)
-                    return;
-                r = edgeFrame.ToArea(r);
-                const float pad = float(GlassRenderer::kPad);
-                float lum = rb->RegionLuma(r.left + pad, r.top + pad, r.right + pad, r.bottom + pad) * (1 - tm) + tintLuma * tm;
-                if (!dark && lum > kDarkInkAbove)
-                    dark = true;
-                else if (dark && lum < kLightInkBelow)
-                    dark = false;
-            };
-            decide(darkClock, snap.scene.clock);
-            if (!snap.scene.items.empty())
-                decide(darkApps,
-                       D2D1::RectF(snap.scene.items.front().icon.left, snap.scene.bar.top, snap.scene.items.back().icon.right, snap.scene.bar.bottom));
+            SampleBarInks(snap.scene, snap.settings, snap.window, *rb, darkClock, darkApps);
             dotBackdrop = std::move(*rb);
         }
         auto ink = [&](bool autoDark) { return snap.settings.textColor == L"dark" || (snap.settings.textColor == L"auto" && autoDark); };
@@ -2759,7 +2756,7 @@ bool Bar::RenderSession()
         });
         if (!ok) {
             Log(L"render: device lost");
-            return true;
+            return SessionEnd::Retry;
         }
         ++presents;
         workMs.push_back(elapsedMs());

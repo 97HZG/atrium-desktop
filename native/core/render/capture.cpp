@@ -216,6 +216,7 @@ std::unique_ptr<DuplicationCapture> DuplicationCapture::Create(const Gpu& gpu, H
     c->frameEvent_ = frameEvent;
     c->released_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     c->stop_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    c->resume_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
     c->thread_ = std::thread([p = c.get()] { p->Pump(); });
     Log(L"capture: monitor %ux%u started (DXGI Desktop Duplication)", desc.ModeDesc.Width, desc.ModeDesc.Height);
     why = S_OK;
@@ -234,11 +235,38 @@ DuplicationCapture::~DuplicationCapture()
     }
     CloseHandle(released_);
     CloseHandle(stop_);
+    CloseHandle(resume_);
+}
+
+void DuplicationCapture::SetPaused(bool paused)
+{
+    if (paused == paused_.load())
+        return;
+    if (!paused) {
+        paused_ = false;
+        SetEvent(resume_);
+        return;
+    }
+    ResetEvent(resume_);
+    paused_ = true;
+    std::lock_guard g(mu_);
+    if (ready_) {
+        texture_ = nullptr;
+        held_ = nullptr;
+        ready_ = false;
+        dup_->ReleaseFrame();
+        SetEvent(released_);
+    }
 }
 
 void DuplicationCapture::Pump()
 {
     while (WaitForSingleObject(stop_, 0) == WAIT_TIMEOUT) {
+        while (paused_) {
+            HANDLE wait[] = {stop_, resume_};
+            if (WaitForMultipleObjects(2, wait, FALSE, INFINITE) == WAIT_OBJECT_0)
+                return;
+        }
         DXGI_OUTDUPL_FRAME_INFO info{};
         winrt::com_ptr<IDXGIResource> res;
         // No waiting inside: the device is shared with the render thread
@@ -260,8 +288,15 @@ void DuplicationCapture::Pump()
             dup_->ReleaseFrame(); // only the pointer moved
             continue;
         }
-        held_ = res;
-        ready_ = true;
+        {
+            std::lock_guard g(mu_);
+            if (paused_) {
+                dup_->ReleaseFrame();
+                continue;
+            }
+            held_ = res;
+            ready_ = true;
+        }
         SetEvent(frameEvent_);
         // Holds the frame until the render thread has copied it.
         HANDLE wait[] = {stop_, released_};
@@ -275,6 +310,7 @@ void DuplicationCapture::Pump()
 ID3D11Texture2D* DuplicationCapture::Acquire()
 {
     Release(); // the frame handed out last time
+    std::lock_guard g(mu_);
     if (!ready_)
         return nullptr;
     texture_ = held_.try_as<ID3D11Texture2D>();
@@ -289,6 +325,7 @@ ID3D11Texture2D* DuplicationCapture::Acquire()
 
 void DuplicationCapture::Release()
 {
+    std::lock_guard g(mu_);
     if (!texture_)
         return; // nothing handed out (a frame may be waiting: it stays)
     texture_ = nullptr;
