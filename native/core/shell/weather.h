@@ -52,6 +52,13 @@ struct Weather {
 std::wstring WeatherCondition(int code);
 std::wstring WeatherCachePath();
 
+// Pure parsing helpers exposed for unit tests.
+bool IsValidWeatherCoords(double lat, double lon);
+bool ParseWeatherLocationJson(const std::string& body, int serviceIndex, double& lat, double& lon, std::wstring& city);
+bool ParseWeatherForecastJson(const std::string& body, double lat, double lon, const std::wstring& city, bool english, Weather& out);
+std::wstring WeatherToJsonString(const Weather& w);
+bool WeatherFromJsonString(const std::wstring& text, Weather& out);
+
 class WeatherSource {
 public:
     using Fetcher = std::function<bool(const std::atomic_bool& quit, Weather& out)>;

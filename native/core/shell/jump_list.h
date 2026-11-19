@@ -48,4 +48,16 @@ bool IsRemotePath(const std::wstring& path);
 // an app's file apart means reading them, which must not happen on a click.
 void StartJumpListIndex(bool enabled);
 
+// Pure buffer parsers exposed for unit tests.
+struct LinkStrings {
+    std::wstring name, relative, workDir, args;
+};
+struct DestEntry {
+    std::wstring path, real;
+    int pin = 0;
+    long long last = 0;
+};
+bool ParseLinkStrings(const BYTE* data, size_t size, LinkStrings& out);
+std::vector<DestEntry> ParseDestList(const std::vector<BYTE>& raw);
+
 } // namespace atrium

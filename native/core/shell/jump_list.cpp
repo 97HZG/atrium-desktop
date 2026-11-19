@@ -138,17 +138,12 @@ bool IsDirectory(const std::wstring& path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-// The strings a shell link carries (the menu shows its name, not the file name).
-struct LinkStrings {
-    std::wstring name;
-    std::wstring relative;
-    std::wstring workDir;
-    std::wstring args;
-};
+} // namespace
 
+// The strings a shell link carries (the menu shows its name, not the file name).
 bool ParseLinkStrings(const BYTE* data, size_t size, LinkStrings& out)
 {
-    if (size < 0x4C)
+    if (!data || size < 0x4C)
         return false;
     uint32_t headerSize = 0;
     std::memcpy(&headerSize, data, 4);
@@ -204,13 +199,6 @@ bool ParseLinkStrings(const BYTE* data, size_t size, LinkStrings& out)
 }
 
 // One entry of the DestList stream (Windows 10/11 layout, version 2 and later).
-struct DestEntry {
-    std::wstring path; // the parsing name the DestList stores (may be a shell name)
-    std::wstring real; // the file-system path behind it
-    int pin = 0;
-    long long last = 0;
-};
-
 std::vector<DestEntry> ParseDestList(const std::vector<BYTE>& raw)
 {
     std::vector<DestEntry> entries;
@@ -247,6 +235,8 @@ std::vector<DestEntry> ParseDestList(const std::vector<BYTE>& raw)
     Log(L"jump: destlist %zu entries, %d pinned", entries.size(), pinnedCount);
     return entries;
 }
+
+namespace {
 
 // One category of a custom destinations file.
 struct CustomCategory {

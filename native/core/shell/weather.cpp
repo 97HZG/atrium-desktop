@@ -89,10 +89,10 @@ std::string GetAny(const std::wstring& url, const std::atomic_bool& quit)
     return !body.empty() || quit.load() ? body : Get(url, false, quit);
 }
 
-// A place on the globe: what a service or the cache says is only used if it is one (the URLs have room for no more).
-bool OnEarth(double lat, double lon) { return std::isfinite(lat) && std::isfinite(lon) && std::fabs(lat) <= 90 && std::fabs(lon) <= 180; }
-
 } // namespace
+
+// A place on the globe: what a service or the cache says is only used if it is one (the URLs have room for no more).
+bool IsValidWeatherCoords(double lat, double lon) { return std::isfinite(lat) && std::isfinite(lon) && std::fabs(lat) <= 90 && std::fabs(lon) <= 180; }
 
 struct WeatherSource::State : std::enable_shared_from_this<WeatherSource::State> {
     std::wstring PlaceName(double lat, double lon, bool english);
@@ -184,6 +184,24 @@ bool WeatherSource::State::Locate(double& lat, double& lon, std::wstring& city, 
     return LocateByIp(lat, lon, city, english, located);
 }
 
+bool ParseWeatherLocationJson(const std::string& body, int serviceIndex, double& lat, double& lon, std::wstring& city)
+{
+    static constexpr const wchar_t* kF[3][5] = {{L"status", L"success", L"city", L"lat", L"lon"},
+                                                {L"success", nullptr, L"city", L"latitude", L"longitude"},
+                                                {nullptr, nullptr, L"city", L"latitude", L"longitude"}};
+    json::JsonObject o{nullptr};
+    if (serviceIndex < 0 || serviceIndex >= 3 || body.empty() || !json::JsonObject::TryParse(winrt::to_hstring(body), o))
+        return false;
+    const auto* f = kF[serviceIndex];
+    if (f[0] && !(f[1] ? o.GetNamedString(f[0], L"") == f[1] : o.GetNamedBoolean(f[0], false)))
+        return false;
+    if (!o.HasKey(f[3]) || !o.HasKey(f[4]) || o.GetNamedValue(f[3]).ValueType() != json::JsonValueType::Number ||
+        o.GetNamedValue(f[4]).ValueType() != json::JsonValueType::Number)
+        return false;
+    const double pLat = o.GetNamedNumber(f[3], 0), pLon = o.GetNamedNumber(f[4], 0);
+    return IsValidWeatherCoords(pLat, pLon) ? (city = std::wstring(o.GetNamedString(f[2], L"")), lat = pLat, lon = pLon, true) : false;
+}
+
 bool WeatherSource::State::LocateByIp(double& lat, double& lon, std::wstring& city, bool english, bool located)
 {
     // The network's place: several services, each directly (the system's proxy would give the
@@ -206,19 +224,11 @@ bool WeatherSource::State::LocateByIp(double& lat, double& lon, std::wstring& ci
             std::string body = Get(s.url, direct, quit_);
             if (quit_.load())
                 return false;
-            json::JsonObject o{nullptr};
-            if (!json::JsonObject::TryParse(winrt::to_hstring(body), o))
+            double pLat = 0, pLon = 0;
+            if (!ParseWeatherLocationJson(body, int(&s - services), pLat, pLon, city))
                 continue;
-            if (s.ok && !(s.okValue ? o.GetNamedString(s.ok, L"") == s.okValue : o.GetNamedBoolean(s.ok, false)))
-                continue;
-            if (!o.HasKey(s.lat) || !o.HasKey(s.lon) || o.GetNamedValue(s.lat).ValueType() != json::JsonValueType::Number ||
-                !OnEarth(o.GetNamedNumber(s.lat, 0), o.GetNamedNumber(s.lon, 0)))
-                continue;
-            city = std::wstring(o.GetNamedString(s.city, L""));
-            if (!located) {
-                lat = o.GetNamedNumber(s.lat, 0);
-                lon = o.GetNamedNumber(s.lon, 0);
-            }
+            if (!located)
+                lat = pLat, lon = pLon;
             if (quit_.load())
                 return false;
             if (s.url != services[0].url || !direct)
@@ -312,7 +322,7 @@ bool FromJson(const json::JsonObject& o, Weather& w)
         w.day = o.GetNamedBoolean(L"day", true);
         w.lat = o.GetNamedNumber(L"lat", 0);
         w.lon = o.GetNamedNumber(L"lon", 0);
-        w.placed = o.HasKey(L"lat") && o.HasKey(L"lon") && OnEarth(w.lat, w.lon);
+        w.placed = o.HasKey(L"lat") && o.HasKey(L"lon") && IsValidWeatherCoords(w.lat, w.lon);
         for (const auto& v : o.GetNamedArray(L"hours", json::JsonArray())) {
             auto x = v.GetObject();
             w.hours.push_back({std::wstring(x.GetNamedString(L"label", L"")), int(x.GetNamedNumber(L"code", 0)), x.GetNamedBoolean(L"day", true),
@@ -331,6 +341,13 @@ bool FromJson(const json::JsonObject& o, Weather& w)
 }
 
 } // namespace
+
+std::wstring WeatherToJsonString(const Weather& w) { return std::wstring(ToJson(w).Stringify()); }
+bool WeatherFromJsonString(const std::wstring& text, Weather& out)
+{
+    json::JsonObject o{nullptr};
+    return !(out = Weather{}, text.empty()) && json::JsonObject::TryParse(text, o) && FromJson(o, out);
+}
 
 std::wstring WeatherCondition(int code)
 {
@@ -493,13 +510,19 @@ struct HourItem {
     int64_t at;
     WeatherHour hour;
 };
+bool NamedArr(const json::JsonObject& o, const wchar_t* k, json::JsonArray& out)
+{
+    return o.HasKey(k) && o.GetNamedValue(k).ValueType() == json::JsonValueType::Array ? (out = o.GetNamedArray(k), true) : false;
+}
 void AddSunEvents(const json::JsonObject& daily, int64_t now, std::vector<HourItem>& items)
 {
     if (items.empty())
         return;
     const int64_t last = items.back().at;
     for (const wchar_t* key : {L"sunrise", L"sunset"}) {
-        auto list = daily.GetNamedArray(key);
+        json::JsonArray list{nullptr};
+        if (!NamedArr(daily, key, list))
+            continue;
         for (uint32_t i = 0; i < list.Size(); ++i) {
             int h = 0, m = 0;
             int64_t at = Minutes(std::wstring(list.GetStringAt(i)), &h, &m);
@@ -518,6 +541,47 @@ void AddSunEvents(const json::JsonObject& daily, int64_t now, std::vector<HourIt
         items.resize(6);
 }
 } // namespace
+
+bool ParseWeatherForecastJson(const std::string& body, double lat, double lon, const std::wstring& city, bool english, Weather& out)
+{
+    out = Weather{};
+    json::JsonObject o{nullptr}, cur{nullptr}, hr{nullptr}, dy{nullptr};
+    json::JsonArray tm{nullptr}, tp{nullptr}, cd{nullptr}, ds{nullptr}, dt{nullptr}, dc{nullptr}, hi{nullptr}, lo{nullptr};
+    auto obj = [&](const wchar_t* k, json::JsonObject& x) {
+        return o.HasKey(k) && o.GetNamedValue(k).ValueType() == json::JsonValueType::Object ? (x = o.GetNamedObject(k), true) : false;
+    };
+    if (!Parse(body, o) || !obj(L"current", cur) || !obj(L"hourly", hr) || !obj(L"daily", dy) || !NamedArr(hr, L"time", tm) ||
+        !NamedArr(hr, L"temperature_2m", tp) || !NamedArr(hr, L"weather_code", cd) || !NamedArr(hr, L"is_day", ds) || !NamedArr(dy, L"time", dt) ||
+        !NamedArr(dy, L"weather_code", dc) || !NamedArr(dy, L"temperature_2m_max", hi) || !NamedArr(dy, L"temperature_2m_min", lo))
+        return false;
+    Weather w;
+    w.city = city, w.lat = lat, w.lon = lon, w.placed = IsValidWeatherCoords(lat, lon), w.temp = float(cur.GetNamedNumber(L"temperature_2m", 0)),
+    w.code = int(cur.GetNamedNumber(L"weather_code", 0)), w.day = cur.GetNamedNumber(L"is_day", 1) != 0;
+    const int64_t now = Minutes(std::wstring(cur.GetNamedString(L"time", L"")));
+    std::vector<HourItem> items;
+    auto isNum = [](const json::JsonArray& a, uint32_t i) { return a.GetAt(i).ValueType() == json::JsonValueType::Number; };
+    for (uint32_t i = 0, nh = std::min({tm.Size(), tp.Size(), cd.Size(), ds.Size()}); i < nh && items.size() < 6; ++i) {
+        if (tm.GetAt(i).ValueType() != json::JsonValueType::String || !isNum(tp, i) || !isNum(cd, i) || !isNum(ds, i))
+            continue;
+        int h = 0;
+        int64_t at = Minutes(std::wstring(tm.GetStringAt(i)), &h);
+        if (at + 60 > now)
+            items.push_back({at,
+                             {items.empty() ? std::wstring(Tr(L"Now")) : std::to_wstring(h) + (english ? L":00" : L"时"), int(cd.GetNumberAt(i)),
+                              ds.GetNumberAt(i) != 0, float(tp.GetNumberAt(i)), 0}});
+    }
+    AddSunEvents(dy, now, items);
+    for (const HourItem& i : items)
+        w.hours.push_back(i.hour);
+    for (uint32_t i = 0, nd = std::min({dt.Size(), dc.Size(), hi.Size(), lo.Size()}); i < nd; ++i) {
+        if (dt.GetAt(i).ValueType() != json::JsonValueType::String || !isNum(dc, i) || !isNum(hi, i) || !isNum(lo, i))
+            continue;
+        int wd = 0;
+        Minutes(std::wstring(dt.GetStringAt(i)) + L"T00:00", nullptr, nullptr, &wd);
+        w.days.push_back({i == 0 ? Tr(L"Today") : WeekName(wd, english), int(dc.GetNumberAt(i)), float(lo.GetNumberAt(i)), float(hi.GetNumberAt(i))});
+    }
+    return (!w.hours.empty() && !w.days.empty()) ? (w.hi = w.days[0].hi, w.lo = w.days[0].lo, w.ok = true, out = std::move(w), true) : false;
+}
 
 bool WeatherSource::State::Fetch(bool english)
 {
@@ -539,7 +603,6 @@ bool WeatherSource::State::Fetch(bool english)
         city = latest_.city;
         Log(L"weather: no location now; the last place (%s)", city.c_str());
     }
-    json::JsonObject o{nullptr};
     wchar_t url[512];
     swprintf_s(url,
                L"https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&timezone=auto&forecast_days=7"
@@ -549,62 +612,13 @@ bool WeatherSource::State::Fetch(bool english)
     std::string forecast = GetAny(url, quit_);
     if (quit_.load())
         return false;
-    if (!Parse(forecast, o) || !o.HasKey(L"current") || !o.HasKey(L"hourly") || !o.HasKey(L"daily")) {
+    Weather w;
+    if (!ParseWeatherForecastJson(forecast, lat, lon, city, english, w)) {
         std::lock_guard g(lock_);
         latest_.error = Tr(L"Weather unavailable");
         Log(L"weather: no forecast for %s", city.c_str());
         return false;
     }
-    Weather w;
-    w.city = city;
-    w.lat = lat;
-    w.lon = lon;
-    w.placed = true;
-    auto current = o.GetNamedObject(L"current");
-    w.temp = float(current.GetNamedNumber(L"temperature_2m", 0));
-    w.code = int(current.GetNamedNumber(L"weather_code", 0));
-    w.day = current.GetNamedNumber(L"is_day", 1) != 0;
-    const int64_t now = Minutes(std::wstring(current.GetNamedString(L"time", L"")));
-
-    // The next hours: this one ("现在") and five more, sunrises and sunsets among them.
-    std::vector<HourItem> items;
-    auto hourly = o.GetNamedObject(L"hourly");
-    auto times = hourly.GetNamedArray(L"time"), temps = hourly.GetNamedArray(L"temperature_2m"), codes = hourly.GetNamedArray(L"weather_code"),
-         days = hourly.GetNamedArray(L"is_day");
-    for (uint32_t i = 0; i < times.Size() && items.size() < 6; ++i) {
-        int h = 0;
-        int64_t at = Minutes(std::wstring(times.GetStringAt(i)), &h);
-        if (at + 60 <= now)
-            continue;
-        WeatherHour x;
-        x.label = items.empty() ? std::wstring(Tr(L"Now")) : english ? std::to_wstring(h) + L":00" : std::to_wstring(h) + L"时";
-        x.temp = float(temps.GetNumberAt(i));
-        x.code = int(codes.GetNumberAt(i));
-        x.day = days.GetNumberAt(i) != 0;
-        items.push_back({at, x});
-    }
-    auto daily = o.GetNamedObject(L"daily");
-    AddSunEvents(daily, now, items);
-    for (const HourItem& i : items)
-        w.hours.push_back(i.hour);
-
-    auto dates = daily.GetNamedArray(L"time"), dcodes = daily.GetNamedArray(L"weather_code"), his = daily.GetNamedArray(L"temperature_2m_max"),
-         los = daily.GetNamedArray(L"temperature_2m_min");
-    for (uint32_t i = 0; i < dates.Size(); ++i) {
-        int wd = 0;
-        Minutes(std::wstring(dates.GetStringAt(i)) + L"T00:00", nullptr, nullptr, &wd);
-        WeatherDay d;
-        d.label = i == 0 ? Tr(L"Today") : WeekName(wd, english);
-        d.code = int(dcodes.GetNumberAt(i));
-        d.hi = float(his.GetNumberAt(i));
-        d.lo = float(los.GetNumberAt(i));
-        w.days.push_back(d);
-    }
-    if (w.hours.empty() || w.days.empty())
-        return false;
-    w.hi = w.days[0].hi;
-    w.lo = w.days[0].lo;
-    w.ok = true;
     if (quit_.load())
         return false;
     WriteTextFile(cachePath_, std::wstring(ToJson(w).Stringify()));

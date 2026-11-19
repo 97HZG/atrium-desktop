@@ -108,3 +108,7 @@ add_executable(shell_taskbar_tests shell_taskbar.cpp)
 target_link_libraries(shell_taskbar_tests PRIVATE atrium_core_lib)
 add_test(NAME shell_taskbar COMMAND shell_taskbar_tests)
 set_tests_properties(shell_taskbar PROPERTIES TIMEOUT 15)
+
+add_executable(parsers_tests parsers.cpp)
+target_link_libraries(parsers_tests PRIVATE atrium_core_lib)
+add_test(NAME parsers COMMAND parsers_tests)
