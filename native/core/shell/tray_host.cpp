@@ -3,13 +3,13 @@
 #include "log.h"
 #include "shell/shell_icon.h"
 #include "shell/shell_taskbar.h"
+#include "win32_path.h"
 
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 
 #include <algorithm>
-#include <cwctype>
 #include <iterator>
 
 namespace atrium {
@@ -77,12 +77,6 @@ std::wstring KeyOf(HWND hwnd, UINT uid, const GUID* guid)
     }
     swprintf_s(key, L"hwnd:%p:%u", static_cast<void*>(hwnd), uid);
     return key;
-}
-
-std::wstring Lower(std::wstring s)
-{
-    std::ranges::transform(s, s.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
-    return s;
 }
 
 std::wstring ProcessPath(DWORD pid)
@@ -496,7 +490,7 @@ void TrayHost::Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage
         icon.hwnd = hwnd;
         icon.pid = PidOf(hwnd);
         std::wstring path = ProcessPath(icon.pid);
-        icon.exe = path.empty() ? L"" : Lower(AppExecutable(path));
+        icon.exe = path.empty() ? L"" : FoldCase(AppExecutable(path));
     }
     icon.uid = nid.uID;
     if (nid.uFlags & NIF_MESSAGE)

@@ -43,6 +43,7 @@ struct TrayIcon {
     bool appTooltip = false; // a version 4 app drawing its own tooltip (NIN_POPUPOPEN): no standard one
     bool flashing = false;   // its icon flashes (hosted): a message waiting
     size_t order = SIZE_MAX; // place in Windows' own order of the tray icons (UIOrderList), if known
+    int exeOrdinal = -1;     // position among icons of the same program
     tray::TargetKey Target() const { return {shell, runtimeId, recordId, exe, tip}; }
 };
 

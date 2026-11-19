@@ -50,17 +50,18 @@ std::wstring VersionString(const std::wstring& path, const wchar_t* field)
     std::vector<BYTE> data(size);
     if (!GetFileVersionInfoW(path.c_str(), 0, size, data.data()))
         return {};
-    struct Lang {
-        WORD lang, codepage;
-    }* langs = nullptr;
+    WORD* lang = nullptr;
     UINT len = 0;
-    if (!VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation", reinterpret_cast<void**>(&langs), &len) || len < sizeof(Lang))
-        return {};
-    wchar_t sub[96];
-    swprintf_s(sub, L"\\StringFileInfo\\%04x%04x\\%s", langs[0].lang, langs[0].codepage, field);
-    wchar_t* value = nullptr;
-    if (VerQueryValueW(data.data(), sub, reinterpret_cast<void**>(&value), &len) && value && len)
-        return value;
+    wchar_t block[16]{};
+    if (VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation", reinterpret_cast<void**>(&lang), &len) && len >= 4)
+        swprintf_s(block, L"%04x%04x", lang[0], lang[1]);
+    for (const wchar_t* cp : {block[0] ? static_cast<const wchar_t*>(block) : L"040904B0", L"040904B0", L"040904E4"}) {
+        wchar_t sub[96];
+        swprintf_s(sub, L"\\StringFileInfo\\%s\\%s", cp, field);
+        wchar_t* value = nullptr;
+        if (VerQueryValueW(data.data(), sub, reinterpret_cast<void**>(&value), &len) && value && len && *value)
+            return value;
+    }
     return {};
 }
 
@@ -377,20 +378,23 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
 {
     std::vector<Found> out;
     available = false;
-    auto collect = [&](HWND host, bool promoted) {
-        HWND bridge = host ? FindWindowExW(host, nullptr, L"Windows.UI.Composition.DesktopWindowContentBridge", nullptr) : nullptr;
+    auto collect = [&](HWND host, bool promoted, bool xaml = true) {
+        HWND bridge = xaml && host ? FindWindowExW(host, nullptr, L"Windows.UI.Composition.DesktopWindowContentBridge", nullptr) : nullptr;
         winrt::com_ptr<IUIAutomationElement> root;
         if (!host || FAILED(uia->ElementFromHandle(bridge ? bridge : host, root.put())) || !root)
             return;
         available = true;
         winrt::com_ptr<IUIAutomationCondition> cond;
         VARIANT v;
-        v.vt = VT_BSTR;
-        v.bstrVal = SysAllocString(L"NotifyItemIcon");
-        HRESULT hr = uia->CreatePropertyCondition(UIA_AutomationIdPropertyId, v, cond.put());
+        v.vt = VARTYPE(xaml ? VT_BSTR : VT_I4);
+        if (xaml)
+            v.bstrVal = SysAllocString(L"NotifyItemIcon");
+        else
+            v.lVal = UIA_ButtonControlTypeId;
+        HRESULT hr = uia->CreatePropertyCondition(xaml ? UIA_AutomationIdPropertyId : UIA_ControlTypePropertyId, v, cond.put());
         VariantClear(&v);
         winrt::com_ptr<IUIAutomationElementArray> all;
-        if (FAILED(hr) || FAILED(root->FindAll(TreeScope_Descendants, cond.get(), all.put())) || !all)
+        if (FAILED(hr) || FAILED(root->FindAll(xaml ? TreeScope_Descendants : TreeScope_Children, cond.get(), all.put())) || !all)
             return;
         int n = 0;
         all->get_Length(&n);
@@ -399,16 +403,14 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
             all->GetElement(i, f.element.put());
             if (!f.element)
                 continue;
-            f.host = host;
+            (xaml ? f.host : f.toolbar) = host;
             BSTR name = nullptr;
-            if (f.element)
-                f.element->get_CurrentName(&name);
+            f.element->get_CurrentName(&name);
             f.tip = name ? name : L"";
             SysFreeString(name);
             f.promoted = promoted;
             f.index = int(std::count_if(out.begin(), out.end(), [&](const Found& o) { return o.promoted == promoted; }));
-            if (f.element)
-                f.element->get_CurrentBoundingRectangle(&f.bounds);
+            f.element->get_CurrentBoundingRectangle(&f.bounds);
             f.runtimeId = RuntimeId(f.element.get());
             out.push_back(std::move(f));
         }
@@ -419,44 +421,12 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
         return out;
     // No XAML tray (Windows 10, and Windows 11 before its new tray): the classic one, a toolbar of
     // buttons on the taskbar and another in the overflow window, named by their tooltips too.
-    auto legacy = [&](HWND toolbar, bool promoted) {
-        winrt::com_ptr<IUIAutomationElement> root;
-        if (!toolbar || FAILED(uia->ElementFromHandle(toolbar, root.put())) || !root)
-            return;
-        available = true;
-        VARIANT v;
-        v.vt = VT_I4;
-        v.lVal = UIA_ButtonControlTypeId;
-        winrt::com_ptr<IUIAutomationCondition> cond;
-        winrt::com_ptr<IUIAutomationElementArray> all;
-        if (FAILED(uia->CreatePropertyCondition(UIA_ControlTypePropertyId, v, cond.put())) ||
-            FAILED(root->FindAll(TreeScope_Children, cond.get(), all.put())) || !all)
-            return;
-        int n = 0;
-        all->get_Length(&n);
-        for (int i = 0; i < n; ++i) {
-            Found f;
-            all->GetElement(i, f.element.put());
-            if (!f.element)
-                continue;
-            BSTR name = nullptr;
-            f.element->get_CurrentName(&name);
-            f.tip = name ? name : L"";
-            SysFreeString(name);
-            f.promoted = promoted;
-            f.index = int(std::count_if(out.begin(), out.end(), [&](const Found& o) { return o.promoted == promoted; }));
-            f.element->get_CurrentBoundingRectangle(&f.bounds);
-            f.toolbar = toolbar;
-            f.runtimeId = RuntimeId(f.element.get());
-            out.push_back(std::move(f));
-        }
-    };
     HWND tray = ShellTaskbar();
     HWND notify = tray ? FindWindowExW(tray, nullptr, L"TrayNotifyWnd", nullptr) : nullptr;
     HWND pager = notify ? FindWindowExW(notify, nullptr, L"SysPager", nullptr) : nullptr;
-    legacy(pager ? FindWindowExW(pager, nullptr, L"ToolbarWindow32", nullptr) : nullptr, true);
+    collect(pager ? FindWindowExW(pager, nullptr, L"ToolbarWindow32", nullptr) : nullptr, true, false);
     HWND overflow = FindWindowW(L"NotifyIconOverflowWindow", nullptr);
-    legacy(overflow ? FindWindowExW(overflow, nullptr, L"ToolbarWindow32", nullptr) : nullptr, false);
+    collect(overflow ? FindWindowExW(overflow, nullptr, L"ToolbarWindow32", nullptr) : nullptr, false, false);
     return out;
 }
 
@@ -930,6 +900,53 @@ HRESULT PointerRightClick(IUIAutomation* uia, const Found& target)
     return result == tray::PointerClick::Sent ? S_OK : result == tray::PointerClick::Cancelled ? E_ABORT : E_FAIL;
 }
 
+std::wstring NormTip(const std::wstring& tip) { return tray::Key(Lower(tray::Title(tip))); }
+uint64_t Uid(const std::wstring& s)
+{
+    return s.rfind(L':') < s.size() && (s[0] == L'u' || s[0] == L'h') ? wcstoull(&s[s.rfind(L':') + 1], nullptr, 10) : ~0ull;
+}
+
+std::vector<const TrayIcon*> PairHosted(const std::vector<HostIcon>& h, const std::vector<TrayIcon>& e, std::vector<bool>& used)
+{
+    std::vector<const TrayIcon*> fb(h.size(), nullptr);
+    used.assign(e.size(), false);
+    for (int tier = 0; tier < 4; ++tier)
+        for (size_t hi = 0; hi < h.size(); ++hi)
+            for (size_t ei = 0; ei < e.size(); ++ei)
+                if (!fb[hi] && !h[hi].exe.empty() && !used[ei] && e[ei].exe == h[hi].exe &&
+                    (tier == 3 || (tier == 0 && e[ei].recordId == h[hi].key) || (tier == 1 && h[hi].uid && Uid(e[ei].recordId) == h[hi].uid) ||
+                     (tier == 2 && !NormTip(h[hi].tip).empty() && NormTip(h[hi].tip) == NormTip(e[ei].tip))))
+                    fb[hi] = &e[ei], used[ei] = true;
+    for (size_t hi = 0; hi < h.size(); ++hi)
+        if (!fb[hi] && !h[hi].exe.empty())
+            for (int n = 0; const TrayIcon& x : e)
+                if (x.exe == h[hi].exe && n >= 0)
+                    fb[hi] = h[hi].uid && Uid(x.recordId) == h[hi].uid ? (n = -1, &x) : n++ ? nullptr : &x;
+    return fb;
+}
+
+TrayIcon FindClickFallback(const TrayIcon& icon, const std::vector<TrayIcon>& icons)
+{
+    std::vector<const TrayIcon*> same;
+    for (const TrayIcon& t : icons)
+        if (!icon.exe.empty() && t.exe == icon.exe)
+            same.push_back(&t);
+    if (same.empty())
+        return TrayIcon{L"", icon.exe};
+    std::ranges::stable_sort(same, [](const TrayIcon* a, const TrayIcon* b) { return a->order < b->order; });
+    for (int tier = 0; tier < 3; ++tier) {
+        const TrayIcon* hit = nullptr;
+        for (int n = 0; const TrayIcon* t : same)
+            if (tier == 0 ? icon.hostKey.starts_with(L"guid:") && t->recordId == icon.hostKey :
+                tier == 1 ? Uid(icon.hostKey) != ~0ull && Uid(t->recordId) == Uid(icon.hostKey) :
+                            !NormTip(icon.tip).empty() && NormTip(t->tip) == NormTip(icon.tip))
+                hit = n++ ? nullptr : t;
+        if (hit)
+            return *hit;
+    }
+    return icon.exeOrdinal >= 0 && size_t(icon.exeOrdinal) < same.size() ? *same[size_t(icon.exeOrdinal)] : *same.front();
+}
+
 } // namespace
 
 DWORD TrayModel::LastSyntheticInput() { return g_syntheticInput; }
@@ -1021,19 +1038,10 @@ bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction)
                                 hostAction == tray::HostAction::DoubleContinuation ? tray::Action::DoubleContinuation :
                                                                                      tray::Action::Left;
     // The host could not send it (an elevated app, the host off): Explorer's button, by program.
-    TrayIcon fallback;
     {
         std::lock_guard g(mutex_);
-        for (const TrayIcon& t : icons_)
-            if (!icon.exe.empty() && t.exe == icon.exe) {
-                fallback = t;
-                break;
-            }
+        jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), {false, FindClickFallback(icon, icons_), action});
     }
-    if (fallback.exe.empty())
-        fallback.exe = icon.exe;
-    std::lock_guard g(mutex_);
-    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), {false, fallback, action});
     cv_.notify_all();
     return true;
 }
@@ -1111,28 +1119,35 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
 
 std::vector<TrayIcon> TrayModel::Icons() const
 {
-    std::lock_guard g(mutex_);
-    // Windows' own order (the system tray's), whatever was built of Explorer's tray when
-    // it was read: the same icon stays in the same place from one opening to the next.
     auto inWindowsOrder = [](std::vector<TrayIcon> list) {
         std::ranges::stable_sort(list, [](const TrayIcon& a, const TrayIcon& b) { return a.order < b.order; });
+        std::map<std::wstring, int> counts;
         for (size_t i = 0; i < list.size(); ++i)
-            list[i].index = int(i);
+            list[i].index = int(i), list[i].exeOrdinal = list[i].exe.empty() ? -1 : counts[list[i].exe]++;
         return list;
     };
-    if (!host_ || host_->Yielded())
-        return inWindowsOrder(icons_);
-    // The hosted icons in Windows' order (where Explorer's tray has the program), the
-    // rest in arrival order after them; Explorer-only icons keep their place.
-    std::vector<HostIcon> hosted = host_->Icons();
+    std::vector<HostIcon> hosted;
+    std::vector<TrayIcon> explorer;
+    std::map<std::wstring, size_t> order;
+    std::map<std::wstring, std::wstring> names, newNames;
+    std::map<uint64_t, std::pair<std::shared_ptr<const IconImage>, bool>> ink, newInk;
+    const TrayHost* hostPtr = nullptr;
+    {
+        std::lock_guard g(mutex_);
+        if (!host_ || host_->Yielded())
+            return inWindowsOrder(icons_);
+        hostPtr = host_.get();
+        hosted = host_->Icons();
+        explorer = inWindowsOrder(icons_);
+        order = windowsOrder_;
+        names = hostNames_;
+        ink = hostInk_;
+    }
     std::erase_if(hosted, [](const HostIcon& h) { return h.hidden; });
-    std::vector<bool> used(hosted.size());
-    std::set<std::wstring> hostedExe;
-    for (const HostIcon& h : hosted)
-        if (!h.exe.empty())
-            hostedExe.insert(h.exe);
+    std::vector<bool> usedExp;
+    const auto fbList = PairHosted(hosted, explorer, usedExp);
     static const tray::ShellSession kHostShell{1, 1, 1};
-    auto make = [&](const HostIcon& h) {
+    auto make = [&](const HostIcon& h, const TrayIcon* fb) {
         TrayIcon t;
         t.tip = h.tip;
         t.exe = h.exe;
@@ -1140,26 +1155,19 @@ std::vector<TrayIcon> TrayModel::Icons() const
         t.pid = h.pid;
         t.appTooltip = h.version >= 4 && !h.showTip;
         t.flashing = h.flashUntil > GetTickCount64();
-        const std::wstring uidKey = L"uid:" + h.exe + L"|" + std::to_wstring(h.uid);
-        for (const std::wstring& key : {h.key, uidKey, L"exe:" + h.exe})
-            if (auto o = windowsOrder_.find(key); o != windowsOrder_.end()) {
+        t.order = fb && fb->order != SIZE_MAX ? fb->order : order.contains(L"exe:" + h.exe) ? order.at(L"exe:" + h.exe) : SIZE_MAX;
+        for (const auto& k : {L"uid:" + h.exe + L"|" + std::to_wstring(h.uid), h.key})
+            if (auto o = order.find(k); o != order.end())
                 t.order = o->second;
-                break;
-            }
-        // An app adding its icon again (TaskbarCreated) often leaves its tooltip out, and
-        // Explorer keeps the one it had: that one then.
-        if (t.tip.empty())
-            for (const TrayIcon& e : icons_)
-                if (!h.exe.empty() && e.exe == h.exe && !e.tip.empty()) {
-                    t.tip = e.tip;
-                    break;
-                }
-        if (t.tip.empty() && !h.exe.empty()) { // none anywhere: the program's name
-            auto [it, fresh] = hostNames_.try_emplace(h.exe);
+        if (t.tip.empty() && fb && !fb->tip.empty())
+            t.tip = fb->tip;
+        if (t.tip.empty() && !h.exe.empty()) {
+            auto [it, fresh] = names.try_emplace(h.exe);
             if (fresh) {
                 it->second = VersionString(h.exe, L"FileDescription");
                 if (it->second.empty())
                     it->second = PathFindFileNameW(h.exe.c_str());
+                newNames.try_emplace(h.exe, it->second);
             }
             t.tip = it->second;
         }
@@ -1168,52 +1176,41 @@ std::vector<TrayIcon> TrayModel::Icons() const
         t.matchMethod = L"host";
         t.image = h.image;
         t.imageVersion = h.imageVersion;
-        if (!t.image) { // no picture sent (or a monochrome one): Explorer's record of the program
-            for (const TrayIcon& e : icons_)
-                if (e.exe == h.exe && e.image) {
-                    t.image = e.image;
-                    t.imageVersion = e.imageVersion;
-                    t.inked = e.inked;
-                    t.inkedOnLight = e.inkedOnLight;
-                    break;
-                }
-        } else {
-            auto ink = hostInk_.find(h.imageVersion);
-            if (ink == hostInk_.end()) {
-                if (hostInk_.size() > 256)
-                    hostInk_.clear(); // animated icons: every frame is a version
-                const int tone = GlyphTone(*h.image);
-                ink = hostInk_.emplace(h.imageVersion, std::make_pair(tone ? std::make_shared<const IconImage>(InkedGlyph(*h.image, tone)) : nullptr, tone > 0))
-                          .first;
+        if (!t.image && fb && fb->image) {
+            t.image = fb->image;
+            t.imageVersion = fb->imageVersion;
+            t.inked = fb->inked;
+            t.inkedOnLight = fb->inkedOnLight;
+        } else if (t.image) {
+            if (auto [it, fresh] = ink.try_emplace(h.imageVersion); fresh) {
+                const int tone = GlyphTone(*t.image);
+                it->second = {tone ? std::make_shared<const IconImage>(InkedGlyph(*t.image, tone)) : nullptr, tone > 0};
+                newInk.try_emplace(h.imageVersion, it->second);
             }
-            t.inked = ink->second.first;
-            t.inkedOnLight = ink->second.second;
+            t.inked = ink[h.imageVersion].first;
+            t.inkedOnLight = ink[h.imageVersion].second;
         }
         return t;
     };
-    // An Explorer button whose program was not recognised but whose name is a hosted
-    // icon's is that icon: not shown twice.
-    std::set<std::wstring> hostedTitles;
-    for (const HostIcon& h : hosted)
-        if (!h.tip.empty())
-            hostedTitles.insert(Title(h.tip));
     std::vector<TrayIcon> out;
-    for (const TrayIcon& e : icons_) {
-        if (e.exe.empty() && !e.tip.empty() && hostedTitles.contains(Title(e.tip)))
-            continue;
-        if (e.exe.empty() || !hostedExe.contains(e.exe)) {
-            out.push_back(e);
-            continue;
-        }
-        for (size_t i = 0; i < hosted.size(); ++i)
-            if (!used[i] && hosted[i].exe == e.exe) {
-                used[i] = true;
-                out.push_back(make(hosted[i]));
-            }
-    }
+    out.reserve(hosted.size() + explorer.size());
     for (size_t i = 0; i < hosted.size(); ++i)
-        if (!used[i])
-            out.push_back(make(hosted[i]));
+        out.push_back(make(hosted[i], fbList[i]));
+    for (size_t i = 0; i < explorer.size(); ++i)
+        if (!usedExp[i] && (!explorer[i].exe.empty() || explorer[i].tip.empty() ||
+                            std::ranges::none_of(hosted, [&](const HostIcon& h) { return !h.tip.empty() && Title(h.tip) == Title(explorer[i].tip); })))
+            out.push_back(explorer[i]);
+    if (!newNames.empty() || !newInk.empty()) {
+        std::lock_guard g(mutex_);
+        if (hostNames_.size() > 256)
+            hostNames_.clear();
+        hostNames_.insert(newNames.begin(), newNames.end());
+        if (host_.get() == hostPtr) {
+            if (hostInk_.size() > 256)
+                hostInk_.clear();
+            hostInk_.insert(newInk.begin(), newInk.end());
+        }
+    }
     return inWindowsOrder(std::move(out));
 }
 
