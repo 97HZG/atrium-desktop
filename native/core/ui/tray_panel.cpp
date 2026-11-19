@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string_view>
 
 namespace atrium {
 
@@ -38,6 +39,36 @@ constexpr UINT kSettleMs = 150;
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
+
+std::optional<size_t> IconIndex(std::wstring_view id)
+{
+    if (!id.starts_with(L"icon:") || id.size() == 5)
+        return std::nullopt;
+    size_t value = 0;
+    for (wchar_t ch : id.substr(5)) {
+        if (ch < L'0' || ch > L'9' || value > (SIZE_MAX - static_cast<size_t>(ch - L'0')) / 10)
+            return std::nullopt;
+        value = value * 10 + static_cast<size_t>(ch - L'0');
+    }
+    return value;
+}
+
+std::optional<size_t> FindTargetIndex(const std::vector<TrayIcon>& icons, const tray::TargetKey& key)
+{
+    if (!key.shell.Valid())
+        return std::nullopt;
+    std::optional<size_t> found;
+    for (size_t i = 0; i < icons.size(); ++i) {
+        const auto cand = icons[i].Target();
+        if (cand.shell != key.shell ||
+            (!key.identity.empty() && !cand.identity.empty() ? key.identity != cand.identity : key.runtime.empty() || key.runtime != cand.runtime))
+            continue;
+        if (found)
+            return std::nullopt;
+        found = i;
+    }
+    return found;
+}
 
 // An app's menu opened through the hidden system tray: Explorer tells the app
 // where its (hidden) button is, and some apps open the menu there, at the
@@ -302,6 +333,10 @@ void TrayPanel::Refresh()
         return;
     if (!pressed_.empty())
         return; // freeze hit cells until mouse-up
+    const bool hadIconHover = hover_.starts_with(L"icon:"), hadTip = !tipFor_.empty();
+    const auto hoverIdx = IconIndex(hover_), tipIdx = IconIndex(tipFor_);
+    const auto hoverTarget = hoverIdx && *hoverIdx < icons_.size() ? std::optional(icons_[*hoverIdx].Target()) : std::nullopt;
+    const auto tipTarget = tipIdx && *tipIdx < icons_.size() ? std::optional(icons_[*tipIdx].Target()) : std::nullopt;
     auto fresh = model_.Icons();
     std::vector<tray::TargetKey> oldKeys, freshKeys;
     for (const auto& icon : icons_)
@@ -312,10 +347,24 @@ void TrayPanel::Refresh()
     icons_.clear();
     for (size_t i : order)
         icons_.push_back(std::move(fresh[i]));
+    if (const auto newHoverIdx = hoverTarget ? FindTargetIndex(icons_, *hoverTarget) : std::nullopt)
+        hover_ = L"icon:" + std::to_wstring(*newHoverIdx);
+    else if (hadIconHover) {
+        hover_.clear();
+        KillTimer(surface_.Hwnd(), kHoverTimer);
+        model_.Hover(nullptr);
+    }
     Place();
     surface_.Invalidate();
-    if (!tipFor_.empty() && tip_ && IsWindowVisible(tip_))
-        ShowTip(); // a tooltip that changes while shown changes in place, as in the system tray
+    if (hadTip) {
+        if (const auto newTipIdx = tipTarget ? FindTargetIndex(icons_, *tipTarget) : std::nullopt) {
+            tipFor_ = L"icon:" + std::to_wstring(*newTipIdx);
+            if (tipFor_ == hover_ && tip_ && IsWindowVisible(tip_))
+                ShowTip(); // a tooltip that changes while shown changes in place, as in the system tray
+        } else {
+            HideTip();
+        }
+    }
 }
 
 // The icon's tooltip, all of its lines, above its cell after the system's hover delay,
@@ -324,8 +373,8 @@ void TrayPanel::Refresh()
 void TrayPanel::ArmTip()
 {
     HideTip();
-    const size_t i = hover_.starts_with(L"icon:") ? size_t(std::stoul(hover_.substr(5))) : icons_.size();
-    if (i >= icons_.size() || private_ || icons_[i].appTooltip || icons_[i].tip.empty())
+    const std::optional<size_t> idx = IconIndex(hover_);
+    if (!idx || *idx >= icons_.size() || private_ || icons_[*idx].appTooltip || icons_[*idx].tip.empty())
         return;
     tipFor_ = hover_;
     UINT delay = 500;
@@ -336,9 +385,10 @@ void TrayPanel::ArmTip()
 
 void TrayPanel::ShowTip()
 {
-    const size_t i = tipFor_.starts_with(L"icon:") ? size_t(std::stoul(tipFor_.substr(5))) : icons_.size();
-    if (tipFor_ != hover_ || i >= icons_.size() || !surface_.Visible())
+    const std::optional<size_t> idx = IconIndex(tipFor_);
+    if (tipFor_ != hover_ || !idx || *idx >= icons_.size() || !surface_.Visible())
         return;
+    const size_t i = *idx;
     const RECT win = surface_.Rect();
     const float s = surface_.Scale();
     const D2D1_RECT_F cell = CellRect(i);
@@ -402,7 +452,15 @@ void TrayPanel::HideTip()
 
 void TrayPanel::LeaveHover()
 {
-    const size_t i = hover_.starts_with(L"icon:") ? size_t(std::stoul(hover_.substr(5))) : icons_.size();
+    const std::optional<size_t> idx = IconIndex(hover_);
+    const size_t i = idx.value_or(icons_.size());
+    if (hover_.starts_with(L"icon:") && i >= icons_.size()) {
+        KillTimer(surface_.Hwnd(), kHoverTimer);
+        model_.Hover(nullptr);
+        hover_.clear();
+        surface_.Invalidate();
+        return;
+    }
     POINT cur{};
     HWND under = i < icons_.size() && surface_.Visible() && GetCursorPos(&cur) ? WindowFromPoint(cur) : nullptr;
     if (under == surface_.Hwnd() && HitAt(surface_.ScreenToContent(cur)) == hover_) {
@@ -417,7 +475,7 @@ void TrayPanel::LeaveHover()
     if (under)
         GetWindowThreadProcessId(under, &pid);
     // An app's own hover popup (NIN_POPUPOPEN) appears under the pointer and takes it from the panel (#89).
-    if (pid && pid == icons_[i].pid && pid != GetCurrentProcessId()) {
+    if (i < icons_.size() && pid && pid == icons_[i].pid && pid != GetCurrentProcessId()) {
         SetTimer(surface_.Hwnd(), kHoverTimer, kHoverMs, nullptr);
         return;
     }
