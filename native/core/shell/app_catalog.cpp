@@ -510,8 +510,11 @@ void AppCatalog::PruneIcons()
                (key.second == prefetchPx_ &&
                 (startIds_.contains(key.first) || std::any_of(startPins_.begin(), startPins_.end(), [&](const auto& app) { return app.id == key.first; })));
     };
-    std::erase_if(icons_, [&](const auto& entry) { return loaded_ && !liveIds_.contains(entry.first.first) && !protectedIcon(entry.first); });
-    std::erase_if(failed_, [&](const auto& entry) { return loaded_ && !liveIds_.contains(entry.first.first) && !protectedIcon(entry.first); });
+    auto staleIcon = [&](const auto& entry) {
+        return loaded_ && !liveIds_.contains(entry.first.first) && !startIds_.contains(entry.first.first) && !protectedIcon(entry.first);
+    };
+    std::erase_if(icons_, staleIcon);
+    std::erase_if(failed_, staleIcon);
     size_t bytes = 0;
     for (const auto& [key, icon] : icons_)
         bytes += icon.image.bgra.size();
@@ -612,6 +615,10 @@ void AppCatalog::Worker()
                     liveIds_.insert(app.id);
                 for (const auto& app : startPins_)
                     liveIds_.insert(app.id);
+                for (const auto& folder : startFolders_)
+                    for (const auto& app : folder.apps)
+                        liveIds_.insert(app.id);
+                liveIds_.insert(startIds_.begin(), startIds_.end());
                 failed_.clear(); // catalogue changes allow another bounded attempt
                 loaded_ = true;
                 PruneIcons();
