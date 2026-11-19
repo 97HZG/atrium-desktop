@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Atrium.Settings;
 
 static void Require(bool condition, string message)
@@ -111,16 +113,6 @@ Require(BarSettings.FromJson(JsonNode.Parse("""{"notifyPlacement":"bad"}""")!.As
     "Invalid notification placement must normalize.");
 Require(BarSettings.FromJson(JsonNode.Parse("""{"notifyPlacement":false}""")!.AsObject(), settings).NotifyPlacement == "topRight",
     "Malformed notification placement must retain the current value.");
-foreach (string mode in new[] { "follow", "primary", "fixed", "all" })
-{
-    settings.DockDisplayMode = mode;
-    Require(BarSettings.FromJson(settings.ToJson(), new()).DockDisplayMode == mode, "Every Dock mode must be retained.");
-}
-foreach (string mode in new[] { "all", "primaryAndWindow", "window" })
-{
-    settings.TaskbarApps = mode;
-    Require(BarSettings.FromJson(settings.ToJson(), new()).TaskbarApps == mode, "Every task distribution mode must be retained.");
-}
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"dockDisplayMode":"bad","taskbarApps":"bad","dockDisplayDelay":99999}""")!.AsObject(), new());
 Require(parsed.DockDisplayMode == "primary" && parsed.TaskbarApps == "all" && parsed.DockDisplayDelay == 2000,
     "Invalid values must normalize like the native core.");
@@ -169,3 +161,190 @@ Require(new PinnedApp("Edge", @"C:\Program Files\msedge.exe", "", "").AllowsMult
 Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMultipleWindows(),
     "The Explorer AUMID must default to allowing multiple windows.");
 Console.WriteLine($"Settings round trips, validation, dirty tracking and display discovery passed ({displays.Count} connected display(s)).");
+
+string? Arg(string flag) => Array.IndexOf(args, flag) is int idx && idx >= 0 && idx + 1 < args.Length ? args[idx + 1] : null;
+string? coreNormalizer = Arg("--core-normalizer"), repoRoot = Arg("--repo-root");
+for (string? d = AppContext.BaseDirectory; repoRoot == null && d != null; d = Directory.GetParent(d)?.FullName)
+{
+    if (File.Exists(Path.Combine(d, "docs", "SETTINGS-PROTOCOL.md")) &&
+        File.Exists(Path.Combine(d, "tests", "fixtures", "settings-schema.json")))
+    { repoRoot = d; }
+}
+Require(repoRoot != null, "Could not locate repository root.");
+string buildRoot = Path.Combine(repoRoot!, "native", "build");
+string normalizerPath = coreNormalizer != null
+    ? (File.Exists(coreNormalizer) ? coreNormalizer : throw new FileNotFoundException($"Core normalizer not found: {coreNormalizer}"))
+    : BuildConfigs.SelectMany(c => new[]
+        { Path.Combine(buildRoot, c, "tests", "display_settings_tests.exe"), Path.Combine(buildRoot, c, "tests", "Release", "display_settings_tests.exe") })
+        .Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault()
+        ?? throw new FileNotFoundException($"display_settings_tests.exe not found under {buildRoot}.");
+
+var schemaKeys = JsonNode.Parse(File.ReadAllText(Path.Combine(repoRoot!, "tests", "fixtures", "settings-schema.json")))!["keys"]!.AsObject();
+string protocolText = File.ReadAllText(Path.Combine(repoRoot!, "docs", "SETTINGS-PROTOCOL.md"));
+string protocolTable = protocolText[..protocolText.IndexOf("## 管道", StringComparison.Ordinal)];
+var docKeys = DocKeyRegex().Matches(protocolTable).Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+var schemaKeySet = schemaKeys.Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
+var csKeys = new BarSettings { StartSize = "medium", StartIcon = "medium", Pins = [] }.ToJson().Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
+
+var altBase = new JsonObject();
+foreach (var (k, node) in schemaKeys)
+{
+    var s = node!.AsObject();
+    altBase[k] = s["type"]!.GetValue<string>() switch
+    {
+        "number" => Math.Abs(s["default"]!.GetValue<double>() - s["min"]!.GetValue<double>()) > 1e-6
+            ? s["min"]!.GetValue<double>() : s["max"]!.GetValue<double>(),
+        "bool" => !s["default"]!.GetValue<bool>(),
+        "enum" => k == "startSize" ? "large" : k == "startIcon" ? "small"
+            : s["values"]!.AsArray().Select(v => v!.GetValue<string>()).First(v => v != s["default"]!.GetValue<string>()),
+        "string" => @"\\?\DISPLAY#alt",
+        "tint" => "#123456",
+        "language" => "en",
+        "stringArray" => new JsonArray("a.exe"),
+        "pins" => new JsonArray(new JsonObject { ["name"] = "App", ["path"] = @"C:\app.exe", ["args"] = "--x", ["aumid"] = "", ["multipleWindows"] = true }),
+        _ => throw new InvalidOperationException($"Unknown schema type for {k}")
+    };
+}
+var altBaseSettings = BarSettings.FromJson(altBase, new());
+
+var cases = new List<(string Label, JsonObject? BaseObj, BarSettings BaseSettings, JsonObject? PatchObj, string? RawPatch)>
+{
+    ("keys:populated", null, new(), JsonNode.Parse("""{"startSize":"medium","startIcon":"medium","pins":[]}""")!.AsObject(), null),
+    ("empty:default", null, new(), new(), null), ("empty:alt", altBase, altBaseSettings, new(), null),
+    ("v1:migration", null, new(), JsonNode.Parse("""{"version":1,"notifyListener":false}""")!.AsObject(), null),
+    ("v2:no-migration", null, new(), JsonNode.Parse("""{"version":2,"notifyListener":false}""")!.AsObject(), null),
+    ("malformed:json", null, new(), null, "{broken"),
+};
+foreach (var (k, node) in schemaKeys)
+{
+    var s = node!.AsObject();
+    void Add(string sub, JsonNode? val) => cases.Add(($"{k}:{sub}", altBase, altBaseSettings, new JsonObject { [k] = val }, null));
+    switch (s["type"]!.GetValue<string>())
+    {
+        case "number":
+            double lo = s["min"]!.GetValue<double>(), hi = s["max"]!.GetValue<double>();
+            Add("min", lo); Add("max", hi); Add("under", lo - 100); Add("over", hi + 100);
+            Add("str", "bad"); Add("bool", false); Add("null", null); Add("arr", new JsonArray()); break;
+        case "bool": Add("true", true); Add("false", false); Add("str", "true"); Add("num", 1); Add("null", null); break;
+        case "enum":
+            foreach (var v in s["values"]!.AsArray()) Add($"val:{v!.GetValue<string>()}", v.GetValue<string>());
+            Add("unknown", "__unknown__"); Add("empty", ""); Add("bool", false); Add("num", 123); Add("null", null); break;
+        case "string": Add("empty", ""); Add("display", @"\\?\DISPLAY#1"); Add("bool", false); break;
+        case "tint": foreach (string t in TintSamples) Add($"val:{t}", t); Add("bool", false); break;
+        case "language": foreach (string l in LangSamples) Add($"val:{l}", l); Add("bool", false); break;
+        case "stringArray":
+            Add("empty", new JsonArray()); Add("ws", new JsonArray(" wechat.exe ", "  ", "foo_"));
+            Add("bool", false); Add("mixed", new JsonArray(123, "ok.exe")); break;
+        case "pins":
+            Add("empty", new JsonArray());
+            var over65 = new JsonArray();
+            for (int i = 0; i < 65; i++) { over65.Add(new JsonObject { ["name"] = $"P{i}", ["path"] = $@"C:\p{i}.exe" }); }
+            Add("65", over65);
+            Add("drop-empty", new JsonArray(new JsonObject { ["name"] = "D", ["path"] = "" }, new JsonObject { ["name"] = "K", ["path"] = @"C:\k.exe" }));
+            Add("multi", new JsonArray(new JsonObject { ["name"] = "A", ["path"] = @"C:\a.exe", ["multipleWindows"] = true },
+                new JsonObject { ["name"] = "B", ["path"] = @"C:\b.exe", ["multipleWindows"] = false },
+                new JsonObject { ["name"] = "C", ["path"] = @"C:\c.exe" }));
+            Add("bad", "bad"); break;
+    }
+}
+
+var psi = new ProcessStartInfo(normalizerPath, "--normalize");
+psi.RedirectStandardInput = psi.RedirectStandardOutput = true;
+psi.StandardInputEncoding = psi.StandardOutputEncoding = new System.Text.UTF8Encoding(false);
+using var proc = Process.Start(psi)!;
+var readTask = Task.Run(() =>
+{
+    var l = new List<string>();
+    while (proc.StandardOutput.ReadLine() is string s) { if (!string.IsNullOrWhiteSpace(s)) l.Add(s); }
+    return l;
+});
+foreach (var (_, baseObj, _, patchObj, rawPatch) in cases)
+{
+    var req = new JsonObject();
+    if (baseObj != null) req["base"] = baseObj.DeepClone();
+    if (rawPatch != null) req["patchText"] = rawPatch; else req["patch"] = patchObj!.DeepClone();
+    proc.StandardInput.WriteLine(req.ToJsonString());
+}
+proc.StandardInput.Close();
+var respLines = await readTask;
+proc.WaitForExit();
+Require(proc.ExitCode == 0, $"Core normalizer exited with code {proc.ExitCode}.");
+Require(respLines.Count == cases.Count, $"Expected {cases.Count} normalizer responses, got {respLines.Count}.");
+
+static bool JsonEqual(JsonNode? a, JsonNode? b)
+{
+    if (a is null || b is null) return a is null && b is null;
+    if (a is JsonObject ao && b is JsonObject bo)
+        return ao.Count == bo.Count && ao.All(kv => bo.TryGetPropertyValue(kv.Key, out var bv) && JsonEqual(kv.Value, bv));
+    if (a is JsonArray aa && b is JsonArray ba)
+        return aa.Count == ba.Count && aa.Zip(ba, JsonEqual).All(x => x);
+    if (a is JsonValue av && b is JsonValue bv)
+    {
+        if (av.TryGetValue(out bool ab) && bv.TryGetValue(out bool bb)) return ab == bb;
+        if (av.TryGetValue(out string? astr) && bv.TryGetValue(out string? bstr)) return astr == bstr;
+        if (av.GetValueKind() == System.Text.Json.JsonValueKind.Number && bv.GetValueKind() == System.Text.Json.JsonValueKind.Number)
+        {
+            double ad = double.Parse(av.ToJsonString(), System.Globalization.CultureInfo.InvariantCulture);
+            double bd = double.Parse(bv.ToJsonString(), System.Globalization.CultureInfo.InvariantCulture);
+            return Math.Abs(ad - bd) <= 1e-9;
+        }
+    }
+    return false;
+}
+
+for (int i = 0; i < cases.Count; i++)
+{
+    var (label, _, baseSettings, patchObj, rawPatch) = cases[i];
+    var resp = JsonNode.Parse(respLines[i])!.AsObject();
+    if (rawPatch != null) { Require(!resp["ok"]!.GetValue<bool>(), $"Malformed JSON [{label}] must return ok=false."); continue; }
+    Require(resp["ok"]!.GetValue<bool>(), $"Case [{label}] failed in C++ normalizer.");
+    var cpp = resp["result"]!.AsObject();
+    if (label == "keys:populated")
+    {
+        var cppKeys = cpp.Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
+        void CheckSet(string name, HashSet<string> actual)
+        {
+            if (actual.SetEquals(schemaKeySet)) return;
+            throw new InvalidOperationException($"4-way key mismatch ({name} vs schema): " +
+                $"missing=[{string.Join(",", schemaKeySet.Except(actual))}], extra=[{string.Join(",", actual.Except(schemaKeySet))}]");
+        }
+        CheckSet("SETTINGS-PROTOCOL.md", docKeys); CheckSet("BarSettings.ToJson", csKeys); CheckSet("Settings.ToJson", cppKeys);
+    }
+    var cs = BarSettings.FromJson(patchObj, baseSettings).ToJson();
+    if (!JsonEqual(cs, cpp))
+        throw new InvalidOperationException($"Differential mismatch [{label}]\nC#:  {cs.ToJsonString()}\nC++: {cpp.ToJsonString()}");
+    if (label == "pins:65") Require(cs["pins"]!.AsArray().Count == 64, "Pins must cap at 64.");
+    if (label == "v1:migration") Require(cs["notifyListener"]!.GetValue<bool>(), "v1 migration must keep notifyListener=true.");
+    if (label == "v2:no-migration") Require(!cs["notifyListener"]!.GetValue<bool>(), "v2 must apply notifyListener=false.");
+}
+
+string xamlCs = File.ReadAllText(Path.Combine(repoRoot!, "settings", "Atrium.Settings", "MainWindow.xaml.cs"));
+var sliderMatches = SliderRegex().Matches(xamlCs);
+var schemaSliders = schemaKeys.Where(kv => kv.Value!["sliderProp"] != null)
+    .ToDictionary(kv => kv.Value!["sliderProp"]!.GetValue<string>(), kv => (kv.Key, Spec: kv.Value!.AsObject()));
+Require(sliderMatches.Count == schemaSliders.Count, $"Expected {schemaSliders.Count} sliders in MainWindow.xaml.cs, found {sliderMatches.Count}.");
+foreach (Match m in sliderMatches)
+{
+    double uiMin = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+    double uiMax = double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+    string prop = m.Groups[3].Value;
+    Require(schemaSliders.TryGetValue(prop, out var entry), $"Slider property {prop} missing from schema.");
+    var sp = entry.Spec;
+    double sMin = sp["uiMin"]!.GetValue<double>(), sMax = sp["uiMax"]!.GetValue<double>();
+    double scale = sp["uiScale"]?.GetValue<double>() ?? 1, mMin = sp["min"]!.GetValue<double>(), mMax = sp["max"]!.GetValue<double>();
+    Require(uiMin == sMin && uiMax == sMax, $"Slider {prop} ({entry.Key}) UI [{uiMin},{uiMax}] != schema [{sMin},{sMax}].");
+    Require(uiMin / scale >= mMin && uiMax / scale <= mMax, $"Slider {prop} ({entry.Key}) scaled exceeds model [{mMin},{mMax}].");
+}
+Console.WriteLine($"Settings contract passed: {schemaKeySet.Count} keys (4-way), " +
+    $"{cases.Count} C++<->C# differential cases, {sliderMatches.Count} sliders aligned.");
+
+internal partial class Program
+{
+    private static readonly string[] BuildConfigs = ["win-x64", "tests", "development", "tidy"];
+    private static readonly string[] TintSamples = ["#000000", "#abcdef", "#123456", "# 12345", "#GGGGGG", "123456"];
+    private static readonly string[] LangSamples = ["auto", "zh", "zh-Hans", "en", "fr-CA", "-en", "en--US", "bad tag", "中文"];
+    [GeneratedRegex(@"^\|\s*`(\w+)`\s*\|", RegexOptions.Multiline)]
+    private static partial Regex DocKeyRegex();
+    [GeneratedRegex(@"new\(""[^""]+"",\s*Loc\.T\(""[^""]+""\),\s*([0-9.]+),\s*([0-9.]+),\s*[0-9.]+,\s*""[^""]*"",\s*s\s*=>\s*s\.(\w+)")]
+    private static partial Regex SliderRegex();
+}
