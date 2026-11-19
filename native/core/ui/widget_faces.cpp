@@ -654,7 +654,7 @@ void PaintNotes(Canvas& c, const WidgetContent& n, const Pal& p, float fw, float
     D2D1_RECT_F caret = c.Caret(n.text, box, size, DWRITE_FONT_WEIGHT_NORMAL, n.caret);
     float scroll = std::max(0.f, caret.bottom - box.bottom);
     c.Clip(box);
-    c.Text(n.text, D2D1::RectF(box.left, box.top - scroll, box.right, box.top - scroll + 10000), size, p.text, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
+    c.Text(n.text, D2D1::RectF(box.left, box.top - scroll, box.right, box.bottom + scroll + 64.f), size, p.text, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
     caret.top -= scroll;
     caret.bottom -= scroll;
     if (n.caretOn)

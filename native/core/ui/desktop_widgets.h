@@ -13,9 +13,13 @@
 #include "ui/glass_menu.h"
 #include "ui/widget_faces.h"
 
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace atrium {
@@ -93,11 +97,22 @@ private:
     void PickFolder(Widget& w);
     void PickCity(Widget& w, POINT at);
     void LoadPhoto(Widget& w, bool another);
+    void PhotoWorker();
     void SampleSystem();
+
+    struct PhotoJob {
+        std::wstring current;
+        bool another = false;
+        std::wstring folder;
+        void* widget = nullptr;
+        unsigned gen = 0;
+        UINT pw = 0, ph = 0;
+        HWND host = nullptr;
+    };
 
     HINSTANCE instance_;
     HWND host_ = nullptr; // timers, the menu's owner
-    HWINEVENTHOOK hook_ = nullptr, showHook_ = nullptr, uncloakHook_ = nullptr;
+    HWINEVENTHOOK hook_ = nullptr, minHook_ = nullptr, showHook_ = nullptr, uncloakHook_ = nullptr;
     bool enabled_ = false;
     bool onRight_ = false;
     BarEdge barEdge_ = BarEdge::Bottom;
@@ -115,6 +130,11 @@ private:
     int lastMinute_ = -1;
     uint64_t cpuIdle_ = 0, cpuTotal_ = 0; // the last GetSystemTimes
     unsigned photoGen_ = 0;
+    std::mutex photoMu_;
+    std::condition_variable photoCv_;
+    std::deque<PhotoJob> photoJobs_;
+    bool photoStop_ = false;
+    std::thread photoWorker_;
     bool restackPosted_ = false;
     // Only Restack may change a widget's place in the z-order: anything else
     // (showing the window, a click, the system) is held back in WM_WINDOWPOSCHANGING.

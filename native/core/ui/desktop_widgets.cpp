@@ -23,7 +23,6 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
-#include <thread>
 
 namespace json = winrt::Windows::Data::Json;
 
@@ -37,6 +36,7 @@ constexpr double kGlideMs = 240;
 constexpr UINT_PTR kTickTimer = 1, kGlideTimer = 3, kSafetyTimer = 4, kCaretTimer = 5, kSaveTimer = 6;
 constexpr UINT kCaretMs = 530, kSaveMs = 800;
 constexpr ULONGLONG kPhotoMs = 10 * 60 * 1000; // a new photo every ten minutes
+constexpr size_t kMaxNoteText = 8192, kMaxReminderText = 512;
 constexpr const wchar_t* kHostClass = L"AtriumWidgetsHost";
 constexpr UINT WM_WIDGET_REMOVE = WM_APP + 1;    // lParam Widget*: removed once its own message is done
 constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2;   // a burst of window events, one restack
@@ -57,19 +57,13 @@ const KindName kKinds[] = {{WidgetKind::Clock, L"clock"},         {WidgetKind::C
 
 const wchar_t* NameOf(WidgetKind k)
 {
-    for (const KindName& n : kKinds)
-        if (n.kind == k)
-            return n.name;
-    return L"clock";
+    const auto* it = std::ranges::find(kKinds, k, &KindName::kind);
+    return it != std::end(kKinds) ? it->name : L"clock";
 }
 bool ParseKind(const std::wstring& s, WidgetKind& k)
 {
-    for (const KindName& n : kKinds)
-        if (s == n.name) {
-            k = n.kind;
-            return true;
-        }
-    return false;
+    const auto* it = std::ranges::find(kKinds, s, &KindName::name);
+    return it != std::end(kKinds) ? (k = it->kind, true) : false;
 }
 const wchar_t* SizeName(WidgetSize s) { return s == WidgetSize::Small ? L"small" : s == WidgetSize::Medium ? L"medium" : L"large"; }
 WidgetSize ParseSize(const std::wstring& s) { return s == L"large" ? WidgetSize::Large : s == L"medium" ? WidgetSize::Medium : WidgetSize::Small; }
@@ -101,6 +95,8 @@ bool IsDesktopWindow(HWND h)
     std::wstring c = ClassOf(h);
     return c == L"Progman" || c == L"WorkerW";
 }
+
+std::wstring ClampText(std::wstring s, size_t max) { return s.size() <= max ? s : s.substr(0, max - (max && IS_HIGH_SURROGATE(s[max - 1]) ? 1 : 0)); }
 
 // The first city of the local time zone's name: "(UTC+08:00) 北京，重庆，…" -> "北京".
 std::wstring LocalCity()
@@ -152,11 +148,9 @@ void ListPhotos(const std::wstring& dir, std::vector<std::wstring>& out, int dep
             continue;
         std::wstring ext = name.substr(dot);
         std::ranges::transform(ext, ext.begin(), ::towlower);
-        for (const wchar_t* e : {L".jpg", L".jpeg", L".png", L".bmp", L".gif", L".webp", L".heic", L".tif", L".tiff"})
-            if (ext == e) {
-                out.push_back(dir + L"\\" + name);
-                break;
-            }
+        static constexpr const wchar_t* kExts[] = {L".jpg", L".jpeg", L".png", L".bmp", L".gif", L".webp", L".heic", L".tif", L".tiff"};
+        if (std::ranges::find(kExts, ext) != std::end(kExts))
+            out.push_back(dir + L"\\" + name);
     } while (out.size() < 5000 && FindNextFileW(h, &fd));
     FindClose(h);
 }
@@ -214,12 +208,19 @@ IconImage ReadPhoto(const std::wstring& path, UINT w, UINT h)
     return out;
 }
 
+struct PhotoRead {
+    void* widget;
+    unsigned gen;
+    std::wstring path;
+    IconImage image;
+};
+
 } // namespace
 
 struct DesktopWidgets::Widget {
     WidgetKind kind = WidgetKind::Clock;
     WidgetSize size = WidgetSize::Small;
-    int col = 0, row = 0;
+    int col = 0, row = 0, downCol = 0;
     std::unique_ptr<Surface> surface;
     bool down = false, dragging = false;
     bool hover = false;    // the mouse is over it: the resize grip shows
@@ -227,25 +228,14 @@ struct DesktopWidgets::Widget {
     bool resizing = false; // dragged by the grip
     bool growLeft = false; // the selected grip is at the bottom left
     WidgetSize downSize = WidgetSize::Small;
-    int downCol = 0;
     POINT downAt{};
-    RECT downRect{};
-    RECT glideFrom{}, glideTo{};
+    RECT downRect{}, glideFrom{}, glideTo{};
     double glideMs = 0;
     WidgetContent content;
     std::vector<WidgetHit> hits; // of the last paint
     ULONGLONG photoAt = 0;       // when the photo was last changed
     unsigned photoGen = 0;       // the photo being read
 };
-
-namespace {
-struct PhotoRead {
-    void* widget;
-    unsigned gen;
-    std::wstring path;
-    IconImage image;
-};
-} // namespace
 
 DesktopWidgets::DesktopWidgets(HINSTANCE instance)
     : instance_(instance),
@@ -294,6 +284,14 @@ void DesktopWidgets::ReloadLanguage()
 DesktopWidgets::~DesktopWidgets()
 {
     SetEnabled(false);
+    {
+        std::lock_guard g(photoMu_);
+        photoStop_ = true;
+        photoJobs_.clear();
+    }
+    photoCv_.notify_one();
+    if (photoWorker_.joinable())
+        photoWorker_.join();
     if (host_)
         DestroyWindow(host_);
     g_widgets = nullptr;
@@ -311,7 +309,8 @@ void DesktopWidgets::SetEnabled(bool on)
         Load();
         Build();
         const DWORD flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
-        hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, nullptr, OnWinEvent, 0, 0, flags);
+        hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, OnWinEvent, 0, 0, flags);
+        minHook_ = SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, nullptr, OnWinEvent, 0, 0, flags);
         // A window that appears without taking the foreground, or uncloaks
         // after it did (WinUI), must also send raised widgets back down.
         showHook_ = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, OnWinEvent, 0, 0, flags);
@@ -321,11 +320,9 @@ void DesktopWidgets::SetEnabled(bool on)
         Restack();
         Log(L"widgets: on (%zu)", widgets_.size());
     } else {
-        for (HWINEVENTHOOK* h : {&hook_, &showHook_, &uncloakHook_}) {
+        for (HWINEVENTHOOK* h : {&hook_, &minHook_, &showHook_, &uncloakHook_})
             if (*h)
-                UnhookWinEvent(*h);
-            *h = nullptr;
-        }
+                UnhookWinEvent(std::exchange(*h, nullptr));
         KillTimer(host_, kTickTimer);
         KillTimer(host_, kSafetyTimer);
         weather_->SetActive(false);
@@ -485,7 +482,7 @@ void DesktopWidgets::Load()
                 if (!ParseKind(std::wstring(e.GetNamedString(L"kind", L"")), k))
                     continue;
                 WidgetContent content;
-                content.text = e.GetNamedString(L"text", L"");
+                content.text = ClampText(std::wstring(e.GetNamedString(L"text", L"")), kMaxNoteText);
                 content.folder = e.GetNamedString(L"folder", L"");
                 if (e.HasKey(L"cities") && e.GetNamedValue(L"cities").ValueType() == json::JsonValueType::Array)
                     for (const auto& cv : e.GetNamedArray(L"cities"))
@@ -496,7 +493,8 @@ void DesktopWidgets::Load()
                         if (iv.ValueType() != json::JsonValueType::Object)
                             continue;
                         json::JsonObject io = iv.GetObject();
-                        content.items.push_back({std::wstring(io.GetNamedString(L"text", L"")), io.GetNamedBoolean(L"done", false)});
+                        content.items.push_back(
+                            {ClampText(std::wstring(io.GetNamedString(L"text", L"")), kMaxReminderText), io.GetNamedBoolean(L"done", false)});
                     }
                 if (!add(k, ParseSize(std::wstring(e.GetNamedString(L"size", L"small"))), int(e.GetNamedNumber(L"col", 0)), int(e.GetNamedNumber(L"row", 0)),
                          content))
@@ -563,12 +561,7 @@ void DesktopWidgets::SaveSoon() { SetTimer(host_, kSaveTimer, kSaveMs, nullptr);
 
 DesktopWidgets::Widget& DesktopWidgets::Create(WidgetKind kind, WidgetSize size, int col, int row)
 {
-    auto w = std::make_unique<Widget>();
-    w->kind = kind;
-    w->size = size;
-    w->col = col;
-    w->row = row;
-    widgets_.push_back(std::move(w));
+    widgets_.push_back(std::make_unique<Widget>(Widget{kind, size, col, row}));
     return *widgets_.back();
 }
 
@@ -767,13 +760,9 @@ bool DesktopWidgets::IsOurs(HWND h) const
 
 // ---- the layer -----------------------------------------------------------------
 
-void CALLBACK DesktopWidgets::OnWinEvent(HWINEVENTHOOK, DWORD event, HWND h, LONG obj, LONG child, DWORD, DWORD)
+void CALLBACK DesktopWidgets::OnWinEvent(HWINEVENTHOOK, DWORD, HWND h, LONG obj, LONG child, DWORD, DWORD)
 {
-    if (!g_widgets || obj != OBJID_WINDOW || child != CHILDID_SELF)
-        return;
-    // Only top-level show/hide events: child controls change constantly.
-    bool appeared = event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_HIDE || event == EVENT_OBJECT_UNCLOAKED;
-    if (appeared && (!h || GetAncestor(h, GA_ROOT) != h))
+    if (!g_widgets || obj != OBJID_WINDOW || child != CHILDID_SELF || !h || GetAncestor(h, GA_ROOT) != h)
         return;
     if (!g_widgets->restackPosted_) {
         g_widgets->restackPosted_ = true; // a burst of events, one restack right after it
@@ -865,13 +854,13 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     if (self) {
         switch (m) {
         case WM_TIMER:
-            if (w == kTickTimer) {
+            if (w == kTickTimer)
                 self->Tick();
-            } else if (w == kSafetyTimer) {
+            else if (w == kSafetyTimer)
                 self->Restack();
-            } else if (w == kGlideTimer) {
+            else if (w == kGlideTimer)
                 self->Glide();
-            } else if (w == kSaveTimer) {
+            else if (w == kSaveTimer) {
                 KillTimer(h, kSaveTimer);
                 self->Save();
             } else if (w == kCaretTimer) {
@@ -897,12 +886,10 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 for (auto& wd : self->widgets_)
                     self->Place(*wd, false);
             return 0;
-        case WM_WIDGET_REMOVE: {
-            auto* gone = reinterpret_cast<Widget*>(l);
-            if (self->Has(gone))
+        case WM_WIDGET_REMOVE:
+            if (auto* gone = reinterpret_cast<Widget*>(l); self->Has(gone))
                 self->RemoveNow(*gone);
             return 0;
-        }
         case WM_WIDGET_PHOTO: {
             auto read = TakePosted<PhotoRead>(l);
             auto* wd = static_cast<Widget*>(read->widget);
@@ -949,7 +936,7 @@ void DesktopWidgets::Tick()
     lastMinute_ = t.wMinute;
     if ((minute || t.wSecond % 30 == 0) && onStatusRequest)
         onStatusRequest();
-    bool sample = t.wSecond % 2 == 0;
+    bool sample = t.wSecond % 2 == 0 && std::ranges::any_of(widgets_, [](const auto& w) { return w->kind == WidgetKind::System; });
     if (sample)
         SampleSystem();
     ULONGLONG now = GetTickCount64();
@@ -1030,32 +1017,46 @@ void DesktopWidgets::LoadPhoto(Widget& w, bool another)
 {
     if (!w.surface)
         return;
-    std::wstring folder = w.content.folder.empty() ? PicturesFolder() : w.content.folder;
-    std::wstring current = w.content.photo;
     float s = Scale();
     UINT pw = UINT(std::lround(WidgetWidth(w.size) * s)), ph = UINT(std::lround(WidgetHeight(w.size) * s));
     unsigned gen = w.photoGen = ++photoGen_;
     w.photoAt = GetTickCount64(); // no second request while this one runs
-    HWND host = host_;
-    void* widget = &w;
-    std::thread([current, another, folder, widget, gen, pw, ph, host] {
-        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        std::wstring path = current;
-        if (another || path.empty()) {
-            std::vector<std::wstring> all;
-            ListPhotos(folder, all);
-            if (all.size() > 1)
-                std::erase(all, current);
-            path.clear();
-            if (!all.empty()) {
-                std::mt19937 rng{std::random_device{}()};
-                path = all[std::uniform_int_distribution<size_t>(0, all.size() - 1)(rng)];
-            }
+    {
+        std::lock_guard g(photoMu_);
+        std::erase_if(photoJobs_, [&](const PhotoJob& j) { return j.widget == &w; });
+        photoJobs_.push_back({w.content.photo, another, w.content.folder.empty() ? PicturesFolder() : w.content.folder, &w, gen, pw, ph, host_});
+        if (!photoWorker_.joinable() && !photoStop_)
+            photoWorker_ = std::thread([this] { PhotoWorker(); });
+    }
+    photoCv_.notify_one();
+}
+
+void DesktopWidgets::PhotoWorker()
+{
+    const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
+    std::mt19937 rng{std::random_device{}()};
+    for (PhotoJob job;;) {
+        {
+            std::unique_lock g(photoMu_);
+            photoCv_.wait(g, [this] { return photoStop_ || !photoJobs_.empty(); });
+            if (photoStop_)
+                break;
+            job = std::move(photoJobs_.front());
+            photoJobs_.pop_front();
         }
-        auto read = std::make_unique<PhotoRead>(PhotoRead{widget, gen, path, path.empty() ? IconImage{} : ReadPhoto(path, pw, ph)});
+        std::wstring path = job.current;
+        if (job.another || path.empty()) {
+            std::vector<std::wstring> all;
+            ListPhotos(job.folder, all);
+            if (all.size() > 1)
+                std::erase(all, job.current);
+            path = all.empty() ? L"" : all[std::uniform_int_distribution<size_t>(0, all.size() - 1)(rng)];
+        }
+        auto img = path.empty() ? IconImage{} : ReadPhoto(path, job.pw, job.ph);
+        PostOwned(job.host, WM_WIDGET_PHOTO, 0, std::make_unique<PhotoRead>(PhotoRead{job.widget, job.gen, path, std::move(img)}));
+    }
+    if (com)
         CoUninitialize();
-        PostOwned(host, WM_WIDGET_PHOTO, 0, std::move(read));
-    }).detach();
 }
 
 // ---- input -------------------------------------------------------------------
@@ -1220,12 +1221,8 @@ void DesktopWidgets::Activate(Widget& w)
         break;
     case WidgetKind::System: open = L"taskmgr.exe"; break;
     case WidgetKind::Battery: open = world_.status.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep"; break;
-    case WidgetKind::Bluetooth:
-        open = L"ms-settings:bluetooth"; // Bluetooth & devices: each device with its battery
-        break;
-    case WidgetKind::Network:
-        open = L"ms-settings:network-status"; // 网络和 Internet: the adapters, their speeds and their usage
-        break;
+    case WidgetKind::Bluetooth: open = L"ms-settings:bluetooth"; break; // Bluetooth & devices: each device with its battery
+    case WidgetKind::Network: open = L"ms-settings:network-status"; break; // 网络和 Internet: the adapters, their speeds and their usage
     case WidgetKind::Photos:
         if (w.content.photo.empty())
             PickFolder(w);
@@ -1326,11 +1323,13 @@ void DesktopWidgets::Insert(Widget& w, const std::wstring& s)
 {
     WidgetContent& c = w.content;
     std::wstring& text = w.kind == WidgetKind::Notes ? c.text : c.items[size_t(c.item)].text;
+    const size_t limit = w.kind == WidgetKind::Notes ? kMaxNoteText : kMaxReminderText;
     std::wstring add = s;
     if (w.kind == WidgetKind::Reminders) // one line
         std::ranges::replace_if(add, [](wchar_t ch) { return ch == L'\r' || ch == L'\n'; }, L' ');
     else
         std::erase(add, L'\r');
+    add = ClampText(std::move(add), text.size() < limit ? limit - text.size() : 0);
     c.caret = std::min(c.caret, text.size());
     text.insert(c.caret, add);
     c.caret += add.size();
@@ -1521,13 +1520,12 @@ void DesktopWidgets::Menu(Widget& w)
         case kCities: PickCity(w, p); break;
         case kNextPhoto: LoadPhoto(w, true); break;
         case kClearDone:
+            EndEdit(w);
             std::erase_if(w.content.items, [](const Reminder& r) { return r.done; });
             Save();
             w.surface->Invalidate();
             break;
-        case kRemove:
-            Remove(w); // w is gone
-            break;
+        case kRemove: Remove(w); break; // w is gone
         default: break;
         }
     });
@@ -1554,10 +1552,9 @@ void DesktopWidgets::PaintShadow(Canvas& c, D2D1_RECT_F face)
         FAILED(sink->Close()))
         return;
     d2d->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), ring.get()), nullptr);
-    for (int i = 9; i >= 1; --i) {
-        const float d = float(i);
-        c.Fill(D2D1::RectF(face.left - d, face.top - d + 2, face.right + d, face.bottom + d + 2), kWidgetRadius + d, D2D1::ColorF(0, 0, 0, 0.018f));
-    }
+    for (int i = 9; i >= 1; --i)
+        c.Fill(D2D1::RectF(face.left - float(i), face.top - float(i) + 2, face.right + float(i), face.bottom + float(i) + 2), kWidgetRadius + float(i),
+               D2D1::ColorF(0, 0, 0, 0.018f));
     d2d->PopLayer();
 }
 
