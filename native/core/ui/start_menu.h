@@ -201,7 +201,6 @@ private:
     // Folders.
     void OpenFolder(int tile);
     void CloseFolder();
-    float FolderOpen(double now) const; // 0 closed .. 1 open
     void StartNaming();
     void FinishNaming(bool keep);
 
@@ -253,7 +252,7 @@ private:
     std::vector<Hit> hits_;
     SystemStatus status_;
     HWND previous_ = nullptr;
-    RECT bar_{}, logo_{};
+    RECT bar_{};
     bool menuOpen_ = false;
     bool tracking_ = false;
     bool stale_ = false;    // the catalog changed while a tile was carried

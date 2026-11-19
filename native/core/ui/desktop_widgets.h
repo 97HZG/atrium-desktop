@@ -38,8 +38,6 @@ public:
     void ReloadLanguage();
     // Adds a widget in the first free place; false when there is no room.
     bool Add(WidgetKind kind, WidgetSize size);
-    // The same by name ("clock", "medium"; the settings app's gallery).
-    bool AddNamed(const std::wstring& kind, const std::wstring& size);
     static bool ParseNames(const std::wstring& kind, const std::wstring& size, WidgetKind& outKind, WidgetSize& outSize);
 
     std::function<void()> onCalendar;    // a calendar widget was clicked

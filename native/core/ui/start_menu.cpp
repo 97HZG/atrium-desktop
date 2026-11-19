@@ -402,7 +402,6 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
 {
     previous_ = previous;
     bar_ = bar;
-    logo_ = logo;
     query_.clear();
     results_.clear();
     allApps_ = scrubbing_ = false;

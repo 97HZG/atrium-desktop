@@ -68,7 +68,6 @@ private:
         std::vector<Hit> hits;
         std::wstring hover, pressed;
         bool tracking = false;
-        int wheel = 0; // wheel delta not yet turned into steps
         float scroll = 0, scrollTarget = 0, contentH = 0, viewH = 0; // the wheel sets the target; the list glides there
         float contentTop = 0; // top-right centre: cards start below the control capsule
         std::map<uint64_t, CardAnim> cards;

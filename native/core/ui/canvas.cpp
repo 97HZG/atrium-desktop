@@ -337,25 +337,6 @@ D2D1_RECT_F Canvas::Caret(const std::wstring& s, D2D1_RECT_F r, float size, DWRI
     return D2D1::RectF(r.left + x / scale, r.top + y / scale, r.left + x / scale + 1.5f, r.top + (y + m.height) / scale);
 }
 
-void Canvas::ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius)
-{
-    if (!Cached(key))
-        Image(key, image, D2D1::RectF(), 0);
-    auto found = s_.bitmaps_.find(key);
-    if (found == s_.bitmaps_.end() || !found->second)
-        return;
-    const auto p = Px(r);
-    if (!s_.roundedImageBrush_ && FAILED(d2d_->CreateBitmapBrush(found->second.get(), s_.roundedImageBrush_.put())))
-        return;
-    auto* brush = s_.roundedImageBrush_.get();
-    brush->SetBitmap(found->second.get());
-    const auto size = found->second->GetSize();
-    brush->SetTransform(D2D1::Matrix3x2F::Scale((p.right - p.left) / size.width, (p.bottom - p.top) / size.height) *
-                        D2D1::Matrix3x2F::Translation(p.left, p.top));
-    brush->SetOpacity(alpha_);
-    FillContinuousRect(d2d_, p, radius * scale, brush);
-}
-
 void Canvas::ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r)
 {
     winrt::com_ptr<ID2D1Factory> f;

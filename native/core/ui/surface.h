@@ -121,7 +121,6 @@ public:
     // An icon by a stable cache key; `image` is only read the first time.
     void Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float opacity = 1);
     void ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r);
-    void ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius);
     // An image as Image draws it into `r`, then through `perspective`: a 4x4 transform in px of the
     // content (what Px gives), before the group's transform.
     void ImagePerspective(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, const D2D1_MATRIX_4X4_F& perspective, float opacity = 1);
@@ -295,7 +294,6 @@ private:
     winrt::com_ptr<ID2D1SolidColorBrush> brush_;
     winrt::com_ptr<ID2D1Bitmap> calloutMask_; // one current label mask, only allocated for the plain fallback
     std::array<float, 7> calloutMaskKey_{};
-    winrt::com_ptr<ID2D1BitmapBrush> roundedImageBrush_;
     winrt::com_ptr<ID2D1Effect> blur_; // Canvas::EndBlur; of the current device context only
     int failedFrames_ = 0;             // in a row, each on a fresh device (RetryFrame)
     winrt::com_ptr<ID2D1CommandList> roundedMask_;

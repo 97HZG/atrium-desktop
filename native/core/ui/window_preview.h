@@ -11,7 +11,6 @@
 
 #include <dwmapi.h>
 
-#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -35,10 +34,6 @@ public:
     void Leave();
     void Close();
     bool Visible() const { return surface_.Visible(); }
-    const std::wstring& Key() const { return key_; }
-    HWND Hwnd() const { return surface_.Hwnd(); }
-
-    std::function<void(HWND)> onActivate; // a window was picked (the preview has closed)
 
 private:
     struct Card {

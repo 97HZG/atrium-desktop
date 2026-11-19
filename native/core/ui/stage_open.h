@@ -19,7 +19,6 @@ public:
         std::erase_if(apps_, [&](const auto& item) { return now >= item.second; });
         return apps_.contains(app);
     }
-    bool Empty() const { return apps_.empty(); }
 
 private:
     std::map<std::wstring, uint64_t> apps_;

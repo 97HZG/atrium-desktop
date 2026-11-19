@@ -46,7 +46,6 @@ public:
         surface_.SetRadius(dip);
     }
     void SetBarHeight(float dip) { barH_ = dip; }
-    HWND Hwnd() const { return surface_.Hwnd(); }
 
 private:
     struct Hit {

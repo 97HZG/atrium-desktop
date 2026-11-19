@@ -1191,12 +1191,9 @@ void ControlCenter::BrightnessChanged(int percent)
     // Not while the slider's own value is on its way, nor where WMI cannot set it.
     if (dragging_ == L"bright" || brightBusy_ || percent == brightness_ || brightness_ == -1)
         return;
-    float before = Size().height;
     brightness_ = percent;
     if (!surface_.Visible())
         return;
-    if (Size().height != before)
-        Place();
     surface_.Invalidate();
 }
 
@@ -1253,7 +1250,6 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
                 ReadRadios(radioDevices_);
             return true;
         }
-        float before = Size().height;
         radios_ = r->radios;
         radiosRead_ = true;
         if (r->devicesRead) {
@@ -1265,8 +1261,6 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
             if (dragging_ != L"bright" && !brightBusy_)
                 brightness_ = r->brightness;
         }
-        if (Size().height != before && surface_.Visible())
-            Place();
         surface_.Invalidate();
         if (radioPending_ && !radioWriteBusy_)
             ReadRadios(radioDevices_);
@@ -1281,7 +1275,6 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
             return true;
         if (!dragging_.empty() && dragging_ != L"slider")
             return true; // an app's slider is held: keep what it shows
-        float before = Size().height;
         bool missing = false;
         for (AudioApp& a : r->apps) {
             if (!a.icon.Empty())
@@ -1299,16 +1292,11 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
         audioRead_ = true;
         if (missing)
             ReadAudio(true);
-        if (Size().height != before && surface_.Visible())
-            Place();
         surface_.Invalidate();
         return true;
     }
     case WM_CC_DISPLAYS: {
-        float before = Size().height;
         displays_ = finder_.Displays();
-        if (Size().height != before && surface_.Visible() && page_ == Page::Cast)
-            Place();
         surface_.Invalidate();
         return true;
     }
@@ -1344,12 +1332,9 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
             Scan(scanRescan_);
         if (gen == scanGen_ && gen > acceptedGen_ && surface_.Visible()) {
             acceptedGen_ = gen;
-            float before = Size().height;
             networks_ = std::move(*list);
             scanned_ = true;
             scanning_ = again;
-            if (Size().height != before && surface_.Visible())
-                Place();
             surface_.Invalidate();
         }
         return true;

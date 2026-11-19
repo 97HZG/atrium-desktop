@@ -48,7 +48,6 @@ public:
         radius_ = dip;
         surface_.SetRadius(dip);
     }
-    HWND Hwnd() const { return surface_.Hwnd(); }
 
     std::function<void()> onSystemTray; // the fallback button
 

@@ -389,8 +389,6 @@ bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         }
         Close();
         TaskModel::ActivateWindow(target);
-        if (onActivate)
-            onActivate(target);
         return true;
     }
     default: break;

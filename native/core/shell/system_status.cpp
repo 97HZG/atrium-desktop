@@ -45,27 +45,9 @@ winrt::com_ptr<IAudioEndpointVolume> DefaultVolume(std::wstring* name = nullptr)
 }
 
 // Forwards Core Audio's volume notifications (on its own thread) as a message.
-class VolumeCallback final : public IAudioEndpointVolumeCallback {
+class VolumeCallback : public winrt::implements<VolumeCallback, IAudioEndpointVolumeCallback> {
 public:
     VolumeCallback(HWND hwnd, UINT msg) : hwnd_(hwnd), msg_(msg) {}
-    STDMETHODIMP QueryInterface(REFIID iid, void** out) override
-    {
-        if (iid == __uuidof(IUnknown) || iid == __uuidof(IAudioEndpointVolumeCallback)) {
-            *out = static_cast<IAudioEndpointVolumeCallback*>(this);
-            AddRef();
-            return S_OK;
-        }
-        *out = nullptr;
-        return E_NOINTERFACE;
-    }
-    STDMETHODIMP_(ULONG) AddRef() override { return InterlockedIncrement(&refs_); }
-    STDMETHODIMP_(ULONG) Release() override
-    {
-        ULONG n = InterlockedDecrement(&refs_);
-        if (!n)
-            delete this;
-        return n;
-    }
     STDMETHODIMP OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA) override
     {
         PostMessageW(hwnd_, msg_, 0, 0);
@@ -75,7 +57,6 @@ public:
 private:
     HWND hwnd_;
     UINT msg_;
-    LONG refs_ = 1;
 };
 
 winrt::com_ptr<IAudioEndpointVolume> g_watched;
@@ -91,7 +72,7 @@ void WatchVolume(HWND hwnd, UINT msg)
     if (!g_watched)
         return;
     if (!g_callback)
-        g_callback.attach(new VolumeCallback(hwnd, msg));
+        g_callback = winrt::make_self<VolumeCallback>(hwnd, msg);
     if (FAILED(g_watched->RegisterControlChangeNotify(g_callback.get())))
         g_watched = nullptr;
 }

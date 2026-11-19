@@ -758,7 +758,6 @@ void Surface::ResetDevice()
     swap_ = nullptr;
     brush_ = nullptr;
     calloutMask_ = nullptr;
-    roundedImageBrush_ = nullptr;
     roundedMask_ = nullptr;
     blur_ = nullptr; // an effect belongs to the device context that made it
     bitmaps_.clear();

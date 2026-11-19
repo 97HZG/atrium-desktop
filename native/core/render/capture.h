@@ -61,12 +61,17 @@ private:
 };
 
 class DuplicationCapture : public BackdropSource {
+    struct Tag {
+        explicit Tag() = default; // not `{}`: only Create can make one
+    };
+
 public:
     // Null when the monitor cannot be duplicated; `why` says why (temporary:
     // E_ACCESSDENIED while the secure desktop shows).
     // elsewhere: DXGI lists the monitor under another GPU (a hybrid laptop
     // that placed this process on the discrete one) - see PreferPowerSavingGpu.
     static std::unique_ptr<DuplicationCapture> Create(const Gpu& gpu, HMONITOR monitor, HANDLE frameEvent, HRESULT& why, bool& elsewhere);
+    explicit DuplicationCapture(Tag) {}
     ~DuplicationCapture() override;
     DuplicationCapture(const DuplicationCapture&) = delete;
     DuplicationCapture& operator=(const DuplicationCapture&) = delete;
@@ -78,7 +83,6 @@ public:
     static bool Temporary(HRESULT why);
 
 private:
-    DuplicationCapture() = default;
     void Pump(); // the waiting thread: holds one acquired frame until the render thread is done with it
 
     winrt::com_ptr<ID3D11Device> device_;

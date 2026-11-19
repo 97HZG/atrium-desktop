@@ -209,7 +209,7 @@ std::unique_ptr<DuplicationCapture> DuplicationCapture::Create(const Gpu& gpu, H
     // The waiting thread and the render thread both use the device.
     if (auto mt = gpu.context.try_as<ID3D11Multithread>())
         mt->SetMultithreadProtected(TRUE);
-    std::unique_ptr<DuplicationCapture> c(new DuplicationCapture());
+    auto c = std::make_unique<DuplicationCapture>(Tag{});
     c->device_ = gpu.device;
     c->context_ = gpu.context;
     c->dup_ = dup;

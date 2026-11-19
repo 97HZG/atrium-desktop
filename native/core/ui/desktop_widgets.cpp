@@ -671,13 +671,6 @@ bool DesktopWidgets::Add(WidgetKind kind, WidgetSize size)
     return true;
 }
 
-bool DesktopWidgets::AddNamed(const std::wstring& kind, const std::wstring& size)
-{
-    WidgetKind k;
-    WidgetSize s;
-    return ParseNames(kind, size, k, s) && Add(k, s);
-}
-
 bool DesktopWidgets::ParseNames(const std::wstring& kind, const std::wstring& size, WidgetKind& outKind, WidgetSize& outSize)
 {
     outSize = ParseSize(size);
@@ -1047,7 +1040,7 @@ void DesktopWidgets::LoadPhoto(Widget& w, bool another)
     w.photoAt = GetTickCount64(); // no second request while this one runs
     HWND host = host_;
     void* widget = &w;
-    std::thread([=] {
+    std::thread([current, another, folder, widget, gen, pw, ph, host] {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         std::wstring path = current;
         if (another || path.empty()) {
