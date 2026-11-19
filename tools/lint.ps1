@@ -5,11 +5,13 @@
 #   ./tools/lint.ps1 -Fix                format first (clang-format, dotnet format)
 #   ./tools/lint.ps1 -Base origin/main   only the changed files for clang-tidy; -MaxLines budget
 #   -Paths <globs>                       the change may touch only these, and answers only for them
+#   -BuildDir <dir>                      reuse an existing Ninja build for -Tidy
 #   ./tools/lint.ps1 -Tidy -UpdateBaseline  record the ratchets (only ever lower them)
 #   -Root <tree>                         check another checkout with these rules
 param(
     [string]$Root = (Split-Path -Parent $PSScriptRoot),
     [string]$RulesRoot,
+    [string]$BuildDir,
     [string]$Base,
     [string[]]$Paths,
     [int]$MaxLines = 0,
@@ -137,7 +139,7 @@ if ($Base) {
         if ($parts[0] -like 'R*') { $parts[1], $parts[2] } elseif ($parts[0] -like 'C*') { $parts[2] } else { $parts[1] }
     })
     $fullConfig = '.clang-tidy', '.clang-format', '.editorconfig', '.gitattributes', 'Directory.Build.props', 'global.json',
-        'tools/lint.ps1', 'tools/lint-baseline.json', 'tools/check-localization.ps1',
+        'tools/lint.ps1', 'tools/lint-*.ps1', 'tools/lint-baseline.json', 'tools/check-localization.ps1',
         'native/CMakeLists.txt', 'native/**/CMakeLists.txt', 'native/CMakePresets.json', '.github/workflows/**'
     $fullRun = [bool]($touchedFiles | Where-Object { Test-Glob $_ $fullConfig } | Select-Object -First 1)
     if ($fullRun -and ($touchedFiles | Where-Object {
@@ -540,93 +542,11 @@ elseif ($sources) {
 }
 
 # --- clang-tidy: .clang-tidy over a Ninja build of the native tree --------------------------------------------
+$analysed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 if ($Tidy) {
-    $build = Join-Path $Root 'native/build/tidy'
-    $cl = Get-Command cl.exe -ErrorAction SilentlyContinue
-    if (-not $cl -or $cl.Source -notmatch '[\\/]x64[\\/]cl\.exe$') {
-        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        $vs = if (Test-Path $vswhere) { & $vswhere -latest -products * -property installationPath 2>$null } else { $null }
-        $vcvars = if ($vs) { Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat' } else { $null }
-        if (-not $vcvars -or -not (Test-Path $vcvars)) { throw 'lint: cl.exe not on PATH and Visual Studio vcvars64.bat not found' }
-        foreach ($line in (Invoke-Tool 'cmd' @('/c', "`"$vcvars`" >nul && set")).Lines) {
-            if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2]) }
-        }
-    }
-    Invoke-Tool 'cmake' @('-S', (Join-Path $Root 'native'), '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
-        '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON', '-DATRIUM_DEVELOPMENT=ON', '-DATRIUM_BUILD_TESTS=ON') | Out-Null
-    Invoke-Tool 'cmake' @('--build', $build) | Out-Null # the generated shader headers
-    $units = @((Get-Content (Join-Path $build 'compile_commands.json') -Raw | ConvertFrom-Json).file |
-        Where-Object { $_ -match '[\\/]native[\\/](core|tests)[\\/].*\.cpp$' } | Sort-Object -Unique) # not core.rc: rc.exe's command is no compiler's
-    if ($Base -and -not $fullRun) {
-        $touched = @($touchedFiles | Where-Object { $_ -like 'native/*' } | ForEach-Object { [IO.Path]::GetFileName($_) })
-        $headers = @($touched | Where-Object { $_ -match '\.h$' })
-        $units = @($units | Where-Object {
-            $touched -contains [IO.Path]::GetFileName($_) -or
-            ($headers -and (Select-String -Path $_ -Pattern ($headers | ForEach-Object { [regex]::Escape($_) + '"' }) -Quiet))
-        })
-    }
-    $analysed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($u in $units) { [void]$analysed.Add((Rel $u).Substring(7)) }
-    $clangTidy = Llvm 'clang-tidy.exe'
-    if (-not $clangTidy) { throw "lint: clang-tidy $llvmMajor not found" }
-    $tidyConfig = Join-Path $rules '.clang-tidy'
-    $results = $units | ForEach-Object -ThrottleLimit ([Environment]::ProcessorCount) -Parallel {
-        $unit = $_
-        $errFile = [IO.Path]::GetTempFileName()
-        try {
-            $stdout = @(& $using:clangTidy -p $using:build "--config-file=$using:tidyConfig" --quiet $unit 2>$errFile | ForEach-Object { "$_" })
-            $exit = $LASTEXITCODE
-            $stderr = if (Test-Path $errFile) { [IO.File]::ReadAllLines($errFile) } else { @() }
-        } finally {
-            Remove-Item $errFile -ErrorAction SilentlyContinue
-        }
-        [pscustomobject]@{ Unit = $unit; Exit = $exit; Stdout = $stdout; Stderr = $stderr }
-    }
-    $seen = @{}
-    foreach ($r in $results) {
-        $unitRel = Rel $r.Unit
-        $allLines = @($r.Stdout) + @($r.Stderr)
-        if ($r.Exit -ne 0) {
-            $errors.Add("tool-error: clang-tidy failed on $unitRel (exit $($r.Exit)): $(Tail $allLines)")
-        }
-        # Catch compile/fatal errors anywhere (including system headers) before the native/ path filter.
-        foreach ($line in $allLines) {
-            if ($line -match '^(?:(.+?):(\d+):\d+: )?(fatal error: .*)$') {
-                $where = if ($Matches[1]) { "$(Rel $Matches[1]):$($Matches[2])" } else { $unitRel }
-                Fail $where 'clang-diagnostic-error' "$($Matches[3]) (in $unitRel)"
-            } elseif ($line -match '^(.+?):(\d+):\d+: error: (.*) \[(clang-diagnostic-[\w-]+)\]$') {
-                Fail "$(Rel $Matches[1]):$($Matches[2])" $Matches[4] "$($Matches[3]) (in $unitRel)"
-            }
-        }
-        $current = $null
-        foreach ($line in $r.Stdout) {
-            if ($line -match '^(.+?):(\d+):\d+: (?:warning|error): (.*) \[([\w.,-]+)\]$') {
-                $file, $row, $text, $check = $Matches[1..4]
-                $rel = Rel $file
-                $current = $null
-                if ($check -like 'clang-diagnostic-*' -and $line -match ': error: ') { continue }
-                if (-not $rel.StartsWith('native/core/') -and -not $rel.StartsWith('native/tests/')) { continue }
-                $where = "${rel}:$row"
-                if ($seen.ContainsKey("$where|$check")) { continue }
-                $seen["$where|$check"] = $true
-                # Long and tangled functions are ratcheted: they may only get shorter and simpler.
-                if ($check -eq 'readability-function-cognitive-complexity' -and $text -match "function '(.+)' has cognitive complexity of (\d+)") {
-                    $counts["$($rel.Substring(7))|complexity|$($Matches[1])"] = [int]$Matches[2]
-                } elseif ($check -eq 'readability-function-cognitive-complexity' -and $text -match 'lambda has cognitive complexity of (\d+)') {
-                    $key = "$($rel.Substring(7))|complexity|(lambda)" # the file's most tangled one
-                    $counts[$key] = [Math]::Max([int]$counts[$key], [int]$Matches[1])
-                } elseif ($check -eq 'readability-function-size' -and $text -match "function '(.+)' exceeds") {
-                    $current = "$($rel.Substring(7))|function-lines|$($Matches[1])"
-                    $counts[$current] = 0
-                } else {
-                    Fail $where $check $text
-                }
-            } elseif ($current -and $line -match 'note: (\d+) lines including') {
-                $counts[$current] = [int]$Matches[1]
-                $current = $null
-            }
-        }
-    }
+    . (Join-Path $PSScriptRoot 'lint-tidy.ps1')
+    Invoke-TidyCheck -Root $Root -Rules $rules -BuildDir $BuildDir -Base $Base -FullRun $fullRun `
+        -TouchedFiles $touchedFiles -Analysed $analysed -Errors $errors -Counts $counts -LlvmMajor $llvmMajor
 }
 
 # --- C#: the projects built with .editorconfig's style rules and the recommended analyzers as errors ----------
@@ -712,7 +632,7 @@ if ($Base) {
     if ($gitOk) {
         $baseTags = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($k in $baseBaseline.Keys) { [void]$baseTags.Add((Get-KeyMetricTag $k)) }
-        $lintChanged = $touchedFiles -contains 'tools/lint.ps1'
+        $lintChanged = [bool]($touchedFiles | Where-Object { Test-Glob $_ @('tools/lint.ps1', 'tools/lint-*.ps1') } | Select-Object -First 1)
         foreach ($k in $baseline.Keys) {
             if ($baseBaseline.Contains($k) -and [int]$baseline[$k] -gt [int]$baseBaseline[$k]) {
                 Fail 'tools/lint-baseline.json' 'baseline' "$k rose ($($baseBaseline[$k]) -> $($baseline[$k]))"
@@ -774,7 +694,7 @@ if ($Paths) {
     $problems = @($problems | Where-Object {
         $file = if ($_ -match '^([^:]+?)(:\d+)?: ') { $Matches[1] } else { '' }
         -not $file -or $_ -match '^(lint|diff|tool-error): ' -or
-            $_ -match ': (scope|version|baseline|clang-diagnostic-error|(?:CS|MC|WMC|RZ)\d+): ' -or (Test-Glob $file $Paths)
+            $_ -match ': (?:scope|version|baseline|header-cycle|clang-diagnostic-error|(?:CS|MC|WMC|RZ)\d+): ' -or (Test-Glob $file $Paths)
     })
 }
 $problems | ForEach-Object { Write-Output $_ }

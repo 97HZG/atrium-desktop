@@ -450,20 +450,20 @@ bool IsDevelopmentBuild()
 #ifdef ATRIUM_DEVELOPMENT
     return true;
 #else
-    static const bool development = [] {
+    static const bool kDevelopment = [] {
         int count = 0;
         auto* args = CommandLineToArgvW(GetCommandLineW(), &count);
         bool explicitDevelopment = false;
         for (int i = 1; args && i < count; ++i)
             explicitDevelopment |= wcscmp(args[i], L"--development") == 0;
-        LocalFree(args);
+        LocalFree(static_cast<HLOCAL>(args));
         wchar_t exe[32768]{};
         GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe)));
         std::wstring path(exe);
         path = path.substr(0, path.find_last_of(L'\\')) + L"\\development.txt";
         return explicitDevelopment || GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
     }();
-    return development;
+    return kDevelopment;
 #endif
 }
 
