@@ -15,6 +15,8 @@
 #include <winrt/base.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -268,6 +270,28 @@ std::wstring CacheFolder()
     return folder;
 }
 
+void PruneLinkCache(const std::wstring& folder, const std::wstring& keepName)
+{
+    std::vector<std::pair<ULONGLONG, std::wstring>> files;
+    WIN32_FIND_DATAW found{};
+    HANDLE search = FindFirstFileW((folder + L"\\*.lnk").c_str(), &found);
+    if (search == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+            files.emplace_back((static_cast<ULONGLONG>(found.ftLastWriteTime.dwHighDateTime) << 32) | found.ftLastWriteTime.dwLowDateTime, found.cFileName);
+    } while (FindNextFileW(search, &found));
+    FindClose(search);
+    if (files.size() <= 128)
+        return;
+    std::ranges::sort(files, [](const auto& a, const auto& b) { return a.first < b.first; });
+    size_t toDelete = files.size() - 128;
+    for (const auto& [time, name] : files) {
+        if (_wcsicmp(name.c_str(), keepName.c_str()) != 0 && DeleteFileW((folder + L"\\" + name).c_str()) && --toDelete == 0)
+            break;
+    }
+}
+
 // The title the system menu shows for a link that carries no name string. The
 // link's own property store holds it; the shell reads that format, so the link
 // is written once to a cache file and asked for its title.
@@ -295,6 +319,7 @@ std::wstring LinkTitleFromShell(const std::vector<BYTE>& bytes)
         WriteFile(handle, bytes.data(), DWORD(bytes.size()), &written, nullptr);
         CloseHandle(handle);
     }
+    PruneLinkCache(folder, name);
     winrt::com_ptr<IPropertyStore> store;
     if (FAILED(SHGetPropertyStoreFromParsingName(file.c_str(), nullptr, GPS_DEFAULT, IID_PPV_ARGS(store.put()))) || !store)
         return {};
@@ -307,7 +332,7 @@ std::wstring LinkTitleFromShell(const std::vector<BYTE>& bytes)
     return title;
 }
 
-bool LoadShellLink(const BYTE* data, size_t size, JumpItem& item)
+bool LoadShellLink(const BYTE* data, size_t size, JumpItem& item, bool needTitle = true)
 {
     winrt::com_ptr<IStream> stream;
     stream.attach(SHCreateMemStream(data, UINT(size)));
@@ -330,14 +355,14 @@ bool LoadShellLink(const BYTE* data, size_t size, JumpItem& item)
     LinkStrings strings;
     ParseLinkStrings(data, size, strings);
     item.name = strings.name;
-    if (item.name.empty()) {
+    if (item.name.empty() && needTitle) {
         const std::vector<BYTE> blob(data, data + size);
         item.name = LinkTitleFromShell(blob);
     }
     return true;
 }
 
-std::vector<CustomCategory> ParseCustom(const std::vector<BYTE>& raw)
+std::vector<CustomCategory> ParseCustom(const std::vector<BYTE>& raw, bool needTitle = true)
 {
     std::vector<CustomCategory> categories;
     if (raw.size() < 24) // 12 byte header + an empty category and its footer
@@ -371,7 +396,7 @@ std::vector<CustomCategory> ParseCustom(const std::vector<BYTE>& raw)
             if (next != std::wstring::npos && next <= footer && end - 16 > start)
                 end -= 16;
             JumpItem item;
-            if (LoadShellLink(raw.data() + start, end - start, item) && !item.program.empty()) {
+            if (LoadShellLink(raw.data() + start, end - start, item, needTitle) && !item.program.empty()) {
                 if (item.name.empty())
                     item.name = BaseName(item.program);
                 item.target = item.program;
@@ -428,8 +453,9 @@ struct FileIndex {
     bool ready = false;
     bool building = false;
     ULONGLONG builtAt = 0;
-    std::map<std::wstring, std::wstring> byExe;  // lower-case program -> file hash
-    std::map<std::wstring, std::wstring> byPath; // lower-case item path -> file hash
+    uint64_t generation = 0;
+    std::map<std::wstring, std::wstring> byExe;  // lower-case program -> file hash (empty when ambiguous)
+    std::map<std::wstring, std::wstring> byPath; // lower-case item path -> file hash (empty when ambiguous)
 };
 
 FileIndex& Index()
@@ -438,7 +464,47 @@ FileIndex& Index()
     return index;
 }
 
-void BuildIndex()
+bool IsGenericShellHost(const std::wstring& foldedExe)
+{
+    const std::wstring name = BaseName(foldedExe);
+    static constexpr const wchar_t* kHosts[] = {
+        L"explorer.exe", L"cmd.exe", L"powershell.exe", L"pwsh.exe", L"rundll32.exe", L"conhost.exe", L"wscript.exe", L"cscript.exe",
+    };
+    return std::ranges::any_of(kHosts, [&name](const wchar_t* host) { return name == host; });
+}
+
+void RecordIndexHash(std::map<std::wstring, std::wstring>& map, const std::wstring& key, const std::wstring& hash)
+{
+    if (key.empty() || hash.empty())
+        return;
+    const auto [it, inserted] = map.emplace(key, hash);
+    if (!inserted && !it->second.empty() && it->second != hash)
+        it->second.clear(); // multiple jump lists share this key; refuse to guess
+}
+
+void IndexCustomDestinations(const std::wstring& recent, const std::atomic<bool>& stop, std::map<std::wstring, std::wstring>& byExe)
+{
+    WIN32_FIND_DATAW found{};
+    HANDLE search = FindFirstFileW((recent + L"\\CustomDestinations\\*.customDestinations-ms").c_str(), &found);
+    if (search == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        if (stop.load(std::memory_order_relaxed))
+            break;
+        const std::wstring hash = std::wstring(found.cFileName).substr(0, 16);
+        const auto bytes = ReadFileBytes(recent + L"\\CustomDestinations\\" + found.cFileName);
+        for (const CustomCategory& category : ParseCustom(bytes, false))
+            for (const JumpItem& item : category.items)
+                if (!item.program.empty()) {
+                    const std::wstring folded = FoldCase(item.program);
+                    if (!IsGenericShellHost(folded))
+                        RecordIndexHash(byExe, folded, hash);
+                }
+    } while (FindNextFileW(search, &found));
+    FindClose(search);
+}
+
+void BuildIndex(const std::atomic<bool>& stop)
 {
     const std::wstring recent = RecentFolder();
     if (recent.empty())
@@ -446,23 +512,16 @@ void BuildIndex()
     std::map<std::wstring, std::wstring> byExe;
     std::map<std::wstring, std::wstring> byPath;
 
-    WIN32_FIND_DATAW found{};
-    HANDLE search = FindFirstFileW((recent + L"\\CustomDestinations\\*.customDestinations-ms").c_str(), &found);
-    if (search != INVALID_HANDLE_VALUE) {
-        do {
-            const std::wstring hash = std::wstring(found.cFileName).substr(0, 16);
-            const auto bytes = ReadFileBytes(recent + L"\\CustomDestinations\\" + found.cFileName);
-            for (const CustomCategory& category : ParseCustom(bytes))
-                for (const JumpItem& item : category.items)
-                    if (!item.program.empty())
-                        byExe[FoldCase(item.program)] = hash;
-        } while (FindNextFileW(search, &found));
-        FindClose(search);
-    }
+    IndexCustomDestinations(recent, stop, byExe);
+    if (stop.load(std::memory_order_relaxed))
+        return;
 
-    search = FindFirstFileW((recent + L"\\AutomaticDestinations\\*.automaticDestinations-ms").c_str(), &found);
+    WIN32_FIND_DATAW found{};
+    HANDLE search = FindFirstFileW((recent + L"\\AutomaticDestinations\\*.automaticDestinations-ms").c_str(), &found);
     if (search != INVALID_HANDLE_VALUE) {
         do {
+            if (stop.load(std::memory_order_relaxed))
+                break;
             const std::wstring hash = std::wstring(found.cFileName).substr(0, 16);
             winrt::com_ptr<IStorage> storage;
             if (FAILED(StgOpenStorage((recent + L"\\AutomaticDestinations\\" + found.cFileName).c_str(), nullptr, STGM_READ | STGM_SHARE_DENY_WRITE, nullptr, 0,
@@ -477,11 +536,13 @@ void BuildIndex()
                         continue;
                     path = resolved;
                 }
-                byPath[FoldCase(path)] = hash;
+                RecordIndexHash(byPath, FoldCase(path), hash);
             }
         } while (FindNextFileW(search, &found));
         FindClose(search);
     }
+    if (stop.load(std::memory_order_relaxed))
+        return;
 
     FileIndex& index = Index();
     std::lock_guard<std::mutex> guard(index.lock);
@@ -489,30 +550,93 @@ void BuildIndex()
     index.byPath = std::move(byPath);
     index.ready = true;
     index.builtAt = GetTickCount64();
-    Log(L"jump list: indexed %zu programs, %zu items", index.byExe.size(), index.byPath.size());
+    ++index.generation;
+    if (!stop.load(std::memory_order_relaxed))
+        Log(L"jump list: indexed %zu programs, %zu items", index.byExe.size(), index.byPath.size());
 }
 
-// The app's file, from the index alone: by its program, else by any of its
-// recent items. Empty while the index is still being built.
+// The app's file, from the index alone: recent documents by AppUserModelID first,
+// then unambiguous program path. Empty while the index is still being built.
 std::wstring FindIndexedHash(const std::wstring& appId, const std::wstring& exePath)
 {
     FileIndex& index = Index();
+    {
+        std::lock_guard<std::mutex> guard(index.lock);
+        if (!index.ready)
+            return {};
+    }
+    // ShellDocumentList invokes COM; query outside index.lock so lookups do not block the index.
+    const std::vector<ShellRecent> recentDocs = appId.empty() ? std::vector<ShellRecent>{} : ShellDocumentList(appId, 0 /*ADLT_RECENT*/, 16);
     std::lock_guard<std::mutex> guard(index.lock);
     if (!index.ready)
         return {};
-    if (!exePath.empty()) {
-        auto it = index.byExe.find(FoldCase(exePath));
-        if (it != index.byExe.end())
-            return it->second;
-    }
-    if (!appId.empty()) {
-        for (const ShellRecent& entry : ShellDocumentList(appId, 0 /*ADLT_RECENT*/, 16)) {
-            auto it = index.byPath.find(FoldCase(entry.path));
-            if (it != index.byPath.end())
-                return it->second;
+    std::map<std::wstring, size_t> pathHits;
+    std::wstring bestHash;
+    size_t bestCount = 0;
+    for (const ShellRecent& entry : recentDocs) {
+        if (const auto it = index.byPath.find(FoldCase(entry.path)); it != index.byPath.end() && !it->second.empty()) {
+            if (const size_t count = ++pathHits[it->second]; count > bestCount) {
+                bestCount = count;
+                bestHash = it->second;
+            }
         }
     }
+    if (!bestHash.empty())
+        return bestHash;
+    if (!exePath.empty()) {
+        if (const auto it = index.byExe.find(FoldCase(exePath)); it != index.byExe.end() && !it->second.empty())
+            return it->second;
+    }
     return {};
+}
+
+struct IndexRunner {
+    std::mutex mutex;
+    std::atomic<bool> stop{false};
+    std::thread worker;
+
+    IndexRunner() = default;
+    IndexRunner(const IndexRunner&) = delete;
+    IndexRunner& operator=(const IndexRunner&) = delete;
+    ~IndexRunner()
+    {
+        stop.store(true, std::memory_order_relaxed);
+        if (std::thread toJoin = TakeWorker(); toJoin.joinable())
+            toJoin.join();
+    }
+    std::thread TakeWorker()
+    {
+        std::lock_guard<std::mutex> guard(mutex);
+        return std::move(worker);
+    }
+};
+
+std::wstring ResolveJumpHash(const std::wstring& appId, const std::wstring& exePath)
+{
+    static std::map<std::wstring, std::wstring> hashByAppId;
+    static uint64_t cachedGeneration = 0;
+    uint64_t generation = 0;
+    bool stale = false;
+    {
+        FileIndex& index = Index();
+        std::lock_guard<std::mutex> guard(index.lock);
+        generation = index.generation;
+        stale = index.ready && GetTickCount64() - index.builtAt > 60000;
+    }
+    if (generation != cachedGeneration || hashByAppId.size() >= 256) {
+        hashByAppId.clear();
+        cachedGeneration = generation;
+    }
+    const std::wstring cacheKey = appId + L"|" + exePath;
+    if (const auto cached = hashByAppId.find(cacheKey); cached != hashByAppId.end())
+        return cached->second;
+    const std::wstring hash = FindIndexedHash(appId, exePath);
+    Log(L"jump list: '%s' -> %s", exePath.c_str(), hash.empty() ? L"(none)" : hash.c_str());
+    if (!hash.empty())
+        hashByAppId[cacheKey] = hash;
+    else if (stale)
+        StartJumpListIndex(true); // index may be older than the app's first jump list
+    return hash;
 }
 
 } // namespace
@@ -523,6 +647,9 @@ void StartJumpListIndex(bool enabled)
 {
     if (!enabled)
         return; // the menus that read the index are off
+    Index();
+    [[maybe_unused]] static const bool kLogReady = (Log(L"jump list: index ready"), true);
+    static IndexRunner runner;
     {
         FileIndex& index = Index();
         std::lock_guard<std::mutex> guard(index.lock);
@@ -530,50 +657,38 @@ void StartJumpListIndex(bool enabled)
             return;
         index.building = true;
     }
-    std::thread([] {
+    if (std::thread previous = runner.TakeWorker(); previous.joinable())
+        previous.join();
+    std::lock_guard<std::mutex> guard(runner.mutex);
+    if (runner.stop.load(std::memory_order_relaxed)) {
+        FileIndex& index = Index();
+        std::lock_guard<std::mutex> indexGuard(index.lock);
+        index.building = false;
+        return;
+    }
+    runner.worker = std::thread([] {
         // A worker without a message pump must not own an STA: the UI thread's
         // shell calls would have to marshal into it and wait for a timeout.
         const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         try {
-            BuildIndex();
+            BuildIndex(runner.stop);
         } catch (...) {
-            Log(L"jump list: index failed");
+            if (!runner.stop.load(std::memory_order_relaxed))
+                Log(L"jump list: index failed");
         }
         if (SUCCEEDED(com))
             CoUninitialize();
         FileIndex& index = Index();
-        std::lock_guard<std::mutex> guard(index.lock);
+        std::lock_guard<std::mutex> indexGuard(index.lock);
         index.building = false; // also after a failed build
-    }).detach();
+    });
 }
 
 std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, const std::wstring& exePath)
 {
-    static std::map<std::wstring, std::wstring> hashByAppId;
-    std::wstring hash;
-    const std::wstring cacheKey = appId + L"|" + exePath;
-    auto cached = hashByAppId.find(cacheKey);
-    if (cached != hashByAppId.end()) {
-        hash = cached->second;
-    } else {
-        hash = FindIndexedHash(appId, exePath);
-        Log(L"jump list: '%s' -> %s", exePath.c_str(), hash.empty() ? L"(none)" : hash.c_str());
-        if (!hash.empty())
-            hashByAppId[cacheKey] = hash;
-    }
-    if (hash.empty()) {
-        // Not found: the index may be older than the app's first jump list (or still being built).
-        // Indexed again in the background, at most once a minute; a later click finds it.
-        bool stale = false;
-        {
-            FileIndex& index = Index();
-            std::lock_guard<std::mutex> guard(index.lock);
-            stale = index.ready && GetTickCount64() - index.builtAt > 60000;
-        }
-        if (stale)
-            StartJumpListIndex(true);
+    const std::wstring hash = ResolveJumpHash(appId, exePath);
+    if (hash.empty())
         return nullptr;
-    }
 
     const std::wstring recent = RecentFolder();
     auto data = std::make_shared<JumpListData>();
@@ -591,6 +706,8 @@ std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, cons
     std::vector<DestEntry> otherEntries;
     for (DestEntry& entry : entries) {
         if (entry.path.empty())
+            continue;
+        if (entry.pin <= 0 && otherEntries.size() >= 24)
             continue;
         if (entry.real.starts_with(L"knownfolder:") || entry.real.starts_with(L"::")) {
             const std::wstring resolved = ShellDisplayName(entry.real, SIGDN_DESKTOPABSOLUTEPARSING);
