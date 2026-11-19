@@ -1,4 +1,4 @@
-# Launched only after the user chooses to restart. Runs outside the install folder.
+﻿# Launched only after the user chooses to restart. Runs outside the install folder.
 param(
     [Parameter(Mandatory)][string]$InstallDirectory,
     [Parameter(Mandatory)][string]$PackageDirectory,
@@ -19,7 +19,8 @@ $incoming = Join-Path $parent "$name.update-$suffix"
 $backup = Join-Path $parent "$name.previous-$suffix"
 $result = Join-Path $cache 'result.json'
 $coreStopped = $false
-$swapped = $false
+$backupStarted = $false
+$incomingStarted = $false
 $confirmed = $false
 $restored = $false
 $started = New-Object 'System.Collections.Generic.List[System.Diagnostics.Process]'
@@ -35,27 +36,39 @@ function Assert-TemporaryPath([string]$Path) {
 
 # Moves what is in $From into $To (merging folders). A folder some process is in (its current
 # directory, e.g. an app started from an older Atrium) cannot be moved itself: its contents go, it stays.
-function Move-Tree([string]$From, [string]$To, [switch]$Keep) {
+function Move-Tree([string]$From, [string]$To, [switch]$Keep, [switch]$BestEffort, [System.Collections.Generic.List[string]]$Errors = $null) {
     if (!(Test-Path -LiteralPath $To)) { New-Item -ItemType Directory -Path $To | Out-Null }
     foreach ($item in @(Get-ChildItem -LiteralPath $From -Force)) {
         $target = Join-Path $To $item.Name
-        if ($item.PSIsContainer -and (Test-Path -LiteralPath $target)) { Move-Tree $item.FullName $target; continue }
+        if ($item.PSIsContainer -and (Test-Path -LiteralPath $target -PathType Container)) {
+            Move-Tree $item.FullName $target -BestEffort:$BestEffort -Errors $Errors; continue
+        }
         if ($item.PSIsContainer) {
-            try { Move-Item -LiteralPath $item.FullName -Destination $target }
-            catch { Move-Tree $item.FullName $target }
+            try { Move-Item -LiteralPath $item.FullName -Destination $target -Force }
+            catch { Move-Tree $item.FullName $target -BestEffort:$BestEffort -Errors $Errors }
             continue
         }
         # A file just written may be open for a moment (a virus scanner reading it).
+        $maxTries = if ($BestEffort) { 3 } else { 6 }
         for ($try = 1; ; $try++) {
-            try { Move-Item -LiteralPath $item.FullName -Destination $target; break }
+            try { Move-Item -LiteralPath $item.FullName -Destination $target -Force; break }
             catch {
-                if ($try -lt 6) { Start-Sleep -Milliseconds 300; continue }
-                throw "无法替换 $($item.FullName)（$($_.Exception.Message.TrimEnd('。', '.'))），请关闭正在使用它的程序后重试。"
+                if ($try -lt $maxTries) { Start-Sleep -Milliseconds 300; continue }
+                $message = "无法替换 $($item.FullName)（$($_.Exception.Message.TrimEnd('。', '.'))），请关闭正在使用它的程序后重试。"
+                if ($BestEffort) { if ($Errors) { $Errors.Add($message) }; break }
+                throw $message
             }
         }
     }
     if (!$Keep) {
-        try { Remove-Item -LiteralPath $From -Force } catch { }
+        try {
+            [IO.Directory]::Delete($From, $false)
+        } catch [UnauthorizedAccessException] {
+            try {
+                [IO.File]::SetAttributes($From, ([IO.File]::GetAttributes($From) -band (-bnot [IO.FileAttributes]::ReadOnly)))
+                [IO.Directory]::Delete($From, $false)
+            } catch { }
+        } catch { }
     }
 }
 
@@ -113,12 +126,49 @@ function Start-Verified([string]$Executable, [string]$Kind, [string]$Arguments) 
     } finally { $ready.Dispose() }
 }
 
-function Stop-NewProcesses {
-    foreach ($process in $started) {
-        if (!$process.HasExited) {
-            [void]$process.CloseMainWindow()
-            if (!$process.WaitForExit(3000)) { Stop-Process -Id $process.Id -Force }
-            [void]$process.WaitForExit(3000)
+function Get-InstallProcesses {
+    $prefix = $install + '\'
+    $byId = @{}
+    foreach ($process in @(Get-Process -ErrorAction SilentlyContinue)) {
+        try {
+            if ($process.Id -ne $PID -and $process.Path -and
+                $process.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                $byId[$process.Id] = [pscustomobject]@{ Process = $process; Path = $process.Path }
+            }
+        } catch { }
+    }
+    try {
+        foreach ($cim in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)) {
+            $procId = [int]$cim.ProcessId
+            if ($procId -ne $PID -and $cim.ExecutablePath -and
+                $cim.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and !$byId.ContainsKey($procId)) {
+                $process = Get-Process -Id $procId -ErrorAction SilentlyContinue
+                if ($process) { $byId[$procId] = [pscustomobject]@{ Process = $process; Path = $cim.ExecutablePath } }
+            }
+        }
+    } catch { }
+    return @($byId.Values)
+}
+
+function Stop-InstallProcesses([int]$WaitMilliseconds, [System.Diagnostics.Process[]]$Tracked = @()) {
+    for ($pass = 1; $pass -le 2; $pass++) {
+        $byId = @{}
+        foreach ($process in @($Tracked) + @(Get-InstallProcesses | ForEach-Object { $_.Process })) {
+            try {
+                if ($process -and $process.Id -ne $PID -and !$process.HasExited -and !$byId.ContainsKey($process.Id)) { $byId[$process.Id] = $process }
+            } catch { }
+        }
+        $processes = @($byId.Values)
+        if ($processes.Count -eq 0) { return }
+        if ($pass -eq 1 -and $WaitMilliseconds -gt 0) {
+            $until = [DateTime]::UtcNow.AddMilliseconds($WaitMilliseconds)
+            while ([DateTime]::UtcNow -lt $until) {
+                $alive = $false; foreach ($process in $processes) { try { if (!$process.HasExited) { $alive = $true; break } } catch { } }
+                if (!$alive) { break }; Start-Sleep -Milliseconds 100
+            }
+        }
+        foreach ($process in $processes) {
+            try { if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue; [void]$process.WaitForExit(3000) } } catch { }
         }
     }
 }
@@ -147,28 +197,23 @@ try {
     }
     $settingsProcess = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
     if ($settingsProcess -and !$settingsProcess.WaitForExit(30000)) { throw '设置中心尚未退出，更新未安装。' }
-    $quit = Start-Process -FilePath (Join-Path $install 'Atrium.exe') -ArgumentList '--exit' -WindowStyle Hidden -PassThru
-    try {
-        if (!$quit.WaitForExit(15000) -or $quit.ExitCode -ne 0) { throw 'Atrium 尚未正常退出，更新未安装。' }
-    } finally { $quit.Dispose() }
-    $coreStopped = $true
+    $coreExe = Join-Path $install 'Atrium.exe'
+    $coreRunning = @(Get-InstallProcesses | Where-Object { $_.Path -and [string]::Equals($_.Path, $coreExe, [StringComparison]::OrdinalIgnoreCase) })
+    if ($StartCore -eq '1' -or $coreRunning.Count -gt 0) {
+        $quit = Start-Process -FilePath $coreExe -ArgumentList '--exit' -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
+        try {
+            if (!$quit.WaitForExit(15000) -or $quit.ExitCode -ne 0) { throw 'Atrium 尚未正常退出，更新未安装。' }
+        } finally { $quit.Dispose() }
+        $coreStopped = $true
+    }
+    Stop-InstallProcesses -WaitMilliseconds 5000
     Assert-TemporaryPath $backup
     Assert-TemporaryPath $incoming
     # The folder itself stays (an app may be in it); what is in it is replaced.
-    try { Move-Tree $install $backup -Keep }
-    catch {
-        Move-Tree $backup $install
-        $restored = $true
-        throw
-    }
-    try { Move-Tree $incoming $install }
-    catch {
-        Move-Tree $install $incoming -Keep
-        Move-Tree $backup $install
-        $restored = $true
-        throw
-    }
-    $swapped = $true
+    $backupStarted = $true
+    Move-Tree $install $backup -Keep
+    $incomingStarted = $true
+    Move-Tree $incoming $install
     if ($StartCore -eq '1') { Start-Verified (Join-Path $install 'Atrium.exe') 'Core' '' }
     $settingsArguments = if ($StartCore -eq '1') { '--page about --require-core-ready' } else { '--page about' }
     Start-Verified (Join-Path $install 'Settings\Atrium.Settings.exe') 'Settings' $settingsArguments
@@ -181,33 +226,56 @@ try {
     Write-Result ''
 } catch {
     $failure = $_.Exception.Message
-    if ($swapped -and !$confirmed) {
+    if ($backupStarted -and !$confirmed) {
+        $rollbackErrors = New-Object 'System.Collections.Generic.List[string]'
+        if ($incomingStarted) {
+            try {
+                $newCore = Join-Path $install 'Atrium.exe'
+                if ($StartCore -eq '1' -and (Test-Path -LiteralPath $newCore)) {
+                    $quit = Start-Process -FilePath $newCore -ArgumentList '--exit' -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
+                    try { [void]$quit.WaitForExit(8000) } finally { $quit.Dispose() }
+                }
+            } catch { }
+            try { Stop-InstallProcesses -WaitMilliseconds 3000 -Tracked @($started) } catch { }
+            try {
+                Assert-TemporaryPath $incoming
+                if (Test-Path -LiteralPath $install) { Move-Tree $install $incoming -Keep -BestEffort -Errors $rollbackErrors }
+            } catch { $rollbackErrors.Add($_.Exception.Message) }
+        }
         try {
-            Stop-NewProcesses
-            Assert-TemporaryPath $incoming
-            Move-Tree $install $incoming -Keep
             Assert-TemporaryPath $backup
-            Move-Tree $backup $install
-            $restored = $true
-        } catch { $failure += " 恢复旧包未完成：$($_.Exception.Message)；恢复副本保留在 $backup。" }
+            if (Test-Path -LiteralPath $backup) { Move-Tree $backup $install -BestEffort -Errors $rollbackErrors }
+        } catch { $rollbackErrors.Add($_.Exception.Message) }
+        $restored = $true
+        if ($rollbackErrors.Count -gt 0 -or ((Test-Path -LiteralPath $backup) -and @(Get-ChildItem -LiteralPath $backup -Force).Count -gt 0)) {
+            $detail = (($rollbackErrors | Select-Object -Unique) -join ' ')
+            if ($detail) { $failure += " 恢复旧包未完成：$detail" }
+            $failure += "；恢复副本保留在 $backup。"
+        }
     }
     Write-Result $failure
 } finally {
     # Never delete an unconfirmed recovery point, even when rollback itself failed.
     $cleanup = @($incoming)
-    if ($confirmed) { $cleanup += $backup }
+    if ($confirmed -or ((Test-Path -LiteralPath $backup) -and @(Get-ChildItem -LiteralPath $backup -Force).Count -eq 0)) { $cleanup += $backup }
     foreach ($temporary in $cleanup) {
         Assert-TemporaryPath $temporary
         if (Test-Path -LiteralPath $temporary) {
             try { Remove-Item -LiteralPath $temporary -Recurse -Force } catch { Write-Warning $_.Exception.Message }
         }
     }
-    if (!$confirmed -and (!$swapped -or $restored)) {
-        if ($coreStopped -and $StartCore -eq '1') {
-            Start-Process -FilePath (Join-Path $install 'Atrium.exe') -WorkingDirectory $workingDirectory -WindowStyle Hidden
+    if (!$confirmed -and (!$backupStarted -or $restored)) {
+        $restoredCore = Join-Path $install 'Atrium.exe'; $backupCore = Join-Path $backup 'Atrium.exe'
+        if ($coreStopped -and $StartCore -eq '1' -and (Test-Path -LiteralPath $restoredCore) -and !(Test-Path -LiteralPath $backupCore)) {
+            try { Start-Process -FilePath $restoredCore -WorkingDirectory $workingDirectory -WindowStyle Hidden } catch { Write-Warning $_.Exception.Message }
         }
-        Start-Process -FilePath (Join-Path $install 'Settings\Atrium.Settings.exe') -ArgumentList '--page about' -WorkingDirectory $workingDirectory `
-            -WindowStyle Hidden
+        $restoredSettings = Join-Path $install 'Settings\Atrium.Settings.exe'
+        $backupSettings = Join-Path $backup 'Settings\Atrium.Settings.exe'
+        $backupSettingsDll = Join-Path $backup 'Settings\Atrium.Settings.dll'
+        if ((Test-Path -LiteralPath $restoredSettings) -and !(Test-Path -LiteralPath $backupSettings) -and !(Test-Path -LiteralPath $backupSettingsDll)) {
+            try { Start-Process -FilePath $restoredSettings -ArgumentList '--page about' -WorkingDirectory $workingDirectory -WindowStyle Hidden }
+            catch { Write-Warning $_.Exception.Message }
+        }
     }
     if ($confirmed) {
         $work = $package

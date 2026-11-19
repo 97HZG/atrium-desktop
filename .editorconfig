@@ -17,6 +17,9 @@ trim_trailing_whitespace = false
 [*.{ps1,sln}]
 end_of_line = crlf
 
+[tools/{Uninstall,Update}.ps1]
+charset = utf-8-bom
+
 [*.{cs,xaml,csproj,props,targets}]
 end_of_line = lf
 
