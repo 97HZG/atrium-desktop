@@ -39,6 +39,30 @@ struct WorldCity {
     const wchar_t* zone;
 };
 const std::vector<WorldCity>& WorldCities();
+inline std::wstring CanonicalCity(const std::wstring& name)
+{
+    static constexpr std::pair<const wchar_t*, const wchar_t*> kLegacy[] = {
+        {L"北京", L"Beijing"},       {L"上海", L"Shanghai"},
+        {L"香港", L"Hong Kong"},     {L"台北", L"Taipei"},
+        {L"东京", L"Tokyo"},         {L"首尔", L"Seoul"},
+        {L"新加坡", L"Singapore"},   {L"曼谷", L"Bangkok"},
+        {L"新德里", L"New Delhi"},   {L"迪拜", L"Dubai"},
+        {L"莫斯科", L"Moscow"},      {L"伊斯坦布尔", L"Istanbul"},
+        {L"开罗", L"Cairo"},         {L"约翰内斯堡", L"Johannesburg"},
+        {L"柏林", L"Berlin"},        {L"巴黎", L"Paris"},
+        {L"伦敦", L"London"},        {L"圣保罗", L"São Paulo"},
+        {L"纽约", L"New York"},      {L"多伦多", L"Toronto"},
+        {L"芝加哥", L"Chicago"},     {L"丹佛", L"Denver"},
+        {L"洛杉矶", L"Los Angeles"}, {L"温哥华", L"Vancouver"},
+        {L"安克雷奇", L"Anchorage"}, {L"檀香山", L"Honolulu"},
+        {L"悉尼", L"Sydney"},        {L"墨尔本", L"Melbourne"},
+        {L"奥克兰", L"Auckland"},
+    };
+    for (const auto& [legacy, canonical] : kLegacy)
+        if (name == legacy)
+            return canonical;
+    return name;
+}
 // The world clocks of a widget (the medium Clock shows four, the medium Digital three): its own
 // choice where it made one, else the defaults.
 bool HasWorldClocks(WidgetKind kind, WidgetSize size);

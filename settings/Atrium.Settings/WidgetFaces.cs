@@ -74,25 +74,37 @@ internal static partial class WidgetFaces
 
     // material: glass (the glass's ink: darkInk), dusk (a dark veil, white only) or color (an opaque face).
     // The world clocks' cities and their Windows time zones (widget_faces.cpp, WorldCities).
-    private static readonly (string Name, string Zone)[] WorldCities =
+    private static readonly (string Name, string Zone, string Legacy)[] WorldCities =
     [
-        ("Beijing", "China Standard Time"), ("Shanghai", "China Standard Time"), ("Hong Kong", "China Standard Time"), ("Taipei", "Taipei Standard Time"),
-        ("Tokyo", "Tokyo Standard Time"), ("Seoul", "Korea Standard Time"), ("Singapore", "Singapore Standard Time"), ("Bangkok", "SE Asia Standard Time"),
-        ("New Delhi", "India Standard Time"), ("Dubai", "Arabian Standard Time"), ("Moscow", "Russian Standard Time"), ("Istanbul", "Turkey Standard Time"),
-        ("Cairo", "Egypt Standard Time"), ("Johannesburg", "South Africa Standard Time"), ("Berlin", "W. Europe Standard Time"),
-        ("Paris", "Romance Standard Time"), ("London", "GMT Standard Time"), ("São Paulo", "E. South America Standard Time"),
-        ("New York", "Eastern Standard Time"), ("Toronto", "Eastern Standard Time"), ("Chicago", "Central Standard Time"),
-        ("Denver", "Mountain Standard Time"), ("Los Angeles", "Pacific Standard Time"), ("Vancouver", "Pacific Standard Time"),
-        ("Anchorage", "Alaskan Standard Time"), ("Honolulu", "Hawaiian Standard Time"), ("Sydney", "AUS Eastern Standard Time"),
-        ("Melbourne", "AUS Eastern Standard Time"), ("Auckland", "New Zealand Standard Time"),
+        ("Beijing", "China Standard Time", "北京"), ("Shanghai", "China Standard Time", "上海"),
+        ("Hong Kong", "China Standard Time", "香港"), ("Taipei", "Taipei Standard Time", "台北"),
+        ("Tokyo", "Tokyo Standard Time", "东京"), ("Seoul", "Korea Standard Time", "首尔"),
+        ("Singapore", "Singapore Standard Time", "新加坡"), ("Bangkok", "SE Asia Standard Time", "曼谷"),
+        ("New Delhi", "India Standard Time", "新德里"), ("Dubai", "Arabian Standard Time", "迪拜"),
+        ("Moscow", "Russian Standard Time", "莫斯科"), ("Istanbul", "Turkey Standard Time", "伊斯坦布尔"),
+        ("Cairo", "Egypt Standard Time", "开罗"), ("Johannesburg", "South Africa Standard Time", "约翰内斯堡"),
+        ("Berlin", "W. Europe Standard Time", "柏林"), ("Paris", "Romance Standard Time", "巴黎"),
+        ("London", "GMT Standard Time", "伦敦"), ("São Paulo", "E. South America Standard Time", "圣保罗"),
+        ("New York", "Eastern Standard Time", "纽约"), ("Toronto", "Eastern Standard Time", "多伦多"),
+        ("Chicago", "Central Standard Time", "芝加哥"), ("Denver", "Mountain Standard Time", "丹佛"),
+        ("Los Angeles", "Pacific Standard Time", "洛杉矶"), ("Vancouver", "Pacific Standard Time", "温哥华"),
+        ("Anchorage", "Alaskan Standard Time", "安克雷奇"), ("Honolulu", "Hawaiian Standard Time", "檀香山"),
+        ("Sydney", "AUS Eastern Standard Time", "悉尼"), ("Melbourne", "AUS Eastern Standard Time", "墨尔本"),
+        ("Auckland", "New Zealand Standard Time", "奥克兰"),
     ];
+
+    internal static string CanonicalCity(string name) =>
+        WorldCities.FirstOrDefault(c => c.Name == name || c.Legacy == name).Name ?? name;
 
     // WidgetCities: the widget's own choice where it made one, else the defaults.
     private static string[] CitiesOf(string kind, IReadOnlyList<string>? chosen)
     {
         string[] cities = kind == "digital" ? ["Tokyo", "London", "New York"] : ["Beijing", "Tokyo", "London", "New York"];
         for (int i = 0; i < cities.Length && chosen != null && i < chosen.Count; i++)
-            if (WorldCities.Any(c => c.Name == chosen[i])) cities[i] = chosen[i];
+        {
+            string city = CanonicalCity(chosen[i]);
+            if (WorldCities.Any(c => c.Name == city)) cities[i] = city;
+        }
         return cities;
     }
 

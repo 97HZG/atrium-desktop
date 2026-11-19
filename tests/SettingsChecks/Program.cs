@@ -488,6 +488,45 @@ finally
 {
     if (Directory.Exists(temp)) Directory.Delete(temp, true);
 }
+
+{
+    string cppFacesH = File.ReadAllText(Path.Combine(repoRoot!, "native", "core", "ui", "widget_faces.h"));
+    string cppFaces = File.ReadAllText(Path.Combine(repoRoot!, "native", "core", "ui", "widget_faces.cpp"));
+    string csFaces = File.ReadAllText(Path.Combine(repoRoot!, "settings", "Atrium.Settings", "WidgetFaces.cs"));
+    string cppWidgets = File.ReadAllText(Path.Combine(repoRoot!, "native", "core", "ui", "desktop_widgets.cpp"));
+    var zhHans = JsonNode.Parse(File.ReadAllText(Path.Combine(repoRoot!, "locales", "zh-Hans.json")))!["strings"]!.AsObject();
+    static string Slice(string src, string marker)
+    {
+        int start = src.IndexOf(marker, StringComparison.Ordinal);
+        int end = src.IndexOf("};", start, StringComparison.Ordinal);
+        int csEnd = src.IndexOf("];", start, StringComparison.Ordinal);
+        if (end < 0 || (csEnd >= 0 && csEnd < end)) end = csEnd;
+        return src[start..end];
+    }
+    var cppCities = CppCityRegex().Matches(Slice(cppFaces, "kCities ="))
+        .Select(m => (Name: m.Groups[1].Value, Zone: m.Groups[2].Value)).ToList();
+    var cppLegacy = CppLegacyRegex().Matches(Slice(cppFacesH, "kLegacy[] =")).ToDictionary(m => m.Groups[2].Value, m => m.Groups[1].Value);
+    var csCities = CsCityRegex().Matches(Slice(csFaces, "WorldCities ="))
+        .Select(m => (Name: m.Groups[1].Value, Zone: m.Groups[2].Value, Legacy: m.Groups[3].Value)).ToList();
+    Require(cppCities.Count == 29 && csCities.Count == 29 &&
+            cppCities.Zip(csCities).All(p => p.First.Name == p.Second.Name && p.First.Zone == p.Second.Zone &&
+                                             cppLegacy.TryGetValue(p.Second.Name, out string? leg) && leg == p.Second.Legacy),
+        "WorldCities in widget_faces.{h,cpp} and WidgetFaces.cs must have 29 identical entries.");
+    Require(zhHans["Local"]?.GetValue<string>() == "本地" &&
+            csCities.All(c => zhHans[c.Name]?.GetValue<string>() == c.Legacy),
+        "Every canonical WorldCities key and Local must match locales/zh-Hans.json.");
+    Require(cppFaces.Contains("""{L"Tokyo", L"London", L"New York"}""") &&
+            cppFaces.Contains("""{L"Beijing", L"Tokyo", L"London", L"New York"}""") &&
+            csFaces.Contains("""["Tokyo", "London", "New York"]""") &&
+            csFaces.Contains("""["Beijing", "Tokyo", "London", "New York"]"""),
+        "Default world clock cities must match between C++ and C#.");
+    string Canonical(string s) => csCities.FirstOrDefault(c => c.Name == s || c.Legacy == s).Name ?? s;
+    Require(Canonical("北京") == "Beijing" && Canonical("圣保罗") == "São Paulo" && Canonical("奥克兰") == "Auckland" &&
+            Canonical("Beijing") == "Beijing" && Canonical("Unknown") == "Unknown",
+        "Legacy Chinese city keys must normalize to canonical English keys.");
+    Require(cppWidgets.Contains("CanonicalCity(") && csFaces.Contains("CanonicalCity("),
+        "Both C++ and C# must normalize legacy city keys on load.");
+}
 Console.WriteLine("Hardening regression checks passed.");
 
 internal partial class Program
@@ -501,4 +540,10 @@ internal partial class Program
     private static partial Regex TintRegex();
     [GeneratedRegex(@"new\(""[^""]+"",\s*Loc\.T\(""[^""]+""\),\s*([0-9.]+),\s*([0-9.]+),\s*[0-9.]+,\s*""[^""]*"",\s*s\s*=>\s*s\.(\w+)")]
     private static partial Regex SliderRegex();
+    [GeneratedRegex(@"\{L""([^""]+)"",\s*L""([^""]+)""\}")]
+    private static partial Regex CppCityRegex();
+    [GeneratedRegex(@"\{L""([^""]+)"",\s*L""([^""]+)""\}")]
+    private static partial Regex CppLegacyRegex();
+    [GeneratedRegex(@"\(""([^""]+)"",\s*""([^""]+)"",\s*""([^""]+)""\)")]
+    private static partial Regex CsCityRegex();
 }

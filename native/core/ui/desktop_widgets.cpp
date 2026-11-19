@@ -114,7 +114,7 @@ std::wstring LocalCity()
     if (open != std::wstring::npos)
         d = d.substr(open + 2);
     size_t end = d.find_first_of(L"，,");
-    return end == std::wstring::npos ? d : d.substr(0, end);
+    return CanonicalCity(end == std::wstring::npos ? d : d.substr(0, end));
 }
 
 std::wstring PicturesFolder()
@@ -487,7 +487,7 @@ void DesktopWidgets::Load()
                 if (e.HasKey(L"cities") && e.GetNamedValue(L"cities").ValueType() == json::JsonValueType::Array)
                     for (const auto& cv : e.GetNamedArray(L"cities"))
                         if (cv.ValueType() == json::JsonValueType::String)
-                            content.cities.emplace_back(cv.GetString());
+                            content.cities.emplace_back(CanonicalCity(std::wstring(cv.GetString())));
                 if (e.HasKey(L"items") && e.GetNamedValue(L"items").ValueType() == json::JsonValueType::Array)
                     for (const auto& iv : e.GetNamedArray(L"items")) {
                         if (iv.ValueType() != json::JsonValueType::Object)

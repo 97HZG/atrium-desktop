@@ -142,21 +142,21 @@ SYSTEMTIME CityTime(const std::wstring& name, const SYSTEMTIME& now, std::wstrin
 const std::vector<WorldCity>& WorldCities()
 {
     static const std::vector<WorldCity> kCities = {
-        {L"北京", L"China Standard Time"},         {L"上海", L"China Standard Time"},
-        {L"香港", L"China Standard Time"},         {L"台北", L"Taipei Standard Time"},
-        {L"东京", L"Tokyo Standard Time"},         {L"首尔", L"Korea Standard Time"},
-        {L"新加坡", L"Singapore Standard Time"},   {L"曼谷", L"SE Asia Standard Time"},
-        {L"新德里", L"India Standard Time"},       {L"迪拜", L"Arabian Standard Time"},
-        {L"莫斯科", L"Russian Standard Time"},     {L"伊斯坦布尔", L"Turkey Standard Time"},
-        {L"开罗", L"Egypt Standard Time"},         {L"约翰内斯堡", L"South Africa Standard Time"},
-        {L"柏林", L"W. Europe Standard Time"},     {L"巴黎", L"Romance Standard Time"},
-        {L"伦敦", L"GMT Standard Time"},           {L"圣保罗", L"E. South America Standard Time"},
-        {L"纽约", L"Eastern Standard Time"},       {L"多伦多", L"Eastern Standard Time"},
-        {L"芝加哥", L"Central Standard Time"},     {L"丹佛", L"Mountain Standard Time"},
-        {L"洛杉矶", L"Pacific Standard Time"},     {L"温哥华", L"Pacific Standard Time"},
-        {L"安克雷奇", L"Alaskan Standard Time"},   {L"檀香山", L"Hawaiian Standard Time"},
-        {L"悉尼", L"AUS Eastern Standard Time"},   {L"墨尔本", L"AUS Eastern Standard Time"},
-        {L"奥克兰", L"New Zealand Standard Time"},
+        {L"Beijing", L"China Standard Time"},        {L"Shanghai", L"China Standard Time"},
+        {L"Hong Kong", L"China Standard Time"},      {L"Taipei", L"Taipei Standard Time"},
+        {L"Tokyo", L"Tokyo Standard Time"},          {L"Seoul", L"Korea Standard Time"},
+        {L"Singapore", L"Singapore Standard Time"},  {L"Bangkok", L"SE Asia Standard Time"},
+        {L"New Delhi", L"India Standard Time"},      {L"Dubai", L"Arabian Standard Time"},
+        {L"Moscow", L"Russian Standard Time"},       {L"Istanbul", L"Turkey Standard Time"},
+        {L"Cairo", L"Egypt Standard Time"},          {L"Johannesburg", L"South Africa Standard Time"},
+        {L"Berlin", L"W. Europe Standard Time"},     {L"Paris", L"Romance Standard Time"},
+        {L"London", L"GMT Standard Time"},           {L"São Paulo", L"E. South America Standard Time"},
+        {L"New York", L"Eastern Standard Time"},     {L"Toronto", L"Eastern Standard Time"},
+        {L"Chicago", L"Central Standard Time"},      {L"Denver", L"Mountain Standard Time"},
+        {L"Los Angeles", L"Pacific Standard Time"},  {L"Vancouver", L"Pacific Standard Time"},
+        {L"Anchorage", L"Alaskan Standard Time"},    {L"Honolulu", L"Hawaiian Standard Time"},
+        {L"Sydney", L"AUS Eastern Standard Time"},   {L"Melbourne", L"AUS Eastern Standard Time"},
+        {L"Auckland", L"New Zealand Standard Time"},
     };
     return kCities;
 }
@@ -166,11 +166,11 @@ bool HasWorldClocks(WidgetKind kind, WidgetSize size) { return size != WidgetSiz
 std::vector<std::wstring> WidgetCities(WidgetKind kind, const std::vector<std::wstring>& chosen)
 {
     // macOS's medium Clock shows four cities; the digital one lists three beside the local time.
-    std::vector<std::wstring> cities =
-        kind == WidgetKind::Digital ? std::vector<std::wstring>{L"东京", L"伦敦", L"纽约"} : std::vector<std::wstring>{L"北京", L"东京", L"伦敦", L"纽约"};
+    using V = std::vector<std::wstring>;
+    V cities = kind == WidgetKind::Digital ? V{L"Tokyo", L"London", L"New York"} : V{L"Beijing", L"Tokyo", L"London", L"New York"};
     for (size_t i = 0; i < cities.size() && i < chosen.size(); ++i)
-        if (std::any_of(WorldCities().begin(), WorldCities().end(), [&](const WorldCity& c) { return chosen[i] == c.name; }))
-            cities[i] = chosen[i];
+        if (std::wstring c = CanonicalCity(chosen[i]); std::any_of(WorldCities().begin(), WorldCities().end(), [&](const WorldCity& w) { return c == w.name; }))
+            cities[i] = std::move(c);
     return cities;
 }
 
@@ -235,7 +235,7 @@ constexpr float kPad = 14;
 void PaintClock(Canvas& c, WidgetSize size, const WidgetContent& content, const WidgetWorld& w, const Pal& p, float fw, float fh)
 {
     if (size == WidgetSize::Small) {
-        ClockFace(c, fw / 2, fh / 2, fh / 2 - 9, w.now, p, p.face, p.text, true, w.city, p.sub);
+        ClockFace(c, fw / 2, fh / 2, fh / 2 - 9, w.now, p, p.face, p.text, true, w.city.empty() ? std::wstring{} : Tr(w.city.c_str()), p.sub);
         return;
     }
     // The world clock: four faces, dark where it is night.
@@ -260,7 +260,7 @@ void PaintDigital(Canvas& c, WidgetSize size, const WidgetContent& content, cons
 {
     const int wd = Weekday(w.now.wYear, w.now.wMonth, w.now.wDay);
     const float leftW = size == WidgetSize::Small ? fw - 2 * kPad : 150;
-    c.Text(w.city.empty() ? Tr(L"Local") : w.city, D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 18), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(Tr(w.city.empty() ? L"Local" : w.city.c_str()), D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 18), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     // Keep one size all day. Leave one DIP for glyph placement / rounding:
     // tabular figures can still differ slightly at the exact trimming boundary.
     const float fit = c.TextWidth(L"00:00", 50, DWRITE_FONT_WEIGHT_SEMI_BOLD);
