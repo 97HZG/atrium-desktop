@@ -22,18 +22,17 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
-      # Pin actions/* to 40-char commit SHAs in a networked pass.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
         with:
           global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
       - name: Cache LLVM 19 tools
         id: llvm-cache
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ runner.tool_cache }}/llvm-19.1.0-19.1.5
           key: llvm-19.1.0-19.1.5-win-x64
@@ -83,16 +82,16 @@ jobs:
           GH_BEFORE: ${{ github.event.before }}
         # A push or a pull request: what it changed (and the units including a changed header).
         run: |
-          $baseArgs = @()
+          $baseArgs = @{}
           if ($env:GH_EVENT -eq 'pull_request') {
-            $baseArgs = @('-Base', "origin/$env:GH_BASE_REF")
+            $baseArgs = @{ Base = "origin/$env:GH_BASE_REF" }
           } elseif ($env:GH_EVENT -eq 'push') {
             $before = $env:GH_BEFORE
             if ($before -and $before -notmatch '^0+$') {
               git rev-parse --verify --quiet "$before^{commit}" *> $null
               if ($LASTEXITCODE -eq 0) {
                 git merge-base --is-ancestor $before HEAD *> $null
-                if ($LASTEXITCODE -eq 0) { $baseArgs = @('-Base', $before) }
+                if ($LASTEXITCODE -eq 0) { $baseArgs = @{ Base = $before } }
               }
             }
           }
@@ -113,7 +112,7 @@ jobs:
       - name: Verify packaged portable zip
         shell: pwsh
         run: ./tools/verify-package.ps1 -SmokeStart
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: Atrium-win-x64
           path: dist/*.zip
