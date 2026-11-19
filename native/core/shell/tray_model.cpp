@@ -291,13 +291,14 @@ std::map<std::wstring, Program> RunningPrograms()
 
 // Whether one of a program's windows has the tray icon `uid` now (the shell
 // knows the icon's place; it fails for icons that are not there).
-bool HasIcon(const std::vector<HWND>& windows, UINT uid, RECT& bounds, std::wstring& identity)
+bool HasIcon(const std::vector<HWND>& windows, UINT uid, RECT& bounds, std::wstring& identity, ShellProbe& probe)
 {
     for (HWND h : windows) {
+        if (!probe.responsive)
+            return false;
         NOTIFYICONIDENTIFIER id{sizeof(id), h, uid, GUID_NULL};
         RECT r{};
-        ShellQuestion explorers; // Explorer's answer, not the tray host's
-        if (SUCCEEDED(Shell_NotifyIconGetRect(&id, &r))) {
+        if (SUCCEEDED(ShellNotifyIconRect(id, r, probe))) {
             bounds = r;
             DWORD pid = 0;
             GetWindowThreadProcessId(h, &pid);
@@ -308,19 +309,17 @@ bool HasIcon(const std::vector<HWND>& windows, UINT uid, RECT& bounds, std::wstr
     return false;
 }
 
-bool LiveIcon(const Record& record, const Program& program, RECT& bounds, std::wstring& identity)
+bool LiveIcon(const Record& record, const Program& program, RECT& bounds, std::wstring& identity, ShellProbe& probe)
 {
-    if (record.guid != GUID_NULL) {
-        NOTIFYICONIDENTIFIER id{sizeof(id), nullptr, 0, record.guid};
-        ShellQuestion explorers; // Explorer's answer, not the tray host's
-        if (FAILED(Shell_NotifyIconGetRect(&id, &bounds)))
-            return false;
-        wchar_t guid[40]{};
-        StringFromGUID2(record.guid, guid, 40);
-        identity = L"guid:" + std::wstring(guid); // liveness only, NOT process ownership
-        return true;
-    }
-    return record.hasUid && HasIcon(program.windows, record.uid, bounds, identity);
+    if (record.guid == GUID_NULL)
+        return record.hasUid && HasIcon(program.windows, record.uid, bounds, identity, probe);
+    NOTIFYICONIDENTIFIER id{sizeof(id), nullptr, 0, record.guid};
+    if (FAILED(ShellNotifyIconRect(id, bounds, probe)))
+        return false;
+    wchar_t guid[40]{};
+    StringFromGUID2(record.guid, guid, 40);
+    identity = L"guid:" + std::wstring(guid); // liveness only, NOT process ownership
+    return true;
 }
 
 struct Found {
@@ -607,6 +606,7 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
         bs.push_back({b.tip, b.promoted, rect(b.bounds)});
     std::vector<tray::Record> rs;
     const Program empty;
+    ShellProbe probe;
     for (const auto& r : records) {
         auto run = running.find(r.exe);
         // A filename-only process result is not proof of a full executable path.
@@ -618,7 +618,7 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
         value.promoted = r.promoted;
         value.order = r.order;
         RECT bounds{};
-        value.live = LiveIcon(r, program, bounds, value.identity);
+        value.live = LiveIcon(r, program, bounds, value.identity, probe);
         value.bounds = rect(bounds);
         if (value.live)
             names(r.exe, program, r.tip, value.names, value.firstTitle);

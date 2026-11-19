@@ -1283,13 +1283,12 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (w) {
             // Win + digit: the bar's app at that place, as a click on it. The keys never reached a
             // window of ours (the foreground lock holds): share the foreground thread's input state.
-            HWND fg = GetForegroundWindow();
-            DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0, me = GetCurrentThreadId();
-            bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
-            AllowSetForegroundWindow(ASFW_ANY);
-            g_app.bar->ActivateIndex(int(w) - 1);
-            if (attached)
-                AttachThreadInput(me, fgThread, FALSE);
+            {
+                HWND fg = GetForegroundWindow();
+                ForegroundAttach attach(fg);
+                AllowSetForegroundWindow(ASFW_ANY);
+                g_app.bar->ActivateIndex(int(w) - 1);
+            }
             return 0;
         }
         if (g_app.start->Visible()) {
@@ -1299,13 +1298,12 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             // never reached a window of ours, so the foreground lock holds: share the foreground
             // thread's input state for the moment the menu takes the focus (as the tray does).
             HWND fg = GetForegroundWindow();
-            DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0, me = GetCurrentThreadId();
-            bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
-            if (g_app.displaySettings.startWithBar)
-                g_app.bar->Reveal(); // kept up while the menu is open (keepShown)
-            g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), fg);
-            if (attached)
-                AttachThreadInput(me, fgThread, FALSE);
+            {
+                ForegroundAttach attach(fg);
+                if (g_app.displaySettings.startWithBar)
+                    g_app.bar->Reveal(); // kept up while the menu is open (keepShown)
+                g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), fg);
+            }
             g_app.notes->PanelsChanged();
             if (GetForegroundWindow() != g_app.start->Hwnd())
                 Log(L"winkey: the start menu did not get the focus");
@@ -1501,12 +1499,14 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                     back = FindWindowW(L"Progman", nullptr);
                 // The focus belongs to Explorer's thread: share its input state
                 // for the moment of the switch (the usual way to hand it on).
-                DWORD fgThread = GetWindowThreadProcessId(fg, nullptr), me = GetCurrentThreadId();
-                bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
-                bool ok = SetForegroundWindow(back) != FALSE;
-                DWORD error = ok ? 0 : GetLastError();
-                if (attached)
-                    AttachThreadInput(me, fgThread, FALSE);
+                bool ok = false;
+                DWORD error = 0;
+                {
+                    ForegroundAttach attach(fg);
+                    ok = SetForegroundWindow(back) != FALSE;
+                    if (!ok)
+                        error = GetLastError();
+                }
                 const wchar_t* how = L"attached";
                 if (!ok) {
                     // A key press of our own lifts the foreground lock (Alt alone

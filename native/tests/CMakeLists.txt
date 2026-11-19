@@ -103,3 +103,8 @@ add_executable(weather_tests weather.cpp)
 target_link_libraries(weather_tests PRIVATE atrium_core_lib)
 add_test(NAME weather COMMAND weather_tests)
 set_tests_properties(weather PROPERTIES TIMEOUT 20)
+
+add_executable(shell_taskbar_tests shell_taskbar.cpp)
+target_link_libraries(shell_taskbar_tests PRIVATE atrium_core_lib)
+add_test(NAME shell_taskbar COMMAND shell_taskbar_tests)
+set_tests_properties(shell_taskbar PROPERTIES TIMEOUT 15)

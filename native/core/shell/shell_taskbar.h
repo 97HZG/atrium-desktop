@@ -44,29 +44,75 @@ struct ShellQuestion {
 // app-bar calls (AppBarMessage): it does not move itself back in front meanwhile.
 inline std::atomic_int g_hostAside{0};
 
-// SHAppBarMessage for Atrium's own calls. With Atrium's tray host first among the
-// Shell_TrayWnd windows, Windows hands the call to a window of the caller's own
-// process with an in-process pointer, which Explorer cannot read. The state calls
-// carry everything in the message itself: they go to Explorer directly then, in
-// the shell's wire format (APPBARMSGDATAV3, handles as 32-bit values).
-inline UINT_PTR AppBarMessage(DWORD message, APPBARDATA& abd)
+inline std::atomic<HWND> g_shellFailHwnd{nullptr};
+inline std::atomic<ULONGLONG> g_shellFailAt{0};
+
+inline bool IsShellCooldown(HWND w)
 {
-    DWORD first = 0;
-    GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &first);
+    if (!w || w != g_shellFailHwnd.load(std::memory_order_acquire))
+        return false;
+    const ULONGLONG at = g_shellFailAt.load(std::memory_order_relaxed), now = GetTickCount64();
+    return now >= at && now - at < 2000;
+}
+inline void NoteShellResponsiveness(HWND w, bool ok)
+{
+    if (!ok && w) {
+        g_shellFailAt.store(GetTickCount64(), std::memory_order_relaxed);
+        g_shellFailHwnd.store(w, std::memory_order_release);
+    } else if (ok && w && w == g_shellFailHwnd.load(std::memory_order_acquire))
+        g_shellFailHwnd.store(nullptr, std::memory_order_release);
+}
+inline bool WindowResponsive(HWND w, UINT ms = 500)
+{
+    DWORD_PTR p;
+    return w && !IsHungAppWindow(w) && SendMessageTimeoutW(w, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, ms, &p);
+}
+inline bool ShellResponsive(HWND shell, UINT timeoutMs = 500, bool honorCooldown = true)
+{
+    if (!shell || IsHungAppWindow(shell) || (honorCooldown && IsShellCooldown(shell)))
+        return false;
+    const bool ok = WindowResponsive(shell, timeoutMs);
+    NoteShellResponsiveness(shell, ok);
+    return ok;
+}
+
+// ABM_GETSTATE/ABM_SETSTATE always go via SendMessageTimeoutW(WM_COPYDATA) in AppBarMessage32 (bounded timeout, works
+// whether TrayHost is first or not). Other AppBar calls step TrayHost behind Explorer's taskbar when first.
+inline bool TryAppBarMessage(DWORD message, APPBARDATA& abd, UINT_PTR& out, UINT timeoutMs = 1500, UINT sendFlags = SMTO_ABORTIFHUNG, bool honorCooldown = true)
+{
     HWND shell = ShellTaskbar();
-    if (first != GetCurrentProcessId() || !shell)
-        return SHAppBarMessage(message, &abd);
     if (message != ABM_GETSTATE && message != ABM_SETSTATE) {
-        // Calls that answer through shared memory (an app bar's place): the host steps behind
-        // Explorer's taskbar for the moment of the call, which then goes to Explorer as usual.
-        HWND host = FindWindowW(L"Shell_TrayWnd", nullptr);
-        ++g_hostAside;
-        SetWindowPos(host, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-        const UINT_PTR result = SHAppBarMessage(message, &abd);
-        SetWindowPos(host, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-        --g_hostAside;
-        return result;
+        if (!ShellResponsive(shell, timeoutMs < 500u ? timeoutMs : 500u, honorCooldown && message != ABM_REMOVE))
+            return false;
+        HWND firstWnd = FindWindowW(L"Shell_TrayWnd", nullptr);
+        DWORD first = 0;
+        GetWindowThreadProcessId(firstWnd, &first);
+        struct HostAside {
+            HWND host;
+            explicit HostAside(HWND w) : host(w)
+            {
+                ++g_hostAside;
+                // Synchronous SetWindowPos ensures SHAppBarMessage sees the updated z-order immediately.
+                SetWindowPos(host, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            }
+            ~HostAside()
+            {
+                SetWindowPos(host, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                --g_hostAside;
+            }
+            HostAside(const HostAside&) = delete;
+            HostAside& operator=(const HostAside&) = delete;
+        };
+        if (first == GetCurrentProcessId()) {
+            const HostAside aside{firstWnd};
+            out = SHAppBarMessage(message, &abd);
+        } else {
+            out = SHAppBarMessage(message, &abd);
+        }
+        return true;
     }
+    if (!shell || IsHungAppWindow(shell) || (honorCooldown && IsShellCooldown(shell)))
+        return false;
     struct AppBarData32 {
         DWORD cbSize;
         DWORD hWnd;
@@ -95,9 +141,60 @@ inline UINT_PTR AppBarMessage(DWORD message, APPBARDATA& abd)
     data.dwSourceProcessId = GetCurrentProcessId();
     COPYDATASTRUCT cds{0, sizeof(data), &data};
     DWORD_PTR result = 0;
-    if (!SendMessageTimeoutW(shell, WM_COPYDATA, reinterpret_cast<WPARAM>(abd.hWnd), reinterpret_cast<LPARAM>(&cds), SMTO_ABORTIFHUNG, 4000, &result))
-        return 0;
-    return result;
+    if (!SendMessageTimeoutW(shell, WM_COPYDATA, reinterpret_cast<WPARAM>(abd.hWnd), reinterpret_cast<LPARAM>(&cds), sendFlags, timeoutMs, &result)) {
+        if (GetLastError() == ERROR_TIMEOUT)
+            NoteShellResponsiveness(shell, false);
+        return false;
+    }
+    NoteShellResponsiveness(shell, true);
+    out = result;
+    return true;
 }
+
+inline UINT_PTR AppBarMessage(DWORD m, APPBARDATA& abd, UINT ms = 1500)
+{
+    UINT_PTR out = 0;
+    return TryAppBarMessage(m, abd, out, ms) ? out : 0;
+}
+struct ShellProbe {
+    HWND shell = ShellTaskbar();
+    bool responsive = ShellResponsive(shell, 500);
+    ULONGLONG lastProbeMs = GetTickCount64();
+};
+inline HRESULT ShellNotifyIconRect(const NOTIFYICONIDENTIFIER& id, RECT& rect, ShellProbe& probe)
+{
+    const ULONGLONG now = GetTickCount64();
+    const bool reprobe = now - probe.lastProbeMs >= 500;
+    if (!probe.responsive || !probe.shell || IsHungAppWindow(probe.shell) || (reprobe && !ShellResponsive(probe.shell, 500))) {
+        probe.responsive = false;
+        return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+    }
+    const ULONGLONG callStart = reprobe ? (probe.lastProbeMs = GetTickCount64()) : now;
+    const ShellQuestion explorers;
+    const HRESULT hr = Shell_NotifyIconGetRect(&id, &rect);
+    if (SUCCEEDED(hr) || (GetTickCount64() - callStart < 500 && !IsHungAppWindow(probe.shell)))
+        return hr;
+    probe.responsive = false;
+    return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+}
+
+struct ForegroundAttach {
+    DWORD me = GetCurrentThreadId(), other = 0;
+    bool attached = false;
+    explicit ForegroundAttach(HWND fg)
+    {
+        if (!fg || IsHungAppWindow(fg))
+            return;
+        other = GetWindowThreadProcessId(fg, nullptr);
+        attached = other && other != me && AttachThreadInput(me, other, TRUE) != FALSE;
+    }
+    ~ForegroundAttach()
+    {
+        if (attached)
+            AttachThreadInput(me, other, FALSE);
+    }
+    ForegroundAttach(const ForegroundAttach&) = delete;
+    ForegroundAttach& operator=(const ForegroundAttach&) = delete;
+};
 
 } // namespace atrium

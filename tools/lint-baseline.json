@@ -12,7 +12,7 @@
   "core/localization.cpp|catch-all": 1,
   "core/localization.cpp|try": 1,
   "core/main.cpp|complexity|ApplySettings": 56,
-  "core/main.cpp|complexity|HostProc": 251,
+  "core/main.cpp|complexity|HostProc": 232,
   "core/main.cpp|complexity|RunGuard": 42,
   "core/main.cpp|complexity|ShowItemMenu": 154,
   "core/main.cpp|complexity|wWinMain": 78,

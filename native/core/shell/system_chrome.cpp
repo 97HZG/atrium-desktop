@@ -10,6 +10,8 @@
 #include <objbase.h>
 #include <winreg.h>
 
+#include <chrono>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -53,18 +55,22 @@ bool IsTaskbar(HWND w)
     return wcscmp(cls, L"Shell_TrayWnd") == 0 || wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0;
 }
 
-bool AutoHide()
+std::optional<bool> QueryAutoHide()
 {
     APPBARDATA abd{sizeof(abd)};
-    return (AppBarMessage(ABM_GETSTATE, abd) & ABS_AUTOHIDE) != 0;
+    UINT_PTR state = 0;
+    if (!TryAppBarMessage(ABM_GETSTATE, abd, state))
+        return std::nullopt;
+    return (state & ABS_AUTOHIDE) != 0;
 }
 
-void SetAutoHide(bool on)
+bool SetAutoHide(bool on, UINT timeoutMs = 1500, UINT sendFlags = SMTO_ABORTIFHUNG)
 {
     APPBARDATA abd{sizeof(abd)};
     abd.hWnd = ShellTaskbar();
     abd.lParam = on ? ABS_AUTOHIDE : ABS_ALWAYSONTOP;
-    AppBarMessage(ABM_SETSTATE, abd);
+    UINT_PTR unused = 0;
+    return TryAppBarMessage(ABM_SETSTATE, abd, unused, timeoutMs, sendFlags, on);
 }
 
 // Windows maximized while the taskbar still held its strip of the work area keep that gap when the
@@ -98,9 +104,9 @@ void ShowTaskbars()
 {
     // Also used by the exception filter: enumerate without allocating.
     if (HWND w = ShellTaskbar())
-        ShowWindow(w, SW_SHOWNA);
+        ShowWindowAsync(w, SW_SHOWNA);
     for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr;)
-        ShowWindow(w, SW_SHOWNA);
+        ShowWindowAsync(w, SW_SHOWNA);
 }
 
 // AutoPlay's "a drive was inserted" toast is one of the system notifications
@@ -215,7 +221,7 @@ bool SystemChrome::UndoLeftover()
 void SystemChrome::ShowTaskbarsNow() { ShowTaskbars(); }
 
 // Both the event hook and the periodic/settings hide paths honour this lease.
-// No mutex is held across cross-thread ShowWindow calls. The state outlives
+// No mutex is held across cross-thread ShowWindowAsync calls. The state outlives
 // SystemChrome, so a worker finishing during shutdown cannot use a freed owner.
 bool SystemChrome::RevealForClick()
 {
@@ -223,6 +229,9 @@ bool SystemChrome::RevealForClick()
         return false;
     ++g_taskbarVisibility.reveals;
     ShowTaskbars();
+    const HWND shell = ShellTaskbar();
+    for (int i = 0; i < 20 && shell && !IsWindowVisible(shell) && !g_taskbarVisibility.stopping; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     if (g_taskbarVisibility.stopping) {
         ConcealAfterClick();
         return false;
@@ -262,7 +271,7 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
     if (hidden) {
         // Auto-hide first: a hidden taskbar that is not auto-hide would still
         // keep its strip of the work area.
-        if (!AutoHide()) {
+        if (const auto autoHide = QueryAutoHide(); autoHide.has_value() && !*autoHide) {
             SetAutoHide(true);
             autoHideOurs_ = true;
             RefitMaximizedLater();
@@ -276,9 +285,8 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
         hook_ = nullptr;
         hookedPid_ = 0;
         ShowTaskbars();
-        if (autoHideOurs_)
-            SetAutoHide(false);
-        autoHideOurs_ = false;
+        if (autoHideOurs_ && (SetAutoHide(false) || !ShellTaskbar()))
+            autoHideOurs_ = false;
         Save();
     }
     Log(L"chrome: system taskbar %s", hidden ? L"hidden" : L"shown");
@@ -374,7 +382,7 @@ void SystemChrome::Enforce()
         // Hidden but not auto-hide, the taskbar keeps its strip of the work area and maximized
         // windows stop its height short of the bottom. Auto-hide can be lost after it was set:
         // set before Explorer's taskbar was ready at sign-in, Explorer restarted, another program.
-        if (ShellTaskbar() && !AutoHide()) {
+        if (const auto autoHide = QueryAutoHide(); autoHide.has_value() && !*autoHide) {
             SetAutoHide(true);
             autoHideOurs_ = true;
             Save();
@@ -412,9 +420,9 @@ void SystemChrome::EmergencyRestore()
     // Stop OnShow/Enforce hiding Explorer again before making it visible.
     // The exception can be on a worker, so these flags are atomic. Do not
     // log or save here; system.json still restores Do Not Disturb next start.
-    if (g_chrome->autoHideOurs_.exchange(false))
-        SetAutoHide(false);
     ShowTaskbars();
+    if (g_chrome->autoHideOurs_.exchange(false))
+        SetAutoHide(false, 250, SMTO_ABORTIFHUNG | SMTO_BLOCK);
 }
 
 void SystemChrome::HideTaskbars()
@@ -423,9 +431,9 @@ void SystemChrome::HideTaskbars()
         return;
     for (HWND w : Taskbars())
         if (g_taskbarVisibility.ShouldHide() && IsWindowVisible(w))
-            ShowWindow(w, SW_HIDE);
+            ShowWindowAsync(w, SW_HIDE);
     // A concurrent reveal or exit can have restored the taskbar while a
-    // cross-thread ShowWindow was in flight. Restoration must win that race.
+    // cross-thread ShowWindowAsync was in flight. Restoration must win that race.
     if (!g_taskbarVisibility.ShouldHide())
         ShowTaskbars();
 }
@@ -454,7 +462,7 @@ void CALLBACK SystemChrome::OnShow(HWINEVENTHOOK, DWORD, HWND w, LONG obj, LONG,
 
 void SystemChrome::Save() const
 {
-    if (!g_taskbarVisibility.hidden && !quietOurs_ && !autoPlayBannerOurs_) {
+    if (!g_taskbarVisibility.hidden && !autoHideOurs_ && !quietOurs_ && !autoPlayBannerOurs_) {
         DeleteFileW(StatePath().c_str());
         return;
     }
