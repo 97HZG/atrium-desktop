@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace Atrium.Settings;
 
@@ -26,12 +28,15 @@ internal static class ShellIcons
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHGetPropertyStoreFromParsingName(string path, IntPtr context, uint flags, ref Guid iid, out IPropertyStore store);
     [DllImport("ole32.dll")] private static extern int PropVariantClear(ref PropVariant value);
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> LinkTargets = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (DateTime LastWriteUtc, string Target)> LinkTargets =
+        new(StringComparer.OrdinalIgnoreCase);
 
+    [SupportedOSPlatform("windows")]
     internal static string ExecutablePath(string path)
     {
         if (!path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) return ExecutableForIcon(path);
-        if (LinkTargets.TryGetValue(path, out string? cached)) return cached;
+        var lastWriteUtc = File.GetLastWriteTimeUtc(path);
+        if (LinkTargets.TryGetValue(path, out var cached) && cached.LastWriteUtc == lastWriteUtc) return cached.Target;
         int hr = CoInitializeEx(IntPtr.Zero, 0);
         if (hr is < 0 and not unchecked((int)0x80010106)) return path; // RPC_E_CHANGED_MODE: thread already initialized
         try
@@ -45,7 +50,8 @@ internal static class ShellIcons
                 try
                 {
                     string target = value.Type == 31 ? ExecutableForIcon(Marshal.PtrToStringUni(value.Text) ?? path) : path;
-                    LinkTargets[path] = target;
+                    if (LinkTargets.Count > 512) LinkTargets.Clear();
+                    LinkTargets[path] = (lastWriteUtc, target);
                     return target;
                 }
                 finally { _ = PropVariantClear(ref value); }
@@ -105,6 +111,7 @@ internal static class ShellIcons
     public sealed record Image(int Width, int Height, byte[] Bgra);
 
     // Loads on a thread-pool (MTA) thread; null if the shell has no icon.
+    [SupportedOSPlatform("windows")]
     public static Task<Image?> LoadAsync(string parsingName, int px) => Task.Run(() =>
     {
         int hr = CoInitializeEx(IntPtr.Zero, 0);
@@ -112,6 +119,7 @@ internal static class ShellIcons
         finally { if (hr >= 0) CoUninitialize(); }
     });
 
+    [SupportedOSPlatform("windows")]
     private static Image? Load(string parsingName, int px)
     {
         parsingName = ExecutableForIcon(parsingName);
@@ -190,10 +198,11 @@ internal static class ShellIcons
     }
 
     // Read the installed client's artwork without depending on a running process.
-    private static string ExecutableForIcon(string path)
+    internal static string ExecutableForIcon(string path)
     {
         if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return path;
-        string actual = Path.Combine(Path.GetDirectoryName(path)!, "app", Path.GetFileName(path));
+        if (Path.GetDirectoryName(path) is not { Length: > 0 } dir) return path;
+        string actual = Path.Combine(dir, "app", Path.GetFileName(path));
         return File.Exists(actual) ? actual : path;
     }
 }

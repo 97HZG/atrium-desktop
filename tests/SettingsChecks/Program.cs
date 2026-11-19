@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -386,6 +388,107 @@ foreach (Match m in sliderMatches)
 }
 Console.WriteLine($"Settings contract passed: {schemaKeySet.Count} keys (4-way), " +
     $"{cases.Count} C++<->C# differential cases, {sliderMatches.Count} sliders aligned.");
+
+static void ExpectThrows<TException>(Action action, string message) where TException : Exception
+{
+    try { action(); }
+    catch (TException) { return; }
+    throw new InvalidOperationException(message);
+}
+
+var libPaths = GameFinder.ParseLibraryPaths(""" "path" "D:\\SteamLibrary" "path" "E:\\Games\\Steam" """);
+Require(libPaths.SequenceEqual([@"D:\SteamLibrary", @"E:\Games\Steam"]), "VDF library paths must unescape.");
+string acf = """ "name" "Portal 2" "installdir" "Portal 2" """;
+Require(GameFinder.ParseVdfField(acf, "name") == "Portal 2" && GameFinder.ParseVdfField(acf, "installdir") == "Portal 2",
+    "ACF fields must parse.");
+Require(GameFinder.IsExcludedRuntime("Steamworks Common Redistributables") &&
+        GameFinder.IsExcludedRuntime("Foo Redistributable") && !GameFinder.IsExcludedRuntime("Portal 2"),
+    "Steam runtime exclusion must filter runtimes only.");
+var epicValid = GameFinder.ParseEpicManifest(
+    """{"AppCategories":["games"],"DisplayName":"Hades","InstallLocation":"C:\\Games\\Hades","LaunchExecutable":"Hades.exe"}""");
+Require(epicValid is { Name: "Hades", Folder: @"C:\Games\Hades", LaunchExe: "Hades.exe" }, "Valid Epic manifest must parse.");
+Require(GameFinder.ParseEpicManifest("""{"AppCategories":["engines"],"DisplayName":"UE","InstallLocation":"C:\\UE"}""") is null,
+    "Non-game Epic manifest must be ignored.");
+Require(GameFinder.ParseEpicManifest("{bad") is null, "Malformed Epic manifest must return null.");
+var merged = GameFinder.MergeGames([
+    new("Portal 2", @"d:\steam\common\portal 2\", "a.exe"),
+    new("Portal 2", @"D:\Steam\common\Portal 2\portal2.exe", "b.exe"),
+    new("Notepad", @"c:\windows\notepad.exe", "n.exe"),
+]);
+Require(merged.Count == 2 && merged[0].Title == "Notepad" && merged[1].Title == "Portal 2",
+    "MergeGames must deduplicate exe entries inside game folders.");
+
+static JsonElement ReleaseJson(string tag, string? assetName = null, string? digest = null)
+{
+    var assets = new JsonArray();
+    if (assetName != null)
+    {
+        var asset = new JsonObject { ["name"] = assetName, ["browser_download_url"] = "https://example.com/a.zip" };
+        if (digest != null) asset["digest"] = digest;
+        assets.Add(asset);
+    }
+    var obj = new JsonObject { ["tag_name"] = tag, ["html_url"] = "https://example.com/rel", ["assets"] = assets };
+    return JsonDocument.Parse(obj.ToJsonString()).RootElement;
+}
+var relOk = ReleaseInfo.FromJson(ReleaseJson("v2.7.0", "Atrium-2.7.0-win-x64.zip", "sha256:abc"));
+Require(relOk.Version == new Version(2, 7, 0, 0) && relOk.Download != null && relOk.Digest == "sha256:abc",
+    "ReleaseInfo.FromJson must parse v2.7.0, matching zip asset, and digest.");
+Require(ReleaseInfo.FromJson(ReleaseJson("v2.7.0+build")).Version == new Version(2, 7, 0, 0) &&
+        ReleaseInfo.FromJson(ReleaseJson("v2.7.0", "other.zip")).Download == null,
+    "ReleaseInfo.FromJson must handle +build tags and missing matching asset.");
+ExpectThrows<JsonException>(() => ReleaseInfo.FromJson(ReleaseJson("bad")), "Invalid version must throw JsonException.");
+ExpectThrows<KeyNotFoundException>(() => ReleaseInfo.FromJson(JsonDocument.Parse("{}").RootElement), "Missing tag_name must throw.");
+
+string temp = Path.Combine(Path.GetTempPath(), "atrium-checks-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Directory.CreateDirectory(temp);
+    string goodZip = Path.Combine(temp, "good.zip");
+    using (var z = ZipFile.Open(goodZip, ZipArchiveMode.Create))
+    {
+        var e = z.CreateEntry("Atrium/ok.txt");
+        using var w = new StreamWriter(e.Open());
+        w.Write("ok");
+    }
+    string goodDigest = "sha256:" + Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(goodZip)));
+    ReleaseValidation.VerifyZipDigest(goodZip, goodDigest);
+    ExpectThrows<IOException>(() => ReleaseValidation.VerifyZipDigest(goodZip, "sha256:0000"), "Digest mismatch must throw.");
+    string extractDir = Path.Combine(temp, "out");
+    ReleaseValidation.ExtractZipSafely(goodZip, extractDir);
+    Require(File.ReadAllText(Path.Combine(extractDir, "Atrium", "ok.txt")) == "ok", "ExtractZipSafely must extract valid zip.");
+    string slipZip = Path.Combine(temp, "slip.zip");
+    using (var z = ZipFile.Open(slipZip, ZipArchiveMode.Create))
+        z.CreateEntry("../escape.txt");
+    ExpectThrows<InvalidDataException>(() => ReleaseValidation.ExtractZipSafely(slipZip, extractDir), "ZipSlip must be rejected.");
+
+    string pkg = Path.Combine(temp, "pkg");
+    string coreExe = Path.Combine(pkg, "Atrium.exe");
+    string settingsExe = Path.Combine(pkg, "Settings", "Atrium.Settings.exe");
+    string settingsDll = Path.Combine(pkg, "Settings", "Atrium.Settings.dll");
+    Directory.CreateDirectory(Path.GetDirectoryName(settingsExe)!);
+    File.WriteAllText(coreExe, ""); File.WriteAllText(settingsExe, ""); File.WriteAllText(settingsDll, "");
+    Version v27 = new(2, 7, 0, 0), v26 = new(2, 6, 0, 0);
+    ReleaseValidation.ValidatePackage(pkg, v27, _ => v27);
+    ExpectThrows<IOException>(() => ReleaseValidation.ValidatePackage(pkg, v27, _ => v26), "Version mismatch must throw.");
+    File.Delete(settingsDll);
+    ExpectThrows<IOException>(() => ReleaseValidation.ValidatePackage(pkg, v27, _ => v27), "Missing Atrium.Settings.dll must throw.");
+    File.Delete(coreExe);
+    ExpectThrows<IOException>(() => ReleaseValidation.ValidatePackage(pkg, v27, _ => v27), "Missing Atrium.exe must throw.");
+
+    Require(ShellIcons.ExecutableForIcon("foo.exe") == "foo.exe", "Bare exe must return itself.");
+    Require(ShellIcons.ExecutableForIcon(@"C:\app\foo.lnk") == @"C:\app\foo.lnk", "Non-exe must return itself.");
+    string iconExe = Path.Combine(temp, "MyApp.exe");
+    string appIconExe = Path.Combine(temp, "app", "MyApp.exe");
+    Require(ShellIcons.ExecutableForIcon(iconExe) == iconExe, "Missing app/<exe> must return original path.");
+    Directory.CreateDirectory(Path.GetDirectoryName(appIconExe)!);
+    File.WriteAllText(appIconExe, "");
+    Require(ShellIcons.ExecutableForIcon(iconExe) == appIconExe, "Existing app/<exe> must be returned.");
+}
+finally
+{
+    if (Directory.Exists(temp)) Directory.Delete(temp, true);
+}
+Console.WriteLine("Hardening regression checks passed.");
 
 internal partial class Program
 {

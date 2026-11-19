@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -112,7 +111,12 @@ internal static class ReleaseInstaller
             cache = CacheDirectory;
             Directory.CreateDirectory(cache);
             mutex = new Mutex(false, @"Local\Atrium.Update." + Path.GetFileName(cache));
-            try { mutex.WaitOne(); } catch (AbandonedMutexException) { }
+            try
+            {
+                if (!mutex.WaitOne(TimeSpan.FromSeconds(30)))
+                    throw new IOException(Loc.T("Could not prepare the update. Try again."));
+            }
+            catch (AbandonedMutexException) { }
             acquired = true;
             // Read once. Error reporting must not depend on the same corrupt or
             // inaccessible state that brought us into the catch branch.
@@ -215,22 +219,20 @@ internal static class ReleaseInstaller
             }
         }
         string zip = Path.Combine(WorkDirectory, "release.zip");
-        if (pending.Release.Digest is { } digest)
+        try
         {
-            using var stream = File.OpenRead(zip);
-            string actual = "sha256:" + Convert.ToHexString(SHA256.HashData(stream));
-            if (!actual.Equals(digest, StringComparison.OrdinalIgnoreCase))
-            {
-                stream.Close();
-                File.Delete(zip); // a retry downloads it again
-                throw new IOException(Loc.T("The update package failed verification. Download again."));
-            }
+            ReleaseValidation.VerifyZipDigest(zip, pending.Release.Digest, LocalizeValidation);
+        }
+        catch (IOException)
+        {
+            File.Delete(zip); // a retry downloads it again
+            throw;
         }
         string unpacked = Path.Combine(WorkDirectory, "unpacked");
         if (Directory.Exists(unpacked)) Directory.Delete(unpacked, true); // an interrupted extraction, not transfer data
         try
         {
-            ZipFile.ExtractToDirectory(zip, unpacked);
+            ReleaseValidation.ExtractZipSafely(zip, unpacked);
         }
         catch (InvalidDataException)
         {
@@ -262,18 +264,16 @@ internal static class ReleaseInstaller
         { /* The core may have exited; it reads ready.json on its next startup. */ }
     }
 
-    private static void ValidatePackage(string directory, Version expected)
+    private static void ValidatePackage(string directory, Version expected) =>
+        ReleaseValidation.ValidatePackage(directory, expected, localize: LocalizeValidation);
+
+    private static string LocalizeValidation(string key) => key switch
     {
-        string core = Path.Combine(directory, "Atrium.exe");
-        string settings = Path.Combine(directory, "Settings", "Atrium.Settings.exe");
-        if (!File.Exists(core) || !File.Exists(settings) || !File.Exists(Path.ChangeExtension(settings, ".dll")))
-            throw new IOException(Loc.T("The update package is missing program files. Download again."));
-        var info = FileVersionInfo.GetVersionInfo(core);
-        var version = new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, info.FilePrivatePart);
-        var settingsInfo = FileVersionInfo.GetVersionInfo(Path.ChangeExtension(settings, ".dll"));
-        var settingsVersion = new Version(settingsInfo.FileMajorPart, settingsInfo.FileMinorPart, settingsInfo.FileBuildPart, settingsInfo.FilePrivatePart);
-        if (version != expected || settingsVersion != expected) throw new IOException(Loc.T("The update package does not match the release. Download again."));
-    }
+        "The update package failed verification. Download again." => Loc.T("The update package failed verification. Download again."),
+        "The update package is missing program files. Download again." => Loc.T("The update package is missing program files. Download again."),
+        "The update package does not match the release. Download again." => Loc.T("The update package does not match the release. Download again."),
+        _ => key,
+    };
 
     internal static void Restart(Prepared ready, bool startCore)
     {

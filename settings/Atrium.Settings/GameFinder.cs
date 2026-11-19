@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
@@ -10,25 +9,14 @@ namespace Atrium.Settings;
 // also after an update renames one), and the games Windows' Game Bar has seen, by program.
 internal static partial class GameFinder
 {
-    internal sealed record Game(string Title, string Entry, string Icon);
-
     public static List<Game> Find()
     {
         var games = new List<Game>();
         try { Steam(games); } catch { }
         try { Epic(games); } catch { }
         try { GameBar(games); } catch { }
-        // A program inside a library's folder is that game already.
-        var folders = games.Select(g => g.Entry).Where(IsFolder).ToList();
-        return [.. games.Where(g => IsFolder(g.Entry) || !folders.Any(f => g.Entry.StartsWith(f, StringComparison.OrdinalIgnoreCase)))
-                    .DistinctBy(g => g.Entry, StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(g => g.Title, StringComparer.CurrentCultureIgnoreCase)];
+        return MergeGames(games);
     }
-
-    internal static bool IsFolder(string entry) => entry.EndsWith('\\');
-
-    // As Stage Manager matches it: lower case, a prefix of its programs' paths.
-    private static string FolderEntry(string folder) => Path.GetFullPath(folder).TrimEnd('\\').ToLowerInvariant() + "\\";
 
     private static void Steam(List<Game> games)
     {
@@ -36,11 +24,7 @@ internal static partial class GameFinder
         if (key?.GetValue("SteamPath") is not string steam || steam.Length == 0) return;
         var libraries = new List<string> { steam };
         string vdf = Path.Combine(steam, "steamapps", "libraryfolders.vdf");
-        if (File.Exists(vdf))
-        {
-            foreach (Match m in LibraryPathRegex().Matches(File.ReadAllText(vdf)))
-                libraries.Add(m.Groups[1].Value.Replace(@"\\", @"\"));
-        }
+        if (File.Exists(vdf)) libraries.AddRange(ParseLibraryPaths(File.ReadAllText(vdf)));
 
         foreach (string library in libraries.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -49,25 +33,15 @@ internal static partial class GameFinder
             foreach (string manifest in Directory.EnumerateFiles(apps, "appmanifest_*.acf"))
             {
                 string text = File.ReadAllText(manifest);
-                string name = Field(text, "name"), dir = Field(text, "installdir");
+                string name = ParseVdfField(text, "name"), dir = ParseVdfField(text, "installdir");
                 // Steam's own runtimes are not games.
-                if (name.Length == 0 || dir.Length == 0 || name.StartsWith("Steamworks", StringComparison.OrdinalIgnoreCase) ||
-                    name.Contains("Redistributable", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+                if (name.Length == 0 || dir.Length == 0 || IsExcludedRuntime(name)) continue;
 
                 string folder = Path.Combine(apps, "common", dir);
                 if (Directory.Exists(folder))
                     games.Add(new Game(name, FolderEntry(folder), MainProgram(folder)));
             }
         }
-    }
-
-    private static string Field(string vdf, string field)
-    {
-        var m = Regex.Match(vdf, "\"" + field + "\"\\s+\"([^\"]*)\"", RegexOptions.IgnoreCase);
-        return m.Success ? m.Groups[1].Value : "";
     }
 
     private static void Epic(List<Game> games)
@@ -78,13 +52,9 @@ internal static partial class GameFinder
         {
             try
             {
-                if (JsonNode.Parse(File.ReadAllText(item)) is not JsonObject o) continue;
-                if (o["AppCategories"] is JsonArray categories && !categories.Any(c => c?.GetValue<string>() == "games")) continue;
-                string name = o["DisplayName"]?.GetValue<string>() ?? "", folder = o["InstallLocation"]?.GetValue<string>() ?? "";
-                string exe = o["LaunchExecutable"]?.GetValue<string>() ?? "";
-                if (name.Length == 0 || !Directory.Exists(folder)) continue;
-                string launch = exe.Length > 0 ? Path.Combine(folder, exe) : "";
-                games.Add(new Game(name, FolderEntry(folder), File.Exists(launch) ? launch : MainProgram(folder)));
+                if (ParseEpicManifest(File.ReadAllText(item)) is not { } manifest || !Directory.Exists(manifest.Folder)) continue;
+                string launch = manifest.LaunchExe.Length > 0 ? Path.Combine(manifest.Folder, manifest.LaunchExe) : "";
+                games.Add(new Game(manifest.Name, FolderEntry(manifest.Folder), File.Exists(launch) ? launch : MainProgram(manifest.Folder)));
             }
             catch { }
         }
@@ -120,9 +90,6 @@ internal static partial class GameFinder
         catch { }
         return Path.GetFileNameWithoutExtension(exe);
     }
-
-    [GeneratedRegex("\"path\"\\s+\"([^\"]+)\"")]
-    private static partial Regex LibraryPathRegex();
 
     [GeneratedRegex("crash|unins|setup|redist|vc_?redist|dxsetup|report|updat|helper|install|benchmark|prereq", RegexOptions.IgnoreCase)]
     private static partial Regex NotTheGameRegex();

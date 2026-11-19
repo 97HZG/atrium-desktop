@@ -8,6 +8,10 @@
   <ItemGroup>
     <Compile Include="../../settings/Atrium.Settings/BarSettings.cs" Link="BarSettings.cs" />
     <Compile Include="../../settings/Atrium.Settings/DesktopDisplay.cs" Link="DesktopDisplay.cs" />
+    <Compile Include="../../settings/Atrium.Settings/GameFinder.Parsers.cs" Link="GameFinder.Parsers.cs" />
     <Compile Include="../../settings/Atrium.Settings/LocalizationValidation.cs" Link="LocalizationValidation.cs" />
+    <Compile Include="../../settings/Atrium.Settings/ReleaseInfo.cs" Link="ReleaseInfo.cs" />
+    <Compile Include="../../settings/Atrium.Settings/ReleaseValidation.cs" Link="ReleaseValidation.cs" />
+    <Compile Include="../../settings/Atrium.Settings/ShellIcons.cs" Link="ShellIcons.cs" />
   </ItemGroup>
 </Project>
