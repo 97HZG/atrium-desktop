@@ -72,6 +72,7 @@ private:
     void Worker();
     HWND notify_;
     UINT msg_;
+    HANDLE stopEvent_ = nullptr;
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::vector<CatalogApp> apps_, startPins_;
@@ -79,11 +80,13 @@ private:
     // Worker only: the exported layout and the layout file's time it is from.
     std::vector<std::pair<std::wstring, std::wstring>> layout_; // key (packagedAppId | desktopAppLink), value
     FILETIME layoutTime_{};
+    bool layoutLoaded_ = false;
     bool loaded_ = false, refresh_ = false, stop_ = false;
     int prefetchPx_ = 0;
     void QueuePrefetch(); // under mutex_
     void PruneIcons(); // under mutex_
     bool QueueIcon(const std::pair<std::wstring, int>& key, bool prefetch);
+    void RefreshStartLayout(); // worker only
     std::deque<std::pair<std::wstring, int>> iconJobs_;
     struct CachedIcon {
         IconImage image;

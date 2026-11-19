@@ -1,12 +1,19 @@
 # Static resource checks. Dynamic OS/data names use locales/legacy.json.
-param([string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot))
+param(
+    [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$RulesRoot
+)
 $ErrorActionPreference = 'Stop'
 $root = $ProjectRoot
 $errors = [System.Collections.Generic.List[string]]::new()
 if (-not ('Atrium.Settings.LocalizationValidation' -as [type])) {
     # The project's implicit usings and nullable context, which Add-Type does not have.
     $prelude = "#nullable enable`nglobal using System;`nglobal using System.Collections.Generic;`nglobal using System.Linq;`n"
-    $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../settings/Atrium.Settings/LocalizationValidation.cs') -Raw -Encoding utf8
+    $validationPath = Join-Path $(if ($RulesRoot) { $RulesRoot } else { $ProjectRoot }) 'settings/Atrium.Settings/LocalizationValidation.cs'
+    if (-not (Test-Path -LiteralPath $validationPath)) {
+        $validationPath = Join-Path $PSScriptRoot '../settings/Atrium.Settings/LocalizationValidation.cs'
+    }
+    $source = Get-Content -LiteralPath $validationPath -Raw -Encoding utf8
     Add-Type -TypeDefinition ($prelude + $source)
 }
 

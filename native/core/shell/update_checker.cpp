@@ -165,7 +165,7 @@ UpdateChecker::UpdateChecker(HWND notify, UINT message)
 {
     if (!stop_)
         winrt::throw_last_error();
-    if (!cache_.empty() && GetFileAttributesW((cache_ + L"\\download.json").c_str()) != INVALID_FILE_ATTRIBUTES)
+    if (!IsDevelopmentBuild() && !cache_.empty() && GetFileAttributesW((cache_ + L"\\download.json").c_str()) != INVALID_FILE_ATTRIBUTES)
         StartWorker(L"--resume-update");
     PostMessageW(notify_, message_, 0, 0);
     worker_ = std::thread([this] { Run(); });
@@ -180,7 +180,7 @@ UpdateChecker::~UpdateChecker()
 
 void UpdateChecker::Run()
 {
-    if (cache_.empty())
+    if (cache_.empty() || IsDevelopmentBuild())
         return;
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     try {

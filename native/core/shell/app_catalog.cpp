@@ -107,8 +107,15 @@ std::wstring ReadUtf8File(const std::wstring& path)
 // The Windows start menu's layout file (start2.bin) is encrypted; the
 // supported way to read it is Export-StartLayout, which writes JSON:
 // {"pinnedList":[{"desktopAppLink":"%APPDATA%\\...lnk"},{"packagedAppId":"...!App"},...]}.
-std::wstring ExportStartLayout()
+std::wstring ExportStartLayout(HANDLE stopEvent, bool* cancelled = nullptr)
 {
+    if (cancelled)
+        *cancelled = false;
+    if (stopEvent && WaitForSingleObject(stopEvent, 0) == WAIT_OBJECT_0) {
+        if (cancelled)
+            *cancelled = true;
+        return {};
+    }
     wchar_t temp[MAX_PATH] = {}, sys[MAX_PATH] = {};
     GetTempPathW(MAX_PATH, temp);
     GetSystemDirectoryW(sys, MAX_PATH);
@@ -127,14 +134,22 @@ std::wstring ExportStartLayout()
         Log(L"catalog: Export-StartLayout could not start (%lu)", GetLastError());
         return {};
     }
-    DWORD code = 1;
-    if (WaitForSingleObject(pi.hProcess, 20000) != WAIT_OBJECT_0) {
+    HANDLE handles[2] = {pi.hProcess, stopEvent};
+    DWORD count = stopEvent ? 2 : 1;
+    DWORD wait = WaitForMultipleObjects(count, handles, FALSE, 20000);
+    if (wait != WAIT_OBJECT_0) {
         TerminateProcess(pi.hProcess, 1);
-        WaitForSingleObject(pi.hProcess, 5000);
-        Log(L"catalog: Export-StartLayout timed out");
-    } else {
-        GetExitCodeProcess(pi.hProcess, &code);
+        WaitForSingleObject(pi.hProcess, 3000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        DeleteFileW(file.c_str());
+        if (cancelled)
+            *cancelled = true;
+        Log(wait == WAIT_OBJECT_0 + 1 ? L"catalog: Export-StartLayout cancelled" : L"catalog: Export-StartLayout timed out");
+        return {};
     }
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     std::wstring text;
@@ -368,8 +383,10 @@ std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
 
 } // namespace
 
-AppCatalog::AppCatalog(HWND notify, UINT readyMsg) : notify_(notify), msg_(readyMsg), refresh_(true)
+AppCatalog::AppCatalog(HWND notify, UINT readyMsg) : notify_(notify), msg_(readyMsg), stopEvent_(CreateEventW(nullptr, TRUE, FALSE, nullptr)), refresh_(true)
 {
+    if (!stopEvent_)
+        winrt::throw_last_error();
     thread_ = std::thread([this] { Worker(); });
 }
 
@@ -379,8 +396,12 @@ AppCatalog::~AppCatalog()
         std::lock_guard g(mutex_);
         stop_ = true;
     }
+    if (stopEvent_)
+        SetEvent(stopEvent_);
     cv_.notify_all();
     thread_.join();
+    if (stopEvent_)
+        CloseHandle(stopEvent_);
 }
 
 void AppCatalog::Refresh()
@@ -510,6 +531,32 @@ void AppCatalog::PruneIcons()
     }
 }
 
+void AppCatalog::RefreshStartLayout()
+{
+    wchar_t local[MAX_PATH] = {};
+    GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
+    std::wstring bin = std::wstring(local) + L"\\Packages\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\LocalState\\start2.bin";
+    WIN32_FILE_ATTRIBUTE_DATA fa{};
+    bool hasBin = GetFileAttributesExW(bin.c_str(), GetFileExInfoStandard, &fa) != 0;
+    if (layoutLoaded_ && (!hasBin || CompareFileTime(&fa.ftLastWriteTime, &layoutTime_) == 0))
+        return;
+    ULONGLONG t1 = GetTickCount64();
+    bool cancelled = false;
+    std::wstring json = ExportStartLayout(stopEvent_, &cancelled);
+    if (cancelled)
+        return;
+    // Only a complete export replaces the pins; otherwise the old ones stay and the next refresh retries
+    // when start2.bin exists. On Windows 10 (no start2.bin), try once so opening Start does not respawn PowerShell.
+    bool found = json.find(L"\"pinnedList\"") != std::wstring::npos;
+    if (found)
+        layout_ = JsonStringPairs(json);
+    if (found || !hasBin) {
+        layoutTime_ = fa.ftLastWriteTime;
+        layoutLoaded_ = true;
+    }
+    Log(L"catalog: start layout exported (%zu entries) in %llu ms", layout_.size(), GetTickCount64() - t1);
+}
+
 void AppCatalog::Worker()
 {
     // STA: shell item image factories of some handlers need it.
@@ -544,21 +591,7 @@ void AppCatalog::Worker()
             // The start menu's pins: exported again only when its layout file changed.
             std::vector<CatalogApp> pins;
             try {
-                wchar_t local[MAX_PATH] = {};
-                GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
-                std::wstring bin = std::wstring(local) + L"\\Packages\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\LocalState\\start2.bin";
-                WIN32_FILE_ATTRIBUTE_DATA fa{};
-                GetFileAttributesExW(bin.c_str(), GetFileExInfoStandard, &fa);
-                if (CompareFileTime(&fa.ftLastWriteTime, &layoutTime_) != 0 || layout_.empty()) {
-                    ULONGLONG t1 = GetTickCount64();
-                    std::wstring json = ExportStartLayout();
-                    // Only a complete export replaces the pins; otherwise the old ones stay and the next refresh tries again.
-                    if (json.find(L"\"pinnedList\"") != std::wstring::npos) {
-                        layout_ = JsonStringPairs(json);
-                        layoutTime_ = fa.ftLastWriteTime;
-                    }
-                    Log(L"catalog: start layout exported (%zu entries) in %llu ms", layout_.size(), GetTickCount64() - t1);
-                }
+                RefreshStartLayout();
                 pins = ResolvePins(layout_, apps);
             } catch (...) {
                 Log(L"catalog: start pins failed");
