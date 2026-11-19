@@ -225,6 +225,12 @@ private:
     void ApplyPlacement();
     void ApplyRegion();
     void PublishPanel();
+    void StartGlassWait();
+    POINT PopOrigin(POINT a) const
+    {
+        const RECT& r = desktopLayer_ ? nativeWindow_ : window_;
+        return {a.x - r.left, a.y - r.top};
+    }
     void SetInk(bool dark, const InkGrid& grid); // WM_GLASS_INK: the inks start fading there
     void FinishHide();
     int InsetPx() const;

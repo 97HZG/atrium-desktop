@@ -99,11 +99,17 @@ void WindowPreview::SetWindows(const std::vector<HWND>& windows)
         RECT win{}, frame{};
         GetWindowRect(c.window, &win);
         c.sourceRect = RECT{0, 0, c.source.cx, c.source.cy};
-        if (!IsIconic(c.window) && SUCCEEDED(DwmGetWindowAttribute(c.window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) && win.right > win.left) {
-            // The source size is in the window's own (physical) px, as the rectangles are.
-            c.sourceRect = RECT{frame.left - win.left, frame.top - win.top, frame.right - win.left, frame.bottom - win.top};
-            c.sourceRect.right = std::min<LONG>(c.sourceRect.right, c.source.cx);
-            c.sourceRect.bottom = std::min<LONG>(c.sourceRect.bottom, c.source.cy);
+        if (!IsIconic(c.window) && SUCCEEDED(DwmGetWindowAttribute(c.window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) && win.right > win.left &&
+            win.bottom > win.top) {
+            // The source size is in the window's own (physical) px; scale (frame - win) to match when DPI differs.
+            const double sx = double(c.source.cx) / double(win.right - win.left);
+            const double sy = double(c.source.cy) / double(win.bottom - win.top);
+            RECT r{std::clamp<LONG>(LONG(std::lround(double(frame.left - win.left) * sx)), 0, c.source.cx),
+                   std::clamp<LONG>(LONG(std::lround(double(frame.top - win.top) * sy)), 0, c.source.cy),
+                   std::clamp<LONG>(LONG(std::lround(double(frame.right - win.left) * sx)), 0, c.source.cx),
+                   std::clamp<LONG>(LONG(std::lround(double(frame.bottom - win.top) * sy)), 0, c.source.cy)};
+            if (r.right > r.left && r.bottom > r.top)
+                c.sourceRect = r;
         }
     }
 }

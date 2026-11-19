@@ -306,11 +306,8 @@ Surface::~Surface()
 {
     std::erase(g_all, this);
     if (hwnd_) {
-        if (g_host) {
-            GlassPanel p;
-            p.hwnd = hwnd_;
-            g_host->SetPanel(p); // not visible: removes the layer
-        }
+        if (g_host)
+            g_host->SetPanel(GlassPanel{hwnd_}); // not visible: removes the layer
         SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
         DestroyWindow(hwnd_);
     }
@@ -359,9 +356,7 @@ void Surface::SetRadius(float dip)
 void Surface::SetShapes(const std::vector<ShapeDip>& shapes, bool animating)
 {
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
-        auto sameRect = [](const D2D1_RECT_F& x, const D2D1_RECT_F& y) {
-            return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom;
-        };
+        auto sameRect = [](const auto& x, const auto& y) { return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom; };
         auto samePart = [&](const ShapeDip::Part& x, const ShapeDip::Part& y) { return sameRect(x.rect, y.rect) && std::equal(x.radii, x.radii + 4, y.radii); };
         return a.radius == b.radius && a.fade == b.fade && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix && a.tailX == b.tailX &&
                a.tailHalfWidth == b.tailHalfWidth && a.tailHeight == b.tailHeight && a.tailInset == b.tailInset && a.parts.size() == b.parts.size() &&
@@ -415,12 +410,21 @@ void Surface::PublishPanel()
     p.animating = shapesAnimating_;
     p.pop = pop_;
     p.popOpen = popOpen_;
-    p.popX = float(anchor_.x - (desktopLayer_ ? nativeWindow_.left : window_.left));
-    p.popY = float(anchor_.y - (desktopLayer_ ? nativeWindow_.top : window_.top));
+    p.popX = float(PopOrigin(anchor_).x);
+    p.popY = float(PopOrigin(anchor_).y);
     p.rippleX = rippleX_;
     p.rippleY = rippleY_;
     p.rippleMs = rippleMs_;
     g_host->SetPanel(p);
+}
+
+void Surface::StartGlassWait()
+{
+    glassReady_ = glassless_; // nothing to wait for
+    ++glassShown_;
+    shownMs_ = ClockMs();
+    if (!glassless_)
+        SetTimer(hwnd_, kGlassWaitTimer, UINT(kGlassWaitMs) + 20, nullptr);
 }
 
 void Surface::SetGlassless(bool on)
@@ -446,10 +450,7 @@ void Surface::SetGlassless(bool on)
     if (!visible_)
         return;
     // As on Show: the content waits a little for its glass, then a plain panel stands in.
-    glassReady_ = false;
-    ++glassShown_;
-    shownMs_ = ClockMs();
-    SetTimer(hwnd_, kGlassWaitTimer, UINT(kGlassWaitMs) + 20, nullptr);
+    StartGlassWait();
     PublishPanel();
     Invalidate();
 }
@@ -533,7 +534,11 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         self->Paint();
         return 0;
     case WM_ERASEBKGND: return 1;
-    case WM_DPICHANGED: self->Invalidate(); return 0;
+    case WM_DPICHANGED:
+        self->Place(self->rect_);
+        self->PublishPanel();
+        self->Invalidate();
+        return 0;
     case WM_CLOSE:
         if (self->onDismiss)
             self->onDismiss();
@@ -577,8 +582,7 @@ void Surface::ApplyPlacement()
         }
         return;
     }
-    SetWindowPos(hwnd_, desktopLayer_ ? nullptr : HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top,
-                 SWP_NOACTIVATE | (desktopLayer_ ? SWP_NOZORDER : 0));
+    SetWindowPos(hwnd_, HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top, SWP_NOACTIVATE);
     ApplyRegion();
 }
 
@@ -612,17 +616,14 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
     KillTimer(hwnd_, kHideTimer);
     Place(rect);
     anchor_ = anchor;
+    const bool wasVisible = visible_;
     bool wasHiding = hiding_;
     hiding_ = false;
     if (!visible_) {
         visible_ = true;
         firstPaint_ = !wasHiding;
-        if (!wasHiding) {
-            glassReady_ = glassless_; // nothing to wait for
-            ++glassShown_;
-            shownMs_ = ClockMs();
-            SetTimer(hwnd_, kGlassWaitTimer, UINT(kGlassWaitMs) + 20, nullptr);
-        }
+        if (!wasHiding)
+            StartGlassWait();
         ShowWindow(hwnd_, activate && activatable_ ? SW_SHOW : SW_SHOWNOACTIVATE);
     }
     if (!desktopLayer_)
@@ -631,18 +632,15 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
         SwitchToThisWindow(hwnd_, TRUE);
     // Content and glass pop out of the anchor together (DWM runs both
     // animations). The animation is in place before the first frame shows.
-    if (pop) {
+    popOpen_ = true;
+    if (pop)
         ++pop_;
-        popOpen_ = true;
-        if (EnsureDevice())
-            PopVisual(shared_->dcomp.get(), visual_.get(), true, float(anchor.x - (desktopLayer_ ? nativeWindow_.left : window_.left)),
-                      float(anchor.y - (desktopLayer_ ? nativeWindow_.top : window_.top)));
-    } else {
-        popOpen_ = true;
-        EnsureDevice();
-    }
+    if (EnsureDevice() && pop)
+        PopVisual(shared_->dcomp.get(), visual_.get(), true, float(PopOrigin(anchor).x), float(PopOrigin(anchor).y));
     Paint();
     PublishPanel();
+    if (!wasVisible && glassReady_ && onReady)
+        onReady();
 }
 
 void Surface::Move(RECT rect)
@@ -700,8 +698,7 @@ void Surface::Hide(bool animate)
     hiding_ = true;
     ++pop_;
     popOpen_ = false;
-    PopVisual(shared_->dcomp.get(), visual_.get(), false, float(anchor_.x - (desktopLayer_ ? nativeWindow_.left : window_.left)),
-              float(anchor_.y - (desktopLayer_ ? nativeWindow_.top : window_.top)));
+    PopVisual(shared_->dcomp.get(), visual_.get(), false, float(PopOrigin(anchor_).x), float(PopOrigin(anchor_).y));
     PublishPanel();
     SetTimer(hwnd_, kHideTimer, kHideMs, nullptr);
 }

@@ -213,7 +213,9 @@ D2D1_COLOR_F Canvas::InkAt(D2D1_RECT_F r, D2D1_COLOR_F c, D2D1_COLOR_F& haloInk)
     // theme's inks are at most 0.96 opaque.
     if (c.a > 0.965f)
         return c;
-    bool isText = same(c, theme.text), isWash = !isText && same(c, theme.hover);
+    const bool sharedRgb = same(theme.text, theme.hover);
+    const bool isText = same(c, theme.text) && (!sharedRgb || c.a >= 0.40f);
+    const bool isWash = !isText && same(c, theme.hover);
     if (!isText && !isWash)
         return c;
     const D2D1_COLOR_F& from = isText ? theme.text : theme.hover;

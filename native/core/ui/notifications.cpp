@@ -60,6 +60,28 @@ std::wstring Ago(ULONGLONG t)
     return TrFormat(L"%d h ago", int(s / 3600));
 }
 
+void SyncToastRegion(HWND hwnd, int& curTop, int& curBottom, const RECT& rr, int regionTop, bool clipBottom, float bottom, float scale)
+{
+    if (regionTop == 0)
+        regionTop = -1;
+    RECT wr{};
+    if (!GetWindowRect(hwnd, &wr))
+        return;
+    const int inset = ((wr.right - wr.left) - (rr.right - rr.left)) / 2;
+    const int regionBottom = clipBottom ? std::min(int(wr.bottom - wr.top), int(std::ceil(bottom * scale)) + 2 * inset) : -1;
+    if (regionTop == curTop && regionBottom == curBottom)
+        return;
+    HRGN rgn = regionTop > 0 || regionBottom >= 0 ?
+                   CreateRectRgn(0, std::max(0, regionTop), wr.right - wr.left, regionBottom >= 0 ? regionBottom : wr.bottom - wr.top) :
+                   nullptr;
+    if (SetWindowRgn(hwnd, rgn, FALSE)) {
+        curTop = regionTop;
+        curBottom = regionBottom;
+    } else if (rgn) {
+        DeleteObject(rgn);
+    }
+}
+
 } // namespace
 
 Notifications::Notifications(HINSTANCE instance)
@@ -774,7 +796,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
     std::vector<float> alphas(shown.size());
     for (size_t i = 0; i < shown.size(); ++i) {
         const Notice& n = *shown[i];
-        float ty, tinset, talpha, tcontent = 1;
+        float ty, tinset = 0, talpha = 1, tcontent = 1;
         if (stack) {
             // Where the card is relative to the one in front (fractional
             // while the wheel turns the stack): behind it, peeking out above
@@ -796,16 +818,10 @@ void Notifications::Paint(Mode mode, Canvas& c)
             }
         } else if (column && bottom_) {
             ty = listTop + listH - card - float(i) * (card + kGap) + v.scroll; // the newest at the bottom corner
-            tinset = 0;
-            talpha = 1;
         } else if (fromTop) {
             ty = listTop + notification::CardTop(i, card, kGap, v.scroll);
-            tinset = 0;
-            talpha = 1;
         } else {
             ty = listH - card - float(i) * (card + kGap) + v.scroll;
-            tinset = 0;
-            talpha = 1;
         }
         const bool others = !v.cards.empty();
         CardAnim& a = v.cards[n.id];
@@ -940,27 +956,11 @@ void Notifications::Paint(Mode mode, Canvas& c)
     v.lastPaint = c.now;
 
     // At rest the window starts at the top of what it shows (the shadow's
-    // room above included); while anything moves it is whole.
-    // A top corner's column is cut below its last card instead.
-    int regionTop = fromTop || moving ? -1 : int(std::lround(top * c.scale));
-    if (regionTop == 0)
-        regionTop = -1;
-    RECT wr{};
-    if (GetWindowRect(v.surface->Hwnd(), &wr)) {
-        const int inset = ((wr.right - wr.left) - (rr.right - rr.left)) / 2;
-        const int regionBottom = fromTop && !(dockTop && moving) ? std::min(int(wr.bottom - wr.top), int(std::ceil(bottom * c.scale)) + 2 * inset) : -1;
-        if (regionTop != v.regionTop || regionBottom != v.regionBottom) {
-            HRGN rgn = regionTop > 0 || regionBottom >= 0 ?
-                           CreateRectRgn(0, std::max(0, regionTop), wr.right - wr.left, regionBottom >= 0 ? regionBottom : wr.bottom - wr.top) :
-                           nullptr;
-            if (SetWindowRgn(v.surface->Hwnd(), rgn, FALSE)) {
-                v.regionTop = regionTop;
-                v.regionBottom = regionBottom;
-            } else if (rgn) {
-                DeleteObject(rgn);
-            }
-        }
-    }
+    // room above included); while anything moves it is whole (except a bottom
+    // corner column, whose upper screen stays clickable). A top corner's column
+    // is cut below its last card instead.
+    const int regionTop = fromTop || (!column && moving) ? -1 : int(std::lround(top * c.scale));
+    SyncToastRegion(v.surface->Hwnd(), v.regionTop, v.regionBottom, rr, regionTop, fromTop && !(dockTop && moving), bottom, c.scale);
 }
 
 void Notifications::Click(Mode mode, const std::wstring& id)

@@ -135,6 +135,19 @@ StartTile* Find(std::vector<StartTile>& tiles, const std::wstring& id)
 constexpr int kOpen = 1, kPinBar = 2, kPinStart = 3, kRemove = 4, kOutOfFolder = 5, kRename = 6, kUngroup = 7, kReset = 8, kHide = 9, kUnhide = 10,
               kShowHidden = 11, kAdmin = 12, kLocation = 13, kSyncPins = 14, kSyncFolders = 15, kSyncBoth = 16, kSize = 17, kIcon = kSize + StartLayout::kSizes;
 
+template<class CloseFn> void FinishMenuClose(Surface& surface, GlassMenu* menu, bool& menuOpen, CloseFn&& close)
+{
+    menuOpen = false;
+    if (!surface.Visible())
+        return;
+    // Back to the start menu, unless the click that closed the menu went to another window.
+    HWND fg = GetForegroundWindow();
+    if (!fg || fg == surface.Hwnd() || (menu && fg == menu->Hwnd()))
+        SetForegroundWindow(surface.Hwnd());
+    else
+        close();
+}
+
 } // namespace
 
 StartMenu::StartMenu(HINSTANCE instance, TaskModel& tasks, AppCatalog& catalog)
@@ -561,11 +574,7 @@ void StartMenu::OpenSyncMenu()
             if (cmd == kSyncPins || cmd == kSyncFolders || cmd == kSyncBoth)
                 SyncFromWindows(cmd != kSyncFolders, cmd != kSyncPins);
         },
-        [this] {
-            menuOpen_ = false;
-            if (surface_.Visible() && GetForegroundWindow() == menu->Hwnd())
-                SetForegroundWindow(surface_.Hwnd());
-        });
+        [this] { FinishMenuClose(surface_, menu, menuOpen_, [this] { Close(false); }); });
 }
 
 // Pins in the Windows order, at the end; a folder of All apps as a folder of its own (one of the
@@ -2282,17 +2291,7 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
             default: break;
             }
         },
-        [this] {
-            menuOpen_ = false;
-            if (!surface_.Visible())
-                return;
-                   // Back to the start menu, unless the click that closed the menu went to another window.
-            HWND fg = GetForegroundWindow();
-            if (!fg || fg == surface_.Hwnd() || fg == menu->Hwnd())
-                SetForegroundWindow(surface_.Hwnd());
-            else
-                Close(false);
-        });
+        [this] { FinishMenuClose(surface_, menu, menuOpen_, [this] { Close(false); }); });
     surface_.Invalidate();
 }
 

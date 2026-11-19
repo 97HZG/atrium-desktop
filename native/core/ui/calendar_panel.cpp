@@ -116,10 +116,11 @@ void CalendarPanel::Paint(Canvas& c)
 {
     const Theme& t = c.theme;
     hits_.clear();
-    const D2D1_SIZE_F size = Size();
+    const RECT rr = surface_.Rect();
+    const float winH = std::max(1.f, float(rr.bottom - rr.top) / c.scale);
     const bool fromTop = EdgeOf(bar_) == BarEdge::Top;
-    D2D1_RECT_F cap = fromTop ? D2D1::RectF(0, 0, kW, barH_) : D2D1::RectF(0, size.height - barH_, kW, size.height);
-    D2D1_RECT_F card = fromTop ? D2D1::RectF(0, barH_ + kGap, kW, size.height) : D2D1::RectF(0, 0, kW, size.height - kGap - barH_);
+    D2D1_RECT_F cap = fromTop ? D2D1::RectF(0, 0, kW, barH_) : D2D1::RectF(0, winH - barH_, kW, winH);
+    D2D1_RECT_F card = fromTop ? D2D1::RectF(0, barH_ + kGap, kW, winH) : D2D1::RectF(0, 0, kW, winH - kGap - barH_);
     std::vector<ShapeDip> shapes{{card, radius_}, {cap, barH_ / 2}};
     if (c.panel)
         for (const ShapeDip& sh : shapes)
