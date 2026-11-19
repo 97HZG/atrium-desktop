@@ -79,6 +79,17 @@ private:
         unsigned gen = 0; // its images' cache keys change with it
         ULONGLONG taken = 0; // when it was taken (or asked for)
     };
+    struct Placeholder {
+        std::shared_ptr<const WindowPicture> picture;
+        bool hasIcon = false, dark = false;
+        float scale = 0;
+    };
+    struct Action {
+        enum class Kind { MoveBeside, Activate, ShowQuietly } kind = Kind::MoveBeside;
+        HWND window = nullptr;
+        RECT frame{}, zone{}, workArea{};
+        bool onRight = false;
+    };
     // A picture in perspective: `rect` (DIP) turned `angle` degrees about the upright axis through
     // (cx, cy), `z` towards the eye, seen from in front of (ox, oy).
     struct Pose {
@@ -111,7 +122,7 @@ private:
 
     void Stage(const Set& keys, bool add, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly = nullptr);
     void Park(HWND window, const std::wstring& key);
-    void Unpark(const Set& keys, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly = nullptr);
+    void Unpark(const Set& keys, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly = nullptr, bool moveBeside = true);
     void Pick(const Set& keys, bool add, HWND front = nullptr);
     void PictureTaken();       // WM_STAGE_PICTURE
     void Launch();             // the flight layer, up for a flight
@@ -124,8 +135,58 @@ private:
     void KeepPicture();        // a picture of the window in front, ready for when it is minimized
     void RequestPicture(HWND window);
     void SetLarge(Flight& f);  // the flight's large picture, if the window has one
-    bool Beside(RECT& frame) const; // moves a frame over the strip's place beside it; false if it was not over it
+    bool Beside(RECT& frame) const { return enabled_ && !autoHide_ && !IsRectEmpty(&rect_) && BesideRect(frame, Zone(), WorkArea(), onRight_); }
+    static bool BesideRect(RECT& frame, const RECT& zone, const RECT& wa, bool onRight);
     void MoveBeside(HWND window);   // the window beside the strip (minimized: where it comes back)
+    void ForgetImages(const std::wstring& key, bool large)
+    {
+        surface_.ForgetImage(key);
+        surface_.ForgetImage(key + L"|s");
+        flight_.ForgetImage(key);
+        flight_.ForgetImage(key + L"|s");
+        if (large)
+            flight_.ForgetImage(key + L"|L");
+    }
+    void EnqueueAction(Action action)
+    {
+        std::unique_lock lk(actionLock_);
+        if (!actionStop_)
+            actions_.push_back(action);
+        lk.unlock();
+        actionCv_.notify_one();
+    }
+    static void ShowQuietly(HWND h);
+    void ActionWorker()
+    {
+        for (;;) {
+            Action a;
+            {
+                std::unique_lock lk(actionLock_);
+                actionCv_.wait(lk, [this] { return actionStop_ || !actions_.empty(); });
+                if (actionStop_)
+                    return;
+                a = actions_.front();
+                actions_.pop_front();
+            }
+            if (!IsWindow(a.window))
+                continue;
+            if (a.kind != Action::Kind::MoveBeside) {
+                a.kind == Action::Kind::Activate ? TaskModel::ActivateWindow(a.window) : ShowQuietly(a.window);
+                continue;
+            }
+            WINDOWPLACEMENT wp{sizeof(wp)};
+            if (!IsIconic(a.window) || IsZoomed(a.window) || !GetWindowPlacement(a.window, &wp) || (wp.flags & WPF_RESTORETOMAXIMIZED))
+                continue;
+            RECT frame = IsRectEmpty(&a.frame) ? wp.rcNormalPosition : a.frame, to = frame;
+            if (!BesideRect(to, a.zone, a.workArea, a.onRight))
+                continue;
+            wp.rcNormalPosition.left += to.left - frame.left;
+            wp.rcNormalPosition.right += to.right - frame.right;
+            wp.showCmd = SW_SHOWMINNOACTIVE;
+            wp.flags = 0;
+            SetWindowPlacement(a.window, &wp);
+        }
+    }
     void Save();
     std::vector<HWND> ParkedInOrder() const; // put away first, first
     void Load();
@@ -178,7 +239,7 @@ private:
     std::vector<Set> recent_;          // waiting sets, most recent first
     std::unordered_map<HWND, Parked> parked_;
     std::unordered_map<HWND, Picture> pictures_;
-    std::unordered_map<std::wstring, std::shared_ptr<const WindowPicture>> placeholders_; // by app
+    std::unordered_map<std::wstring, Placeholder> placeholders_; // by app
     unsigned pictureGen_ = 0;
     uint64_t seq_ = 0;
     Set pending_;                      // picked in the strip, not in front yet
@@ -208,6 +269,11 @@ private:
     ULONGLONG desktopSince_ = 0;       // since when the desktop has been in front (0: it is not)
     bool covered_ = false;
     ULONGLONG coveredAt_ = 0;
+    std::mutex actionLock_;
+    std::condition_variable actionCv_;
+    std::deque<Action> actions_;
+    bool actionStop_ = false;
+    std::thread actionWorker_;
 };
 
 } // namespace atrium

@@ -53,19 +53,20 @@ std::vector<uint8_t> Shrink(const uint8_t* src, int sw, int sh, int stride, int 
     return out;
 }
 
-// All but a few of `src`'s pixels (w x h BGRA) are of the colour in its middle.
+// All-zero buffers and near-uniform frames (not yet drawn) are blank; 32+ differing pixels indicate content.
 bool Blank(const uint8_t* src, int w, int h, int stride)
 {
     const uint8_t* mid = src + size_t(h / 2) * stride + size_t(w / 2) * 4;
-    int all = 0, same = 0;
+    bool nonZero = (mid[0] | mid[1] | mid[2] | mid[3]) != 0;
+    int diff = 0;
     for (int y = 0; y < h; y += 4)
         for (int x = 0; x < w; x += 4) {
             const uint8_t* p = src + size_t(y) * stride + size_t(x) * 4;
-            ++all;
-            if (std::abs(p[0] - mid[0]) <= 6 && std::abs(p[1] - mid[1]) <= 6 && std::abs(p[2] - mid[2]) <= 6)
-                ++same;
+            nonZero = nonZero || (p[0] | p[1] | p[2] | p[3]) != 0;
+            if ((std::abs(p[0] - mid[0]) > 6 || std::abs(p[1] - mid[1]) > 6 || std::abs(p[2] - mid[2]) > 6) && ++diff >= 32)
+                return false;
         }
-    return same >= all - all / 200;
+    return !nonZero || diff < 32;
 }
 
 } // namespace
@@ -143,14 +144,16 @@ float CornerRadius(HWND window)
 
 WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, int largeMax, WindowPicture* large)
 {
+    if (!IsWindow(window) || IsIconic(window))
+        return {};
     RECT win{}, frame{};
     if (!GetWindowRect(window, &win) || win.right <= win.left || win.bottom <= win.top)
         return {};
     if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) || frame.right <= frame.left || frame.bottom <= frame.top)
         frame = win;
-    const int ww = win.right - win.left, wh = win.bottom - win.top;
-    if (ww > 16384 || wh > 16384) // no window is shown this large: not gigabytes for it
+    if (int64_t(win.right) - win.left > 16384 || int64_t(win.bottom) - win.top > 16384)
         return {};
+    const int ww = win.right - win.left, wh = win.bottom - win.top;
     BITMAPINFO bi{};
     bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
     bi.bmiHeader.biWidth = ww;
@@ -242,47 +245,60 @@ WindowPicture PlaceholderPicture(const IconImage& icon, int width, int height, b
     return Finish(std::move(px), width, height, float(std::max(6, width / 24)));
 }
 
-WindowSnapshots::WindowSnapshots(HWND notify, UINT message) : shared_(std::make_shared<Shared>())
-{
-    shared_->notify = notify;
-    shared_->message = message;
-}
+WindowSnapshots::WindowSnapshots(HWND notify, UINT message) : notify_(notify), message_(message), worker_([this] { Worker(); }) {}
 
 WindowSnapshots::~WindowSnapshots()
 {
-    std::lock_guard g(shared_->lock);
-    shared_->notify = nullptr; // workers still out drop what they bring
+    std::unique_lock lk(lock_);
+    stop_ = true;
+    lk.unlock();
+    cv_.notify_all();
+    if (worker_.joinable())
+        worker_.join();
 }
 
 void WindowSnapshots::Request(HWND window, int maxWidth, int maxHeight, float radius, int largeMax)
 {
-    // PrintWindow waits for the window's thread: a hung one would hold a worker and its bitmap for good.
-    if (IsHungAppWindow(window))
+    // PrintWindow waits for the window's thread: a hung one would hold the worker and its bitmap for good.
+    if (!window || IsIconic(window) || IsHungAppWindow(window))
         return;
-    {
-        std::lock_guard g(shared_->lock);
-        if (std::ranges::find(shared_->pending, window) != shared_->pending.end())
+    std::unique_lock lk(lock_);
+    if (stop_ || !notify_ || pending_.contains(window) || queue_.size() >= 32)
+        return;
+    pending_.insert(window);
+    queue_.push_back(Job{window, maxWidth, maxHeight, largeMax, radius});
+    lk.unlock();
+    cv_.notify_one();
+}
+
+void WindowSnapshots::Worker()
+{
+    // Physical px of every monitor, as the window's own picture is.
+    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    for (;;) {
+        Job job{};
+        {
+            std::unique_lock lk(lock_);
+            cv_.wait(lk, [this] { return stop_ || !queue_.empty(); });
+            if (stop_)
+                return;
+            job = queue_.front();
+            queue_.pop_front();
+        }
+        WindowPicture large, p = Capture(job.window, job.maxWidth, job.maxHeight, job.radius, job.largeMax, &large);
+        std::lock_guard g(lock_);
+        pending_.erase(job.window);
+        if (stop_ || !notify_)
             return;
-        shared_->pending.push_back(window);
+        done_.push_back(Result{job.window, std::move(p), std::move(large)});
+        PostMessageW(notify_, message_, 0, 0);
     }
-    std::thread([shared = shared_, window, maxWidth, maxHeight, radius, largeMax] {
-        // Physical px of every monitor, as the window's own picture is.
-        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        WindowPicture large;
-        WindowPicture p = Capture(window, maxWidth, maxHeight, radius, largeMax, &large);
-        std::lock_guard g(shared->lock);
-        std::erase(shared->pending, window);
-        if (!shared->notify)
-            return;
-        shared->done.push_back(Result{window, std::move(p), std::move(large)});
-        PostMessageW(shared->notify, shared->message, 0, 0);
-    }).detach();
 }
 
 std::vector<WindowSnapshots::Result> WindowSnapshots::Take()
 {
-    std::lock_guard g(shared_->lock);
-    return std::exchange(shared_->done, {});
+    std::lock_guard g(lock_);
+    return std::exchange(done_, {});
 }
 
 } // namespace atrium

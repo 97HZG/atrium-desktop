@@ -8,8 +8,11 @@
 
 #include <windows.h>
 
-#include <memory>
+#include <condition_variable>
+#include <deque>
 #include <mutex>
+#include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace atrium {
@@ -54,14 +57,22 @@ public:
     std::vector<Result> Take();
 
 private:
-    struct Shared {
-        std::mutex lock;
-        std::vector<Result> done;
-        std::vector<HWND> pending; // being taken: one worker a window, however often it is asked for
-        HWND notify = nullptr;
-        UINT message = 0;
+    struct Job {
+        HWND window;
+        int maxWidth, maxHeight, largeMax;
+        float radius;
     };
-    std::shared_ptr<Shared> shared_;
+    void Worker();
+
+    std::mutex lock_;
+    std::condition_variable cv_;
+    std::deque<Job> queue_;
+    std::unordered_set<HWND> pending_; // queued or in-flight: at most one entry per window
+    std::vector<Result> done_;
+    HWND notify_ = nullptr;
+    UINT message_ = 0;
+    bool stop_ = false;
+    std::thread worker_;
 };
 
 } // namespace atrium

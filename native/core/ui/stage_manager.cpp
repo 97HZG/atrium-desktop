@@ -80,7 +80,9 @@ std::wstring StatePath()
 // hangs must not hang the bar.
 // Up again without taking the foreground. A window minimized from maximized comes back maximized:
 // SW_SHOWNOACTIVATE alone restores its normal size, a maximized app back at half the screen (#19).
-void ShowQuietly(HWND h)
+} // namespace
+
+void StageManager::ShowQuietly(HWND h)
 {
     WINDOWPLACEMENT wp{sizeof(wp)};
     if (IsIconic(h) && GetWindowPlacement(h, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED)) {
@@ -89,6 +91,8 @@ void ShowQuietly(HWND h)
     }
     ShowWindowAsync(h, SW_SHOWNOACTIVATE);
 }
+
+namespace {
 
 bool OnMonitor(HWND h, HMONITOR m) { return MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) == m; }
 
@@ -174,7 +178,8 @@ StageManager::StageManager(HINSTANCE instance, TaskModel& tasks)
     : tasks_(tasks),
       surface_(instance, L"Atrium Stage Manager", false),
       flight_(instance, L"Atrium Stage Flight", false, 0),
-      snapshots_(surface_.Hwnd(), WM_STAGE_PICTURE)
+      snapshots_(surface_.Hwnd(), WM_STAGE_PICTURE),
+      actionWorker_([this] { ActionWorker(); })
 {
     surface_.SetGlassless(true);
     flight_.SetGlassless(true);
@@ -198,6 +203,12 @@ StageManager::~StageManager()
 {
     if (minimizeHook_)
         UnhookWinEvent(minimizeHook_);
+    std::unique_lock lk(actionLock_);
+    actionStop_ = true;
+    lk.unlock();
+    actionCv_.notify_all();
+    if (actionWorker_.joinable())
+        actionWorker_.join();
 }
 
 namespace {
@@ -225,7 +236,7 @@ void StageManager::SetExcluded(std::vector<std::wstring> apps)
         if (StageAppExcluded(excluded_, p.key) && !Has(release, p.key))
             release.push_back(p.key);
     if (!release.empty()) {
-        Unpark(release, nullptr, false);
+        Unpark(release, nullptr, false, nullptr, false);
         touched = true;
     }
     touched |= std::erase_if(stage_, [&](const std::wstring& key) { return StageAppExcluded(excluded_, key); }) > 0;
@@ -602,19 +613,15 @@ void StageManager::PutDown(HWND window, bool fly)
 void StageManager::PictureTaken()
 {
     for (WindowSnapshots::Result& r : snapshots_.Take()) {
+        if (!enabled_ || !IsWindow(r.window))
+            continue;
         if (parked_.contains(r.window))
             Log(L"stage: picture of %p %s", r.window,
                 r.picture.ok ? (std::to_wstring(r.picture.width) + L"x" + std::to_wstring(r.picture.height)).c_str() : L"(none)");
         if (r.picture.ok) {
             Picture& p = pictures_[r.window];
-            if (p.gen) {
-                std::wstring old = L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(r.window)) + L"|" + std::to_wstring(p.gen);
-                surface_.ForgetImage(old);
-                surface_.ForgetImage(old + L"|s");
-                flight_.ForgetImage(old);
-                flight_.ForgetImage(old + L"|s");
-                flight_.ForgetImage(old + L"|L");
-            }
+            if (p.gen)
+                ForgetImages(L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(r.window)) + L"|" + std::to_wstring(p.gen), true);
             p.picture = std::make_shared<const WindowPicture>(std::move(r.picture));
             p.large = r.large.ok ? std::make_shared<const WindowPicture>(std::move(r.large)) : nullptr;
             p.gen = ++pictureGen_;
@@ -642,7 +649,7 @@ void StageManager::PictureTaken()
 
 // The windows of `keys` that were put away come back, least recent first; `front` (by default the
 // most recent of them) last, and in front, activated if asked (a pick in the strip).
-void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly)
+void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly, bool moveBeside)
 {
     std::vector<std::pair<uint64_t, HWND>> mine;
     for (const auto& [h, p] : parked_)
@@ -652,8 +659,9 @@ void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std:
     if (!front && !mine.empty())
         front = mine.back().second;
     // Kept out of the strip's band: they come back beside it.
-    for (const auto& [seq, h] : mine)
-        MoveBeside(h);
+    if (moveBeside)
+        for (const auto& [seq, h] : mine)
+            MoveBeside(h);
     // Picked in the strip: the pictures fly back to the windows' places, the windows come up as they land.
     bool flying = false;
     for (const auto& [seq, h] : mine) {
@@ -666,14 +674,7 @@ void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std:
         std::erase_if(flights_, [&](const Flight& f) { return f.window == h; });
         if (!picture || !IsWindow(h) || !key.starts_with(L"stage|w|"))
             continue;
-        Flight f;
-        f.window = h;
-        f.picture = picture;
-        f.key = key;
-        f.toStrip = false;
-        f.from = *from;
-        f.place = PlacePose(parked_[h].frame);
-        f.activate = activate && h == front;
+        Flight f{h, picture, key, {}, {}, false, *from, PlacePose(parked_[h].frame), 0, 0, false, activate && h == front};
         SetLarge(f);
         flights_.push_back(std::move(f));
         flying = true;
@@ -687,20 +688,13 @@ void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std:
         if (!minimizeToStrip_) // else it stays without: up on the stage, minimizing sends its picture to the strip
             Transitions(h, true);
         if (h != front && IsWindow(h))
-            ShowQuietly(h);
+            EnqueueAction({Action::Kind::ShowQuietly, h});
     }
     if (!front)
         return;
     parked_.erase(front);
-    if (Flying(front)) {
-        // Up (and in front) when its picture lands.
-    } else if (activate) {
-        // Restoring waits for the app to answer (and for its animation): not on the UI thread,
-        // whose strip is gliding meanwhile. The click on the strip lets this process hand on the
-        // foreground from any of its threads.
-        std::thread([front] { TaskModel::ActivateWindow(front); }).detach();
-    } else if (IsIconic(front))
-        ShowQuietly(front);
+    if (!Flying(front) && (activate || IsIconic(front)))
+        EnqueueAction({activate ? Action::Kind::Activate : Action::Kind::ShowQuietly, front});
     if (!mine.empty()) {
         // The others come back asynchronously: `front` goes on top again once they have.
         raise_ = front;
@@ -756,6 +750,9 @@ void StageManager::OpenInCurrentGroup(const std::wstring& app)
 void StageManager::RestoreAll()
 {
     openIntent_.Cancel();
+    std::unique_lock lk(actionLock_);
+    actions_.clear();
+    lk.unlock();
     ReleaseUp();
     // Pictures on their way back: their windows come up now.
     for (Flight& f : flights_)
@@ -775,7 +772,13 @@ void StageManager::RestoreAll()
     recent_.clear();
     stage_.clear();
     pending_.clear();
+    for (const auto& [h, p] : pictures_)
+        if (p.gen)
+            ForgetImages(L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(h)) + L"|" + std::to_wstring(p.gen), true);
     pictures_.clear();
+    for (const auto& [app, ph] : placeholders_)
+        ForgetImages(L"stage|p|" + app, false);
+    placeholders_.clear();
     Save();
     Rebuild();
 }
@@ -935,8 +938,12 @@ void StageManager::Prune()
     const ULONGLONG now = GetTickCount64();
     std::erase_if(parked_, [&](const auto& kv) {
         HWND h = kv.first;
-        if (!IsWindow(h) || !IsWindowVisible(h))
+        if (!IsWindow(h))
             return true;
+        if (!IsWindowVisible(h)) {
+            Transitions(h, true);
+            return true;
+        }
         // Minimizing is asynchronous (and waits for the picture): a window just put away may not be down yet.
         if (kv.second.down && !IsIconic(h) && now - kv.second.since > kSettleMs) {
             Transitions(h, true); // came back some other way
@@ -958,12 +965,7 @@ void StageManager::Prune()
         if (parked_.contains(kv.first) || (IsWindow(kv.first) && now - kv.second.taken < kFreshMs) || up_.contains(kv.first) || Flying(kv.first) ||
             (staged.contains(kv.first) && IsWindow(kv.first)))
             return false;
-        std::wstring key = L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(kv.first)) + L"|" + std::to_wstring(kv.second.gen);
-        surface_.ForgetImage(key);
-        surface_.ForgetImage(key + L"|s");
-        flight_.ForgetImage(key);
-        flight_.ForgetImage(key + L"|s");
-        flight_.ForgetImage(key + L"|L");
+        ForgetImages(L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(kv.first)) + L"|" + std::to_wstring(kv.second.gen), true);
         return true;
     });
     Save();
@@ -1065,14 +1067,11 @@ void StageManager::Load()
 // ---- beside the strip --------------------------------------------------------------------------
 
 // Always shown, the strip stays out: a window over its place moves beside it (narrower if it must).
-bool StageManager::Beside(RECT& frame) const
+bool StageManager::BesideRect(RECT& frame, const RECT& zone, const RECT& wa, bool onRight)
 {
-    if (!enabled_ || autoHide_ || IsRectEmpty(&rect_))
-        return false;
-    const RECT zone = Zone(), wa = WorkArea();
     if (frame.bottom <= zone.top || frame.top >= zone.bottom)
         return false;
-    if (onRight_) {
+    if (onRight) {
         if (frame.right <= zone.left)
             return false;
         OffsetRect(&frame, zone.left - frame.right, 0);
@@ -1099,12 +1098,13 @@ void StageManager::MoveBeside(HWND window)
     auto parked = parked_.find(window);
     RECT frame{};
     if (down) {
-        WINDOWPLACEMENT wp{sizeof(wp)};
-        if (parked == parked_.end() || !GetWindowPlacement(window, &wp))
+        if (parked == parked_.end() || !enabled_ || autoHide_ || IsRectEmpty(&rect_))
             return;
-        if (wp.flags & WPF_RESTORETOMAXIMIZED)
-            return; // it comes back maximized
         frame = parked->second.frame;
+        if (IsRectEmpty(&frame)) {
+            EnqueueAction({Action::Kind::MoveBeside, window, {}, Zone(), WorkArea(), onRight_});
+            return;
+        }
     } else if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame)))) {
         return;
     }
@@ -1115,17 +1115,7 @@ void StageManager::MoveBeside(HWND window)
     if (parked != parked_.end())
         parked->second.frame = to;
     if (down) {
-        // Off this thread: the app answers it (one that hangs must not hang the strip).
-        std::thread([window, dl, dr] {
-            WINDOWPLACEMENT wp{sizeof(wp)};
-            if (!GetWindowPlacement(window, &wp))
-                return;
-            wp.rcNormalPosition.left += dl;
-            wp.rcNormalPosition.right += dr;
-            wp.showCmd = SW_SHOWMINNOACTIVE;
-            wp.flags = 0;
-            SetWindowPlacement(window, &wp);
-        }).detach();
+        EnqueueAction({Action::Kind::MoveBeside, window, frame, Zone(), WorkArea(), onRight_});
     } else {
         RECT r{};
         GetWindowRect(window, &r);
@@ -1435,7 +1425,7 @@ void StageManager::Watch()
     // Anywhere along the edge above the bar; not while dragging (a window to snap, a selection).
     const bool dragging = (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
     const bool atEdge =
-        !dragging && (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) && p.y >= mi.rcMonitor.top && p.y < mi.rcWork.bottom;
+        !dragging && PtInRect(&mi.rcMonitor, p) && (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) && p.y < mi.rcWork.bottom;
     edgeSince_ = atEdge ? (edgeSince_ ? edgeSince_ : now) : 0;
     if (!autoHide_ && !Covered()) {
         peek_ = false;
@@ -1514,9 +1504,10 @@ std::shared_ptr<const WindowPicture> StageManager::PictureOf(HWND window, const 
     }
     // No picture (put away before Atrium started, or one that cannot be printed): its app's icon.
     cacheKey = L"stage|p|" + AppOf(app);
-    auto& p = placeholders_[AppOf(app)];
-    if (!p) {
-        const float s = PopupScale(WorkArea());
+    const float s = PopupScale(WorkArea());
+    const bool dark = AppsDark();
+    auto& ph = placeholders_[AppOf(app)];
+    if (!ph.picture || !ph.hasIcon || ph.scale != s || ph.dark != dark) {
         const int w = int(std::lround(kBoxW * s)), h = int(std::lround(kBoxW * s / 1.6f));
         // The largest icon the app has, up to 52 DIP.
         IconImage icon;
@@ -1525,9 +1516,16 @@ std::shared_ptr<const WindowPicture> StageManager::PictureOf(HWND window, const 
             if (!icon.Empty())
                 break;
         }
-        p = std::make_shared<const WindowPicture>(PlaceholderPicture(icon, w, h, AppsDark()));
+        if (!ph.picture || ph.scale != s || ph.dark != dark || !icon.Empty()) {
+            if (ph.picture)
+                ForgetImages(cacheKey, false);
+            ph.picture = std::make_shared<const WindowPicture>(PlaceholderPicture(icon, w, h, dark));
+            ph.hasIcon = !icon.Empty();
+            ph.dark = dark;
+            ph.scale = s;
+        }
     }
-    return p;
+    return ph.picture;
 }
 
 StageManager::Pose StageManager::PoseOf(const Entry& e, size_t j, const WindowPicture& p, float angle) const
@@ -1702,11 +1700,7 @@ void StageManager::PaintFlights(Canvas& c)
         }
         if (!f.toStrip && t >= kRestoreAt && !f.restored) {
             f.restored = true;
-            HWND h = f.window;
-            if (f.activate)
-                std::thread([h] { TaskModel::ActivateWindow(h); }).detach();
-            else
-                ShowQuietly(h);
+            EnqueueAction({f.activate ? Action::Kind::Activate : Action::Kind::ShowQuietly, f.window});
         }
         const double over = f.elapsed - kFlightMs - kFlightHoldMs;
         if (!f.toStrip && over > 0)
