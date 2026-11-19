@@ -73,9 +73,9 @@ public sealed partial class MainWindow : Window, IDisposable
             s => s.Magnify * 100, (s, v) => s.Magnify = v / 100, false),
 
         // The band above the bar that answers the pointer ahead of time (riseNear, magnifyNear).
-        new("near", Loc.T("Enter distance"), 4, 160, 2, "px",
+        new("near", Loc.T("Enter distance"), 2, 160, 2, "px",
             s => s.NearEnter, (s, v) => s.NearEnter = v, false),
-        new("near", Loc.T("Leave distance"), 4, 200, 2, "px",
+        new("near", Loc.T("Leave distance"), 2, 200, 2, "px",
             s => s.NearLeave, (s, v) => s.NearLeave = v, false),
 
         new("notify", Loc.T("Popup duration"), 3, 30, 1, "s",
@@ -1538,7 +1538,12 @@ public sealed partial class MainWindow : Window, IDisposable
             if (def.Group == group) def.Set(CurrentSettings, def.Get(d));
         if (group == "clarity") CurrentSettings.Tint = d.Tint;
         if (group == "width") CurrentSettings.AutoWidth = d.AutoWidth;
-        if (group == "size") CurrentSettings.HoverRise = d.HoverRise;
+        if (group == "size")
+        {
+            CurrentSettings.HoverRise = d.HoverRise;
+            CurrentSettings.RiseNear = d.RiseNear;
+            CurrentSettings.MagnifyNear = d.MagnifyNear;
+        }
         if (group == "notify")
         {
             CurrentSettings.NotifyHideBody = d.NotifyHideBody;

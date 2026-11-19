@@ -31,7 +31,9 @@ inline bool StageAppExcluded(const std::vector<std::wstring>& excluded, const st
     const std::wstring file = slash == std::wstring::npos ? app : app.substr(slash + 1);
     return std::ranges::any_of(excluded, [&](const std::wstring& raw) {
         const std::wstring entry = LowerAppKey(raw);
-        return !entry.empty() && (app == entry || file == entry || app.starts_with(entry));
+        // Prefix matching is limited to directory ('\' or '/') and package ('_') prefixes.
+        return !entry.empty() &&
+               (app == entry || file == entry || ((entry.back() == L'\\' || entry.back() == L'/' || entry.back() == L'_') && app.starts_with(entry)));
     });
 }
 

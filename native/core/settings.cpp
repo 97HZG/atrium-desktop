@@ -1,6 +1,7 @@
 #include "settings.h"
 
 #include "localization.h"
+#include "localization_format.h"
 #include "log.h"
 #include "shell/logon_task.h"
 
@@ -14,9 +15,9 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cwctype>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <vector>
 
 namespace json = winrt::Windows::Data::Json;
@@ -47,11 +48,7 @@ void Settings::Clamp()
     c(nearLeave, 2, 200, d.nearLeave);
     c(dockDisplayDelay, 100, 2000, d.dockDisplayDelay);
     tint &= 0xFFFFFF;
-    bool languageValid = !language.empty() && language.size() <= 32;
-    for (wchar_t ch : language)
-        if (!iswalnum(ch) && ch != L'-')
-            languageValid = false;
-    if (!languageValid)
+    if (!localization::ValidTag(language))
         language = L"auto";
     else if (language == L"zh")
         language = L"zh-Hans";
@@ -73,6 +70,20 @@ void Settings::Clamp()
         taskbarApps = L"all";
     if (notifyPlacement != L"topLeft" && notifyPlacement != L"topRight" && notifyPlacement != L"bottomLeft" && notifyPlacement != L"bottomRight")
         notifyPlacement = L"dock";
+    if (widgetBackdrop != L"wallpaper")
+        widgetBackdrop = L"desktop";
+    if (widgetMaterial != L"dusk" && widgetMaterial != L"color")
+        widgetMaterial = L"glass";
+    constexpr std::wstring_view kAsciiWs = L" \t\r\n\v\f";
+    for (auto& entry : stageExcluded) {
+        const size_t first = entry.find_first_not_of(kAsciiWs);
+        if (first == std::wstring::npos) {
+            entry.clear();
+            continue;
+        }
+        entry = entry.substr(first, entry.find_last_not_of(kAsciiWs) - first + 1);
+    }
+    std::erase_if(stageExcluded, [](const std::wstring& entry) { return entry.empty(); });
     if (pins && pins->size() > 64)
         pins->resize(64);
     if (preset != L"liquid" && preset != L"frosted")
@@ -210,7 +221,8 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     num(L"margin", s.margin);
     if (o.HasKey(L"tint") && o.GetNamedValue(L"tint").ValueType() == json::JsonValueType::String) {
         std::wstring t(o.GetNamedString(L"tint"));
-        if (t.size() == 7 && t[0] == L'#' && std::all_of(t.begin() + 1, t.end(), [](wchar_t c) { return iswxdigit(c) != 0; }))
+        auto hex = [](wchar_t c) { return (c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f') || (c >= L'A' && c <= L'F'); };
+        if (t.size() == 7 && t[0] == L'#' && std::all_of(t.begin() + 1, t.end(), hex))
             s.tint = static_cast<uint32_t>(wcstoul(t.c_str() + 1, nullptr, 16));
     }
     num(L"iconSize", s.iconSize);
@@ -277,11 +289,9 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"winNumbers", s.winNumbers);
     flag(L"startOnLogin", s.startOnLogin);
     if (o.HasKey(L"widgetBackdrop") && o.GetNamedValue(L"widgetBackdrop").ValueType() == json::JsonValueType::String)
-        s.widgetBackdrop = std::wstring(o.GetNamedString(L"widgetBackdrop")) == L"wallpaper" ? L"wallpaper" : L"desktop";
-    if (o.HasKey(L"widgetMaterial") && o.GetNamedValue(L"widgetMaterial").ValueType() == json::JsonValueType::String) {
-        const std::wstring m(o.GetNamedString(L"widgetMaterial"));
-        s.widgetMaterial = m == L"dusk" || m == L"color" ? m : L"glass";
-    }
+        s.widgetBackdrop = std::wstring(o.GetNamedString(L"widgetBackdrop"));
+    if (o.HasKey(L"widgetMaterial") && o.GetNamedValue(L"widgetMaterial").ValueType() == json::JsonValueType::String)
+        s.widgetMaterial = std::wstring(o.GetNamedString(L"widgetMaterial"));
     if (o.HasKey(L"language") && o.GetNamedValue(L"language").ValueType() == json::JsonValueType::String)
         s.language = std::wstring(o.GetNamedString(L"language"));
     if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
@@ -442,7 +452,7 @@ bool IsDevelopmentBuild()
 #else
     static const bool development = [] {
         int count = 0;
-        auto args = CommandLineToArgvW(GetCommandLineW(), &count);
+        auto* args = CommandLineToArgvW(GetCommandLineW(), &count);
         bool explicitDevelopment = false;
         for (int i = 1; args && i < count; ++i)
             explicitDevelopment |= wcscmp(args[i], L"--development") == 0;

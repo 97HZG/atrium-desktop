@@ -4,10 +4,13 @@
 #include "ui/notification_layout.h"
 #include "motion.h"
 
+#include <winrt/Windows.Data.Json.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Foundation.h>
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 
 using namespace atrium;
 
@@ -116,6 +119,32 @@ void CheckSettings()
     Require(Settings::FromJson(LR"({"dockDisplayDelay":"bad","dockDisplay":false})", settings, parsed) && parsed.dockDisplayDelay == 750 &&
                 parsed.dockDisplay == settings.dockDisplay,
             "malformed keys retain current values");
+}
+
+void CheckSettingsNormalization()
+{
+    Settings parsed;
+    Require(Settings::FromJson(LR"({"widgetBackdrop":"bogus","widgetMaterial":"bogus"})", Settings{}, parsed) && parsed.widgetBackdrop == L"desktop" &&
+                parsed.widgetMaterial == L"glass",
+            "invalid widget backdrop and material normalize to defaults");
+    Require(Settings::FromJson(LR"({"widgetBackdrop":"wallpaper","widgetMaterial":"dusk"})", Settings{}, parsed) && parsed.widgetBackdrop == L"wallpaper" &&
+                parsed.widgetMaterial == L"dusk",
+            "valid widget backdrop and dusk material survive");
+    Require(Settings::FromJson(LR"({"widgetMaterial":"color"})", Settings{}, parsed) && parsed.widgetMaterial == L"color", "color widget material survives");
+    Require(Settings::FromJson(LR"({"stageExcluded":[" \t\r\n\u000B\ffoo.exe\f\u000B\n\r\t "," \t\r\n\u000B\f","\u3000bar.exe\u00A0"]})", Settings{}, parsed) &&
+                parsed.stageExcluded == std::vector<std::wstring>{L"foo.exe", L"\u3000bar.exe\u00A0"},
+            "stageExcluded trims ASCII whitespace only and preserves U+3000 and U+00A0");
+    Require(Settings::FromJson(LR"({"language":"-bad"})", Settings{}, parsed) && parsed.language == L"auto", "leading dash language resets to auto");
+    Require(Settings::FromJson(LR"({"language":"en-"})", Settings{}, parsed) && parsed.language == L"auto", "trailing dash language resets to auto");
+    Require(Settings::FromJson(LR"({"language":"en--us"})", Settings{}, parsed) && parsed.language == L"auto", "double dash language resets to auto");
+    Require(Settings::FromJson(LR"({"language":""})", Settings{}, parsed) && parsed.language == L"auto", "empty language resets to auto");
+    Require(Settings::FromJson(LR"({"language":"zh"})", Settings{}, parsed) && parsed.language == L"zh-Hans", "zh normalizes to zh-Hans");
+    Require(Settings::FromJson(LR"({"language":"zh-Hant"})", Settings{}, parsed) && parsed.language == L"zh-Hant", "valid subtag survives");
+    Settings tinted;
+    tinted.tint = 0x112233;
+    Require(Settings::FromJson(LR"({"tint":"# 12345"})", tinted, parsed) && parsed.tint == 0x112233, "whitespace-padded tint is rejected and retains fallback");
+    Require(Settings::FromJson(LR"({"tint":"#GGGGGG"})", tinted, parsed) && parsed.tint == 0x112233, "non-hex tint is rejected and retains fallback");
+    Require(Settings::FromJson(LR"({"tint":"#1a2B3c"})", tinted, parsed) && parsed.tint == 0x1A2B3C, "strict ASCII hex tint parses");
 }
 
 void CheckDisplays()
@@ -273,13 +302,72 @@ void CheckNotificationLayout()
     Require(bottomLeft.rect.left == -2542 && bottomLeft.rect.bottom == 1182 && bottomLeft.rect.right - bottomLeft.rect.left == 576,
             "the bottom left corner supports negative coordinates and monitor DPI");
 }
+
+std::wstring Utf8ToWide(std::string_view bytes)
+{
+    if (bytes.empty())
+        return {};
+    const int n = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), int(bytes.size()), nullptr, 0);
+    if (n <= 0)
+        return {};
+    std::wstring wide(size_t(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), int(bytes.size()), wide.data(), n);
+    return wide;
+}
+
+std::string WideToUtf8(std::wstring_view wide)
+{
+    if (wide.empty())
+        return {};
+    const int n = WideCharToMultiByte(CP_UTF8, 0, wide.data(), int(wide.size()), nullptr, 0, nullptr, nullptr);
+    if (n <= 0)
+        return {};
+    std::string bytes(size_t(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), int(wide.size()), bytes.data(), n, nullptr, nullptr);
+    return bytes;
+}
+
+void RunNormalizer()
+{
+    namespace json = winrt::Windows::Data::Json;
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.empty())
+            continue;
+        json::JsonObject obj{nullptr};
+        Require(json::JsonObject::TryParse(Utf8ToWide(line), obj), "valid ndjson line");
+        Settings base;
+        if (obj.HasKey(L"base") && obj.GetNamedValue(L"base").ValueType() == json::JsonValueType::Object)
+            Require(Settings::FromJson(std::wstring(obj.GetNamedObject(L"base").Stringify()), Settings{}, base), "valid base");
+        std::wstring patchText;
+        if (obj.HasKey(L"patchText") && obj.GetNamedValue(L"patchText").ValueType() == json::JsonValueType::String) {
+            patchText = std::wstring(obj.GetNamedString(L"patchText"));
+        } else {
+            Require(obj.HasKey(L"patch") && obj.GetNamedValue(L"patch").ValueType() == json::JsonValueType::Object, "patch object required");
+            patchText = std::wstring(obj.GetNamedObject(L"patch").Stringify());
+        }
+        Settings out;
+        if (Settings::FromJson(patchText, base, out))
+            std::cout << R"({"ok":true,"result":)" << WideToUtf8(out.ToJson()) << "}\n";
+        else
+            std::cout << R"({"ok":false})" << '\n';
+        std::cout.flush();
+    }
+}
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
     try {
         winrt::init_apartment();
+        if (std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string_view(arg) == "--normalize"; })) {
+            RunNormalizer();
+            return 0;
+        }
         CheckSettings();
+        CheckSettingsNormalization();
         CheckDisplays();
         CheckTaskDistribution();
         CheckFullscreenCoverage();

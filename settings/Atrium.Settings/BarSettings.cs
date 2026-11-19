@@ -92,7 +92,7 @@ internal sealed class BarSettings
     public bool StageMinimize { get; set; }            // a window minimized on the stage goes to the strip (off unless chosen)
     // Apps Stage Manager leaves alone; the default is the Windows Snipping Tool, whose overlay
     // and control bar must stay on screen while recording. Other tools can be added.
-    // Keep in step with DefaultStageExcluded() in native/core/ui/stage_excluded.h.
+    // Keep in step with DefaultStageExcluded() in native/core/stage_excluded.h.
     public static readonly string[] StageExcludedDefaults =
     [
         "snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_",
@@ -251,7 +251,9 @@ internal sealed class BarSettings
         var s = new BarSettings();
         var f = fallback;
         double Num(string k, double d) => o?[k] is JsonValue v && v.TryGetValue(out double x) && double.IsFinite(x) ? x : d;
-        s.Preset = o?["preset"] is JsonValue p && p.TryGetValue(out string? ps) && ps != null ? ps : f.Preset;
+        string Str(string key, string value) => o?[key] is JsonValue v && v.TryGetValue(out string? text) && text != null ? text : value;
+        string preset = Str("preset", f.Preset);
+        s.Preset = preset is "liquid" or "frosted" ? preset : "custom";
         s.Transparency = Math.Clamp(Num("transparency", f.Transparency), 0, 1);
         s.CornerRadius = Math.Clamp(Num("cornerRadius", f.CornerRadius), 0, 200);
         s.Blur = Math.Clamp(Num("blur", f.Blur), 0, 1);
@@ -265,19 +267,20 @@ internal sealed class BarSettings
         s.Margin = Math.Clamp(Num("margin", f.Margin), 0, 400);
         s.IconSize = Math.Clamp(Num("iconSize", f.IconSize), 16, 64);
         s.Magnify = Math.Clamp(Num("magnify", f.Magnify), 1, 2);
-        s.Tint = f.Tint;
+        s.Tint = f.Tint & 0xFFFFFFu;
         if (o?["tint"] is JsonValue t && t.TryGetValue(out string? ts) && ts is { Length: 7 } && ts[0] == '#' &&
+            ts.Skip(1).All(char.IsAsciiHexDigit) &&
             uint.TryParse(ts.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint tint))
         {
-            s.Tint = tint;
+            s.Tint = tint & 0xFFFFFFu;
         }
 
         bool Flag(string k, bool d) => o?[k] is JsonValue v && v.TryGetValue(out bool b) ? b : d;
         s.HoverRise = Flag("hoverRise", f.HoverRise);
         s.RiseNear = Flag("riseNear", f.RiseNear);
         s.MagnifyNear = Flag("magnifyNear", f.MagnifyNear);
-        s.NearEnter = Math.Clamp(Num("nearEnter", f.NearEnter), 2, 200);
-        s.NearLeave = Math.Clamp(Num("nearLeave", f.NearLeave), 2, 240);
+        s.NearEnter = Math.Clamp(Num("nearEnter", f.NearEnter), 2, 160);
+        s.NearLeave = Math.Clamp(Num("nearLeave", f.NearLeave), 2, 200);
         s.ShowClock = Flag("showClock", f.ShowClock);
         s.ShowClockSeconds = Flag("showClockSeconds", f.ShowClockSeconds);
         s.ShowTray = Flag("showTray", f.ShowTray);
@@ -286,10 +289,10 @@ internal sealed class BarSettings
         s.StartStatus = Flag("startStatus", f.StartStatus);
         s.StartCentered = Flag("startCentered", f.StartCentered);
         s.StartWithBar = Flag("startWithBar", f.StartWithBar);
-        s.StartSize = o?["startSize"] is JsonValue ss0 && ss0.TryGetValue(out string? size) && size is "small" or "medium" or "large" or "xlarge"
-            ? size! : f.StartSize;
-        s.StartIcon = o?["startIcon"] is JsonValue si0 && si0.TryGetValue(out string? iconSize) && iconSize is "small" or "medium" or "large" or "xlarge"
-            ? iconSize! : f.StartIcon;
+        string startSize = Str("startSize", f.StartSize);
+        s.StartSize = startSize is "small" or "medium" or "large" or "xlarge" ? startSize : "";
+        string startIcon = Str("startIcon", f.StartIcon);
+        s.StartIcon = startIcon is "small" or "medium" or "large" or "xlarge" ? startIcon : "";
         s.ShowStatus = Flag("showStatus", f.ShowStatus);
         s.ShowNotifications = Flag("showNotifications", f.ShowNotifications);
         s.ShowDesktop = Flag("showDesktop", f.ShowDesktop);
@@ -311,58 +314,62 @@ internal sealed class BarSettings
         s.Bar = Flag("bar", f.Bar);
         s.Widgets = Flag("widgets", f.Widgets);
         s.WidgetsOnRight = Flag("widgetsOnRight", f.WidgetsOnRight);
-        s.WidgetBackdrop = o?["widgetBackdrop"] is JsonValue wb && wb.TryGetValue(out string? wbs) && wbs != null
-            ? (wbs == "wallpaper" ? "wallpaper" : "desktop")
-            : f.WidgetBackdrop;
+        string widgetBackdrop = Str("widgetBackdrop", f.WidgetBackdrop);
+        s.WidgetBackdrop = widgetBackdrop == "wallpaper" ? "wallpaper" : "desktop";
         s.StageManager = Flag("stageManager", f.StageManager);
         s.StageOnRight = Flag("stageOnRight", f.StageOnRight);
         s.StageAutoHide = Flag("stageAutoHide", f.StageAutoHide);
         s.StageMinimize = Flag("stageMinimize", f.StageMinimize);
-        s.StageExcluded = f.StageExcluded == null ? [] : [.. f.StageExcluded];
+        s.StageExcluded = [];
+        const string AsciiWs = " \t\r\n\v\f";
+        void AddStageExcluded(string? raw)
+        {
+            if (raw == null) return;
+            string trimmed = raw.AsSpan().Trim(AsciiWs).ToString();
+            if (trimmed.Length > 0) s.StageExcluded.Add(trimmed);
+        }
         if (o?["stageExcluded"] is JsonArray excluded)
         {
-            s.StageExcluded = [];
             foreach (var node in excluded)
             {
-                if (node is JsonValue value && value.TryGetValue(out string? app) && !string.IsNullOrWhiteSpace(app))
-                    s.StageExcluded.Add(app.Trim());
+                if (node is JsonValue value && value.TryGetValue(out string? app))
+                    AddStageExcluded(app);
             }
         }
-        s.WidgetMaterial = o?["widgetMaterial"] is JsonValue wm && wm.TryGetValue(out string? wms) && wms is "dusk" or "color" or "glass"
-            ? wms : f.WidgetMaterial;
+        else if (f.StageExcluded != null)
+        {
+            foreach (string app in f.StageExcluded)
+                AddStageExcluded(app);
+        }
+        string widgetMaterial = Str("widgetMaterial", f.WidgetMaterial);
+        s.WidgetMaterial = widgetMaterial is "dusk" or "color" ? widgetMaterial : "glass";
         s.HideTaskbar = Flag("hideTaskbar", f.HideTaskbar);
         s.HideBanners = Flag("hideBanners", f.HideBanners);
         s.RemoteVisible = Flag("remoteVisible", f.RemoteVisible);
         s.WinKeyStart = Flag("winKeyStart", f.WinKeyStart);
         s.WinNumbers = Flag("winNumbers", f.WinNumbers);
         s.StartOnLogin = Flag("startOnLogin", f.StartOnLogin);
-        string Display(string key, string value) => o?[key] is JsonValue v && v.TryGetValue(out string? text) && text != null ? text : value;
-        string mode = Display("dockDisplayMode", f.DockDisplayMode);
+        string mode = Str("dockDisplayMode", f.DockDisplayMode);
         s.DockDisplayMode = mode is "follow" or "fixed" or "all" ? mode : "primary";
         s.DockDisplayDelay = Math.Clamp(Num("dockDisplayDelay", f.DockDisplayDelay), 100, 2000);
-        s.DockDisplay = Display("dockDisplay", f.DockDisplay);
-        s.DesktopDisplay = Display("desktopDisplay", f.DesktopDisplay);
-        string apps = Display("taskbarApps", f.TaskbarApps);
+        s.DockDisplay = Str("dockDisplay", f.DockDisplay);
+        s.DesktopDisplay = Str("desktopDisplay", f.DesktopDisplay);
+        string apps = Str("taskbarApps", f.TaskbarApps);
         s.TaskbarApps = apps is "primaryAndWindow" or "window" ? apps : "all";
         s.TaskbarRightPrimaryOnly = Flag("taskbarRightPrimaryOnly", f.TaskbarRightPrimaryOnly);
         s.WindowsContextMenu = Flag("windowsContextMenu", f.WindowsContextMenu);
-        string placement = Display("notifyPlacement", f.NotifyPlacement);
+        string placement = Str("notifyPlacement", f.NotifyPlacement);
         s.NotifyPlacement = NotifyCorners.Contains(placement) ? placement : "dock";
-        s.TextColor = o?["textColor"] is JsonValue tc && tc.TryGetValue(out string? tcs) && tcs != null
-            ? (tcs is "light" or "dark" ? tcs : "auto")
-            : f.TextColor;
-        s.AutoHide = o?["autoHide"] is JsonValue ah && ah.TryGetValue(out string? ahs) && ahs != null
-            ? (ahs is "never" or "always" ? ahs : "fullscreen")
-            : f.AutoHide;
-        s.BarEdge = o?["barEdge"] is JsonValue be && be.TryGetValue(out string? bes) && bes != null
-            ? (bes is "top" or "left" or "right" ? bes : "bottom")
-            : f.BarEdge;
-        string language = Display("language", f.Language);
-        bool validLanguage = !string.IsNullOrWhiteSpace(language) && language.Length <= 32 &&
-                             language.All(ch => char.IsLetterOrDigit(ch) || ch == '-');
-        s.Language = !validLanguage ? "auto" : language == "zh" ? "zh-Hans" : language;
-        s.StatusStyle = o?["statusStyle"] is JsonValue ss && ss.TryGetValue(out string? sss) && sss == "icons" ? "icons"
-            : o?["statusStyle"] is JsonValue ? "ring" : f.StatusStyle;
+        string textColor = Str("textColor", f.TextColor);
+        s.TextColor = textColor is "light" or "dark" ? textColor : "auto";
+        string autoHide = Str("autoHide", f.AutoHide);
+        s.AutoHide = autoHide is "never" or "always" ? autoHide : "fullscreen";
+        string barEdge = Str("barEdge", f.BarEdge);
+        s.BarEdge = barEdge is "top" or "left" or "right" ? barEdge : "bottom";
+        string language = Str("language", f.Language);
+        s.Language = !LocalizationValidation.ValidTag(language) ? "auto" : language == "zh" ? "zh-Hans" : language;
+        string statusStyle = Str("statusStyle", f.StatusStyle);
+        s.StatusStyle = statusStyle == "icons" ? "icons" : "ring";
         s.Pins = f.Pins == null ? null : [.. f.Pins];
         if (o?["pins"] is JsonArray arr)
         {
@@ -370,14 +377,14 @@ internal sealed class BarSettings
             foreach (var node in arr)
             {
                 if (node is not JsonObject e) continue;
-                string Str(string k) => e[k] is JsonValue v && v.TryGetValue(out string? x) && x != null ? x : "";
+                string PinStr(string k) => e[k] is JsonValue v && v.TryGetValue(out string? x) && x != null ? x : "";
                 bool? multiple = e["multipleWindows"] is JsonValue flag && flag.TryGetValue(out bool value) ? value : null;
-                var pin = new PinnedApp(Str("name"), Str("path"), Str("args"), Str("aumid"), multiple);
+                var pin = new PinnedApp(PinStr("name"), PinStr("path"), PinStr("args"), PinStr("aumid"), multiple);
                 if (pin.Path.Length > 0 || pin.Aumid.Length > 0) pins.Add(pin);
             }
-            if (pins.Count > 64) pins.RemoveRange(64, pins.Count - 64);
             s.Pins = pins;
         }
+        if (s.Pins is { Count: > 64 }) s.Pins.RemoveRange(64, s.Pins.Count - 64);
         return s;
     }
 

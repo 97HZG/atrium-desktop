@@ -8,5 +8,6 @@
   <ItemGroup>
     <Compile Include="../../settings/Atrium.Settings/BarSettings.cs" Link="BarSettings.cs" />
     <Compile Include="../../settings/Atrium.Settings/DesktopDisplay.cs" Link="DesktopDisplay.cs" />
+    <Compile Include="../../settings/Atrium.Settings/LocalizationValidation.cs" Link="LocalizationValidation.cs" />
   </ItemGroup>
 </Project>

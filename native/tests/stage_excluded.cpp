@@ -36,6 +36,11 @@ int main()
     run("case does not matter",
         [&] { require(StageAppExcluded({L"WeChat.EXE"}, L"D:\\Apps\\WeChat\\wechat.exe"), "entries and app keys compare without case"); });
     run("a full path entry matches exactly", [&] { require(StageAppExcluded({L"d:\\apps\\tool.exe"}, L"d:\\apps\\tool.exe"), "a full key must match"); });
+    run("folder prefixes require a trailing separator", [&] {
+        require(StageAppExcluded({L"c:\\games\\hero\\"}, L"c:\\games\\hero\\bin\\run.exe"), "a trailing-backslash folder matches apps inside it");
+        require(StageAppExcluded({L"c:/games/hero/"}, L"c:/games/hero/bin/run.exe"), "a trailing-slash folder matches apps inside it");
+        require(!StageAppExcluded({L"c:\\app"}, L"c:\\application\\a.exe"), "a non-folder non-underscore prefix must not match");
+    });
     run("unrelated apps are not excluded", [&] {
         require(!StageAppExcluded({L"wechat.exe"}, L"d:\\apps\\notepad.exe"), "no substring or unrelated match");
         require(!StageAppExcluded({}, L"d:\\apps\\wechat.exe"), "an empty list excludes nothing");
