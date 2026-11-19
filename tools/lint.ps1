@@ -606,7 +606,8 @@ function Match-BaselineMoves([System.Collections.IDictionary]$oldMap, [System.Co
                 if ($rp.Count -lt 3 -or $rp[1] -ne $p[1] -or [int]$newMap[$k] -gt [int]$oldMap[$removed[$i]]) { continue }
                 $same = $rp[0] -eq $p[0]
                 if ($same -ne $samePass) { continue }
-                if (-not $same -and ($rp[2] -ne $p[2] -or $p[2] -in @('(lambda)', 'operator()') -or -not (& $isShrank $rp[0]))) { continue }
+                if (-not $same -and ($rp[2] -ne $p[2] -or $p[2] -in @('(lambda)', 'operator()') -or
+                    $p[2] -match '(?:^|::)\(lambda#\d+\)$' -or -not (& $isShrank $rp[0]))) { continue }
                 if ($best -lt 0 -or [int]$oldMap[$removed[$i]] -lt [int]$oldMap[$removed[$best]]) { $best = $i }
             }
             if ($best -ge 0) { $matched[$k] = $removed[$best]; $removed.RemoveAt($best) }
