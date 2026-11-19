@@ -3,6 +3,7 @@
 #include "localization.h"
 
 #include "log.h"
+#include "shell/shell_icon.h"
 
 #include <windows.h>
 #include <audiopolicy.h>

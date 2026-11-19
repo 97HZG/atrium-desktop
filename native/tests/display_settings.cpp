@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "shell/displays.h"
+#include "shell/task_model.h"
 #include "ui/notification_layout.h"
 #include "motion.h"
 

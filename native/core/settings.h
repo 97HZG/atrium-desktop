@@ -3,8 +3,8 @@
 // protocol (docs/SETTINGS-PROTOCOL.md). Lengths are in DIP.
 #pragma once
 
-#include "shell/task_model.h"
-#include "ui/stage_excluded.h"
+#include "pinned_app.h"
+#include "stage_excluded.h"
 
 #include <cstdint>
 #include <optional>

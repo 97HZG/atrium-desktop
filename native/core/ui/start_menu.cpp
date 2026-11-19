@@ -7,6 +7,7 @@
 #include "log.h"
 #include "motion.h"
 #include "render/wifi_glyph.h"
+#include "shell/shell_icon.h"
 
 #include <imm.h>
 #include <sddl.h>

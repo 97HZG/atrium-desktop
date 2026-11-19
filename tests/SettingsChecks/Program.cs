@@ -158,10 +158,14 @@ Require(!new BarSettings().SameAs(menuOff), "The Windows-style context menu must
 var displays = DesktopDisplay.Read();
 Require(displays.Count > 0 && displays.Any(d => d.Primary), "Connected displays and system primary must be discoverable.");
 Require(displays.All(d => d.Id.Length > 0 && d.Scale > 0 && d.Width > 0 && d.WorkWidth > 0), "Display IDs, geometry and scale must be valid.");
+var shortcutPin = new PinnedApp("Browser", @"C:\Links\Browser.lnk", "", "");
+Require(!shortcutPin.AllowsMultipleWindows() && shortcutPin.AllowsMultipleWindows(@"C:\Program Files\chrome.exe"),
+    "PinnedApp multiple-window default must use the resolved target path without shell I/O.");
+Require(!(shortcutPin with { MultipleWindows = false }).AllowsMultipleWindows(@"C:\Program Files\chrome.exe"),
+    "An explicit launch-mode override must take precedence over the resolved target path.");
+Require(new PinnedApp("Edge", @"C:\Program Files\msedge.exe", "", "").AllowsMultipleWindows() &&
+        !new PinnedApp("Notepad", @"C:\Windows\notepad.exe", "", "").AllowsMultipleWindows(),
+    "An .exe pin with no resolved path must fall back to its own executable name.");
+Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMultipleWindows(),
+    "The Explorer AUMID must default to allowing multiple windows.");
 Console.WriteLine($"Settings round trips, validation, dirty tracking and display discovery passed ({displays.Count} connected display(s)).");
-
-namespace Atrium.Settings
-{
-    // Pin icon resolution is outside this settings-model check.
-    internal static class ShellIcons { public static string ExecutablePath(string path) => path; }
-}

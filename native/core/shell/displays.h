@@ -3,13 +3,15 @@
 
 #include <windows.h>
 #include "bar_edge.h"
-#include "task_model.h"
 
-#include <string>
+#include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace atrium {
+
+struct TaskItem;
 
 struct DisplayInfo {
     HMONITOR monitor;

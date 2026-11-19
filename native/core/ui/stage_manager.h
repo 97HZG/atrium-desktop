@@ -24,7 +24,7 @@
 #include "shell/task_model.h"
 #include "ui/stage_scroll.h"
 #include "ui/stage_open.h"
-#include "ui/stage_excluded.h"
+#include "stage_excluded.h"
 #include "ui/surface.h"
 #include "ui/window_snapshot.h"
 

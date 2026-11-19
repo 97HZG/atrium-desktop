@@ -3,12 +3,12 @@
 // the input and the saved layout.
 #pragma once
 
+#include "icon_image.h"
 #include "shell/bluetooth_batteries.h"
 #include "shell/lunar.h"
 #include "shell/network_monitor.h"
 #include "shell/system_status.h"
 #include "shell/weather.h"
-#include "shell/task_model.h"
 #include "ui/surface.h"
 
 #include <memory>

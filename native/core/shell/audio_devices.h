@@ -6,7 +6,7 @@
 // blocks briefly: the lists are read on a worker thread.
 #pragma once
 
-#include "shell/task_model.h"
+#include "icon_image.h"
 
 #include <string>
 #include <vector>

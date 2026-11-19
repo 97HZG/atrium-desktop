@@ -1,6 +1,7 @@
 #include "shell/tray_host.h"
 
 #include "log.h"
+#include "shell/shell_icon.h"
 #include "shell/shell_taskbar.h"
 
 #include <objbase.h>
@@ -135,39 +136,48 @@ const wchar_t* Name(tray::HostAction action)
 
 } // namespace
 
-TrayHost::TrayHost(HWND notify, UINT msg)
+TrayHost::TrayHost(HWND notify, UINT msg, DWORD readyWaitMs, DWORD startDelayMs)
     : notify_(notify),
       msg_(msg),
+      startDelayMs_(startDelayMs),
       taskbarCreated_(RegisterWindowMessageW(L"TaskbarCreated")),
       quit_(RegisterWindowMessageW(L"Atrium.TrayHost.Quit")),
-      hover_(RegisterWindowMessageW(L"Atrium.TrayHost.Hover"))
+      hover_(RegisterWindowMessageW(L"Atrium.TrayHost.Hover")),
+      ready_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
+      stop_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
 {
-    HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    thread_ = std::thread([this, ready] { Run(ready); });
-    if (ready) {
-        WaitForSingleObject(ready, 3000);
-        CloseHandle(ready);
-    }
+    thread_ = std::thread([this] { Run(); });
+    if (ready_)
+        WaitForSingleObject(ready_, readyWaitMs);
 }
 
 TrayHost::~TrayHost()
 {
+    stopping_ = true;
     if (HWND w = window_.load()) {
         // Behind Explorer's taskbar first, so that calls from now on go to Explorer; the
         // ones already on their way are answered before the window goes.
-        stopping_ = true;
         SetWindowPos(w, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         Sleep(100);
         PostMessageW(w, quit_, 0, 0);
-    } else if (threadId_)
-        PostThreadMessageW(threadId_, WM_QUIT, 0, 0);
+    }
+    if (stop_)
+        SetEvent(stop_);
     if (thread_.joinable())
         thread_.join();
+    if (ready_)
+        CloseHandle(ready_);
+    if (stop_)
+        CloseHandle(stop_);
 }
 
-void TrayHost::Run(HANDLE ready)
+void TrayHost::Run()
 {
-    threadId_ = GetCurrentThreadId();
+    if (!stop_ || WaitForSingleObject(stop_, startDelayMs_) == WAIT_OBJECT_0) {
+        if (ready_)
+            SetEvent(ready_);
+        return;
+    }
     HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = Proc;
@@ -178,19 +188,25 @@ void TrayHost::Run(HANDLE ready)
     child.hInstance = instance;
     child.lpszClassName = L"TrayNotifyWnd";
     const bool registered = RegisterClassExW(&wc) != 0;
+    DWORD error = registered ? 0 : GetLastError();
     RegisterClassExW(&child);
     RECT r{};
     if (HWND shell = ShellTaskbar())
         GetWindowRect(shell, &r);
-    HWND w = registered ? CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"Shell_TrayWnd", L"", WS_POPUP, r.left, r.top, r.right - r.left,
-                                          r.bottom - r.top, nullptr, nullptr, instance, this) :
-                          nullptr;
+    HWND w = nullptr;
+    if (registered && WaitForSingleObject(stop_, 0) != WAIT_OBJECT_0) {
+        w = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"Shell_TrayWnd", L"", WS_POPUP, r.left, r.top, r.right - r.left,
+                            r.bottom - r.top, nullptr, nullptr, instance, this);
+        if (!w)
+            error = GetLastError();
+    }
     if (!w) {
-        Log(L"tray host: no window (%lu)", GetLastError());
+        if (WaitForSingleObject(stop_, 0) != WAIT_OBJECT_0)
+            Log(L"tray host: no window (%lu)", error);
         UnregisterClassW(L"Shell_TrayWnd", instance);
         UnregisterClassW(L"TrayNotifyWnd", instance);
-        if (ready)
-            SetEvent(ready);
+        if (ready_)
+            SetEvent(ready_);
         return;
     }
     // Some apps place things by the notification area inside the taskbar.
@@ -209,15 +225,37 @@ void TrayHost::Run(HANDLE ready)
     KeepFirst();
     SetTimer(w, kKeepTimer, kKeepMs, nullptr);
     SetTimer(w, kPruneTimer, kPruneMs, nullptr);
-    if (ready)
-        SetEvent(ready);
-    if (!yielded_)
+    if (ready_)
+        SetEvent(ready_);
+    if (!yielded_ && !stopping_)
         Broadcast();
 
-    MSG m;
-    while (GetMessageW(&m, nullptr, 0, 0) > 0) {
-        TranslateMessage(&m);
-        DispatchMessageW(&m);
+    for (;;) {
+        if (WaitForSingleObject(stop_, 0) == WAIT_OBJECT_0)
+            break;
+        MSG m;
+        bool quit = false;
+        while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) {
+            if (m.message == WM_QUIT) {
+                quit = true;
+                break;
+            }
+            TranslateMessage(&m);
+            DispatchMessageW(&m);
+            if (WaitForSingleObject(stop_, 0) == WAIT_OBJECT_0) {
+                quit = true;
+                break;
+            }
+        }
+        if (quit)
+            break;
+        const DWORD wait = MsgWaitForMultipleObjectsEx(1, &stop_, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (wait == WAIT_OBJECT_0 || wait == WAIT_FAILED)
+            break;
+    }
+    if (IsWindow(w)) {
+        RemovePropW(w, kTaskband);
+        DestroyWindow(w);
     }
     if (shown)
         UnhookWinEvent(shown);

@@ -4,7 +4,8 @@
 // thread; the UI thread reads snapshots.
 #pragma once
 
-#include "shell/task_model.h"
+#include "icon_image.h"
+#include "pinned_app.h"
 
 #include <windows.h>
 

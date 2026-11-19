@@ -4,6 +4,7 @@
 #pragma once
 
 #include "icon_image.h"
+#include "pinned_app.h"
 
 #include <windows.h>
 
@@ -11,22 +12,10 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
 namespace atrium {
-
-// A pinned entry as stored in settings.json ("pins", docs/SETTINGS-PROTOCOL.md).
-struct PinnedApp {
-    std::wstring name;  // display name
-    std::wstring path;  // .lnk, .exe or other launchable file; may be empty for Store apps
-    std::wstring args;  // extra arguments when `path` is an .exe
-    std::wstring aumid; // AppUserModelID, empty when unknown
-    std::optional<bool> multipleWindows; // absent: browsers and Explorer allow new windows; others reuse
-    bool AllowsMultipleWindows() const;
-    bool operator==(const PinnedApp&) const = default;
-};
 
 struct TaskItem {
     std::wstring key;   // stable grouping key: lowercase AUMID if known, else lowercase exe path
@@ -40,19 +29,7 @@ struct TaskItem {
     bool multipleWindows = false;
 };
 
-// Icon of a shell item (a path or "shell:AppsFolder\\<id>") through
-// IShellItemImageFactory, square, premultiplied. Blocking; call it off the UI
-// thread. COM must be initialised on the calling thread.
-// thumbnail: the picture itself (an image file) rather than its icon.
-bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out, bool thumbnail = false);
-// Atrium's own programs (Atrium.exe, Atrium.Settings.exe): their icon read from the file
-// itself, not from the shell's icon cache or Explorer's tray snapshot, which keep the icon an
-// earlier build had at the same path. False for any other program.
-bool LoadAtriumIcon(const std::wstring& exePath, int sizePx, IconImage& out);
-// Resolves a shortcut and a versioned client's app/ launcher without starting it.
-std::wstring AppExecutable(const std::wstring& path);
-// An icon's picture, premultiplied BGRA (false for a monochrome icon).
-bool HIconToImage(HICON icon, IconImage& out);
+bool AllowsMultipleWindows(const PinnedApp& app);
 
 class TaskModel {
 public:

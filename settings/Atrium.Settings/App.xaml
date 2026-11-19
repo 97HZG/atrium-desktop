@@ -481,13 +481,6 @@
                 </Setter>
             </Style>
             <!-- ============ Segmented control: a track, the chosen segment a raised tile ============ -->
-            <Style x:Key="SegmentTrackStyle" TargetType="Border">
-                <Setter Property="local:ContinuousCorners.Paint" Value="{ThemeResource FillBrush}" />
-                <Setter Property="CornerRadius" Value="15" />
-                <Setter Property="Padding" Value="2" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="HorizontalAlignment" Value="Right" />
-            </Style>
             <Style x:Key="SegmentStyle" TargetType="RadioButton">
                 <Setter Property="Foreground" Value="{ThemeResource InkSecondaryBrush}" />
                 <Setter Property="FontSize" Value="13" />

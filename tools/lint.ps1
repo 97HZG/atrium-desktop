@@ -174,7 +174,7 @@ foreach ($rel in $files | Where-Object { $_ -match '\.xaml$' }) {
 # --- Native: layers, banned and ratcheted constructs ----------------------------------------------------------
 # Who may include whom. Root headers are either foundation (anyone) or composition (root only).
 $foundation = 'bar_edge.h', 'clock.h', 'icon_image.h', 'localization.h', 'localization_format.h', 'log.h', 'motion.h', 'notice.h', 'posted.h', 'resource.h',
-    'settings.h', 'status.h', 'win32_path.h'
+    'pinned_app.h', 'settings.h', 'stage_excluded.h', 'status.h', 'win32_path.h'
 $layers = @{ render = @(); shell = @(); ui = @('render', 'shell') }
 # Configuration macros set before the headers that read them; any other value is a constexpr.
 $configMacros = 'SECURITY_WIN32', 'WIN32_LEAN_AND_MEAN', 'NOMINMAX', 'IDI_ATRIUM'

@@ -6,6 +6,7 @@
 #include "shell/messengers.h"
 
 #include "log.h"
+#include "shell/shell_icon.h"
 #include "shell/shell_taskbar.h"
 #include "shell/system_chrome.h"
 #include "shell/tray_pointer.h"

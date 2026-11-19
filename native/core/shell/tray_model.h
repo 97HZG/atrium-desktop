@@ -1,7 +1,8 @@
 // Tray snapshots and actions; evidence contracts: docs/TRAY.md.
 #pragma once
 
-#include "shell/task_model.h"
+#include "icon_image.h"
+#include "pinned_app.h"
 #include "shell/tray_click.h"
 #include "shell/tray_host.h"
 #include "shell/tray_pointer.h"
@@ -11,6 +12,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>

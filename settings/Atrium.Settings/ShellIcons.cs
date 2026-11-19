@@ -31,19 +31,28 @@ internal static class ShellIcons
     internal static string ExecutablePath(string path)
     {
         if (!path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) return ExecutableForIcon(path);
-        return LinkTargets.GetOrAdd(path, static link =>
+        if (LinkTargets.TryGetValue(path, out string? cached)) return cached;
+        int hr = CoInitializeEx(IntPtr.Zero, 0);
+        if (hr is < 0 and not unchecked((int)0x80010106)) return path; // RPC_E_CHANGED_MODE: thread already initialized
+        try
         {
             var iid = typeof(IPropertyStore).GUID;
-            if (SHGetPropertyStoreFromParsingName(link, IntPtr.Zero, 0, ref iid, out var store) != 0) return link;
+            if (SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, 0, ref iid, out var store) != 0) return path;
             try
             {
                 var key = new PropertyKey { Format = new Guid("b9b4b3fc-2b51-4a42-b5d8-324146afcf25"), Id = 2 };
-                if (store.GetValue(ref key, out var value) != 0) return link;
-                try { return value.Type == 31 ? ExecutableForIcon(Marshal.PtrToStringUni(value.Text) ?? link) : link; }
+                if (store.GetValue(ref key, out var value) != 0) return path;
+                try
+                {
+                    string target = value.Type == 31 ? ExecutableForIcon(Marshal.PtrToStringUni(value.Text) ?? path) : path;
+                    LinkTargets[path] = target;
+                    return target;
+                }
                 finally { _ = PropVariantClear(ref value); }
             }
             finally { Marshal.ReleaseComObject(store); }
-        });
+        }
+        finally { if (hr >= 0) CoUninitialize(); }
     }
     [ComImport, Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IShellItemImageFactory

@@ -1,4 +1,5 @@
 #include "displays.h"
+#include "shell/task_model.h"
 
 #include <shellapi.h>
 

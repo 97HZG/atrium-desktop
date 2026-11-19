@@ -387,8 +387,6 @@ public sealed partial class MainWindow
 
     // The core's grid (native/core/ui/desktop_widgets.cpp): cells 164, gaps 16, margins 24, a row's room for the bar.
     private const double WCell = 164, WGap = 16, WMargin = 24;
-    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(System.Drawing.Point pt, uint flags);
-    [System.Runtime.InteropServices.DllImport("shcore.dll")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
     private FileSystemWatcher? _widgetWatcher;
 
     private static string WidgetsPath => Path.Combine(Path.GetDirectoryName(CoreClient.SettingsPath)!, "widgets.json");

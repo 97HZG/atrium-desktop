@@ -7,6 +7,7 @@
 
 #include "bar_edge.h"
 #include "motion.h"
+#include "shell/task_model.h"
 #include "ui/surface.h"
 
 #include <dwmapi.h>

@@ -13,6 +13,7 @@ namespace Atrium.Settings;
 public sealed partial class PinVm : INotifyPropertyChanged
 {
     private readonly MainWindow _owner;
+    private string? _resolvedPath;
 
     internal PinVm(MainWindow owner, PinnedApp pin)
     {
@@ -33,17 +34,16 @@ public sealed partial class PinVm : INotifyPropertyChanged
     public string LaunchName { get; }
     public int LaunchMode
     {
-        get => Pin.AllowsMultipleWindows ? 1 : 0;
+        get => Pin.AllowsMultipleWindows(_resolvedPath) ? 1 : 0;
         set
         {
-            if (value < 0 || value == 1 == Pin.AllowsMultipleWindows) return;
+            if (value < 0 || value == 1 == Pin.AllowsMultipleWindows(_resolvedPath)) return;
             Pin = Pin with { MultipleWindows = value == 1 };
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LaunchMode)));
             _owner.ChangePinLaunch();
         }
     }
 
-    public string Number { get; private set => Set(ref field, value, nameof(Number)); } = "";
     public bool CanUp { get; private set => Set(ref field, value, nameof(CanUp)); }
     public bool CanDown { get; private set => Set(ref field, value, nameof(CanDown)); }
     public ImageSource? Icon
@@ -53,9 +53,15 @@ public sealed partial class PinVm : INotifyPropertyChanged
     }
     public Visibility FallbackVisibility => Icon == null ? Visibility.Visible : Visibility.Collapsed;
 
+    internal void SetResolvedPath(string path)
+    {
+        int before = LaunchMode;
+        _resolvedPath = path;
+        if (LaunchMode != before) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LaunchMode)));
+    }
+
     internal void SetPosition(int index, int count)
     {
-        Number = (index + 1).ToString("00");
         CanUp = index > 0;
         CanDown = index < count - 1;
     }
@@ -123,6 +129,12 @@ public sealed partial class MainWindow
 
     private async Task LoadIconAsync(PinVm vm)
     {
+        if (vm.Pin.MultipleWindows == null && vm.Pin.Path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+        {
+            string target = await Task.Run(() => ShellIcons.ExecutablePath(vm.Pin.Path));
+            if (!_pinVms.Contains(vm)) return;
+            vm.SetResolvedPath(target);
+        }
         string name = ShellIcons.ParsingName(vm.Pin);
         if (!_iconCache.TryGetValue(name, out var source))
         {

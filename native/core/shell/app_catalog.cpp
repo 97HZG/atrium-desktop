@@ -1,6 +1,7 @@
 #include "shell/app_catalog.h"
 
 #include "log.h"
+#include "shell/shell_icon.h"
 #include "shell/start_layout.h"
 
 #include <shellapi.h>

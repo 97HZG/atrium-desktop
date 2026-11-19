@@ -35,6 +35,7 @@ add_executable(atrium_core WIN32
     localization.cpp
     shell/ime_status.cpp
     shell/keyboard_hook.cpp
+    shell/shell_icon.cpp
     shell/task_model.cpp
     shell/app_processes.cpp
     shell/app_catalog.cpp

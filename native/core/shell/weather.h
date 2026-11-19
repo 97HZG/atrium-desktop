@@ -7,8 +7,13 @@
 #pragma once
 
 #include <windows.h>
+#include <winrt/Windows.Foundation.h>
 
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -49,27 +54,59 @@ std::wstring WeatherCachePath();
 
 class WeatherSource {
 public:
+    using Fetcher = std::function<bool(const std::atomic_bool& quit, Weather& out)>;
+
     // `message` is posted to `notify` with a new Latest().
     WeatherSource(HWND notify, UINT message);
+    WeatherSource(HWND notify, UINT message, Fetcher fetcher);
     ~WeatherSource();
     WeatherSource(const WeatherSource&) = delete;
     WeatherSource& operator=(const WeatherSource&) = delete;
 
-    void SetActive(bool on);                // fetch only while a weather widget shows
-    void Refresh();                         // the labels are language-specific: fetch again after a language change
+    void SetActive(bool on); // fetch only while a weather widget shows
+    void Refresh();          // the labels are language-specific: fetch again after a language change
     Weather Latest();
 
 private:
-    void Run();
-    bool Fetch();
+    struct State;
 
-    HWND notify_;
-    UINT message_;
-    std::mutex lock_;
-    std::condition_variable wake_;
-    bool active_ = false, quit_ = false, dirty_ = true;
-    Weather latest_;
+    std::shared_ptr<State> state_;
     std::thread thread_;
 };
+
+// Waits on a WinRT async operation without holding `lock` across Status()/Cancel().
+template<typename Async, typename KeepAlive> bool WaitWeatherAsync(const Async& op, const std::shared_ptr<KeepAlive>& keepAlive, std::mutex& lock,
+                                                                   std::condition_variable& wake, const std::atomic_bool& quit,
+                                                                   std::chrono::milliseconds timeout, bool* timedOut = nullptr)
+{
+    auto completed = std::make_shared<std::atomic_bool>(false);
+    op.Completed([keepAlive, completed, &lock, &wake](const Async&, winrt::Windows::Foundation::AsyncStatus) {
+        completed->store(true);
+        std::lock_guard g(lock);
+        wake.notify_all();
+    });
+    if (!completed->load() && op.Status() != winrt::Windows::Foundation::AsyncStatus::Started)
+        return !quit.load();
+    bool quitting = false;
+    bool ok = false;
+    {
+        std::unique_lock g(lock);
+        ok = wake.wait_for(g, timeout, [&] { return quit.load() || completed->load(); });
+        quitting = quit.load();
+    }
+    if (quitting) {
+        op.Cancel();
+        return false;
+    }
+    if (!ok) {
+        op.Cancel();
+        if (timedOut) {
+            *timedOut = true;
+            return false;
+        }
+        throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
+    }
+    return true;
+}
 
 } // namespace atrium

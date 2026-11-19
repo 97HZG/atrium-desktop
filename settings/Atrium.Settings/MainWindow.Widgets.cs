@@ -222,18 +222,6 @@ public sealed partial class MainWindow
             using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(Px, 0, Px.Length);
             bmp.Invalidate();
         }
-
-        // The pixels under one tile, for a card that moves with its own piece of glass.
-        public WriteableBitmap Crop(GlassTile t)
-        {
-            int x0 = Math.Clamp((int)Math.Round(t.X * Rs), 0, PW - 1), y0 = Math.Clamp((int)Math.Round(t.Y * Rs), 0, PH - 1);
-            int w = Math.Clamp((int)Math.Round(t.W * Rs), 1, PW - x0), h = Math.Clamp((int)Math.Round(t.H * Rs), 1, PH - y0);
-            var bmp = new WriteableBitmap(w, h);
-            using (var stream = bmp.PixelBuffer.AsStream())
-                for (int y = 0; y < h; y++) stream.Write(Px, ((y0 + y) * PW + x0) * 4, w * 4);
-            bmp.Invalidate();
-            return bmp;
-        }
     }
 
     private void PostTiles(object target, double w, double h, double k, IReadOnlyList<GlassTile> tiles, GlassTile? bar,

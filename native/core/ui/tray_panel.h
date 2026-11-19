@@ -6,6 +6,7 @@
 #pragma once
 
 #include "motion.h"
+#include "shell/task_model.h"
 #include "shell/tray_model.h"
 #include "ui/surface.h"
 

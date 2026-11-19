@@ -7,8 +7,8 @@
 // for the glass's shadow; callers work in content coordinates only.
 #pragma once
 
+#include "icon_image.h"
 #include "render/glass_panel.h"
-#include "shell/task_model.h"
 
 #include <windows.h>
 #include <d2d1_3.h>

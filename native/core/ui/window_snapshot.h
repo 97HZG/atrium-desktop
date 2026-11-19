@@ -4,7 +4,7 @@
 // shadow of its own; both premultiplied BGRA, ready for Canvas::ImagePerspective.
 #pragma once
 
-#include "shell/task_model.h"
+#include "icon_image.h"
 
 #include <windows.h>
 

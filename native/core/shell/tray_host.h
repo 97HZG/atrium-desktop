@@ -20,7 +20,7 @@
 // guard process puts Explorer's taskbar in front if the window stops answering.
 #pragma once
 
-#include "shell/task_model.h"
+#include "icon_image.h"
 #include "shell/tray_protocol.h"
 
 #include <windows.h>
@@ -55,8 +55,8 @@ struct HostIcon {
 
 class TrayHost {
 public:
-    // Posts `msg` (wParam 0) to `notify` when the icons change.
-    TrayHost(HWND notify, UINT msg);
+    // Posts `msg` (wParam 0) to `notify` when the icons change. `readyWaitMs` and `startDelayMs` are for tests only.
+    TrayHost(HWND notify, UINT msg, DWORD readyWaitMs = 3000, DWORD startDelayMs = 0);
     ~TrayHost();
     TrayHost(const TrayHost&) = delete;
     TrayHost& operator=(const TrayHost&) = delete;
@@ -81,7 +81,7 @@ public:
     void SetPlaces(RECT anchor);
 
 private:
-    void Run(HANDLE ready);
+    void Run();
     static LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l);
     static void CALLBACK ShellEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG object, LONG, DWORD, DWORD);
     LRESULT Message(HWND h, UINT m, WPARAM w, LPARAM l);
@@ -97,13 +97,14 @@ private:
 
     HWND notify_;
     UINT msg_;
+    DWORD startDelayMs_ = 0;
     UINT taskbarCreated_ = 0, quit_ = 0, hover_ = 0;
+    HANDLE ready_ = nullptr, stop_ = nullptr;
     std::atomic<HWND> window_{nullptr};
     std::atomic_bool dirty_ = false;   // changed since the last notice (posted at most every 100 ms)
     std::atomic_bool yielded_ = false;
     std::atomic_bool stopping_ = false; // going: no longer moves itself in front
     std::thread thread_;
-    DWORD threadId_ = 0;
     mutable std::mutex mutex_;
     std::map<std::wstring, HostIcon> icons_;
     uint64_t nextAdded_ = 0, nextImage_ = 0;

@@ -9,10 +9,13 @@
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Devices.Geolocation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Foundation.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <mutex>
 
 namespace json = winrt::Windows::Data::Json;
 
@@ -24,8 +27,10 @@ constexpr auto kEvery = std::chrono::minutes(30);
 constexpr auto kRetry = std::chrono::minutes(3);
 
 // A GET over WinHTTP; direct: not through the system's proxy. The body, empty on failure.
-std::string Get(const std::wstring& url, bool direct)
+std::string Get(const std::wstring& url, bool direct, const std::atomic_bool& quit)
 {
+    if (quit.load())
+        return {};
     URL_COMPONENTS u{sizeof(u)};
     wchar_t host[256] = {}, path[2048] = {};
     u.lpszHostName = host;
@@ -55,6 +60,8 @@ std::string Get(const std::wstring& url, bool direct)
                             WINHTTP_NO_HEADER_INDEX) &&
         status == 200) {
         for (;;) {
+            if (quit.load())
+                break;
             DWORD n = 0;
             if (!WinHttpQueryDataAvailable(request, &n) || n == 0)
                 break;
@@ -72,53 +79,75 @@ std::string Get(const std::wstring& url, bool direct)
     if (connect)
         WinHttpCloseHandle(connect);
     WinHttpCloseHandle(session);
-    return body;
+    return quit.load() ? std::string{} : body;
 }
 
 // Directly first; then through the system's proxy (a network that only reaches out through it).
-std::string GetAny(const std::wstring& url)
+std::string GetAny(const std::wstring& url, const std::atomic_bool& quit)
 {
-    std::string body = Get(url, true);
-    return body.empty() ? Get(url, false) : body;
+    std::string body = Get(url, true, quit);
+    return !body.empty() || quit.load() ? body : Get(url, false, quit);
 }
+
+// A place on the globe: what a service or the cache says is only used if it is one (the URLs have room for no more).
+bool OnEarth(double lat, double lon) { return std::isfinite(lat) && std::isfinite(lon) && std::fabs(lat) <= 90 && std::fabs(lon) <= 180; }
+
+} // namespace
+
+struct WeatherSource::State : std::enable_shared_from_this<WeatherSource::State> {
+    std::wstring PlaceName(double lat, double lon, bool english);
+    bool Locate(double& lat, double& lon, std::wstring& city, bool english);
+    bool LocateByIp(double& lat, double& lon, std::wstring& city, bool english, bool located);
+    bool Fetch(bool english);
+    void Run();
+
+private:
+    friend class WeatherSource;
+    std::mutex lock_;
+    std::condition_variable wake_, doneCv_;
+    HWND notify_ = nullptr;
+    UINT message_ = 0;
+    bool active_ = false, dirty_ = true, done_ = false, detached_ = false, lastEnglish_ = false;
+    std::atomic_bool quit_{false};
+    std::wstring cachePath_, lastName_;
+    Weather latest_;
+    double lastLat_ = 1000, lastLon_ = 1000;
+    Fetcher fetcher_;
+};
 
 // A place's name for coordinates (BigDataCloud's free reverse geocoding, no account): the city,
 // else the locality; "南京市" is shown as "南京", as the network's place is. Asked again only once the
 // computer has moved a few kilometres (the worker thread alone calls it).
-std::wstring PlaceName(double lat, double lon)
+std::wstring WeatherSource::State::PlaceName(double lat, double lon, bool english)
 {
-    static double lastLat = 1000, lastLon = 1000;
-    static std::wstring lastName;
-    static bool lastEnglish = false;
-    const bool english = LanguageIsEnglish();
-    if (!lastName.empty() && lastEnglish == english && std::fabs(lat - lastLat) < 0.03 && std::fabs(lon - lastLon) < 0.03)
-        return lastName;
+    if (!lastName_.empty() && lastEnglish_ == english && std::fabs(lat - lastLat_) < 0.03 && std::fabs(lon - lastLon_) < 0.03)
+        return lastName_;
     wchar_t url[256];
     swprintf_s(url, L"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.4f&longitude=%.4f&localityLanguage=%s", lat, lon,
                english ? L"en" : L"zh");
+    std::string body = GetAny(url, quit_);
+    if (quit_.load())
+        return {};
     json::JsonObject o{nullptr};
-    if (!json::JsonObject::TryParse(winrt::to_hstring(GetAny(url)), o))
+    if (!json::JsonObject::TryParse(winrt::to_hstring(body), o))
         return {};
     std::wstring name(o.GetNamedString(L"city", L""));
     if (name.empty())
         name = std::wstring(o.GetNamedString(L"locality", L""));
-    if (!LanguageIsEnglish() && name.size() > 2 && name.back() == L'市')
+    if (!english && name.size() > 2 && name.back() == L'市')
         name.pop_back();
     if (!name.empty()) {
-        lastLat = lat;
-        lastLon = lon;
-        lastName = name;
-        lastEnglish = english;
+        lastLat_ = lat;
+        lastLon_ = lon;
+        lastName_ = name;
+        lastEnglish_ = english;
     }
     return name;
 }
 
 // Where the computer is: Windows' location service (when it lets desktop apps use it), else the
 // network's place. The network's city also names a Windows position that has no name.
-// A place on the globe: what a service or the cache says is only used if it is one (the URLs have room for no more).
-bool OnEarth(double lat, double lon) { return std::isfinite(lat) && std::isfinite(lon) && std::fabs(lat) <= 90 && std::fabs(lon) <= 180; }
-
-bool Locate(double& lat, double& lon, std::wstring& city)
+bool WeatherSource::State::Locate(double& lat, double& lon, std::wstring& city, bool english)
 {
     namespace geo = winrt::Windows::Devices::Geolocation;
     bool located = false;
@@ -126,35 +155,40 @@ bool Locate(double& lat, double& lon, std::wstring& city)
         // Bounded: on some systems (#67) the access request never completes, which left the
         // widget waiting for good.
         auto access = geo::Geolocator::RequestAccessAsync();
-        if (access.wait_for(std::chrono::seconds(5)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
-            access.Cancel();
-            throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
-        }
+        if (!WaitWeatherAsync(access, shared_from_this(), lock_, wake_, quit_, std::chrono::seconds(5)))
+            return false;
         if (access.GetResults() == geo::GeolocationAccessStatus::Allowed) {
             geo::Geolocator locator;
             auto position = locator.GetGeopositionAsync(std::chrono::minutes(30), std::chrono::seconds(15));
-            if (position.wait_for(std::chrono::seconds(20)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
-                position.Cancel();
-                throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
-            }
+            if (!WaitWeatherAsync(position, shared_from_this(), lock_, wake_, quit_, std::chrono::seconds(20)))
+                return false;
             auto at = position.GetResults().Coordinate().Point().Position();
             lat = at.Latitude;
             lon = at.Longitude;
             located = true;
-            city = PlaceName(lat, lon);
+            city = PlaceName(lat, lon, english);
+            if (quit_.load())
+                return false;
             Log(L"weather: located by Windows (%s)", city.c_str());
-        } else {
+        } else if (!quit_.load()) {
             Log(L"weather: Windows' location is off for desktop apps; using the network's place");
         }
     } catch (const winrt::hresult_error& e) {
-        Log(L"weather: Windows' location failed (0x%08X); using the network's place", static_cast<unsigned>(e.code()));
+        if (!quit_.load())
+            Log(L"weather: Windows' location failed (0x%08X); using the network's place", static_cast<unsigned>(e.code()));
     }
+    if (quit_.load())
+        return false;
     if (located && !city.empty())
         return true;
+    return LocateByIp(lat, lon, city, english, located);
+}
+
+bool WeatherSource::State::LocateByIp(double& lat, double& lon, std::wstring& city, bool english, bool located)
+{
     // The network's place: several services, each directly (the system's proxy would give the
     // proxy's place), then through the proxy (a network that only reaches out through it): one
     // service blocked or over its limit (#67) is not the end of it.
-    const bool english = LanguageIsEnglish();
     struct Service {
         const wchar_t* url;
         const wchar_t *ok, *okValue, *city, *lat, *lon;
@@ -167,8 +201,13 @@ bool Locate(double& lat, double& lon, std::wstring& city)
     };
     for (bool direct : {true, false})
         for (const Service& s : services) {
+            if (quit_.load())
+                return false;
+            std::string body = Get(s.url, direct, quit_);
+            if (quit_.load())
+                return false;
             json::JsonObject o{nullptr};
-            if (!json::JsonObject::TryParse(winrt::to_hstring(Get(s.url, direct)), o))
+            if (!json::JsonObject::TryParse(winrt::to_hstring(body), o))
                 continue;
             if (s.ok && !(s.okValue ? o.GetNamedString(s.ok, L"") == s.okValue : o.GetNamedBoolean(s.ok, false)))
                 continue;
@@ -180,12 +219,16 @@ bool Locate(double& lat, double& lon, std::wstring& city)
                 lat = o.GetNamedNumber(s.lat, 0);
                 lon = o.GetNamedNumber(s.lon, 0);
             }
+            if (quit_.load())
+                return false;
             if (s.url != services[0].url || !direct)
                 Log(L"weather: placed by %s%s", s.url, direct ? L"" : L" (through the proxy)");
             return true;
         }
     return located;
 }
+
+namespace {
 
 std::wstring Wide(const std::string& s)
 {
@@ -220,7 +263,7 @@ int64_t Minutes(const std::wstring& t, int* hour = nullptr, int* minute = nullpt
 
 const wchar_t* const kWeek[] = {L"周日", L"周一", L"周二", L"周三", L"周四", L"周五", L"周六"};
 const wchar_t* const kWeekEn[] = {L"Sun", L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat"};
-const wchar_t* WeekName(int wd) { return LanguageIsEnglish() ? Tr(kWeekEn[wd]) : kWeek[wd]; }
+const wchar_t* WeekName(int wd, bool english) { return english ? Tr(kWeekEn[wd]) : kWeek[wd]; }
 
 json::JsonObject ToJson(const Weather& w)
 {
@@ -330,86 +373,159 @@ std::wstring WeatherCachePath()
     return path.substr(0, path.find_last_of(L'\\')) + L"\\weather.json";
 }
 
-WeatherSource::WeatherSource(HWND notify, UINT message) : notify_(notify), message_(message)
+WeatherSource::WeatherSource(HWND notify, UINT message) : WeatherSource(notify, message, nullptr) {}
+
+WeatherSource::WeatherSource(HWND notify, UINT message, Fetcher fetcher) : state_(std::make_shared<State>())
 {
-    // The last forecast at once (stale is better than nothing while the first fetch runs).
-    json::JsonObject o{nullptr};
-    std::wstring text = ReadTextFile(WeatherCachePath());
-    if (!text.empty() && json::JsonObject::TryParse(text, o))
-        FromJson(o, latest_);
-    thread_ = std::thread([this] { Run(); });
+    state_->notify_ = notify;
+    state_->message_ = message;
+    state_->fetcher_ = std::move(fetcher);
+    if (!state_->fetcher_) {
+        state_->cachePath_ = WeatherCachePath();
+        // The last forecast at once (stale is better than nothing while the first fetch runs).
+        json::JsonObject o{nullptr};
+        std::wstring text = ReadTextFile(state_->cachePath_);
+        if (!text.empty() && json::JsonObject::TryParse(text, o))
+            FromJson(o, state_->latest_);
+    }
+    thread_ = std::thread([state = state_] { state->Run(); });
 }
 
 WeatherSource::~WeatherSource()
 {
+    bool joined = false;
     {
-        std::lock_guard g(lock_);
-        quit_ = true;
+        std::unique_lock g(state_->lock_);
+        state_->quit_.store(true);
+        state_->notify_ = nullptr;
+        state_->wake_.notify_all();
+        joined = state_->doneCv_.wait_for(g, std::chrono::milliseconds(250), [&] { return state_->done_; });
+        if (!joined)
+            state_->detached_ = true;
     }
-    wake_.notify_all();
     if (thread_.joinable())
-        thread_.join();
+        joined ? thread_.join() : thread_.detach();
 }
 
 void WeatherSource::SetActive(bool on)
 {
     {
-        std::lock_guard g(lock_);
-        if (on == active_)
+        std::lock_guard g(state_->lock_);
+        if (on == state_->active_)
             return;
-        active_ = on;
+        state_->active_ = on;
     }
-    wake_.notify_all();
+    state_->wake_.notify_all();
 }
 
 void WeatherSource::Refresh()
 {
     {
-        std::lock_guard g(lock_);
-        dirty_ = true;
+        std::lock_guard g(state_->lock_);
+        state_->dirty_ = true;
     }
-    wake_.notify_all();
+    state_->wake_.notify_all();
 }
 
 Weather WeatherSource::Latest()
 {
-    std::lock_guard g(lock_);
-    return latest_;
+    std::lock_guard g(state_->lock_);
+    return state_->latest_;
 }
 
-void WeatherSource::Run()
+void WeatherSource::State::Run()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     auto next = std::chrono::steady_clock::now();
     for (;;) {
+        bool english = false;
         {
             std::unique_lock g(lock_);
             wake_.wait(g, [&] { return quit_ || active_; }); // nothing to do while no weather widget shows
             if (quit_)
-                return;
+                break;
             wake_.wait_until(g, next, [&] { return quit_ || !active_ || dirty_; });
             if (quit_)
-                return;
+                break;
             if (!active_ || (!dirty_ && std::chrono::steady_clock::now() < next))
                 continue;
             dirty_ = false;
+            english = LanguageIsEnglish();
         }
         bool ok = false;
         try {
-            ok = Fetch();
+            if (Weather w; fetcher_) {
+                if (ok = fetcher_(quit_, w); ok && !quit_) {
+                    std::lock_guard g(lock_);
+                    latest_ = std::move(w);
+                }
+            } else {
+                ok = Fetch(english);
+            }
         } catch (...) {
-            Log(L"weather: fetch failed");
+            if (!quit_)
+                Log(L"weather: fetch failed");
         }
+        if (quit_)
+            break;
         next = std::chrono::steady_clock::now() + (ok ? kEvery : kRetry);
-        PostMessageW(notify_, message_, 0, 0);
+        HWND notify;
+        {
+            std::lock_guard g(lock_);
+            notify = notify_;
+        }
+        if (notify)
+            PostMessageW(notify, message_, 0, 0);
     }
+    bool detached;
+    {
+        std::lock_guard g(lock_);
+        detached = detached_;
+        done_ = true;
+    }
+    if (!detached)
+        winrt::uninit_apartment();
+    doneCv_.notify_all();
 }
 
-bool WeatherSource::Fetch()
+namespace {
+struct HourItem {
+    int64_t at;
+    WeatherHour hour;
+};
+void AddSunEvents(const json::JsonObject& daily, int64_t now, std::vector<HourItem>& items)
+{
+    if (items.empty())
+        return;
+    const int64_t last = items.back().at;
+    for (const wchar_t* key : {L"sunrise", L"sunset"}) {
+        auto list = daily.GetNamedArray(key);
+        for (uint32_t i = 0; i < list.Size(); ++i) {
+            int h = 0, m = 0;
+            int64_t at = Minutes(std::wstring(list.GetStringAt(i)), &h, &m);
+            if (at <= now || at >= last)
+                continue;
+            WeatherHour x;
+            wchar_t label[16];
+            swprintf_s(label, L"%d:%02d", h, m);
+            x.label = label;
+            x.event = key[4] == L'r' ? 1 : 2;
+            items.push_back({at, x});
+        }
+    }
+    std::ranges::stable_sort(items, [](const HourItem& a, const HourItem& b) { return a.at < b.at; });
+    if (items.size() > 6)
+        items.resize(6);
+}
+} // namespace
+
+bool WeatherSource::State::Fetch(bool english)
 {
     double lat = 0, lon = 0;
     std::wstring city;
-    if (!Locate(lat, lon, city)) {
+    if (!Locate(lat, lon, city, english)) {
+        if (quit_.load())
+            return false;
         std::lock_guard g(lock_);
         if (!latest_.placed) {
             latest_.ok = latest_.ok && !latest_.hours.empty();
@@ -430,7 +546,10 @@ bool WeatherSource::Fetch()
                L"&current=temperature_2m,weather_code,is_day&hourly=temperature_2m,weather_code,is_day"
                L"&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset",
                lat, lon);
-    if (!Parse(GetAny(url), o) || !o.HasKey(L"current") || !o.HasKey(L"hourly") || !o.HasKey(L"daily")) {
+    std::string forecast = GetAny(url, quit_);
+    if (quit_.load())
+        return false;
+    if (!Parse(forecast, o) || !o.HasKey(L"current") || !o.HasKey(L"hourly") || !o.HasKey(L"daily")) {
         std::lock_guard g(lock_);
         latest_.error = Tr(L"Weather unavailable");
         Log(L"weather: no forecast for %s", city.c_str());
@@ -448,11 +567,7 @@ bool WeatherSource::Fetch()
     const int64_t now = Minutes(std::wstring(current.GetNamedString(L"time", L"")));
 
     // The next hours: this one ("现在") and five more, sunrises and sunsets among them.
-    struct Item {
-        int64_t at;
-        WeatherHour hour;
-    };
-    std::vector<Item> items;
+    std::vector<HourItem> items;
     auto hourly = o.GetNamedObject(L"hourly");
     auto times = hourly.GetNamedArray(L"time"), temps = hourly.GetNamedArray(L"temperature_2m"), codes = hourly.GetNamedArray(L"weather_code"),
          days = hourly.GetNamedArray(L"is_day");
@@ -462,35 +577,15 @@ bool WeatherSource::Fetch()
         if (at + 60 <= now)
             continue;
         WeatherHour x;
-        x.label = items.empty() ? std::wstring(Tr(L"Now")) : LanguageIsEnglish() ? std::to_wstring(h) + L":00" : std::to_wstring(h) + L"时";
+        x.label = items.empty() ? std::wstring(Tr(L"Now")) : english ? std::to_wstring(h) + L":00" : std::to_wstring(h) + L"时";
         x.temp = float(temps.GetNumberAt(i));
         x.code = int(codes.GetNumberAt(i));
         x.day = days.GetNumberAt(i) != 0;
         items.push_back({at, x});
     }
     auto daily = o.GetNamedObject(L"daily");
-    if (!items.empty()) {
-        const int64_t last = items.back().at;
-        for (const wchar_t* key : {L"sunrise", L"sunset"}) {
-            auto list = daily.GetNamedArray(key);
-            for (uint32_t i = 0; i < list.Size(); ++i) {
-                int h = 0, m = 0;
-                int64_t at = Minutes(std::wstring(list.GetStringAt(i)), &h, &m);
-                if (at <= now || at >= last)
-                    continue;
-                WeatherHour x;
-                wchar_t label[16];
-                swprintf_s(label, L"%d:%02d", h, m);
-                x.label = label;
-                x.event = key[4] == L'r' ? 1 : 2;
-                items.push_back({at, x});
-            }
-        }
-        std::ranges::stable_sort(items, [](const Item& a, const Item& b) { return a.at < b.at; });
-        if (items.size() > 6)
-            items.resize(6);
-    }
-    for (const Item& i : items)
+    AddSunEvents(daily, now, items);
+    for (const HourItem& i : items)
         w.hours.push_back(i.hour);
 
     auto dates = daily.GetNamedArray(L"time"), dcodes = daily.GetNamedArray(L"weather_code"), his = daily.GetNamedArray(L"temperature_2m_max"),
@@ -499,7 +594,7 @@ bool WeatherSource::Fetch()
         int wd = 0;
         Minutes(std::wstring(dates.GetStringAt(i)) + L"T00:00", nullptr, nullptr, &wd);
         WeatherDay d;
-        d.label = i == 0 ? Tr(L"Today") : WeekName(wd);
+        d.label = i == 0 ? Tr(L"Today") : WeekName(wd, english);
         d.code = int(dcodes.GetNumberAt(i));
         d.hi = float(his.GetNumberAt(i));
         d.lo = float(los.GetNumberAt(i));
@@ -510,7 +605,11 @@ bool WeatherSource::Fetch()
     w.hi = w.days[0].hi;
     w.lo = w.days[0].lo;
     w.ok = true;
-    WriteTextFile(WeatherCachePath(), std::wstring(ToJson(w).Stringify()));
+    if (quit_.load())
+        return false;
+    WriteTextFile(cachePath_, std::wstring(ToJson(w).Stringify()));
+    if (quit_.load())
+        return false;
     Log(L"weather: %s %.0f° %s", w.city.c_str(), w.temp, WeatherCondition(w.code).c_str());
     std::lock_guard g(lock_);
     latest_ = std::move(w);

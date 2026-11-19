@@ -14,6 +14,7 @@
 #include "shell/app_catalog.h"
 #include "shell/shell_taskbar.h"
 #include "shell/app_registration.h"
+#include "shell/shell_icon.h"
 #include "shell/update_checker.h"
 #include "shell/task_model.h"
 #include "shell/notification_listener.h"
