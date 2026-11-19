@@ -61,8 +61,6 @@ public:
     void Activate(const std::wstring& key, HMONITOR monitor = nullptr); // monitor restricts cycling to this taskbar's windows
     // Middle click / "new window": start another instance.
     void Launch(const std::wstring& key);
-    // Politely close every window of the group (WM_CLOSE).
-    void CloseAll(const std::wstring& key);
     // End the entire application, including tray processes and child helpers.
     bool CanTerminate(const std::wstring& key) const;
     void Terminate(const std::wstring& key);

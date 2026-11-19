@@ -21,7 +21,7 @@ bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out,
 bool LoadAtriumIcon(const std::wstring& exePath, int sizePx, IconImage& out);
 // Resolves a shortcut and a versioned client's app/ launcher without starting it.
 std::wstring AppExecutable(const std::wstring& path);
-// An icon's picture, premultiplied BGRA (false for a monochrome icon).
+// An icon's picture, premultiplied BGRA.
 bool HIconToImage(HICON icon, IconImage& out);
 // Scales a premultiplied image into a size x size square (aspect kept, centred).
 IconImage FitToSquare(const IconImage& src, int size);

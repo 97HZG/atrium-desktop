@@ -94,6 +94,31 @@ bool ShellImage(const std::wstring& parsingName, int size, IconImage& out, bool 
     return false;
 }
 
+// Monochrome icon: double-height mask (top half = AND, bottom half = XOR).
+bool MonoIconToImage(HBITMAP maskBmp, IconImage& out)
+{
+    std::vector<uint8_t> mask;
+    int mw = 0, mh = 0;
+    if (!ReadBits(maskBmp, mw, mh, mask) || mw <= 0 || mh < 2 || (mh % 2) != 0)
+        return false;
+    const int h = mh / 2;
+    const size_t plane = size_t(mw) * size_t(h) * 4;
+    out.bgra.assign(plane, 0);
+    for (size_t i = 0; i < plane; i += 4) {
+        const bool andBit = (mask[i] | mask[i + 1] | mask[i + 2]) != 0;
+        const bool xorBit = (mask[plane + i] | mask[plane + i + 1] | mask[plane + i + 2]) != 0;
+        if (!andBit) {
+            std::copy_n(&mask[plane + i], 3, &out.bgra[i]);
+            out.bgra[i + 3] = 255;
+        } else if (xorBit) {
+            std::fill_n(&out.bgra[i], 4, uint8_t(255));
+        }
+    }
+    out.width = mw;
+    out.height = h;
+    return true;
+}
+
 } // namespace
 
 bool HIconToImage(HICON icon, IconImage& out)
@@ -102,7 +127,7 @@ bool HIconToImage(HICON icon, IconImage& out)
     if (!GetIconInfo(icon, &ii))
         return false;
     bool ok = false;
-    if (ii.hbmColor) { // monochrome icons (no colour bitmap) are not worth supporting
+    if (ii.hbmColor) {
         std::vector<uint8_t> color;
         int w = 0, h = 0;
         if (ReadBits(ii.hbmColor, w, h, color)) {
@@ -128,6 +153,8 @@ bool HIconToImage(HICON icon, IconImage& out)
             out.bgra = std::move(color);
             ok = true;
         }
+    } else if (ii.hbmMask) {
+        ok = MonoIconToImage(ii.hbmMask, out);
     }
     if (ii.hbmColor)
         DeleteObject(ii.hbmColor);
