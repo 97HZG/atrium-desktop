@@ -25,10 +25,6 @@
 #include <ranges>
 #include <set>
 
-#pragma comment(lib, "imm32.lib")
-#pragma comment(lib, "secur32.lib")
-#pragma comment(lib, "advapi32.lib")
-
 namespace atrium {
 
 namespace {

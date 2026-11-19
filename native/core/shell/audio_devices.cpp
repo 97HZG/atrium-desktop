@@ -19,8 +19,6 @@
 #include <functional>
 #include <map>
 
-#pragma comment(lib, "version.lib")
-
 namespace atrium {
 
 namespace {

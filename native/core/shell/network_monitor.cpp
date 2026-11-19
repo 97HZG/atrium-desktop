@@ -10,8 +10,6 @@
 
 #include <utility>
 
-#pragma comment(lib, "iphlpapi.lib")
-
 namespace atrium {
 
 namespace {

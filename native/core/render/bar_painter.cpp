@@ -14,8 +14,6 @@
 #include <numbers>
 #include <set>
 
-#pragma comment(lib, "dxguid.lib") // CLSID_D2D1Shadow
-
 namespace atrium {
 
 namespace {

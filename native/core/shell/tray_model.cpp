@@ -27,10 +27,6 @@
 #include <map>
 #include <set>
 
-#pragma comment(lib, "windowscodecs.lib")
-#pragma comment(lib, "version.lib")
-#pragma comment(lib, "shlwapi.lib")
-
 namespace atrium {
 
 namespace {

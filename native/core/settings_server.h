@@ -3,6 +3,7 @@
 // and a client that disconnects without committing has its preview reverted.
 #pragma once
 
+#include "host_messages.h"
 #include "settings.h"
 
 #include <windows.h>
@@ -14,13 +15,6 @@
 #include <thread>
 
 namespace atrium {
-
-// Posted to the host window when the effective settings changed; lParam is
-// unused, the host reads SettingsServer::Current().
-constexpr UINT WM_ATRIUM_SETTINGS = WM_APP + 1;
-// Sent by the pipe thread: WidgetKind in wParam, WidgetSize in lParam, both
-// scalar values. A timeout must not leave pointers to the sender's stack.
-constexpr UINT WM_ATRIUM_ADD_WIDGET = WM_APP + 9;
 
 std::wstring SettingsPipeName();
 

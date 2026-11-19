@@ -13,8 +13,6 @@
 #include <cmath>
 #include <numbers>
 
-#pragma comment(lib, "dxguid.lib") // CLSID_D2D1GaussianBlur
-
 namespace atrium {
 
 namespace {

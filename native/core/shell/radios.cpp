@@ -13,8 +13,6 @@
 #include <algorithm>
 #include <set>
 
-#pragma comment(lib, "wbemuuid.lib")
-
 namespace atrium {
 
 using namespace winrt;

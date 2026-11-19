@@ -8,8 +8,6 @@
 #include <algorithm>
 #include <map>
 
-#pragma comment(lib, "wlanapi.lib")
-
 namespace atrium {
 
 namespace {

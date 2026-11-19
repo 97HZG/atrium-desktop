@@ -6,6 +6,7 @@
 #include "bar_edge.h"
 #include "render/capture.h"
 #include "clock.h"
+#include "host_messages.h"
 #include "localization.h"
 #include "log.h"
 #include "resource.h"
@@ -63,17 +64,6 @@ using namespace atrium;
 constexpr wchar_t kHostClass[] = L"AtriumCoreHost";
 constexpr wchar_t kGuardMutex[] = L"Local\\Atrium.Guard"; // held by the guard while it runs
 constexpr wchar_t kInstanceMutex[] = L"Local\\Atrium.Core";
-constexpr UINT WM_TRAY = WM_APP + 2;
-constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.exe
-constexpr UINT WM_CATALOG = WM_APP + 4;       // the app catalog has news
-constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listener thread
-constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the icons
-constexpr UINT WM_VOLUME = WM_APP + 7;        // the default playback device's volume changed
-constexpr UINT WM_STATUS = WM_APP + 10;       // lParam: SystemStatus*, read off the UI thread
-constexpr UINT WM_UPDATE_READY = WM_APP + 11; // background package is validated and ready
-constexpr UINT WM_WIN_KEY = WM_APP + 12;      // the Windows key alone (wParam 0, winKeyStart), Win + 1..9, 0 (1..10, winNumbers)
-constexpr UINT WM_USB = WM_APP + 13;          // the device worker has queued removal notices
-constexpr UINT WM_IME_STATE = WM_APP + 20;    // the input method may have changed (ImeWatcher)
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
 constexpr UINT_PTR kDisplaySettleTimer = 0x56; // once more after a display change, the topology settled
@@ -1848,7 +1838,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         Log(L"usb: could not register for volume notifications (%lu)", GetLastError());
     SetTimer(g_app.host, kStatusTimer, kStatusMs, nullptr);
     g_app.tray->Refresh(); // the panel opens with the icons already read
-    g_app.updates = std::make_unique<UpdateChecker>(g_app.host);
+    g_app.updates = std::make_unique<UpdateChecker>(g_app.host, WM_UPDATE_READY);
     if (!g_readyEvent.empty())
         SetTimer(g_app.host, kReadyTimer, 50, nullptr);
 

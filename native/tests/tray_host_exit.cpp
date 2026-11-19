@@ -3,11 +3,6 @@
 #include <chrono>
 #include <cstdio>
 
-namespace atrium {
-bool HIconToImage(HICON, IconImage&) { return false; }
-std::wstring AppExecutable(const std::wstring& path) { return path; }
-} // namespace atrium
-
 using namespace atrium;
 
 int main()

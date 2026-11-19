@@ -8,8 +8,6 @@
 
 #include <algorithm>
 
-#pragma comment(lib, "icu.lib")
-
 namespace atrium {
 
 namespace {

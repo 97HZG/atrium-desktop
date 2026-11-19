@@ -18,8 +18,6 @@
 #include <cmath>
 #include <memory>
 
-#pragma comment(lib, "powrprof.lib")
-
 namespace atrium {
 
 namespace {

@@ -25,8 +25,6 @@
 #include <random>
 #include <thread>
 
-#pragma comment(lib, "dwmapi.lib")
-
 namespace json = winrt::Windows::Data::Json;
 
 namespace atrium {

@@ -157,13 +157,17 @@ void DownloadRelease(const json::JsonObject& release, const Version& current)
 }
 } // namespace
 
-UpdateChecker::UpdateChecker(HWND notify) : notify_(notify), stop_(CreateEventW(nullptr, TRUE, FALSE, nullptr)), cache_(UpdateCache())
+UpdateChecker::UpdateChecker(HWND notify, UINT message)
+    : notify_(notify),
+      message_(message),
+      stop_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
+      cache_(UpdateCache())
 {
     if (!stop_)
         winrt::throw_last_error();
     if (!cache_.empty() && GetFileAttributesW((cache_ + L"\\download.json").c_str()) != INVALID_FILE_ATTRIBUTES)
         StartWorker(L"--resume-update");
-    PostMessageW(notify_, WM_APP + 11, 0, 0);
+    PostMessageW(notify_, message_, 0, 0);
     worker_ = std::thread([this] { Run(); });
 }
 

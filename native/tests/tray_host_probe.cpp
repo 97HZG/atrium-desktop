@@ -16,24 +16,6 @@
 #include <string>
 #include <vector>
 
-namespace atrium {
-// The probe does not link the task model: the picture only has to exist.
-bool HIconToImage(HICON icon, IconImage& out)
-{
-    ICONINFO ii{};
-    if (!GetIconInfo(icon, &ii))
-        return false;
-    if (ii.hbmColor)
-        DeleteObject(ii.hbmColor);
-    if (ii.hbmMask)
-        DeleteObject(ii.hbmMask);
-    out.width = out.height = 1;
-    out.bgra = {0, 0, 0, 255};
-    return true;
-}
-std::wstring AppExecutable(const std::wstring& path) { return path; }
-} // namespace atrium
-
 using namespace atrium;
 
 namespace {

@@ -24,9 +24,9 @@ atrium_shader(glass.hlsl ps_5_0 PS g_GlassPS glass_ps.h)
 atrium_shader(glass.hlsl ps_5_0 PSBasic g_GlassBasicPS glass_basic_ps.h)
 atrium_shader(compare.hlsl cs_5_0 CS g_CompareCS compare_cs.h)
 atrium_shader(backdrop_edge.hlsl ps_5_0 PS g_BackdropEdgePS backdrop_edge_ps.h)
+add_custom_target(atrium_shaders DEPENDS ${shader_headers})
 
-add_executable(atrium_core WIN32
-    main.cpp
+add_library(atrium_core_lib STATIC
     bar.cpp
     near_hover.cpp
     log.cpp
@@ -85,13 +85,23 @@ add_executable(atrium_core WIN32
     render/glass_panel.cpp
     render/ui_font.cpp
     render/gpu.cpp
-    render/wifi_glyph.cpp
-    core.rc
-    core.manifest
-    ${shader_headers})
+    render/wifi_glyph.cpp)
+add_dependencies(atrium_core_lib atrium_shaders)
+# C++/WinRT headers come with the Windows SDK.
+target_include_directories(atrium_core_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${shader_out})
+target_compile_options(atrium_core_lib PRIVATE /bigobj)
+target_compile_definitions(atrium_core_lib PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+if(ATRIUM_DEVELOPMENT)
+    target_compile_definitions(atrium_core_lib PUBLIC ATRIUM_DEVELOPMENT)
+endif()
+target_link_libraries(atrium_core_lib PUBLIC
+    windowsapp d3d11 dxgi dxguid dcomp d2d1 dwrite shcore user32 gdi32 shell32 ole32
+    dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof wlanapi windowscodecs winhttp setupapi taskschd
+    iphlpapi advapi32 comctl32 icu wbemuuid secur32)
+
+add_executable(atrium_core WIN32 main.cpp core.rc core.manifest)
 # build/win-x64/<Config>/Atrium.exe
 set_target_properties(atrium_core PROPERTIES OUTPUT_NAME "Atrium" RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-target_include_directories(atrium_core PRIVATE ${shader_out})
 # The interface face (D40) next to the exe, as in the package.
 set(ui_fonts MiSans-Light.otf MiSans-Medium.otf MiSans-Demibold.otf MiSans-Semibold.otf)
 list(TRANSFORM ui_fonts PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/fonts/)
@@ -99,14 +109,5 @@ add_custom_command(TARGET atrium_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:atrium_core>/Fonts
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ui_fonts} $<TARGET_FILE_DIR:atrium_core>/Fonts
     VERBATIM)
-# C++/WinRT headers come with the Windows SDK.
 target_compile_options(atrium_core PRIVATE /bigobj)
-target_compile_definitions(atrium_core PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-if(ATRIUM_DEVELOPMENT)
-    target_compile_definitions(atrium_core PRIVATE ATRIUM_DEVELOPMENT)
-endif()
-target_include_directories(atrium_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(atrium_core PRIVATE
-    windowsapp d3d11 dxgi dcomp d2d1 dwrite shcore user32 gdi32 shell32 ole32
-    dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof wlanapi windowscodecs winhttp setupapi taskschd
-    iphlpapi advapi32 comctl32)
+target_link_libraries(atrium_core PRIVATE atrium_core_lib)

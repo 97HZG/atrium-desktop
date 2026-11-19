@@ -1,7 +1,5 @@
 // Manual integration probe. No CTest registration: --click changes foreground/menu state.
-// Compile the production adapter unchanged; omit task-model artwork/shortcut loading only.
-#include "shell/shell_taskbar.h"
-#include "shell/system_chrome.h"
+// Links atrium_core_lib directly for the production TrayModel adapter and helpers.
 #include "shell/tray_model.h"
 
 #include <objbase.h>
@@ -12,18 +10,6 @@
 #include <algorithm>
 #include <iostream>
 
-namespace atrium {
-std::wstring AppExecutable(const std::wstring& path) { return path; }
-bool LoadAtriumIcon(const std::wstring&, int, IconImage&) { return false; }
-bool LoadShellImage(const std::wstring&, int, IconImage&, bool) { return false; }
-bool HIconToImage(HICON, IconImage&) { return false; }
-bool SystemChrome::RevealForClick()
-{
-    ShowWindow(ShellTaskbar(), SW_SHOWNA);
-    return true;
-}
-void SystemChrome::ConcealAfterClick() {}
-} // namespace atrium
 using namespace atrium;
 namespace {
 constexpr UINT kResult = WM_APP + 42;

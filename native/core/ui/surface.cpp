@@ -18,8 +18,6 @@
 #include <thread>
 #include <vector>
 
-#pragma comment(lib, "dcomp.lib")
-
 namespace atrium {
 
 float PopupScale(RECT bar)

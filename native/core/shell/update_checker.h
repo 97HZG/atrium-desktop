@@ -13,7 +13,7 @@ namespace atrium {
 
 class UpdateChecker {
 public:
-    explicit UpdateChecker(HWND notify);
+    UpdateChecker(HWND notify, UINT message);
     ~UpdateChecker();
     UpdateChecker(const UpdateChecker&) = delete;
     UpdateChecker& operator=(const UpdateChecker&) = delete;
@@ -23,6 +23,7 @@ public:
 private:
     void Run();
     HWND notify_;
+    UINT message_;
     HANDLE stop_;
     std::wstring cache_;
     std::thread worker_;
