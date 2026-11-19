@@ -47,6 +47,21 @@ bool Matches(HANDLE process, const std::wstring& path, std::span<const AppProces
     });
 }
 
+std::wstring LongFolder(const std::wstring& path)
+{
+    wchar_t stack[MAX_PATH]{};
+    DWORD len = GetLongPathNameW(path.c_str(), stack, ARRAYSIZE(stack));
+    if (len > 0 && len < ARRAYSIZE(stack))
+        return std::wstring(stack, len);
+    if (len >= ARRAYSIZE(stack)) {
+        std::wstring expanded(len, L'\0');
+        len = GetLongPathNameW(path.c_str(), expanded.data(), len);
+        if (len > 0 && len < expanded.size())
+            return expanded.substr(0, len);
+    }
+    return path;
+}
+
 std::wstring NormalizeFolder(std::wstring_view folder)
 {
     std::wstring normalized;
@@ -58,7 +73,12 @@ std::wstring NormalizeFolder(std::wstring_view folder)
             continue;
         normalized.push_back(ch);
     }
-    if (!normalized.empty() && normalized.back() != L'\\')
+    if (normalized.empty())
+        return normalized;
+    if (normalized.back() != L'\\')
+        normalized.push_back(L'\\');
+    normalized = LongFolder(normalized);
+    if (normalized.back() != L'\\')
         normalized.push_back(L'\\');
     return normalized;
 }

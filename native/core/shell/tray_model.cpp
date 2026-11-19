@@ -903,7 +903,7 @@ HRESULT PointerRightClick(IUIAutomation* uia, const Found& target)
 std::wstring NormTip(const std::wstring& tip) { return tray::Key(Lower(tray::Title(tip))); }
 uint64_t Uid(const std::wstring& s)
 {
-    return s.rfind(L':') < s.size() && (s[0] == L'u' || s[0] == L'h') ? wcstoull(&s[s.rfind(L':') + 1], nullptr, 10) : ~0ull;
+    return s.rfind(L':') < s.size() && (s.starts_with(L"uid:") || s.starts_with(L"hwnd:")) ? wcstoull(&s[s.rfind(L':') + 1], nullptr, 10) : ~0ull;
 }
 
 std::vector<const TrayIcon*> PairHosted(const std::vector<HostIcon>& h, const std::vector<TrayIcon>& e, std::vector<bool>& used)

@@ -146,6 +146,20 @@ void UpdateUnread(const std::vector<std::pair<std::wstring, Row>>& rows, bool ba
     }
 }
 
+void ReadRow(IUIAutomationElement* e, std::vector<std::pair<std::wstring, Row>>& rows)
+{
+    BSTR id = nullptr, name = nullptr;
+    bool ok = e && SUCCEEDED(e->get_CachedAutomationId(&id)) && SUCCEEDED(e->get_CachedName(&name)) && name;
+    if (ok) {
+        Row r = Parse(name);
+        std::wstring key = id && *id ? id : r.chat;
+        if (!r.chat.empty())
+            rows.emplace_back(key, r);
+    }
+    SysFreeString(id);
+    SysFreeString(name);
+}
+
 } // namespace
 
 WeChatSource::WeChatSource(HWND notify, UINT msg) : notify_(notify), msg_(msg), wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr))
@@ -192,18 +206,6 @@ void WeChatSource::Run()
     // names keep the chat and the unread count, so messages are seen there too.
     std::vector<winrt::com_ptr<IUIAutomationElement>> held;
     std::wstring heldProgram;
-    auto readRow = [&](IUIAutomationElement* e, std::vector<std::pair<std::wstring, Row>>& rows) {
-        BSTR id = nullptr, name = nullptr;
-        bool ok = e && SUCCEEDED(e->get_CachedAutomationId(&id)) && SUCCEEDED(e->get_CachedName(&name)) && name;
-        if (ok) {
-            Row r = Parse(name);
-            std::wstring key = id && *id ? id : r.chat;
-            if (!r.chat.empty())
-                rows.emplace_back(key, r);
-        }
-        SysFreeString(id);
-        SysFreeString(name);
-    };
     {
         UiaWatch watch(uia.get(), wake_);
         UiaWindowWake windows(wake_, L"QWindowIcon");
@@ -237,10 +239,13 @@ void WeChatSource::Run()
                 watch.Prune();
                 std::vector<std::pair<std::wstring, Row>> rows;
                 bool found = false;
+                bool anyHung = false;
                 for (const auto& [p, program] : procs) {
                     for (HWND h : WeChatWindows(p)) {
-                        if (IsHungAppWindow(h))
+                        if (IsHungAppWindow(h)) {
+                            anyHung = true;
                             continue;
+                        }
                         winrt::com_ptr<IUIAutomationElement> root;
                         winrt::com_ptr<IUIAutomationElementArray> all;
                         if (FAILED(uia->ElementFromHandle(h, root.put())) || !root ||
@@ -252,7 +257,7 @@ void WeChatSource::Run()
                         for (int i = 0; i < n; ++i) {
                             winrt::com_ptr<IUIAutomationElement> e;
                             all->GetElement(i, e.put());
-                            readRow(e.get(), rows);
+                            ReadRow(e.get(), rows);
                             if (e)
                                 elements.push_back(std::move(e));
                         }
@@ -272,7 +277,7 @@ void WeChatSource::Run()
                         break;
                 }
                 bool fromHeld = false;
-                if (!found && !held.empty() && !procs.empty()) {
+                if (!found && !anyHung && !held.empty() && !procs.empty()) {
                     // In the tray: the rows held from when the window was shown.
                     for (size_t i = 0; i < held.size();) {
                         winrt::com_ptr<IUIAutomationElement> fresh;
@@ -280,7 +285,7 @@ void WeChatSource::Run()
                             held.erase(held.begin() + ptrdiff_t(i)); // gone (WeChat restarted, the list rebuilt)
                             continue;
                         }
-                        readRow(fresh.get(), rows);
+                        ReadRow(fresh.get(), rows);
                         ++i;
                     }
                     found = fromHeld = !rows.empty();
@@ -295,10 +300,10 @@ void WeChatSource::Run()
                     held.clear();
                     unread.clear();
                     baseline = false; // after a restart its list is a new baseline
-                } else if (!found) {
+                } else if (!found && !anyHung) {
                     report(1, L"WeChat's chat list is not readable (open its window once)");
                     baseline = false;
-                } else {
+                } else if (found) {
                     if (state < 2 || (state == 3 && !fromHeld))
                         Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());
                     state = fromHeld ? 3 : 2;

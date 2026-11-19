@@ -10,10 +10,15 @@
 #include <objbase.h>
 #include <winreg.h>
 
+#include <winrt/Windows.Data.Json.h>
+#include <winrt/Windows.Foundation.Collections.h>
+
 #include <chrono>
 #include <optional>
 #include <thread>
 #include <vector>
+
+namespace json = winrt::Windows::Data::Json;
 
 namespace atrium {
 
@@ -77,27 +82,24 @@ bool SetAutoHide(bool on, UINT timeoutMs = 1500, UINT sendFlags = SMTO_ABORTIFHU
 // area grows: not every app lays itself out again. Each one is stretched to its work area, its
 // invisible borders outside it as Windows places a maximized window. A moment later: the shell
 // moves the work area after the call returns.
-void RefitMaximizedLater()
+void RefitMaximized()
 {
-    std::thread([] {
-        Sleep(500);
-        EnumWindows(
-            [](HWND w, LPARAM) -> BOOL {
-                MONITORINFO mi{sizeof(mi)};
-                RECT r{}, f{};
-                if (!IsWindowVisible(w) || !IsZoomed(w) || !GetMonitorInfoW(MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST), &mi) || !GetWindowRect(w, &r) ||
-                    FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &f, sizeof(f))))
-                    return TRUE;
-                const RECT& a = mi.rcWork;
-                if (f.left <= a.left + 1 && f.top <= a.top + 1 && f.right >= a.right - 1 && f.bottom >= a.bottom - 1)
-                    return TRUE;
-                Log(L"chrome: a maximized window stopped short of the work area (%ld,%ld,%ld,%ld); fitted", f.left, f.top, f.right, f.bottom);
-                SetWindowPos(w, nullptr, r.left + a.left - f.left, r.top + a.top - f.top, (r.right + a.right - f.right) - (r.left + a.left - f.left),
-                             (r.bottom + a.bottom - f.bottom) - (r.top + a.top - f.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+    EnumWindows(
+        [](HWND w, LPARAM) -> BOOL {
+            MONITORINFO mi{sizeof(mi)};
+            RECT r{}, f{};
+            if (!IsWindowVisible(w) || !IsZoomed(w) || !GetMonitorInfoW(MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST), &mi) || !GetWindowRect(w, &r) ||
+                FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &f, sizeof(f))))
                 return TRUE;
-            },
-            0);
-    }).detach();
+            const RECT& a = mi.rcWork;
+            if (f.left <= a.left + 1 && f.top <= a.top + 1 && f.right >= a.right - 1 && f.bottom >= a.bottom - 1)
+                return TRUE;
+            Log(L"chrome: a maximized window stopped short of the work area (%ld,%ld,%ld,%ld); fitted", f.left, f.top, f.right, f.bottom);
+            SetWindowPos(w, nullptr, r.left + a.left - f.left, r.top + a.top - f.top, (r.right + a.right - f.right) - (r.left + a.left - f.left),
+                         (r.bottom + a.bottom - f.bottom) - (r.top + a.top - f.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+            return TRUE;
+        },
+        0);
 }
 
 void ShowTaskbars()
@@ -188,27 +190,28 @@ bool SystemChrome::UndoLeftover()
     if (left.empty())
         return false;
     Log(L"chrome: undoing the last run's changes: %s", left.c_str());
-    if (left.find(L"\"autoHide\":true") != std::wstring::npos)
+    json::JsonObject o{nullptr};
+    if (!json::JsonObject::TryParse(left, o)) {
+        ShowTaskbars();
+        DeleteFileW(StatePath().c_str());
+        return true;
+    }
+    auto flag = [&](const wchar_t* key) { return o.HasKey(key) && o.GetNamedValue(key).ValueType() == json::JsonValueType::Boolean && o.GetNamedBoolean(key); };
+    if (flag(L"autoHide"))
         SetAutoHide(false);
     ShowTaskbars();
-    if (left.find(L"\"quiet\":true") != std::wstring::npos && QuietProfile() == kQuietProfile) {
+    if (flag(L"quiet") && QuietProfile() == kQuietProfile) {
         // The profile Atrium changed it from. Files from before this field have
         // no record and are restored to unrestricted, as they were then.
         std::wstring restore = kQuietProfileOff;
-        const std::wstring key = L"\"quietRestore\":\"";
-        const size_t at = left.find(key);
-        if (at != std::wstring::npos) {
-            const size_t begin = at + key.size();
-            const size_t end = left.find(L'"', begin);
-            if (end != std::wstring::npos && end > begin)
-                restore.assign(left, begin, end - begin);
-        }
+        if (o.HasKey(L"quietRestore") && o.GetNamedValue(L"quietRestore").ValueType() == json::JsonValueType::String)
+            restore = std::wstring(o.GetNamedString(L"quietRestore"));
         if (restore.empty() || restore == kQuietProfile)
             restore = kQuietProfileOff;
         SetQuietProfile(restore.c_str());
         Log(L"chrome: Do Not Disturb restored (%s)", restore.c_str());
     }
-    if (left.find(L"\"autoPlayBanner\":true") != std::wstring::npos) {
+    if (flag(L"autoPlayBanner")) {
         if (SetAutoPlayBanner(true))
             Log(L"chrome: AutoPlay banners restored");
         else
@@ -259,6 +262,7 @@ void SystemChrome::RestoreForExit()
     g_taskbarVisibility.stopping = true;
     SetTaskbarHidden(false);
     SetBannersHidden(false);
+    StopRefit(true);
 }
 
 void SystemChrome::SetTaskbarHidden(bool hidden)
@@ -274,12 +278,13 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
         if (const auto autoHide = QueryAutoHide(); autoHide.has_value() && !*autoHide) {
             SetAutoHide(true);
             autoHideOurs_ = true;
-            RefitMaximizedLater();
+            ScheduleRefit();
         }
         Save();
         HideTaskbars();
         Watch();
     } else {
+        StopRefit(false);
         if (hook_)
             UnhookWinEvent(hook_);
         hook_ = nullptr;
@@ -387,7 +392,7 @@ void SystemChrome::Enforce()
             autoHideOurs_ = true;
             Save();
             Log(L"chrome: the taskbar was no longer auto-hide; set again");
-            RefitMaximizedLater();
+            ScheduleRefit();
         }
         HideTaskbars();
         Watch(); // Explorer may have been restarted
@@ -460,29 +465,64 @@ void CALLBACK SystemChrome::OnShow(HWINEVENTHOOK, DWORD, HWND w, LONG obj, LONG,
     }
 }
 
+void SystemChrome::ScheduleRefit()
+{
+    {
+        std::lock_guard lock(refitMutex_);
+        if (refitStop_)
+            return;
+        refitPending_ = true;
+        refitAt_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        if (!refitThread_.joinable())
+            refitThread_ = std::thread([this] { RefitWorker(); });
+    }
+    refitCv_.notify_one();
+}
+
+void SystemChrome::StopRefit(bool stop)
+{
+    {
+        std::lock_guard lock(refitMutex_);
+        refitStop_ = refitStop_ || stop;
+        refitPending_ = false;
+    }
+    refitCv_.notify_all();
+    if (stop && refitThread_.joinable())
+        refitThread_.join();
+}
+
+void SystemChrome::RefitWorker()
+{
+    for (;;) {
+        std::unique_lock lock(refitMutex_);
+        refitCv_.wait(lock, [this] { return refitStop_ || refitPending_; });
+        if (refitStop_)
+            break;
+        const auto deadline = refitAt_;
+        if (refitCv_.wait_until(lock, deadline, [this, deadline] { return refitStop_ || !refitPending_ || refitAt_ != deadline; }))
+            continue;
+        refitPending_ = false;
+        lock.unlock();
+        if (g_taskbarVisibility.hidden && !g_taskbarVisibility.stopping)
+            RefitMaximized();
+    }
+}
+
 void SystemChrome::Save() const
 {
     if (!g_taskbarVisibility.hidden && !autoHideOurs_ && !quietOurs_ && !autoPlayBannerOurs_) {
         DeleteFileW(StatePath().c_str());
         return;
     }
-    std::wstring json = L"{\"taskbarHidden\":";
-    json += g_taskbarVisibility.hidden ? L"true" : L"false";
-    json += L",\"autoHide\":";
-    json += autoHideOurs_ ? L"true" : L"false";
-    json += L",\"quiet\":";
-    json += quietOurs_ ? L"true" : L"false";
-    if (quietOurs_ && !quietBefore_.empty()) {
-        // The profile to put back after a crash or a killed process. Profile names
-        // are plain ASCII identifiers, so they need no JSON escaping.
-        json += L",\"quietRestore\":\"";
-        json += quietBefore_;
-        json += L"\"";
-    }
+    json::JsonObject o;
+    o.SetNamedValue(L"taskbarHidden", json::JsonValue::CreateBooleanValue(g_taskbarVisibility.hidden.load()));
+    o.SetNamedValue(L"autoHide", json::JsonValue::CreateBooleanValue(autoHideOurs_.load()));
+    o.SetNamedValue(L"quiet", json::JsonValue::CreateBooleanValue(quietOurs_));
+    if (quietOurs_ && !quietBefore_.empty())
+        o.SetNamedValue(L"quietRestore", json::JsonValue::CreateStringValue(quietBefore_));
     if (autoPlayBannerOurs_)
-        json += L",\"autoPlayBanner\":true";
-    json += L"}";
-    WriteTextFile(StatePath(), json);
+        o.SetNamedValue(L"autoPlayBanner", json::JsonValue::CreateBooleanValue(true));
+    WriteTextFile(StatePath(), std::wstring(o.Stringify()));
 }
 
 } // namespace atrium

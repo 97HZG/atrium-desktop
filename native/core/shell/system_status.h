@@ -6,6 +6,9 @@
 #include "status.h"
 
 #include <windows.h>
+#include <endpointvolume.h>
+
+#include <winrt/base.h>
 
 #include <string>
 #include <thread>
@@ -25,19 +28,20 @@ public:
 
 private:
     void Run();
+    void WatchVolume();
+    void UnwatchVolume();
     HWND notify_;
     UINT readyMessage_, volumeMessage_;
     HANDLE quit_, wake_;
+    winrt::com_ptr<IAudioEndpointVolume> watched_;
+    winrt::com_ptr<IAudioEndpointVolumeCallback> callback_;
+    std::wstring watchedEndpointId_;
     std::thread thread_;
 };
 // Changes the default playback volume by `delta` percent points; returns the new level.
 int AdjustVolume(int delta);
 void SetVolume(int percent); // 0..100; unmutes above 0
 bool ToggleMute();
-// Posts `msg` to `hwnd` whenever the default playback device's volume or mute
-// changes (volume keys, other programs). Call again after the default device
-// changed: it follows the current one. Call on an STA/MTA thread with COM.
-void WatchVolume(HWND hwnd, UINT msg);
 
 enum class PowerAction { Sleep, Hibernate, Restart, Shutdown };
 bool CanHibernate();

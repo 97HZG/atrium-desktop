@@ -13,7 +13,11 @@
 #include <windows.h>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <string>
+#include <thread>
 
 namespace atrium {
 
@@ -93,6 +97,9 @@ public:
 
 private:
     static void HideTaskbars();
+    void ScheduleRefit();
+    void StopRefit(bool stop);
+    void RefitWorker();
     void Watch();
     void Save() const;
     static void CALLBACK OnShow(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD);
@@ -107,6 +114,12 @@ private:
     bool exiting_ = false;
     HWINEVENTHOOK hook_ = nullptr;
     DWORD hookedPid_ = 0;
+    std::mutex refitMutex_;
+    std::condition_variable refitCv_;
+    bool refitStop_ = false;
+    bool refitPending_ = false;
+    std::chrono::steady_clock::time_point refitAt_;
+    std::thread refitThread_;
 };
 
 // Do Not Disturb: the user's selected profile, e.g.

@@ -4,6 +4,7 @@
 
 #include "log.h"
 #include "shell/shell_icon.h"
+#include "win32_path.h"
 
 #include <windows.h>
 #include <audiopolicy.h>
@@ -15,7 +16,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cwctype>
 #include <functional>
 #include <map>
 
@@ -60,13 +60,6 @@ std::wstring Prop(IPropertyStore* props, const PROPERTYKEY& key)
     if (SUCCEEDED(props->GetValue(key, &v)) && v.vt == VT_LPWSTR && v.pwszVal)
         s = v.pwszVal;
     PropVariantClear(&v);
-    return s;
-}
-
-std::wstring Lower(std::wstring s)
-{
-    for (wchar_t& c : s)
-        c = wchar_t(std::towlower(c));
     return s;
 }
 
@@ -145,7 +138,7 @@ std::wstring SessionKey(IAudioSessionControl2* s, std::wstring* path = nullptr)
     std::wstring p = ProcessPath(pid);
     if (path)
         *path = p;
-    return p.empty() ? L"#pid:" + std::to_wstring(pid) : Lower(p);
+    return p.empty() ? L"#pid:" + std::to_wstring(pid) : FoldCase(p);
 }
 
 } // namespace
@@ -160,7 +153,7 @@ std::vector<AudioOutput> ListAudioOutputs()
             return list;
         std::wstring def;
         winrt::com_ptr<IMMDevice> d;
-        if (SUCCEEDED(e->GetDefaultAudioEndpoint(eRender, eMultimedia, d.put()))) {
+        if (SUCCEEDED(e->GetDefaultAudioEndpoint(eRender, eConsole, d.put()))) {
             LPWSTR id = nullptr;
             if (SUCCEEDED(d->GetId(&id)) && id) {
                 def = id;

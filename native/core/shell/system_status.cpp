@@ -22,7 +22,7 @@ namespace atrium {
 
 namespace {
 
-winrt::com_ptr<IAudioEndpointVolume> DefaultVolume(std::wstring* name = nullptr)
+winrt::com_ptr<IAudioEndpointVolume> DefaultVolume(std::wstring* name = nullptr, std::wstring* id = nullptr)
 {
     winrt::com_ptr<IMMDeviceEnumerator> devices;
     winrt::com_ptr<IMMDevice> device;
@@ -31,6 +31,12 @@ winrt::com_ptr<IAudioEndpointVolume> DefaultVolume(std::wstring* name = nullptr)
         FAILED(devices->GetDefaultAudioEndpoint(eRender, eConsole, device.put())) ||
         FAILED(device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, nullptr, volume.put_void())))
         return nullptr;
+    if (id) {
+        LPWSTR rawId = nullptr;
+        if (SUCCEEDED(device->GetId(&rawId)) && rawId)
+            *id = rawId;
+        CoTaskMemFree(rawId);
+    }
     winrt::com_ptr<IPropertyStore> props;
     if (name && SUCCEEDED(device->OpenPropertyStore(STGM_READ, props.put()))) {
         PROPVARIANT v;
@@ -57,22 +63,34 @@ private:
     UINT msg_;
 };
 
-winrt::com_ptr<IAudioEndpointVolume> g_watched;
-winrt::com_ptr<VolumeCallback> g_callback;
-
 } // namespace
 
-void WatchVolume(HWND hwnd, UINT msg)
+void SystemStatusReader::UnwatchVolume()
 {
-    if (g_watched && g_callback)
-        g_watched->UnregisterControlChangeNotify(g_callback.get());
-    g_watched = DefaultVolume();
-    if (!g_watched)
+    if (watched_ && callback_)
+        watched_->UnregisterControlChangeNotify(callback_.get());
+    watched_ = nullptr;
+    watchedEndpointId_.clear();
+}
+
+void SystemStatusReader::WatchVolume()
+{
+    std::wstring endpointId;
+    winrt::com_ptr<IAudioEndpointVolume> volume = DefaultVolume(nullptr, &endpointId);
+    if (!volume || endpointId.empty()) {
+        UnwatchVolume();
         return;
-    if (!g_callback)
-        g_callback = winrt::make_self<VolumeCallback>(hwnd, msg);
-    if (FAILED(g_watched->RegisterControlChangeNotify(g_callback.get())))
-        g_watched = nullptr;
+    }
+    float level = 0;
+    if (watched_ && endpointId == watchedEndpointId_ && SUCCEEDED(watched_->GetMasterVolumeLevelScalar(&level)))
+        return;
+    UnwatchVolume();
+    if (!callback_)
+        callback_ = winrt::make<VolumeCallback>(notify_, volumeMessage_);
+    if (SUCCEEDED(volume->RegisterControlChangeNotify(callback_.get()))) {
+        watched_ = std::move(volume);
+        watchedEndpointId_ = std::move(endpointId);
+    }
 }
 
 SystemStatusReader::SystemStatusReader(HWND notify, UINT readyMessage, UINT volumeMessage)
@@ -100,23 +118,15 @@ void SystemStatusReader::Run()
     SetThreadDescription(GetCurrentThread(), L"Atrium system status");
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     HANDLE events[] = {quit_, wake_};
-    std::wstring watched;
-    bool watching = false;
     while (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0 + 1) {
         auto status = std::make_unique<SystemStatus>(QuerySystemStatus());
-        if (!watching || status->audioDevice != watched) {
-            WatchVolume(notify_, volumeMessage_);
-            watched = status->audioDevice;
-            watching = true;
-        }
+        WatchVolume();
         if (WaitForSingleObject(quit_, 0) == WAIT_OBJECT_0)
             break;
         PostOwned(notify_, readyMessage_, 0, std::move(status));
     }
-    if (g_watched && g_callback)
-        g_watched->UnregisterControlChangeNotify(g_callback.get());
-    g_watched = nullptr;
-    g_callback = nullptr;
+    UnwatchVolume();
+    callback_ = nullptr;
     winrt::uninit_apartment();
 }
 
