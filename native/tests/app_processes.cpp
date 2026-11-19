@@ -1,6 +1,7 @@
 #include "shell/app_processes.h"
 
 #include <windows.h>
+#include <shlobj.h>
 #include <tlhelp32.h>
 
 #include <filesystem>
@@ -99,6 +100,47 @@ struct Fixture {
     }
 };
 
+void CheckSharedFolders()
+{
+    auto known = [](REFKNOWNFOLDERID id) {
+        PWSTR raw = nullptr;
+        const HRESULT hr = SHGetKnownFolderPath(id, 0, nullptr, &raw);
+        const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> guard(raw, CoTaskMemFree);
+        Require(SUCCEEDED(hr) && raw != nullptr, "query known folder path");
+        return fs::path(raw);
+    };
+    wchar_t buffer[MAX_PATH]{};
+    Require(GetWindowsDirectoryW(buffer, ARRAYSIZE(buffer)) != 0, "read Windows directory");
+    const fs::path windowsDir(buffer);
+    Require(GetSystemDirectoryW(buffer, ARRAYSIZE(buffer)) != 0, "read System32 directory");
+    const fs::path systemDir(buffer);
+    Require(GetTempPathW(ARRAYSIZE(buffer), buffer) != 0, "read temporary directory");
+    const fs::path tempDir(buffer);
+    const fs::path programFiles = known(FOLDERID_ProgramFiles);
+    const fs::path downloads = known(FOLDERID_Downloads);
+    const fs::path localAppData = known(FOLDERID_LocalAppData);
+
+    Require(IsSharedAppFolder(L""), "empty folder is treated as shared");
+    Require(IsSharedAppFolder(L"C:\\"), "drive root is treated as shared");
+    Require(IsSharedAppFolder(L"c:/"), "drive root with forward slash is treated as shared");
+    Require(IsSharedAppFolder(windowsDir.wstring()), "Windows directory root is shared");
+    Require(!IsSharedAppFolder((windowsDir / L"CustomApp").wstring()), "Windows subdirectory outside System32/SysWOW64 is allowed");
+    Require(IsSharedAppFolder(systemDir.wstring()), "System32 is shared");
+    Require(IsSharedAppFolder((systemDir / L"WindowsPowerShell\\v1.0\\").wstring()), "System32 subdirectory is shared");
+    Require(IsSharedAppFolder((systemDir.wstring() + L"/WindowsPowerShell//v1.0")), "normalized System32 subdirectory is shared");
+    if (GetSystemWow64DirectoryW(buffer, ARRAYSIZE(buffer)) != 0) {
+        const fs::path sysWow64(buffer);
+        Require(IsSharedAppFolder(sysWow64.wstring()), "SysWOW64 is shared");
+        Require(IsSharedAppFolder((sysWow64 / L"WindowsPowerShell\\v1.0\\").wstring()), "SysWOW64 subdirectory is shared");
+    }
+    Require(IsSharedAppFolder(programFiles.wstring()), "Program Files root is shared");
+    Require(IsSharedAppFolder(downloads.wstring()), "Downloads root is shared");
+    Require(IsSharedAppFolder(tempDir.wstring()), "Temp root is shared");
+    Require(!IsSharedAppFolder(L"C:\\Program Files\\MyApp\\"), "dedicated Program Files app folder is not shared");
+    Require(!IsSharedAppFolder((programFiles / L"MyApp").wstring()), "Program Files app subfolder is not shared");
+    Require(!IsSharedAppFolder((localAppData / L"Programs\\MyApp\\").wstring()), "LocalAppData Programs app folder is not shared");
+}
+
 void CheckTermination(const fs::path& self)
 {
     Require(!CanTerminateApp({}), "missing identity is disabled");
@@ -107,6 +149,7 @@ void CheckTermination(const fs::path& self)
     Require(CanTerminateApp({{}, L"package!app"}), "packaged apps can use AUMID alone");
 
     Fixture fixture;
+    Require(!IsSharedAppFolder((fixture.root / L"app").wstring()), "isolated test app folder is not shared");
     const auto app = fixture.Copy(self, L"app", L"probe.exe");
     // The app starts a helper from its own folder, which starts another program from elsewhere.
     const auto helper = fixture.Copy(self, L"app\\bin", L"helper.exe");
@@ -161,6 +204,7 @@ int wmain(int argc, wchar_t** argv)
         }
         wchar_t self[32768]{};
         Require(GetModuleFileNameW(nullptr, self, ARRAYSIZE(self)) != 0, "read test executable path");
+        CheckSharedFolders();
         CheckTermination(self);
         std::cout << "PASS: application termination, background helpers and process isolation\n";
         return 0;

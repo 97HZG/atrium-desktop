@@ -5,6 +5,7 @@
 
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace atrium {
 
@@ -15,6 +16,7 @@ struct AppProcessIdentity {
 
 // Shared Windows hosts cannot be ended as if they were an application.
 bool CanTerminateApp(const AppProcessIdentity& app);
+bool IsSharedAppFolder(std::wstring_view folder);
 bool TerminateAppProcesses(std::span<const AppProcessIdentity> apps);
 
 } // namespace atrium
