@@ -190,13 +190,17 @@ void SettingsServer::Serve(HANDLE pipe)
             }
             message.append(buffer.data(), bytes);
         } while (error == ERROR_MORE_DATA && message.size() < 1024 * 1024);
+        if (error == ERROR_MORE_DATA) {
+            Log(L"pipe: request exceeded 1 MB, disconnecting");
+            goto done;
+        }
 
         std::string reply = Handle(message);
         ResetEvent(ov.hEvent);
         if (!WriteFile(pipe, reply.data(), DWORD(reply.size()), &bytes, &ov)) {
             error = GetLastError();
             if (error != ERROR_IO_PENDING || !Wait(pipe, ov, quit_, bytes, error))
-                goto done;
+                break;
         }
     }
 done:

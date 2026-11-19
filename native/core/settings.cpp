@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -402,6 +403,8 @@ bool SetStartOnLogin(bool enabled)
 {
     if (IsDevelopmentBuild())
         return true;
+    static std::mutex mutex;
+    std::lock_guard lock(mutex);
     constexpr auto kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
     wchar_t exe[32768]{};
     DWORD length = GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe)));

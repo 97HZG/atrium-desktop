@@ -8,13 +8,24 @@
 #include <vector>
 
 namespace atrium {
+struct CornerMaskKey {
+    long long outerReach = 0, outerA = 0, innerReach = 0, innerA = 0, stroke = 0;
+    bool operator==(const CornerMaskKey&) const = default;
+};
+
 struct CornerMask {
-    CornerProfile outer, inner;
-    float stroke = 0;
+    CornerMaskKey key;
     size_t bytes = 0;
     winrt::com_ptr<IUnknown> domain;
     winrt::com_ptr<ID2D1Bitmap> bitmap;
 };
+
+inline CornerProfile QuantizeCorner(CornerProfile p, long long& reachKey, long long& aKey)
+{
+    reachKey = std::llround(p.reach * 8.f);
+    aKey = std::llround(p.a * 64.f);
+    return {float(reachKey) / 8.f, float(aKey) / 64.f};
+}
 
 struct CornerMaskCache {
     std::vector<CornerMask> entries;
@@ -63,11 +74,14 @@ inline ID2D1Bitmap* ContinuousMask(ID2D1RenderTarget* target, float width, float
         return nullptr;
     stroke = std::clamp(stroke, 0.f, std::min(width, height) * 0.5f);
     auto domain = CornerResourceDomain(target);
-    const auto outer = CornerFor(width, height, radius);
-    const auto inner = CornerFor(std::max(0.f, width - 2 * stroke), std::max(0.f, height - 2 * stroke), std::max(0.f, radius - stroke));
+    CornerMaskKey key;
+    const auto outer = QuantizeCorner(CornerFor(width, height, radius), key.outerReach, key.outerA);
+    const auto inner = QuantizeCorner(CornerFor(std::max(0.f, width - 2 * stroke), std::max(0.f, height - 2 * stroke), std::max(0.f, radius - stroke)),
+                                      key.innerReach, key.innerA);
+    key.stroke = std::llround(stroke * 8.f);
+    stroke = float(key.stroke) / 8.f;
     for (auto& entry : cache)
-        if (entry.domain == domain && entry.outer.reach == outer.reach && entry.outer.a == outer.a && entry.inner.reach == inner.reach &&
-            entry.inner.a == inner.a && entry.stroke == stroke)
+        if (entry.domain == domain && entry.key == key)
             return entry.bitmap.get();
     // A corner stamp has a small stretchable centre. Animated lengths reuse it
     // without allocating or rasterizing a full-size bitmap every frame.
@@ -91,7 +105,7 @@ inline ID2D1Bitmap* ContinuousMask(ID2D1RenderTarget* target, float width, float
         cache.erase(cache.begin());
     }
     bytes += pixels.size();
-    cache.push_back({outer, inner, stroke, pixels.size(), std::move(domain), std::move(bitmap)});
+    cache.push_back({key, pixels.size(), std::move(domain), std::move(bitmap)});
     return cache.back().bitmap.get();
 }
 

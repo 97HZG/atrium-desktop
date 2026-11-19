@@ -148,7 +148,8 @@ struct App {
 App g_app;
 std::wstring g_readyEvent;
 
-Bar& ActiveBar() { return *g_app.activeBar; }
+Bar& ActiveBar() { return *(g_app.activeBar ? g_app.activeBar : g_app.bar.get()); }
+Bar* WinKeyBar() { return g_app.barOn.value_or(true) ? (g_app.activeBar ? g_app.activeBar : g_app.bar.get()) : nullptr; }
 
 template<class Action> void ForBars(Action action)
 {
@@ -213,10 +214,11 @@ void OpenSettings(const wchar_t* page = nullptr)
     std::wstring dir = ExeDir();
     std::vector<std::wstring> candidates = {dir + L"\\Settings\\Atrium.Settings.exe", dir + L"\\Atrium.Settings.exe"};
     // A development build (native\build\win-x64\Release): the packaged settings app of the same repository.
-    for (std::wstring up = dir; up.size() > 3;) {
-        up = up.substr(0, up.find_last_of(L'\\'));
-        candidates.push_back(
-            up + (IsDevelopmentBuild() ? L"\\dist\\Development\\Atrium\\Settings\\Atrium.Settings.exe" : L"\\dist\\Atrium\\Settings\\Atrium.Settings.exe"));
+    for (std::wstring up = dir; IsDevelopmentBuild(); candidates.push_back(up + L"\\dist\\Development\\Atrium\\Settings\\Atrium.Settings.exe")) {
+        const size_t pos = up.find_last_of(L'\\');
+        if (pos == std::wstring::npos || pos <= 2)
+            break;
+        up.resize(pos);
     }
     for (const std::wstring& exe : candidates) {
         if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES)
@@ -696,30 +698,42 @@ void EnsureGuard()
     Log(L"guard: started (%lu)", pi.dwProcessId);
 }
 
+HWND FindProcessWindow(const wchar_t* className, DWORD pid)
+{
+    for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, className, nullptr)) != nullptr;) {
+        DWORD owner = 0;
+        if (GetWindowThreadProcessId(w, &owner); owner == pid)
+            return w;
+    }
+    return nullptr;
+}
+
 int RunGuard(DWORD pid)
 {
     HANDLE held = CreateMutexW(nullptr, TRUE, kGuardMutex);
+    if (held && GetLastError() == ERROR_ALREADY_EXISTS)
+        if (const DWORD wait = WaitForSingleObject(held, 5000); wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+            CloseHandle(held);
+            held = nullptr;
+        }
+    auto release = [](HANDLE h) {
+        ReleaseMutex(h);
+        CloseHandle(h);
+    };
+    std::unique_ptr<void, decltype(release)> guard(held, release);
     HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!process)
         return 1;
     HWND host = nullptr;
-    int silent = 0; // checks in a row without an answer
-    bool shown = false;
-    int traySilent = 0;  // the same for Atrium's tray host window (shell/tray_host.h)
-    bool trayBack = false;
+    int silent = 0, traySilent = 0; // checks in a row without an answer (and Atrium's tray host)
+    bool shown = false, trayBack = false;
     while (WaitForSingleObject(process, 2000) == WAIT_TIMEOUT) {
         // Apps' tray calls go to the tray host first and wait for it. Not answering
         // (Atrium hung, or its host thread), Explorer's taskbar goes in front of it so
         // that they reach Explorer; the host moves back once it runs again.
-        HWND trayHost = nullptr;
-        for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, L"Shell_TrayWnd", nullptr)) != nullptr;) {
-            DWORD owner = 0;
-            GetWindowThreadProcessId(w, &owner);
-            if (owner == pid)
-                trayHost = w;
-        }
-        DWORD_PTR trayAnswer = 0;
-        const bool trayAlive = !trayHost || SendMessageTimeoutW(trayHost, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 1500, &trayAnswer);
+        HWND trayHost = FindProcessWindow(L"Shell_TrayWnd", pid);
+        DWORD_PTR answer = 0;
+        const bool trayAlive = !trayHost || SendMessageTimeoutW(trayHost, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 1500, &answer);
         traySilent = trayAlive ? 0 : traySilent + 1;
         if (traySilent >= 2) {
             if (HWND shell = ShellTaskbar(pid))
@@ -731,16 +745,8 @@ int RunGuard(DWORD pid)
             Log(L"guard: Atrium's tray host (%lu) responds again", pid);
             trayBack = false;
         }
-        if (!host || !IsWindow(host)) {
-            host = nullptr;
-            for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, kHostClass, nullptr)) != nullptr;) {
-                DWORD owner = 0;
-                GetWindowThreadProcessId(w, &owner);
-                if (owner == pid)
-                    host = w;
-            }
-        }
-        DWORD_PTR answer = 0;
+        if (!host || !IsWindow(host))
+            host = FindProcessWindow(kHostClass, pid);
         const bool alive = !host || SendMessageTimeoutW(host, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &answer);
         silent = alive ? 0 : silent + 1;
         if (silent >= 4 && !shown) {
@@ -761,10 +767,6 @@ int RunGuard(DWORD pid)
         if (SystemChrome::UndoLeftover())
             Log(L"guard: Atrium (%lu) ended without putting Windows back (exit 0x%08lX): done here", pid, code);
         CoUninitialize();
-    }
-    if (held) {
-        ReleaseMutex(held);
-        CloseHandle(held);
     }
     return 0;
 }
@@ -1225,6 +1227,15 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
     g_app.notes->PanelsChanged();
 }
 
+void UpdateDesktopMonitor(bool notify)
+{
+    HMONITOR desktop = ResolveDisplay(ConnectedDisplays(), g_app.desktopDisplay);
+    g_app.widgets->SetMonitor(desktop, true);
+    g_app.stage->SetMonitor(desktop, true);
+    if (notify)
+        g_app.notes->PanelsChanged();
+}
+
 LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (g_app.tasks && g_app.tasks->HandleMessage(m, w, l))
@@ -1267,39 +1278,34 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_OPEN_SETTINGS: OpenSettings(); return 0;
-    case WM_IME_STATE: {
+    case WM_IME_STATE:
         // A finished read from the watcher's thread (see ImeWatcher::Run).
-        auto sample = TakePosted<ImeWatcher::Sample>(l);
-        if (sample)
+        if (auto sample = TakePosted<ImeWatcher::Sample>(l))
             OnImeSample(*sample);
         return 0;
-    }
     case WM_WIN_KEY:
-        if (!g_app.barOn.value_or(true))
+        if (Bar* bar = WinKeyBar(); !bar)
             return 0;
-        if (w) {
+        else if (w) {
             // Win + digit: the bar's app at that place, as a click on it. The keys never reached a
             // window of ours (the foreground lock holds): share the foreground thread's input state.
-            {
-                HWND fg = GetForegroundWindow();
-                ForegroundAttach attach(fg);
-                AllowSetForegroundWindow(ASFW_ANY);
-                g_app.bar->ActivateIndex(int(w) - 1);
-            }
-            return 0;
-        }
-        if (g_app.start->Visible()) {
+            HWND fg = GetForegroundWindow();
+            ForegroundAttach attach(fg);
+            AllowSetForegroundWindow(ASFW_ANY);
+            bar->ActivateIndex(int(w) - 1);
+        } else if (g_app.start->Visible())
             g_app.start->Close(false);
-        } else {
+        else {
             // The keyboard's: whatever was in front gets the focus back when it closes. The key
             // never reached a window of ours, so the foreground lock holds: share the foreground
             // thread's input state for the moment the menu takes the focus (as the tray does).
+            g_app.activeBar = bar;
             HWND fg = GetForegroundWindow();
             {
                 ForegroundAttach attach(fg);
                 if (g_app.displaySettings.startWithBar)
-                    g_app.bar->Reveal(); // kept up while the menu is open (keepShown)
-                g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), fg);
+                    bar->Reveal(); // kept up while the menu is open (keepShown)
+                g_app.start->Open(bar->BarRect(), bar->EntryRect(L"#start"), fg);
             }
             g_app.notes->PanelsChanged();
             if (GetForegroundWindow() != g_app.start->Hwnd())
@@ -1539,19 +1545,12 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         // the topology still changes; renderers set up then could keep drawing to a gone output
         // (#66: blank bars until a restart). Once more when it has settled.
         SetTimer(h, kDisplaySettleTimer, 2000, nullptr);
-        {
-            HMONITOR desktop = ResolveDisplay(ConnectedDisplays(), g_app.desktopDisplay);
-            g_app.widgets->SetMonitor(desktop, true);
-            g_app.stage->SetMonitor(desktop, true);
-            g_app.notes->PanelsChanged();
-        }
+        UpdateDesktopMonitor(true);
         return 0;
     case WM_SETTINGCHANGE:
         if (w == SPI_SETWORKAREA && g_app.displaysReady) {
             SyncDisplayBars(g_app.displaySettings, true, true);
-            HMONITOR desktop = ResolveDisplay(ConnectedDisplays(), g_app.desktopDisplay);
-            g_app.widgets->SetMonitor(desktop, true);
-            g_app.stage->SetMonitor(desktop, true);
+            UpdateDesktopMonitor(false);
         }
         return 0;
     case WM_CLOSE:
