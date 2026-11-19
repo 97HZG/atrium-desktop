@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Atrium.Settings;
@@ -266,8 +268,18 @@ foreach (var (_, baseObj, _, patchObj, rawPatch) in cases)
     proc.StandardInput.WriteLine(req.ToJsonString());
 }
 proc.StandardInput.Close();
-var respLines = await readTask;
-proc.WaitForExit();
+var timeout = TimeSpan.FromSeconds(15);
+List<string> respLines;
+try
+{
+    respLines = await readTask.WaitAsync(timeout);
+    await proc.WaitForExitAsync().WaitAsync(timeout);
+}
+catch (TimeoutException ex)
+{
+    try { proc.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+    throw new TimeoutException($"display_settings_tests --normalize timed out after {timeout.TotalSeconds:0}s.", ex);
+}
 Require(proc.ExitCode == 0, $"Core normalizer exited with code {proc.ExitCode}.");
 Require(respLines.Count == cases.Count, $"Expected {cases.Count} normalizer responses, got {respLines.Count}.");
 
@@ -292,6 +304,42 @@ static bool JsonEqual(JsonNode? a, JsonNode? b)
     return false;
 }
 
+static void AssertSchemaCompliance(string label, JsonObject cs, JsonObject schemaKeys)
+{
+    foreach (var (k, node) in schemaKeys)
+    {
+        var s = node!.AsObject();
+        string type = s["type"]!.GetValue<string>();
+        bool hasKey = cs.TryGetPropertyValue(k, out var val);
+        if (label == "empty:default")
+        {
+            bool canOmit = s["omitWhenEmpty"]?.GetValue<bool>() == true || s["optional"]?.GetValue<bool>() == true;
+            Require((hasKey || canOmit) && (!hasKey || JsonEqual(val, s["default"])),
+                $"Default mismatch [{label}] for {k}: got {val?.ToJsonString() ?? "<omitted>"}");
+        }
+        bool ok = type switch
+        {
+            "number" => hasKey && val is JsonValue nv && nv.GetValueKind() == JsonValueKind.Number &&
+                double.Parse(nv.ToJsonString(), CultureInfo.InvariantCulture) is double d &&
+                d >= s["min"]!.GetValue<double>() && d <= s["max"]!.GetValue<double>(),
+            "enum" => (!hasKey || val is null)
+                ? s["omitWhenEmpty"]?.GetValue<bool>() == true
+                : val is JsonValue ev && ev.TryGetValue(out string? es) &&
+                    ((s["omitWhenEmpty"]?.GetValue<bool>() == true && es == "") ||
+                     s["values"]!.AsArray().Any(v => v!.GetValue<string>() == es)),
+            "tint" => hasKey && val is JsonValue tv && tv.TryGetValue(out string? ts) && TintRegex().IsMatch(ts),
+            "bool" => hasKey && val is JsonValue bv && bv.TryGetValue(out bool _),
+            "string" or "language" => hasKey && val is JsonValue sv && sv.TryGetValue(out string? _),
+            "stringArray" => hasKey && val is JsonArray sa && sa.All(e => e is JsonValue jv && jv.TryGetValue(out string? _)),
+            "pins" => (!hasKey || val is null)
+                ? s["optional"]?.GetValue<bool>() == true
+                : val is JsonArray pa && pa.Count <= (s["maxCount"]?.GetValue<int>() ?? 64),
+            _ => throw new InvalidOperationException($"Unknown schema type {type} for {k}")
+        };
+        Require(ok, $"Schema violation [{label}] for {k} ({type}): {val?.ToJsonString() ?? "<omitted>"}");
+    }
+}
+
 for (int i = 0; i < cases.Count; i++)
 {
     var (label, _, baseSettings, patchObj, rawPatch) = cases[i];
@@ -313,6 +361,7 @@ for (int i = 0; i < cases.Count; i++)
     var cs = BarSettings.FromJson(patchObj, baseSettings).ToJson();
     if (!JsonEqual(cs, cpp))
         throw new InvalidOperationException($"Differential mismatch [{label}]\nC#:  {cs.ToJsonString()}\nC++: {cpp.ToJsonString()}");
+    AssertSchemaCompliance(label, cs, schemaKeys);
     if (label == "pins:65") Require(cs["pins"]!.AsArray().Count == 64, "Pins must cap at 64.");
     if (label == "v1:migration") Require(cs["notifyListener"]!.GetValue<bool>(), "v1 migration must keep notifyListener=true.");
     if (label == "v2:no-migration") Require(!cs["notifyListener"]!.GetValue<bool>(), "v2 must apply notifyListener=false.");
@@ -345,6 +394,8 @@ internal partial class Program
     private static readonly string[] LangSamples = ["auto", "zh", "zh-Hans", "en", "fr-CA", "-en", "en--US", "bad tag", "中文"];
     [GeneratedRegex(@"^\|\s*`(\w+)`\s*\|", RegexOptions.Multiline)]
     private static partial Regex DocKeyRegex();
+    [GeneratedRegex(@"^#[0-9a-fA-F]{6}$")]
+    private static partial Regex TintRegex();
     [GeneratedRegex(@"new\(""[^""]+"",\s*Loc\.T\(""[^""]+""\),\s*([0-9.]+),\s*([0-9.]+),\s*[0-9.]+,\s*""[^""]*"",\s*s\s*=>\s*s\.(\w+)")]
     private static partial Regex SliderRegex();
 }
