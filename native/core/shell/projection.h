@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace atrium {
@@ -34,6 +35,7 @@ public:
 private:
     struct State;
     std::shared_ptr<State> state_;
+    std::thread worker_;
 };
 
 // Blocks (worker thread): projects the desktop to the display; false if Windows refused.

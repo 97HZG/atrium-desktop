@@ -8,6 +8,8 @@
 #include <winrt/Windows.UI.ViewManagement.h>
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <map>
 #include <mutex>
 #include <set>
@@ -21,6 +23,23 @@ using namespace winrt::Windows::Devices::Enumeration;
 using winrt::Windows::UI::ViewManagement::ProjectionManager;
 
 namespace {
+struct ApartmentGuard {
+    ApartmentGuard() { init_apartment(apartment_type::multi_threaded); }
+    ~ApartmentGuard() { uninit_apartment(); }
+    ApartmentGuard(const ApartmentGuard&) = delete;
+    ApartmentGuard& operator=(const ApartmentGuard&) = delete;
+};
+
+template<class Async> bool AwaitAsync(const Async& op, const wchar_t* what)
+{
+    auto status = op.wait_for(std::chrono::seconds(8));
+    if (status == winrt::Windows::Foundation::AsyncStatus::Completed)
+        return true;
+    op.Cancel();
+    Log(L"cast: %s %s (%d)", what, status == winrt::Windows::Foundation::AsyncStatus::Started ? L"timed out" : L"failed", int(status));
+    return false;
+}
+
 struct DisplaySubscription {
     DeviceWatcher watcher{nullptr};
     event_token added{}, updated{}, removed{}, completed{}, stopped{};
@@ -60,16 +79,17 @@ struct DisplaySubscription {
 
 struct DisplayFinder::State {
     mutable std::mutex lock;
+    std::condition_variable cv;
     std::map<std::wstring, std::wstring> found; // id -> name
-    std::shared_ptr<DisplaySubscription> subscription;
     HWND hwnd = nullptr;
     UINT msg = 0;
     bool searching = false;
+    bool stop = false;
     unsigned gen = 0;
     void Notify(unsigned expected)
     {
         std::lock_guard g(lock);
-        if (gen == expected && hwnd)
+        if (!stop && gen == expected && hwnd)
             PostMessageW(hwnd, msg, 0, 0);
     }
 };
@@ -88,46 +108,51 @@ void DisplayFinder::Start(HWND hwnd, UINT msg)
         state_->hwnd = hwnd;
         state_->msg = msg;
         state_->searching = true;
+        state_->stop = false;
         gen = ++state_->gen;
     }
     std::weak_ptr<State> weak = state_;
-    std::thread([weak, gen] {
-        init_apartment(apartment_type::multi_threaded);
+    worker_ = std::thread([weak, gen] {
         try {
-            auto subscription = std::make_shared<DisplaySubscription>();
+            ApartmentGuard apartment;
+            DisplaySubscription subscription;
             auto w = DeviceInformation::CreateWatcher(ProjectionManager::GetDeviceSelector());
-            subscription->watcher = w;
+            subscription.watcher = w;
             auto changed = [weak, gen](auto&& apply) {
                 if (auto s = weak.lock()) {
                     {
                         std::lock_guard g(s->lock);
-                        if (s->gen != gen)
+                        if (s->gen != gen || s->stop)
                             return;
                         apply(*s);
                     }
                     s->Notify(gen);
                 }
             };
-            subscription->added = w.Added([changed](const DeviceWatcher&, const DeviceInformation& d) {
+            subscription.added = w.Added([changed](const DeviceWatcher&, const DeviceInformation& d) {
                 std::wstring id(d.Id()), name(d.Name());
                 changed([&](State& s) { s.found[id] = name; });
             });
-            subscription->updated = w.Updated([](const DeviceWatcher&, const DeviceInformationUpdate&) {}); // needed for the enumeration to complete
-            subscription->removed = w.Removed([changed](const DeviceWatcher&, const DeviceInformationUpdate& u) {
+            subscription.updated = w.Updated([](const DeviceWatcher&, const DeviceInformationUpdate&) {}); // needed for the enumeration to complete
+            subscription.removed = w.Removed([changed](const DeviceWatcher&, const DeviceInformationUpdate& u) {
                 std::wstring id(u.Id());
                 changed([&](State& s) { s.found.erase(id); });
             });
-            subscription->completed = w.EnumerationCompleted(
+            subscription.completed = w.EnumerationCompleted(
                 [changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
-            subscription->stopped =
+            subscription.stopped =
                 w.Stopped([changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
-            // Start before publishing. If Stop invalidates this generation while
-            // Start is in progress, the unpublished subscription stops itself.
-            w.Start();
             if (auto s = weak.lock()) {
-                std::lock_guard g(s->lock);
-                if (s->gen == gen)
-                    s->subscription = subscription;
+                bool stopped = false;
+                {
+                    std::lock_guard g(s->lock);
+                    stopped = s->stop || s->gen != gen;
+                }
+                if (!stopped) {
+                    w.Start();
+                    std::unique_lock lk(s->lock);
+                    s->cv.wait(lk, [&] { return s->stop || s->gen != gen; });
+                }
             }
         } catch (...) {
             Log(L"cast: watching for wireless displays failed");
@@ -141,20 +166,21 @@ void DisplayFinder::Start(HWND hwnd, UINT msg)
                 s->Notify(gen);
             }
         }
-        // The apartment stays: the watcher lives on in the multithreaded one.
-    }).detach();
+    });
 }
 
 void DisplayFinder::Stop()
 {
-    std::shared_ptr<DisplaySubscription> subscription;
     {
         std::lock_guard g(state_->lock);
         ++state_->gen;
+        state_->stop = true;
         state_->hwnd = nullptr;
         state_->searching = false;
-        subscription = std::move(state_->subscription);
     }
+    state_->cv.notify_all();
+    if (worker_.joinable())
+        worker_.join();
 }
 
 std::vector<WirelessDisplay> DisplayFinder::Displays() const
@@ -176,9 +202,15 @@ bool DisplayFinder::Searching() const
 bool ProjectTo(const std::wstring& id)
 {
     try {
-        DeviceInformation d = DeviceInformation::CreateFromIdAsync(id).get();
+        auto createOp = DeviceInformation::CreateFromIdAsync(id);
+        if (!AwaitAsync(createOp, L"create"))
+            return false;
+        DeviceInformation d = createOp.GetResults();
         // No views of our own: Windows projects the desktop.
-        ProjectionManager::StartProjectingAsync(0, 0, d).get();
+        auto projOp = ProjectionManager::StartProjectingAsync(0, 0, d);
+        if (!AwaitAsync(projOp, L"projecting"))
+            return false;
+        projOp.GetResults();
         Log(L"cast: projecting");
         return true;
     } catch (const hresult_error& e) {
@@ -192,7 +224,10 @@ bool ProjectTo(const std::wstring& id)
 bool StopProjecting()
 {
     try {
-        ProjectionManager::StopProjectingAsync(0, 0).get();
+        auto stopOp = ProjectionManager::StopProjectingAsync(0, 0);
+        if (!AwaitAsync(stopOp, L"stopping"))
+            return false;
+        stopOp.GetResults();
         Log(L"cast: stopped");
         return true;
     } catch (...) {

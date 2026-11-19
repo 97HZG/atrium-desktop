@@ -81,6 +81,15 @@ private:
     void ShowPage(Page page);
     void SetSliderAt(const std::wstring& id, float x);
     void SetBrightnessAsync(int percent);
+    void OnProjected(WPARAM w, LPARAM l);
+    void BumpGenerations()
+    {
+        ++radioGen_;
+        ++audioGen_;
+        ++scanGen_;
+        ++castGen_;
+        connecting_.clear();
+    }
     float Hover(Canvas& c, const std::wstring& id, bool on);
     float MainHeight() const;
     float PageHeight(Page page) const;
@@ -147,6 +156,7 @@ private:
     DisplayFinder finder_;
     std::vector<WirelessDisplay> displays_;
     std::wstring projecting_, connecting_; // display ids
+    unsigned castGen_ = 0;
     ProjectionMode mode_ = ProjectionMode::Unknown;
     int monitors_ = 1;
 };

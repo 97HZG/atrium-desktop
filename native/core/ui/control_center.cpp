@@ -37,7 +37,7 @@ constexpr UINT WM_CC_RADIOS = WM_APP + 0x52;   // lParam RadioRead*
 constexpr UINT WM_CC_BRIGHT = WM_APP + 0x53;   // the brightness worker is done (wParam: the value it set last)
 constexpr UINT WM_CC_AUDIO = WM_APP + 0x54;    // lParam AudioRead*
 constexpr UINT WM_CC_DISPLAYS = WM_APP + 0x55; // the wireless displays in range changed
-constexpr UINT WM_CC_PROJECTED = WM_APP + 0x56; // wParam 1 projecting, 0 refused; lParam std::wstring* the display (null: stopped)
+constexpr UINT WM_CC_PROJECTED = WM_APP + 0x56; // wParam (gen << 1) | ok, lParam std::wstring* the display (null: stopped)
 constexpr UINT WM_CC_RADIO_SET = WM_APP + 0x57;
 constexpr UINT WM_CC_OUTPUT_SET = WM_APP + 0x58;
 
@@ -151,9 +151,7 @@ void ControlCenter::Place()
 
 void ControlCenter::Open(RECT anchor, RECT bar)
 {
-    ++radioGen_;
-    ++audioGen_;
-    ++scanGen_;
+    BumpGenerations();
     anchor_ = anchor;
     bar_ = bar;
     hover_.clear();
@@ -192,9 +190,7 @@ void ControlCenter::Close()
     if (!surface_.Visible())
         return;
     KillTimer(surface_.Hwnd(), kStatusTimer);
-    ++radioGen_;
-    ++audioGen_;
-    ++scanGen_;
+    BumpGenerations();
     radioPending_ = audioPending_ = scanPending_ = false;
     radioDevices_ = audioIcons_ = scanRescan_ = false;
     finder_.Stop();
@@ -1087,14 +1083,14 @@ void ControlCenter::Activate(const std::wstring& id)
         connecting_ = displays_[i].id;
         HWND h = surface_.Hwnd();
         std::wstring target = connecting_;
-        OnWorker([h, target] {
+        OnWorker([h, target, gen = castGen_] {
             bool ok = ProjectTo(target);
-            PostOwned(h, WM_CC_PROJECTED, ok ? 1 : 0, std::make_unique<std::wstring>(target));
+            PostOwned(h, WM_CC_PROJECTED, (WPARAM(gen) << 1) | WPARAM(ok ? 1 : 0), std::make_unique<std::wstring>(target));
         });
         surface_.Invalidate();
     } else if (id == L"castoff") {
         HWND h = surface_.Hwnd();
-        OnWorker([h] { PostMessageW(h, WM_CC_PROJECTED, StopProjecting() ? 1 : 0, 0); });
+        OnWorker([h, gen = castGen_] { PostMessageW(h, WM_CC_PROJECTED, (WPARAM(gen) << 1) | WPARAM(StopProjecting() ? 1 : 0), 0); });
     } else if (id.starts_with(L"mode:")) {
         const ProjectionMode modes[4] = {ProjectionMode::Internal, ProjectionMode::Clone, ProjectionMode::Extend, ProjectionMode::External};
         ProjectionMode m = modes[std::clamp(int(std::stoul(id.substr(5))), 0, 3)];
@@ -1194,6 +1190,23 @@ void ControlCenter::BrightnessChanged(int percent)
     brightness_ = percent;
     if (!surface_.Visible())
         return;
+    surface_.Invalidate();
+}
+
+void ControlCenter::OnProjected(WPARAM w, LPARAM l)
+{
+    auto d = TakePosted<std::wstring>(l);
+    if (unsigned(w >> 1) != castGen_)
+        return;
+    connecting_.clear();
+    if (w & 1) {
+        projecting_ = d ? *d : std::wstring{};
+    } else if (surface_.Visible()) {
+        // Windows refused (or the display wants a PIN): its own panel takes over.
+        Close();
+        SendWinK();
+        return;
+    }
     surface_.Invalidate();
 }
 
@@ -1300,22 +1313,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
         surface_.Invalidate();
         return true;
     }
-    case WM_CC_PROJECTED: {
-        auto d = TakePosted<std::wstring>(l);
-        connecting_.clear();
-        if (d && w) {
-            projecting_ = *d;
-        } else if (!d && w) {
-            projecting_.clear();
-        } else if (surface_.Visible()) {
-            // Windows refused (or the display wants a PIN): its own panel takes over.
-            Close();
-            SendWinK();
-            return true;
-        }
-        surface_.Invalidate();
-        return true;
-    }
+    case WM_CC_PROJECTED: OnProjected(w, l); return true;
     case WM_CC_BRIGHT:
         brightBusy_ = false;
         if (brightPending_ >= 0 && brightPending_ != int(w))
