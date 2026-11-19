@@ -1,7 +1,9 @@
 <Project>
   <!-- Code style and quality are part of the build (.editorconfig): any violation fails it. -->
   <PropertyGroup>
-    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <AnalysisLevel>10.0-recommended</AnalysisLevel>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
