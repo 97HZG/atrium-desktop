@@ -109,12 +109,21 @@ std::wstring BaseName(const std::wstring& path)
 
 bool IsRemoteShare(const std::wstring& path)
 {
-    if (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\')
+    size_t offset = 0;
+    if (path.starts_with(L"\\\\?\\") || path.starts_with(L"\\\\.\\")) {
+        if (path.starts_with(L"\\\\?\\") && path.size() >= 8 && _wcsnicmp(path.c_str() + 4, L"UNC\\", 4) == 0)
+            return true;
+        offset = 4;
+    } else if (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\') {
         return true; // \\server\share
-    if (path.size() >= 3 && path[1] == L':' && (path[2] == L'\\' || path[2] == L'/')) {
-        const wchar_t root[4] = {path[0], L':', L'\\', 0};
-        const UINT type = GetDriveTypeW(root);
-        return type == DRIVE_REMOTE || type == DRIVE_NO_ROOT_DIR;
+    }
+    if (path.size() >= offset + 3 && path[offset + 1] == L':' && (path[offset + 2] == L'\\' || path[offset + 2] == L'/')) {
+        const wchar_t drive = path[offset];
+        if ((drive >= L'A' && drive <= L'Z') || (drive >= L'a' && drive <= L'z')) {
+            const wchar_t root[4] = {drive, L':', L'\\', 0};
+            const UINT type = GetDriveTypeW(root);
+            return type == DRIVE_REMOTE || type == DRIVE_NO_ROOT_DIR;
+        }
     }
     return false;
 }
@@ -205,7 +214,6 @@ std::vector<DestEntry> ParseDestList(const std::vector<BYTE>& raw)
     std::vector<DestEntry> entries;
     if (raw.size() < 32)
         return entries;
-    const int version = Read<int>(raw, 0);
     size_t at = 32;
     while (at + 130 <= raw.size()) {
         short pathChars = Read<short>(raw, at + 128);
@@ -228,9 +236,7 @@ std::vector<DestEntry> ParseDestList(const std::vector<BYTE>& raw)
         }
         if (!entry.path.empty())
             entries.push_back(std::move(entry));
-        at += recordSize + 4 + size_t(store < 0 ? 0 : store);
-        if (version == 1 && entries.size() > 10000)
-            break;
+        at += recordSize + 4 + size_t(store);
     }
     int pinnedCount = 0;
     for (const DestEntry& entry : entries)
