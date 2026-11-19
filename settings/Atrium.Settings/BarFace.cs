@@ -359,13 +359,15 @@ internal static class TextMetrics
 
     public static double Line(TextBlock t)
     {
-        var key = (t.FontFamily.Source, t.FontSize, (int)t.FontWeight.Weight);
+        double size = Math.Round(t.FontSize * 4.0) / 4.0;
+        if (size <= 0) size = t.FontSize;
+        var key = (t.FontFamily.Source, size, (int)t.FontWeight.Weight);
         if (Lines.TryGetValue(key, out double h)) return h;
-        if (Lines.Count >= 256) Lines.Clear(); // sizes in a glide are all different: bounded, not a cache of every one
+        if (Lines.Count > 256) Lines.Clear(); // sizes in a glide are all different: bounded, not a cache of every one
         var probe = new TextBlock
         {
             FontFamily = t.FontFamily,
-            FontSize = t.FontSize,
+            FontSize = size,
             FontWeight = t.FontWeight,
             Text = "Ag",
             IsTextScaleFactorEnabled = false,

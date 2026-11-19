@@ -23,7 +23,7 @@ namespace Atrium.Settings;
 public sealed partial class MainWindow
 {
     private ModuleScene? _startScene, _trayScene, _imeScene, _statusScene, _clockScene;
-    private bool _minimized; // the scenes stand still: nothing of theirs is on screen
+    private bool _scenesPaused; // the scenes stand still: nothing of theirs is on screen
 
     private ModuleScene? SceneFor(int page) => page switch
     {
@@ -53,10 +53,17 @@ public sealed partial class MainWindow
     private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
     {
         if (args.DidPositionChange) UpdateWindowMinimumSize();
-        bool minimized = sender.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
-        if (minimized == _minimized) return;
-        _minimized = minimized;
-        foreach (var scene in Scenes()) scene.Wake();
+        UpdateScenesPause(!sender.IsVisible ? false : null);
+    }
+
+    private void OnWindowVisibilityChanged(object sender, WindowVisibilityChangedEventArgs args) => UpdateScenesPause(args.Visible);
+
+    private void UpdateScenesPause(bool? visible = null)
+    {
+        bool paused = !(visible ?? AppWindow.IsVisible) || AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+        if (paused == _scenesPaused) return;
+        _scenesPaused = paused;
+        foreach (var scene in Scenes()) { if (paused) scene.Pause(); else scene.Resume(); }
     }
 
     private void StopModules()
@@ -229,13 +236,8 @@ public sealed partial class MainWindow
         return g;
     }
 
-    private static Path RingPath(double width) => new()
-    {
-        IsHitTestVisible = false,
-        StrokeThickness = width,
-        StrokeStartLineCap = PenLineCap.Round,
-        StrokeEndLineCap = PenLineCap.Round,
-    };
+    private static Path RingPath(double width) =>
+        new() { IsHitTestVisible = false, StrokeThickness = width, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
 
     // ---- A page's scene: the picture, the bar and the popup above it ----
 
@@ -264,9 +266,10 @@ public sealed partial class MainWindow
         private BarGeometry? _barFrom, _barTo;
         private double _barT = 1;
         private bool _barDark;
-        protected bool Active;
-        protected double Now;
-        private bool _ticking, _open, _popPending;
+        protected bool Active { get; private set; }
+        protected double Now { get; set; }
+        protected bool Ticking { get; private set; }
+        private bool _open, _popPending;
         private long _last;
         private int _posted, _applied;
         private string _postedKey = "";
@@ -293,7 +296,7 @@ public sealed partial class MainWindow
             Face = new BarFace(_barLayer, MaxPreviewApps);
             foreach (var icon in Face.Icons) icon.SetBinding(Image.SourceProperty, new Binding { Path = new PropertyPath(nameof(PinVm.Icon)) });
             Marks.RenderTransform = _marksScale;
-            _worker = new LatestWorker<GlassJob>(Render);
+            _worker = new LatestWorker<GlassJob>(Render, (j, _) => M.DispatcherQueue.TryEnqueue(() => RenderFailed(j)));
         }
 
         // ---- What a scene says ----
@@ -309,6 +312,8 @@ public sealed partial class MainWindow
         protected virtual void Refreshed() { }
         protected virtual void PoppedIn() { }
         protected virtual void Left() { }
+        protected virtual void Paused() { }
+        protected virtual void Resumed() { }
         protected virtual StatusLook BarStatus() => StatusLook.Current();
 
         protected bool HasFrame => _shown != null;
@@ -343,26 +348,9 @@ public sealed partial class MainWindow
             if (Fit()) Kick();
         }
 
-        public void Leave()
-        {
-            if (!Active) return;
-            Active = false;
-            StopTicking();
-            Left();
-        }
-
-        public void Stop()
-        {
-            Leave();
-            _worker.Stop();
-        }
-
-        public void Resize()
-        {
-            if (!Active) return;
-            _postedKey = "";
-            if (Fit()) Kick();
-        }
+        public void Leave() { if (!Active) return; Active = false; StopTicking(); Left(); }
+        public void Stop() { Leave(); _worker.Stop(); }
+        public void Resize() { if (!Active) return; _postedKey = ""; if (Fit()) Kick(); }
 
         public void Refresh()
         {
@@ -433,23 +421,20 @@ public sealed partial class MainWindow
 
         protected void Kick()
         {
-            if (!Active || _ticking || M._minimized) return;
-            _ticking = true;
+            if (!Active || Ticking || M._scenesPaused) return;
+            Ticking = true;
             _last = Environment.TickCount64;
             CompositionTarget.Rendering += Tick;
         }
 
-        // The window was minimized or restored.
-        public void Wake()
-        {
-            if (M._minimized) StopTicking();
-            else Kick();
-        }
+        // The window was minimized, hidden, or restored.
+        public void Pause() { if (Active) { StopTicking(); Paused(); } }
+        public void Resume() { if (Active && !M._scenesPaused) { Resumed(); Kick(); } }
 
         private void StopTicking()
         {
-            if (!_ticking) return;
-            _ticking = false;
+            if (!Ticking) return;
+            Ticking = false;
             CompositionTarget.Rendering -= Tick;
         }
 
@@ -496,7 +481,7 @@ public sealed partial class MainWindow
         private void Render(GlassJob j)
         {
             long start = System.Diagnostics.Stopwatch.GetTimestamp();
-            if (Picture(j, j.Rs) is not { } picture) return;
+            if (Picture(j, j.Rs) is not { } picture) { M.DispatcherQueue.TryEnqueue(() => RenderFailed(j)); return; }
             var (bg, key) = picture;
             var spec = GlassSpec.For(j.Material, j.Scale * j.Rs);
             var next = new Dictionary<(GlassTile, GlassSpec, string), GlassOverlay>();
@@ -562,21 +547,23 @@ public sealed partial class MainWindow
             LayoutBar(bar);
             _shown = state;
             Arrange(state, 0);
-            if (_popPending)
-            {
-                _popPending = false;
-                PopIn();
-            }
+            if (_popPending) { _popPending = false; PopIn(); }
+            Kick();
+        }
+
+        private void RenderFailed(GlassJob j)
+        {
+            if (!Active || j.Id <= _applied) return;
+            _applied = j.Id;
+            _postedLow = false;
+            if (_shown == null) { _shown = (((BarGeometry, object))j.State).Item2; _popPending = false; }
             Kick();
         }
 
         private static void Show(Image image, GlassTile t, GlassOverlay o, double rs)
         {
             if (image.Source is not WriteableBitmap bmp || bmp.PixelWidth != o.Width || bmp.PixelHeight != o.Height)
-            {
-                bmp = new WriteableBitmap(o.Width, o.Height);
-                image.Source = bmp;
-            }
+                image.Source = bmp = new WriteableBitmap(o.Width, o.Height);
             using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(o.Pixels, 0, o.Pixels.Length);
             bmp.Invalidate();
             double w = o.Width / rs, h = o.Height / rs;
@@ -669,11 +656,7 @@ public sealed partial class MainWindow
         // The popup closes and opens again (a choice of where it opens): `between` runs while it is away.
         protected void Replay(Action between)
         {
-            if (!_open || !HasFrame)
-            {
-                between();
-                return;
-            }
+            if (!_open || !HasFrame) { between(); return; }
             PopOut();
             var timer = M.DispatcherQueue.CreateTimer();
             timer.Interval = TimeSpan.FromMilliseconds(160);
@@ -1123,10 +1106,10 @@ public sealed partial class MainWindow
             _prev = "";
             _changed = 0;
             Face.ShowIme(Glyphs[0]);
-            _tick.Start();
+            if (!M._scenesPaused) _tick.Start();
         }
 
-        protected override void Left() => _tick.Stop();
+        protected override void Left() => _tick.Stop(); protected override void Paused() => _tick.Stop(); protected override void Resumed() => _tick.Start();
 
         protected override bool Arrange(object state, double dt)
         {
@@ -1155,19 +1138,15 @@ public sealed partial class MainWindow
         private readonly TextBlock _battGlyph, _battTitle, _battSub, _castGlyph, _castTitle, _castSub, _stageGlyph, _stageTitle, _stageSub;
         // The sliders.
         private readonly LevelRow _bright, _sound;
-        private readonly Border _chevron;
-        private readonly TextBlock _chevronGlyph;
+        private readonly Border _chevron; private readonly TextBlock _chevronGlyph;
         // The levels the demonstration moves, and the ring's motion (BarPainter's StatusMotion).
+        private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _tick;
+        private StatusLook? _lastReal;
         private double _start, _volumeUntil, _brightUntil, _volumeMix, _brightMix, _fill = -1, _speed;
         private int _volume = 40, _brightness = 45;
 
         private sealed record Frame(double Left, double Top);
-
-        private sealed class LevelRow
-        {
-            public required TextBlock Title, Value, Glyph;
-            public required Border Track, Fill;
-        }
+        private sealed class LevelRow { public required TextBlock Title, Value, Glyph; public required Border Track, Fill; }
 
         public StatusScene(MainWindow m) : base(m, m.StatusStage, m.StatusCanvas)
         {
@@ -1211,6 +1190,9 @@ public sealed partial class MainWindow
             _chevronGlyph = Symbol("\uE76C", 9.5, _inks[5].Text);
             Marks.Children.Add(_chevron);
             Marks.Children.Add(_chevronGlyph);
+            _tick = m.DispatcherQueue.CreateTimer();
+            _tick.Interval = TimeSpan.FromMilliseconds(250);
+            _tick.Tick += (_, _) => { if (NeedsKick(Environment.TickCount64, StatusLook.Current())) Kick(); };
         }
 
         private LevelRow NewRow(PanelInk ink, string title, string glyph)
@@ -1236,11 +1218,9 @@ public sealed partial class MainWindow
         // ControlCenter::MainShapes: connections; battery over casting; Stage Manager; brightness; sound.
         private static readonly Rect[] Shapes =
         [
-            new(0, 0, (CW - CGap) / 2, TopH),
-            new((CW - CGap) / 2 + CGap, 0, (CW - CGap) / 2, (TopH - CGap) / 2),
+            new(0, 0, (CW - CGap) / 2, TopH), new((CW - CGap) / 2 + CGap, 0, (CW - CGap) / 2, (TopH - CGap) / 2),
             new((CW - CGap) / 2 + CGap, (TopH - CGap) / 2 + CGap, (CW - CGap) / 2, (TopH - CGap) / 2),
-            new(0, TopH + CGap, CW, StageH),
-            new(0, TopH + CGap + StageH + CGap, CW, SliderH),
+            new(0, TopH + CGap, CW, StageH), new(0, TopH + CGap + StageH + CGap, CW, SliderH),
             new(0, TopH + CGap + StageH + CGap + SliderH + CGap, CW, SliderH),
         ];
 
@@ -1254,28 +1234,45 @@ public sealed partial class MainWindow
 
         protected override void Entered()
         {
-            _start = Environment.TickCount64;
-            _volumeUntil = _brightUntil = _volumeMix = _brightMix = 0;
-            _fill = -1;
-            _speed = 0;
-            _volume = 40;
-            _brightness = 45;
+            (_start, _volumeUntil, _brightUntil, _volumeMix, _brightMix, _speed) = (Environment.TickCount64, 0, 0, 0, 0, 0);
+            (_fill, _volume, _brightness, _lastReal) = (-1, 40, 45, null);
+            if (!M._scenesPaused) _tick.Start();
         }
+
+        protected override void Left() => _tick.Stop(); protected override void Paused() => _tick.Stop(); protected override void Resumed() => _tick.Start();
 
         // The demonstration: the volume up, the brightness up, the volume down, the brightness down,
         // as dragging the sliders does; each change shows on the ring for a while.
         private static double Ramp(double t, double at, double from, double to)
+        { double u = Math.Clamp((t - at) / 700, 0, 1); return from + (to - from) * u * u * (3 - 2 * u); }
+
+        private static (int Volume, int Brightness) DemoLevels(double t, bool laptop) =>
+            ((int)Math.Round(t < 4000 ? Ramp(t, 800, 40, 80) : Ramp(t, 6400, 80, 40)),
+             laptop ? (int)Math.Round(t < 7000 ? Ramp(t, 3600, 45, 85) : Ramp(t, 9200, 85, 45)) : 45);
+
+        private static bool InRamp(double t, bool laptop) =>
+            (t >= 800 && t <= 1500) || (t >= 6400 && t <= 7100) || (laptop && ((t >= 3600 && t <= 4300) || (t >= 9200 && t <= 9900)));
+
+        private bool NeedsKick(long now, StatusLook real)
         {
-            double u = Math.Clamp((t - at) / 700, 0, 1);
-            return from + (to - from) * u * u * (3 - 2 * u);
+            if (Ticking) return false;
+            if (!HasFrame || real != _lastReal || _volumeMix > 0.001 || _brightMix > 0.001 || Math.Abs(_speed) > 0.001) return true;
+            if ((_volumeUntil > 0 && now >= _volumeUntil) || (_brightUntil > 0 && now >= _brightUntil)) return true;
+            if (!IsOpen) return false;
+            double t = Math.Max(0, now - _start) % Loop;
+            return InRamp(t, real.Battery) || DemoLevels(t, real.Battery) != (_volume, _brightness);
         }
 
         protected override StatusLook BarStatus() => Look();
 
-        private StatusLook Look()
+        private StatusLook Look() => StatusLook.Current() is var r
+            ? r with { Fill = _fill < 0 ? r.Fill : _fill, Volume = _volume, VolumeMix = _volumeMix, BrightMix = _brightMix } : null!;
+
+        private static bool ApproachSnap(ref double v, double to, double dt)
         {
-            var real = StatusLook.Current();
-            return real with { Fill = _fill < 0 ? real.Fill : _fill, Volume = _volume, VolumeMix = _volumeMix, BrightMix = _brightMix };
+            v = Approach(v, to, dt, 12);
+            if (Math.Abs(v - to) >= 0.001) return true;
+            v = to; return false;
         }
 
         protected override bool Arrange(object state, double dt)
@@ -1283,30 +1280,27 @@ public sealed partial class MainWindow
             var f = (Frame)state;
             PlaceMarks(f.Left, f.Top);
             var real = StatusLook.Current();
-            bool laptop = real.Battery;
+            _lastReal = real;
+            bool laptop = real.Battery, moving = false;
+            double t = Math.Max(0, Now - _start) % Loop;
             if (IsOpen)
             {
-                double t = (Now - _start) % Loop;
-                int volume = (int)Math.Round(t < 4000 ? Ramp(t, 800, 40, 80) : Ramp(t, 6400, 80, 40));
-                int brightness = laptop ? (int)Math.Round(t < 7000 ? Ramp(t, 3600, 45, 85) : Ramp(t, 9200, 85, 45)) : 45;
-                if (volume != _volume)
-                {
-                    _volumeUntil = Now + LevelShowMs;
-                    _brightUntil = 0;
-                }
-                if (brightness != _brightness)
-                {
-                    _brightUntil = Now + LevelShowMs;
-                    _volumeUntil = 0;
-                }
+                var (volume, brightness) = DemoLevels(t, laptop);
+                if (volume != _volume) { _volumeUntil = Now + LevelShowMs; _brightUntil = 0; moving = true; }
+                if (brightness != _brightness) { _brightUntil = Now + LevelShowMs; _volumeUntil = 0; moving = true; }
                 (_volume, _brightness) = (volume, brightness);
+                if (InRamp(t, laptop)) moving = true;
             }
             bool showVolume = Now < _volumeUntil, showBright = Now < _brightUntil;
-            _volumeMix = Approach(_volumeMix, showVolume ? 1 : 0, dt, 12);
-            _brightMix = Approach(_brightMix, showBright ? 1 : 0, dt, 12);
+            if (!showVolume) _volumeUntil = 0;
+            if (!showBright) _brightUntil = 0;
+            moving |= ApproachSnap(ref _volumeMix, showVolume ? 1 : 0, dt);
+            moving |= ApproachSnap(ref _brightMix, showBright ? 1 : 0, dt);
             double target = showBright ? _brightness / 100.0 : (showVolume || !laptop) ? _volume / 100.0 : real.Fill;
             if (_fill < 0) _fill = target;
             SmoothSpring.Step(ref _fill, ref _speed, target, dt / 1000);
+            if (Math.Abs(_fill - target) >= 0.001 || Math.Abs(_speed) >= 0.001) moving = true;
+            else (_fill, _speed) = (target, 0);
             UpdateBarStatus(Look());
 
             ArrangeConnections();
@@ -1314,7 +1308,7 @@ public sealed partial class MainWindow
             ArrangeRow(_bright, Shapes[4], _brightness, laptop, laptop ? $"{_brightness}%" : Loc.T("Not adjustable"), _inks[4], false);
             _sound.Glyph.Text = StatusGlyph.VolumeGlyph(Look());
             ArrangeRow(_sound, Shapes[5], _volume, true, $"{_volume}%", _inks[5], true);
-            return IsOpen || _volumeMix > 0.001 || _brightMix > 0.001 || Math.Abs(_speed) > 0.001;
+            return moving;
         }
 
         private void ArrangeConnections()
@@ -1464,8 +1458,8 @@ public sealed partial class MainWindow
         protected override bool IsOpen => M.CurrentSettings.ShowClock;
         protected override Size PopupSize => new(CW, CardH + CapGap + BarHeight);
         protected override Vector2 Anchor => new((float)(Bar!.ClockX >= 0 ? Bar.ClockX + Bar.ClockW / 2 : BarRight), (float)PopupBottom);
-        protected override void Entered() => _tick.Start();
-        protected override void Left() => _tick.Stop();
+        protected override void Entered() { if (!M._scenesPaused) _tick.Start(); }
+        protected override void Left() => _tick.Stop(); protected override void Paused() => _tick.Stop(); protected override void Resumed() => _tick.Start();
 
         protected override (GlassTile[] Tiles, object State) Pieces()
         {

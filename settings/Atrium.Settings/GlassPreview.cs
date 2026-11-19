@@ -408,14 +408,16 @@ internal static class GlassRenderer
 internal sealed class LatestWorker<T> where T : class
 {
     private readonly Action<T> _run;
+    private readonly Action<T, Exception>? _onError;
     private readonly Lock _lock = new();
     private T? _next;
     private bool _busy;
     private bool _stopped;
 
-    public LatestWorker(Action<T> run)
+    public LatestWorker(Action<T> run, Action<T, Exception>? onError = null)
     {
         _run = run;
+        _onError = onError;
     }
 
     public void Post(T job)
@@ -447,7 +449,12 @@ internal sealed class LatestWorker<T> where T : class
                 _next = null;
             }
             try { _run(job); }
-            catch (Exception e) { System.Diagnostics.Debug.WriteLine("preview render failed: " + e); }
+            catch (Exception e)
+            {
+                System.Diagnostics.Debug.WriteLine("preview render failed: " + e);
+                try { _onError?.Invoke(job, e); }
+                catch (Exception cbEx) { System.Diagnostics.Debug.WriteLine("preview error handler failed: " + cbEx); }
+            }
         }
     }
 }

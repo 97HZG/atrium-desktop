@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.CSharp.RuntimeBinder;
 using Microsoft.Win32;
 
 namespace Atrium.Settings;
@@ -165,7 +166,7 @@ internal sealed partial class CoreClient : IDisposable
             StateConfirmed = true;
             return (BarSettings.FromJson(r["saved"] as JsonObject, new()), BarSettings.FromJson(r["current"] as JsonObject, new()));
         }
-        var file = ReadFile();
+        var file = await Task.Run(ReadFile);
         return (file, file.Clone());
     }
 
@@ -180,7 +181,7 @@ internal sealed partial class CoreClient : IDisposable
             return Loc.T("The connection to the core was lost; the save result is not confirmed. Reconnect and check the saved settings.");
         try
         {
-            LastSaveWarning = WriteFile(s);
+            LastSaveWarning = await Task.Run(() => WriteFile(s.Clone()));
             return null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -288,22 +289,36 @@ internal sealed partial class CoreClient : IDisposable
     private static void RemoveLogonTask(string exe)
     {
         string name = "Atrium Startup-" + System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
+        dynamic? service = null, folder = null, task = null, definition = null, actions = null, action = null;
         try
         {
-            dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
+            service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
             service.Connect();
-            dynamic folder = service.GetFolder("\\");
-            dynamic task;
+            folder = service.GetFolder("\\");
             try { task = folder.GetTask(name); }
             catch (COMException e) when (e.HResult == unchecked((int)0x80070002)) { return; } // no task
-            string command = ((string)task.Definition.Actions.Item(1).Path).Trim('"');
+            definition = task.Definition;
+            actions = definition.Actions;
+            if ((int)actions.Count < 1) return;
+            action = actions.Item(1);
+            string? command = (action.Path as string)?.Trim('"');
             if (!string.Equals(command, exe, StringComparison.OrdinalIgnoreCase))
                 throw new IOException(Loc.T("That startup entry belongs to Atrium in another location"));
             folder.DeleteTask(name, 0);
         }
-        catch (COMException e)
+        catch (Exception e) when (e is RuntimeBinderException or COMException or ArgumentException)
         {
             throw new IOException(e.Message, e);
+        }
+        finally
+        {
+            static void Release(object? com) { if (com != null && Marshal.IsComObject(com)) Marshal.FinalReleaseComObject(com); }
+            Release(action);
+            Release(actions);
+            Release(definition);
+            Release(task);
+            Release(folder);
+            Release(service);
         }
     }
 
