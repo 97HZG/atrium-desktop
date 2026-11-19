@@ -241,7 +241,8 @@ foreach ($rel in $files | Where-Object { $_ -match '\.xaml$' }) {
 
 # --- C# layer: pure logic/model files stay free of WinUI; LocalizationValidation compiles standalone ----------
 $csLayer = 'BarSettings.cs', 'BitsTransfer.cs', 'CoreClient.cs', 'CornerProfile.cs', 'DesktopDisplay.cs', 'GameFinder.cs',
-    'GlassPreview.cs', 'LocalizationValidation.cs', 'Photo.cs', 'ReleaseInfo.cs', 'ReleaseInstaller.cs', 'ShellIcons.cs'
+    'GameFinder.Parsers.cs', 'GlassPreview.cs', 'LocalizationValidation.cs', 'Photo.cs', 'ReleaseInfo.cs',
+    'ReleaseInstaller.cs', 'ReleaseValidation.cs', 'ShellIcons.cs'
 foreach ($rel in $files | Where-Object { $_ -match '^settings/Atrium\.Settings/.*\.cs$' }) {
     $name = [IO.Path]::GetFileName($rel)
     if ($csLayer -notcontains $name) { continue }

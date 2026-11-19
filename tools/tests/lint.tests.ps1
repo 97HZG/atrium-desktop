@@ -149,7 +149,13 @@ try {
         @('layer-found-bar', @{ 'native/core/bar.h' = $hdr; 'native/core/settings.h' = "$hdr`n#include `"bar.h`"" }, ': layer:'),
         @('layer-found-winrt', @{ 'native/core/settings.h' = "$hdr`n#include <winrt/base.h>" }, ': layer:'),
         @('header-cycle', @{ 'native/core/ui/a.h' = "$hdr`n#include `"b.h`""; 'native/core/ui/b.h' = "$hdr`n#include `"a.h`"" }, ': header-cycle:'),
-        @('csharp-layer', @{ 'settings/Atrium.Settings/BarSettings.cs' = "using Microsoft.UI.Xaml;`npublic class BarSettings {}" }, ': csharp-layer:')
+        @('csharp-layer', @{ 'settings/Atrium.Settings/BarSettings.cs' = "using Microsoft.UI.Xaml;`npublic class BarSettings {}" }, ': csharp-layer:'),
+        @('csharp-layer-gamefinder-parsers',
+            @{ 'settings/Atrium.Settings/GameFinder.Parsers.cs' = "using Microsoft.UI.Xaml;`npublic static class GameFinderParsers {}" },
+            ': csharp-layer:'),
+        @('csharp-layer-release-validation',
+            @{ 'settings/Atrium.Settings/ReleaseValidation.cs' = "using Microsoft.UI.Xaml;`npublic static class ReleaseValidation {}" },
+            ': csharp-layer:')
     )
     foreach ($sc in $structCases) {
         $r = New-FixtureRepo $sc[0]
