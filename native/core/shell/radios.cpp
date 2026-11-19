@@ -11,7 +11,6 @@
 #include <winrt/Windows.Foundation.h>
 
 #include <algorithm>
-#include <set>
 
 namespace atrium {
 
@@ -60,7 +59,15 @@ bool SetRadio(bool bluetooth, bool on)
 std::vector<BluetoothDevice> ListBluetooth()
 {
     std::vector<BluetoothDevice> out;
-    std::set<std::wstring> names;
+    auto add = [&](const BluetoothDevice& b) {
+        if (b.name.empty())
+            return;
+        auto it = std::ranges::find_if(out, [&](const BluetoothDevice& existing) { return existing.name == b.name; });
+        if (it != out.end())
+            it->connected |= b.connected;
+        else
+            out.push_back(b);
+    };
     try {
         // Classic devices (headsets, keyboards, phones), then Bluetooth LE.
         for (const auto& d : Enumeration::DeviceInformation::FindAllAsync(Bluetooth::BluetoothDevice::GetDeviceSelectorFromPairingState(true)).get()) {
@@ -71,8 +78,7 @@ std::vector<BluetoothDevice> ListBluetooth()
                     b.connected = dev.ConnectionStatus() == Bluetooth::BluetoothConnectionStatus::Connected;
             } catch (const winrt::hresult_error&) {
             }
-            if (!b.name.empty() && names.insert(b.name).second)
-                out.push_back(b);
+            add(b);
         }
         for (const auto& d : Enumeration::DeviceInformation::FindAllAsync(Bluetooth::BluetoothLEDevice::GetDeviceSelectorFromPairingState(true)).get()) {
             BluetoothDevice b;
@@ -83,8 +89,7 @@ std::vector<BluetoothDevice> ListBluetooth()
                     b.connected = dev.ConnectionStatus() == Bluetooth::BluetoothConnectionStatus::Connected;
             } catch (const winrt::hresult_error&) {
             }
-            if (!b.name.empty() && names.insert(b.name).second)
-                out.push_back(b);
+            add(b);
         }
     } catch (...) {
         Log(L"radios: listing Bluetooth devices failed");

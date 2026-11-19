@@ -100,9 +100,15 @@ std::vector<BluetoothBattery> ReadBluetoothBatteries()
         if (instance.starts_with(L"BTHENUM\\DEV_") || instance.starts_with(L"BTHLE\\DEV_")) {
             c.device = true;
             DEVPROP_BOOLEAN on = DEVPROP_FALSE;
-            c.connected = Property(set, d, kConnected, on) && on == DEVPROP_TRUE;
-            c.name = Text(set, d, DEVPKEY_Device_FriendlyName);
-            c.category = Text(set, d, DEVPKEY_DeviceContainer_Category);
+            c.connected |= Property(set, d, kConnected, on) && on == DEVPROP_TRUE;
+            std::wstring name = Text(set, d, DEVPKEY_Device_FriendlyName);
+            if (name.empty())
+                name = Text(set, d, DEVPKEY_NAME);
+            if (!name.empty())
+                c.name = std::move(name);
+            std::wstring category = Text(set, d, DEVPKEY_DeviceContainer_Category);
+            if (!category.empty())
+                c.category = std::move(category);
         }
         const std::wstring cls = Text(set, d, DEVPKEY_Device_Class);
         c.keyboard |= cls == L"Keyboard";

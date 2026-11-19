@@ -98,8 +98,8 @@ bool RegisterLogonTask(const std::wstring& exe)
                              L"<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
                              L"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>4</Priority>"
                              L"<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings></Settings>"
-                             L"<Actions Context=\"Author\"><Exec><Command>" +
-                             Xml(exe) + L"</Command></Exec></Actions></Task>";
+                             L"<Actions Context=\"Author\"><Exec><Command>\"" +
+                             Xml(exe) + L"\"</Command></Exec></Actions></Task>";
     VARIANT none{};
     winrt::com_ptr<IRegisteredTask> task;
     HRESULT hr = folder->RegisterTask(Bstr(TaskName(sid)).b, Bstr(xml).b, TASK_CREATE_OR_UPDATE, none, none, TASK_LOGON_INTERACTIVE_TOKEN, none, task.put());

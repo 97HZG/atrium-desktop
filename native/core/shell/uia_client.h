@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <initializer_list>
+#include <utility>
 #include <vector>
 
 namespace atrium {
@@ -101,8 +102,7 @@ public:
     UiaWindowWake(HANDLE wake, const wchar_t* windowClass)
         : wake_(wake),
           windowClass_(windowClass),
-          show_(SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_REORDER, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS)),
-          name_(SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_VALUECHANGE, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS))
+          show_(SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS))
     {
         g_active = this;
     }
@@ -110,8 +110,9 @@ public:
     {
         if (show_)
             UnhookWinEvent(show_);
-        if (name_)
-            UnhookWinEvent(name_);
+        for (const auto& [pid, hook] : nameHooks_)
+            if (hook)
+                UnhookWinEvent(hook);
         g_active = nullptr;
     }
     UiaWindowWake(const UiaWindowWake&) = delete;
@@ -119,23 +120,40 @@ public:
 
     template<typename Processes> void SetProcesses(const Processes& processes)
     {
-        processes_.clear();
-        for (const auto& [pid, path] : processes)
-            processes_.push_back(pid);
+        std::vector<DWORD> next;
+        for (const auto& entry : processes)
+            if (entry.first != 0 && std::ranges::find(next, entry.first) == next.end())
+                next.push_back(entry.first);
+        for (size_t i = nameHooks_.size(); i-- > 0;)
+            if (std::ranges::find(next, nameHooks_[i].first) == next.end()) {
+                if (nameHooks_[i].second)
+                    UnhookWinEvent(nameHooks_[i].second);
+                nameHooks_.erase(nameHooks_.begin() + ptrdiff_t(i));
+            }
+        for (DWORD pid : next) {
+            if (std::ranges::any_of(nameHooks_, [pid](const auto& item) { return item.first == pid; }))
+                continue;
+            HWINEVENTHOOK hook =
+                SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_VALUECHANGE, nullptr, Changed, pid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+            if (hook)
+                nameHooks_.emplace_back(pid, hook);
+        }
     }
 
 private:
     static void CALLBACK Changed(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD)
     {
-        if (!g_active)
+        if (!g_active || !window)
             return;
         bool appearance = event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_HIDE;
         if (appearance && (object != OBJID_WINDOW || child != CHILDID_SELF || GetAncestor(window, GA_ROOT) != window))
             return;
         HWND root = GetAncestor(window, GA_ROOT);
+        if (!root)
+            return;
         DWORD pid = 0;
         GetWindowThreadProcessId(root, &pid);
-        if (!appearance && std::ranges::find(g_active->processes_, pid) == g_active->processes_.end())
+        if (!appearance && std::ranges::none_of(g_active->nameHooks_, [pid](const auto& item) { return item.first == pid; }))
             return;
         wchar_t name[96]{};
         GetClassNameW(root, name, int(std::size(name)));
@@ -145,8 +163,8 @@ private:
     inline static thread_local UiaWindowWake* g_active = nullptr;
     HANDLE wake_;
     const wchar_t* windowClass_;
-    std::vector<DWORD> processes_;
-    HWINEVENTHOOK show_ = nullptr, name_ = nullptr;
+    std::vector<std::pair<DWORD, HWINEVENTHOOK>> nameHooks_;
+    HWINEVENTHOOK show_ = nullptr;
 };
 
 // Out-of-context WinEvents arrive on the installing thread, which must pump
@@ -165,6 +183,8 @@ inline void WaitForUiaWake(HANDLE wake, DWORD timeout)
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+            if (GetTickCount64() >= until || WaitForSingleObject(wake, 0) == WAIT_OBJECT_0)
+                return;
         }
     }
 }

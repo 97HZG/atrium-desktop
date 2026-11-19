@@ -17,11 +17,23 @@ std::vector<DisplayInfo> ConnectedDisplays()
             info.cbSize = sizeof(info);
             if (!GetMonitorInfoW(monitor, &info))
                 return TRUE;
+            std::wstring id = info.szDevice;
+            std::wstring fallback;
             DISPLAY_DEVICEW device{};
             device.cb = sizeof(device);
-            std::wstring id = info.szDevice;
-            if (EnumDisplayDevicesW(info.szDevice, 0, &device, EDD_GET_DEVICE_INTERFACE_NAME) && device.DeviceID[0])
-                id = device.DeviceID;
+            for (DWORD i = 0; EnumDisplayDevicesW(info.szDevice, i, &device, EDD_GET_DEVICE_INTERFACE_NAME); ++i) {
+                if (i == 0 && device.DeviceID[0])
+                    fallback = device.DeviceID;
+                if ((device.StateFlags & DISPLAY_DEVICE_ACTIVE) && device.DeviceID[0]) {
+                    id = device.DeviceID;
+                    fallback.clear();
+                    break;
+                }
+                device = {};
+                device.cb = sizeof(device);
+            }
+            if (!fallback.empty())
+                id = std::move(fallback);
             auto& list = *reinterpret_cast<std::vector<DisplayInfo>*>(data);
             list.push_back({monitor, std::move(id), info.rcMonitor, info.rcWork, (info.dwFlags & MONITORINFOF_PRIMARY) != 0});
             return TRUE;
@@ -80,8 +92,8 @@ bool TilesFill(const std::vector<RECT>& tiles, const RECT& work, int slack)
         for (size_t j = 0; j + 1 < ys.size(); ++j) {
             if (xs[i] == xs[i + 1] || ys[j] == ys[j + 1])
                 continue;
-            const POINT mid{(xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2};
-            if (std::ranges::none_of(grown, [&](const RECT& t) { return PtInRect(&t, mid) != FALSE; }))
+            const POINT pt{xs[i], ys[j]};
+            if (std::ranges::none_of(grown, [&](const RECT& t) { return PtInRect(&t, pt) != FALSE; }))
                 return false;
         }
     return true;

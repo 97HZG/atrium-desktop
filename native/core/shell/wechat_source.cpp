@@ -105,6 +105,47 @@ std::vector<HWND> WeChatWindows(DWORD pid)
     return ctx.out;
 }
 
+void UpdateUnread(const std::vector<std::pair<std::wstring, Row>>& rows, bool baseline, const std::wstring& exe, HWND notify, UINT msg,
+                  std::map<std::wstring, int>& unread)
+{
+    std::map<std::wstring, int> rebuilt;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const auto& [key, r] = rows[i];
+        auto old = unread.find(key);
+        // A chat not seen before counts only at the top of the list,
+        // where a new message puts it (scrolling brings old ones in).
+        bool rose = baseline && !r.muted && (old != unread.end() ? r.unread > old->second : r.unread > 0 && i < 3);
+        // Not gated on baseline: WeChat in front clears it, and reading happens there (#79).
+        bool read = old != unread.end() && old->second > 0 && r.unread == 0;
+        if (rose || read) {
+            auto n = std::make_unique<Notice>();
+            n->source = L"wechat";
+            n->title = r.chat;
+            n->unread = rose;
+            if (rose) {
+                n->app = Tr(L"WeChat");
+                n->appId = exe;
+                n->body = r.summary;
+                if (!exe.empty())
+                    n->action = L"app:" + exe;
+            }
+            if (PostOwned(notify, msg, 0, std::move(n)) && rose)
+                Log(L"wechat: new message (unread %d)", r.unread);
+        }
+        if (baseline)
+            unread[key] = r.unread;
+        else
+            rebuilt[key] = r.unread;
+    }
+    if (!baseline)
+        unread = std::move(rebuilt);
+    if (unread.size() > 512) {
+        std::erase_if(unread, [&](const auto& kv) { return std::ranges::none_of(rows, [&](const auto& row) { return row.first == kv.first; }); });
+        while (unread.size() > 512)
+            unread.erase(unread.begin());
+    }
+}
+
 } // namespace
 
 WeChatSource::WeChatSource(HWND notify, UINT msg) : notify_(notify), msg_(msg), wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr))
@@ -198,6 +239,8 @@ void WeChatSource::Run()
                 bool found = false;
                 for (const auto& [p, program] : procs) {
                     for (HWND h : WeChatWindows(p)) {
+                        if (IsHungAppWindow(h))
+                            continue;
                         winrt::com_ptr<IUIAutomationElement> root;
                         winrt::com_ptr<IUIAutomationElementArray> all;
                         if (FAILED(uia->ElementFromHandle(h, root.put())) || !root ||
@@ -250,6 +293,7 @@ void WeChatSource::Run()
                 if (procs.empty()) {
                     report(0, L"WeChat is not running");
                     held.clear();
+                    unread.clear();
                     baseline = false; // after a restart its list is a new baseline
                 } else if (!found) {
                     report(1, L"WeChat's chat list is not readable (open its window once)");
@@ -258,31 +302,7 @@ void WeChatSource::Run()
                     if (state < 2 || (state == 3 && !fromHeld))
                         Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());
                     state = fromHeld ? 3 : 2;
-                    for (size_t i = 0; i < rows.size(); ++i) {
-                        const auto& [key, r] = rows[i];
-                        auto old = unread.find(key);
-                        // A chat not seen before counts only at the top of the list,
-                        // where a new message puts it (scrolling brings old ones in).
-                        bool rose = baseline && !r.muted && (old != unread.end() ? r.unread > old->second : r.unread > 0 && i < 3);
-                        // Not gated on baseline: WeChat in front clears it, and reading happens there (#79).
-                        bool read = old != unread.end() && old->second > 0 && r.unread == 0;
-                        if (rose || read) {
-                            auto n = std::make_unique<Notice>();
-                            n->source = L"wechat";
-                            n->title = r.chat;
-                            n->unread = rose;
-                            if (rose) {
-                                n->app = Tr(L"WeChat");
-                                n->appId = exe;
-                                n->body = r.summary;
-                                if (!exe.empty())
-                                    n->action = L"app:" + exe;
-                            }
-                            if (PostOwned(notify_, msg_, 0, std::move(n)) && rose)
-                                Log(L"wechat: new message (unread %d)", r.unread);
-                        }
-                        unread[key] = r.unread;
-                    }
+                    UpdateUnread(rows, baseline, exe, notify_, msg_, unread);
                     baseline = true;
                 }
             } catch (...) {

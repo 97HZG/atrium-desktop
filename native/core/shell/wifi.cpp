@@ -32,14 +32,19 @@ public:
     Wlan(const Wlan&) = delete;
     Wlan& operator=(const Wlan&) = delete;
     HANDLE Handle() const { return handle_; }
-    // The first Wi-Fi interface (laptops have one).
+    // The connected Wi-Fi interface, or the first if none is connected.
     const GUID* Interface()
     {
         if (!handle_)
             return nullptr;
         if (!list_ && WlanEnumInterfaces(handle_, nullptr, &list_) != ERROR_SUCCESS)
             return nullptr;
-        return list_ && list_->dwNumberOfItems ? &list_->InterfaceInfo[0].InterfaceGuid : nullptr;
+        if (!list_ || !list_->dwNumberOfItems)
+            return nullptr;
+        for (DWORD i = 0; i < list_->dwNumberOfItems; ++i)
+            if (list_->InterfaceInfo[i].isState == wlan_interface_state_connected)
+                return &list_->InterfaceInfo[i].InterfaceGuid;
+        return &list_->InterfaceInfo[0].InterfaceGuid;
     }
 
 private:

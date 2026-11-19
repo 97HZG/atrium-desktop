@@ -76,12 +76,13 @@ std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& 
             if (s <= 0)
                 s = 1;
             float w = float(r.right - r.left) / s, hh = float(r.bottom - r.top) / s;
-            // A message popup sits in the work area's bottom-right corner; Feishu's
-            // other small untitled windows (the text-selection toolbar, the update
-            // notice) are elsewhere.
+            // A message popup sits in a right corner of the work area (bottom-right or
+            // top-right); Feishu's other small untitled windows (the text-selection
+            // toolbar, the update notice) are elsewhere.
             MONITORINFO mi{sizeof(mi)};
             GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
-            bool corner = float(mi.rcWork.right - r.right) / s <= 48 && float(mi.rcWork.bottom - r.bottom) / s <= 48;
+            bool vertical = float(mi.rcWork.bottom - r.bottom) / s <= 48 || float(r.top - mi.rcWork.top) / s <= 48;
+            bool corner = float(mi.rcWork.right - r.right) / s <= 48 && vertical;
             if (wcscmp(cls, L"Chrome_WidgetWin_1") != 0 || w < 160 || w > 520 || hh < 40 || hh > 260 || !corner)
                 return TRUE;
             DWORD pid = 0;
@@ -101,6 +102,8 @@ std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& 
 std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text, IUIAutomationCacheRequest* cache, HWND h, UiaWatch& watch)
 {
     std::vector<std::wstring> out;
+    if (IsHungAppWindow(h))
+        return out;
     winrt::com_ptr<IUIAutomationElement> root;
     winrt::com_ptr<IUIAutomationElementArray> all;
     if (FAILED(uia->ElementFromHandle(h, root.put())) || !root)
