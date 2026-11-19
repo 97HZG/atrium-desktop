@@ -40,6 +40,7 @@
 #include "ui/start_menu.h"
 #include "ui/tray_panel.h"
 #include "posted.h"
+#include "win32_path.h"
 
 #include <windows.h>
 #include <dbt.h>
@@ -51,6 +52,7 @@
 #include <winrt/Windows.Foundation.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -312,10 +314,6 @@ void OpenSystem(const std::wstring& what)
     Log(L"start: system entry %s", what.c_str());
 }
 
-void ToggleTray(RECT);
-void ToggleControl(RECT);
-void ToggleCalendar();
-void UpdateStatus();
 void UpdateStatus()
 {
     if (g_app.status)
@@ -325,40 +323,31 @@ void UpdateStatus()
 // Atrium's tray panel and control centre open above their entries on the
 // bar; a click on the entry while one is open closes it (and must not reopen
 // it: the press that deactivated it is the same click).
-void ToggleTray(RECT)
+template<class Panel, class OpenFn> void TogglePopup(Panel& panel, OpenFn open)
 {
-    if (g_app.trayPanel->Visible()) {
-        g_app.trayPanel->Close();
+    if (panel.Visible()) {
+        panel.Close();
         return;
     }
-    if (GetTickCount64() - g_app.trayPanel->LastClosed() < 400 && g_app.trayPanel->LastClosed() > g_app.switchedBarAt)
+    if (GetTickCount64() - panel.LastClosed() < 400 && panel.LastClosed() > g_app.switchedBarAt)
         return;
-    g_app.trayPanel->Open(ActiveBar().EntryRect(L"#tray"), ActiveBar().BarRect(), ActiveBar().PreviousForeground());
+    open();
     g_app.notes->PanelsChanged();
+}
+
+void ToggleTray(RECT)
+{
+    TogglePopup(*g_app.trayPanel, [] { g_app.trayPanel->Open(ActiveBar().EntryRect(L"#tray"), ActiveBar().BarRect(), ActiveBar().PreviousForeground()); });
 }
 
 void ToggleControl(RECT)
 {
-    if (g_app.control->Visible()) {
-        g_app.control->Close();
-        return;
-    }
-    if (GetTickCount64() - g_app.control->LastClosed() < 400 && g_app.control->LastClosed() > g_app.switchedBarAt)
-        return;
-    g_app.control->Open(ActiveBar().EntryRect(L"#status"), ActiveBar().BarRect());
-    g_app.notes->PanelsChanged();
+    TogglePopup(*g_app.control, [] { g_app.control->Open(ActiveBar().EntryRect(L"#status"), ActiveBar().BarRect()); });
 }
 
 void ToggleCalendar()
 {
-    if (g_app.calendar->Visible()) {
-        g_app.calendar->Close();
-        return;
-    }
-    if (GetTickCount64() - g_app.calendar->LastClosed() < 400 && g_app.calendar->LastClosed() > g_app.switchedBarAt)
-        return;
-    g_app.calendar->Open(ActiveBar().EntryRect(L"#clock"), ActiveBar().BarRect());
-    g_app.notes->PanelsChanged();
+    TogglePopup(*g_app.calendar, [] { g_app.calendar->Open(ActiveBar().EntryRect(L"#clock"), ActiveBar().BarRect()); });
 }
 
 void ToggleStart(RECT)
@@ -439,39 +428,30 @@ void ShowMenu(POINT pt)
 
 // The tray icon of a notice's sender: its program's file name or the start of
 // its tooltip is the sender's name or id ("QQ" -> qq.exe, "QQ: 12345").
-const TrayIcon* TrayIconOf(const Notice& n)
+std::optional<TrayIcon> TrayIconOf(const Notice& n)
 {
-    static std::vector<TrayIcon> icons;
-    icons = g_app.tray->Icons();
-    auto lower = [](std::wstring s) {
-        for (auto& c : s)
-            c = wchar_t(towlower(c));
-        return s;
-    };
     std::vector<std::wstring> names;
     for (const std::wstring& s : {n.app, n.appId}) {
-        std::wstring v = lower(s);
-        if (size_t bang = v.find(L'!'); bang != std::wstring::npos) // packaged: "publisher.app_hash!App"
+        std::wstring v = FoldCase(s);
+        if (const size_t bang = v.find(L'!'); bang != std::wstring::npos) // packaged: "publisher.app_hash!App"
             v = v.substr(0, bang);
-        if (size_t slash = v.find_last_of(L"\\/"); slash != std::wstring::npos) // a path
+        if (const size_t slash = v.find_last_of(L"\\/"); slash != std::wstring::npos) // a path
             v = v.substr(slash + 1);
         if (v.size() > 4 && v.ends_with(L".exe"))
             v.resize(v.size() - 4);
         if (v.size() >= 2)
-            names.push_back(v);
+            names.push_back(std::move(v));
     }
-    for (const TrayIcon& icon : icons) {
-        std::wstring stem = lower(icon.exe.substr(icon.exe.find_last_of(L'\\') + 1));
+    for (const TrayIcon& icon : g_app.tray->Icons()) {
+        std::wstring stem = FoldCase(icon.exe.substr(icon.exe.find_last_of(L'\\') + 1));
         if (stem.size() > 4 && stem.ends_with(L".exe"))
             stem.resize(stem.size() - 4);
-        std::wstring tip = lower(TrayModel::Title(icon.tip));
-        for (const std::wstring& name : names) {
-            bool tipNames = tip.starts_with(name) && (tip.size() == name.size() || !iswalnum(tip[name.size()]));
-            if ((!icon.exe.empty() && stem == name) || tipNames)
-                return &icon;
-        }
+        const std::wstring tip = FoldCase(TrayModel::Title(icon.tip));
+        for (const std::wstring& name : names)
+            if ((!icon.exe.empty() && stem == name) || (tip.starts_with(name) && (tip.size() == name.size() || !iswalnum(tip[name.size()]))))
+                return icon;
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 // What clicking a notification does: open its link, or bring its app to the
@@ -487,13 +467,12 @@ bool RunNoticeAction(const Notice& n)
         return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
     }
     if (n.action.starts_with(L"app:")) {
-        std::wstring aumid = n.action.substr(4), key = aumid;
-        for (auto& c : key)
-            c = wchar_t(towlower(c));
+        const std::wstring aumid = n.action.substr(4);
+        const std::wstring key = FoldCase(aumid);
         // An app living in the tray (QQ, WeChat, Feishu): its own tray click
         // opens what is new, the chat of the unread message. Starting it again
         // would open a second instance's login window instead.
-        if (const TrayIcon* icon = TrayIconOf(n)) {
+        if (const std::optional<TrayIcon> icon = TrayIconOf(n)) {
             AllowSetForegroundWindow(ASFW_ANY);
             g_app.tray->Click(*icon, false);
             Log(L"notify: action through the tray icon of %s", n.app.c_str());
@@ -812,6 +791,73 @@ bool IsWorkspaceFile(const std::wstring& path)
     return std::ranges::any_of(kProjectKinds, [&](const wchar_t* kind) { return _wcsicmp(extension, kind) == 0; });
 }
 
+bool PinsEqual(const PinnedApp& a, const PinnedApp& b)
+{
+    return FoldCase(a.path) == FoldCase(b.path) && FoldCase(a.aumid) == FoldCase(b.aumid) && a.args == b.args;
+}
+
+bool AddUniquePin(std::vector<PinnedApp>& pins, const PinnedApp& pin)
+{
+    if (pins.size() >= 64 || std::ranges::any_of(pins, [&](const PinnedApp& existing) { return PinsEqual(existing, pin); }))
+        return false;
+    pins.push_back(pin);
+    return true;
+}
+
+bool UnpinMatchingPin(std::vector<PinnedApp>& pins, int pinIndex, const std::optional<PinnedApp>& target)
+{
+    if (!target)
+        return false;
+    if (pinIndex >= 0 && size_t(pinIndex) < pins.size() && PinsEqual(pins[size_t(pinIndex)], *target)) {
+        pins.erase(pins.begin() + pinIndex);
+        return true;
+    }
+    if (auto it = std::ranges::find_if(pins, [&](const PinnedApp& p) { return PinsEqual(p, *target); }); it != pins.end()) {
+        pins.erase(it);
+        return true;
+    }
+    return false;
+}
+
+template<class Fn> void ModifyPins(Fn&& fn)
+{
+    if (!g_app.server)
+        return;
+    g_app.server->Modify([&](Settings& s) {
+        auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+        if (fn(pins))
+            s.pins = std::move(pins);
+    });
+}
+
+std::vector<std::pair<std::wstring, std::vector<JumpItem>>> BuildFallbackJumpSections(const std::wstring& appId)
+{
+    if (appId.empty())
+        return {};
+    std::vector<JumpItem> places, workspaces, files;
+    std::set<std::wstring> seen;
+    const auto take = [&](std::vector<JumpItem>& into, const ShellRecent& entry, bool folder) {
+        // A place that is gone is not listed: the shell would open the default
+        // folder instead, which reads as a wrong pick.
+        if (into.size() >= 5 || (!IsRemotePath(entry.path) && GetFileAttributesW(entry.path.c_str()) == INVALID_FILE_ATTRIBUTES))
+            return;
+        if (seen.insert(FoldCase(entry.path)).second)
+            into.push_back({entry.name, entry.path, {}, {}, folder});
+    };
+    for (const ShellRecent& entry : ShellDocumentList(appId, ADLT_FREQUENT, 24))
+        if (IsDirectoryPath(entry.path))
+            take(places, entry, true);
+    for (const ShellRecent& entry : ShellDocumentList(appId, ADLT_RECENT, 24)) {
+        const bool folder = IsDirectoryPath(entry.path);
+        take(folder ? places : IsWorkspaceFile(entry.path) ? workspaces : files, entry, folder);
+    }
+    std::vector<std::pair<std::wstring, std::vector<JumpItem>>> sections;
+    for (auto [label, list] : {std::pair{L"Folders", &places}, {L"Workspaces", &workspaces}, {L"Recent", &files}})
+        if (!list->empty())
+            sections.emplace_back(label, std::move(*list));
+    return sections;
+}
+
 void ShowItemMenu(const std::wstring& key, POINT pt)
 {
     const ULONGLONG startedAt = GetTickCount64();
@@ -819,6 +865,10 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     auto it = std::ranges::find_if(items, [&](const TaskItem& t) { return t.key == key; });
     if (it == items.end())
         return;
+    std::optional<PinnedApp> pinnedEntry;
+    if (it->pinned && it->pinIndex >= 0 && g_app.server)
+        if (const auto& pins = g_app.server->Current().pins; pins && size_t(it->pinIndex) < pins->size())
+            pinnedEntry = (*pins)[size_t(it->pinIndex)];
     PinnedApp pin = g_app.tasks->PinFor(key);
     const std::wstring pinTarget = g_app.tasks->PinTarget(key);
     const std::wstring appPath = pinTarget.empty() ? pin.path : pinTarget;
@@ -851,47 +901,9 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                 sections.emplace_back(category.title, category.items);
             if (!jump->recent.empty())
                 sections.emplace_back(L"Recent", jump->recent);
-        } else {
+        } else
             // No jump list file: the shell's own document lists are the next best thing.
-            std::vector<ShellRecent> places, workspaces, files;
-            std::set<std::wstring> seen;
-            const auto take = [&](std::vector<ShellRecent>& into, const ShellRecent& entry) {
-                // A place that is gone is not listed: the shell would open the default
-                // folder instead, which reads as a wrong pick.
-                if (!IsRemotePath(entry.path) && GetFileAttributesW(entry.path.c_str()) == INVALID_FILE_ATTRIBUTES)
-                    return;
-                std::wstring id = entry.path;
-                for (wchar_t& c : id)
-                    c = wchar_t(towlower(c));
-                if (into.size() >= 5 || !seen.insert(id).second)
-                    return;
-                into.push_back(entry);
-            };
-            if (!appId.empty()) {
-                for (const ShellRecent& entry : ShellDocumentList(appId, ADLT_FREQUENT, 24))
-                    if (IsDirectoryPath(entry.path))
-                        take(places, entry);
-                for (const ShellRecent& entry : ShellDocumentList(appId, ADLT_RECENT, 24))
-                    take(IsDirectoryPath(entry.path) ? places : IsWorkspaceFile(entry.path) ? workspaces : files, entry);
-            }
-            const auto toItems = [](const std::vector<ShellRecent>& list) {
-                std::vector<JumpItem> items;
-                for (const ShellRecent& entry : list) {
-                    JumpItem item;
-                    item.name = entry.name;
-                    item.target = entry.path;
-                    item.folder = IsDirectoryPath(entry.path);
-                    items.push_back(std::move(item));
-                }
-                return items;
-            };
-            if (!places.empty())
-                sections.emplace_back(L"Folders", toItems(places));
-            if (!workspaces.empty())
-                sections.emplace_back(L"Workspaces", toItems(workspaces));
-            if (!files.empty())
-                sections.emplace_back(L"Recent", toItems(files));
-        }
+            sections = BuildFallbackJumpSections(appId);
     }
 
     std::vector<MenuEntry> entries = {{it->name, 0, false, false, true}, {L"", 0}};
@@ -919,7 +931,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
         shape += (shape.empty() ? L"" : L"; ") + title + L"(" + std::to_wstring(rows.size()) + L")";
     Log(L"menu: '%s' path='%s' appid='%s' items=%zu [%s] in %llu ms", it->name.c_str(), appPath.c_str(), appId.c_str(), listed.size(), shape.c_str(),
         GetTickCount64() - startedAt);
-    const bool canRunAs = windowsEntries && !appPath.empty() && appPath.find(L"\\WindowsApps\\") == std::wstring::npos;
+    const bool canRunAs = windowsEntries && !appPath.empty() && FoldCase(appPath).find(L"\\windowsapps\\") == std::wstring::npos;
     if (canRunAs)
         entries.push_back({Tr(L"Run as administrator"), CmdRunAs});
     std::wstring location = g_app.tasks->FileLocation(key);
@@ -934,7 +946,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     int pinIndex = it->pinIndex;
     auto windows = it->windows;
     std::wstring name = it->name;
-    g_app.menu->Open(std::move(entries), pt, BarMenuPlace(true), [key, location, pinIndex, windows, name, pt, appPath, listed](int cmd) {
+    g_app.menu->Open(std::move(entries), pt, BarMenuPlace(true), [key, location, pinIndex, pinnedEntry, windows, name, pt, appPath, listed](int cmd) {
         switch (cmd) {
         case CmdNewWindow: g_app.tasks->Launch(key); break;
         case CmdStageAdd:
@@ -943,23 +955,8 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
             else
                 g_app.tasks->Activate(key); // no group to add to: the same row opens the app
             break;
-        case CmdPin: {
-            PinnedApp pin = g_app.tasks->PinFor(key);
-            g_app.server->Modify([&](Settings& s) {
-                auto pins = s.pins.value_or(std::vector<PinnedApp>{});
-                pins.push_back(pin);
-                s.pins = std::move(pins);
-            });
-            break;
-        }
-        case CmdUnpin:
-            g_app.server->Modify([&](Settings& s) {
-                auto pins = s.pins.value_or(std::vector<PinnedApp>{});
-                if (pinIndex >= 0 && pinIndex < int(pins.size()))
-                    pins.erase(pins.begin() + pinIndex);
-                s.pins = std::move(pins);
-            });
-            break;
+        case CmdPin: ModifyPins([pin = g_app.tasks->PinFor(key)](std::vector<PinnedApp>& pins) { return AddUniquePin(pins, pin); }); break;
+        case CmdUnpin: ModifyPins([pinIndex, &pinnedEntry](std::vector<PinnedApp>& pins) { return UnpinMatchingPin(pins, pinIndex, pinnedEntry); }); break;
         case CmdClose:
             for (HWND window : windows)
                 TaskModel::CloseWindow(window);
@@ -985,7 +982,9 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
         case CmdRunAs:
             if (!appPath.empty()) {
                 // Elevation is the shell's "runas" verb; no context menu is needed for it.
-                const HINSTANCE opened = ShellExecuteW(nullptr, L"runas", appPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                const wchar_t* args = pinnedEntry && !pinnedEntry->args.empty() ? pinnedEntry->args.c_str() : nullptr;
+                const std::wstring dir = std::filesystem::path(appPath).parent_path().wstring();
+                const HINSTANCE opened = ShellExecuteW(nullptr, L"runas", appPath.c_str(), args, dir.empty() ? nullptr : dir.c_str(), SW_SHOWNORMAL);
                 if (reinterpret_cast<INT_PTR>(opened) <= 32)
                     Log(L"menu: runas '%s' failed (%ld)", appPath.c_str(), GetLastError());
             }
@@ -1008,7 +1007,6 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                 Log(L"menu: jump cmd=%d '%s' program='%s' -> %p (error %lu)", cmd, item.target.c_str(), item.program.c_str(), reinterpret_cast<void*>(opened),
                     opened > reinterpret_cast<HINSTANCE>(32) ? 0ul : GetLastError());
             }
-
             break;
         }
     });
@@ -1064,20 +1062,19 @@ void Reorder(const std::wstring& key, int to)
     // Pin index (in the current list) the item goes in front of.
     int at = to < pinnedLeft ? items[size_t(to)].pinIndex : pinnedLeft ? items[size_t(pinnedLeft - 1)].pinIndex + 1 : 0;
     PinnedApp fresh = dragged.pinned ? PinnedApp{} : g_app.tasks->PinFor(key);
-    g_app.server->Modify([&](Settings& s) {
-        auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+    ModifyPins([&](std::vector<PinnedApp>& pins) {
         PinnedApp pin = fresh;
         int dest = at;
         if (dragged.pinned) {
             if (dragged.pinIndex < 0 || dragged.pinIndex >= int(pins.size()))
-                return;
+                return false;
             pin = pins[size_t(dragged.pinIndex)];
             pins.erase(pins.begin() + dragged.pinIndex);
             if (dest > dragged.pinIndex)
                 --dest;
         }
         pins.insert(pins.begin() + std::clamp(dest, 0, int(pins.size())), pin);
-        s.pins = std::move(pins);
+        return true;
     });
     Log(L"bar: %s moved to %d%s", key.c_str(), to, dragged.pinned ? L"" : L" and pinned");
 }
@@ -1593,6 +1590,16 @@ void WaitForGuard()
     }
 }
 
+std::thread StartLogonUpdate(bool registeredHere, const Settings& settings)
+{
+    if (!IsRegisteredApplication(ExeDir()) || (registeredHere && (!settings.startOnLogin || StartupTurnedOff())))
+        return {};
+    return std::thread([on = settings.startOnLogin] {
+        if (!SetStartOnLogin(on))
+            Log(L"startup: could not update the Windows logon entry");
+    });
+}
+
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
@@ -1707,11 +1714,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     // Also on every start while it is on: an update from a version that started from the
     // Run key moves to the logon task, unless that entry was turned off in Task Manager.
     // Off this thread: Task Scheduler is slow while the session is starting.
-    if (IsRegisteredApplication(ExeDir()) && (!registeredHere || (settings.startOnLogin && !StartupTurnedOff())))
-        std::thread([on = settings.startOnLogin] {
-            if (!SetStartOnLogin(on))
-                Log(L"startup: could not update the Windows logon entry");
-        }).detach();
+    std::thread startupThread = StartLogonUpdate(registeredHere, settings);
     if (!settings.pins) {
         // First run: start from the user's Windows taskbar pins (saved on the next save).
         settings.pins = TaskModel::ImportWindowsPins();
@@ -1817,14 +1820,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         g_app.start->onIcon(g_app.start->IconSizeName());
     // The start menu shows the Windows start menu's pins; from there an app
     // can be pinned to the bar (the bar's own pins are separate).
-    g_app.start->onPin = [](const PinnedApp& pin) {
-        g_app.server->Modify([&](Settings& s) {
-            auto pins = s.pins.value_or(std::vector<PinnedApp>{});
-            if (std::ranges::find(pins, pin) == pins.end() && pins.size() < 64)
-                pins.push_back(pin);
-            s.pins = std::move(pins);
-        });
-    };
+    g_app.start->onPin = [](const PinnedApp& pin) { ModifyPins([&](std::vector<PinnedApp>& pins) { return AddUniquePin(pins, pin); }); };
     AddTrayIcon();
     UpdateStatus();
     g_app.brightnessNotify = RegisterPowerSettingNotification(g_app.host, &kBrightnessSetting, DEVICE_NOTIFY_WINDOW_HANDLE);
@@ -1890,6 +1886,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.secondaryBars.clear();
     g_app.bar.reset();
     g_app.chrome.reset();
+    if (startupThread.joinable())
+        startupThread.join();
     Log(L"core: exited");
     ReleaseMutex(mutex);
     CloseHandle(mutex);
