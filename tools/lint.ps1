@@ -5,7 +5,7 @@
 #   ./tools/lint.ps1 -Fix                format first (clang-format, dotnet format)
 #   ./tools/lint.ps1 -Base origin/main   only the changed files for clang-tidy; -MaxLines budget
 #   -Paths <globs>                       the change may touch only these, and answers only for them
-#   ./tools/lint.ps1 -UpdateBaseline     record the ratchets (only ever lower them)
+#   ./tools/lint.ps1 -Tidy -UpdateBaseline  record the ratchets (only ever lower them)
 #   -Root <tree>                         check another checkout with these rules
 param(
     [string]$Root = (Split-Path -Parent $PSScriptRoot),
@@ -25,6 +25,9 @@ $baselinePath = Join-Path $Root 'tools/lint-baseline.json'
 $errors = [System.Collections.Generic.List[string]]::new()
 $counts = [ordered]@{}
 $Paths = @($Paths | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+if ($UpdateBaseline -and ($Base -or $Paths -or $MaxLines -or -not $Tidy)) {
+    throw 'lint: -UpdateBaseline requires -Tidy and cannot be used with -Base, -Paths, or -MaxLines'
+}
 
 function Rel([string]$path) { [IO.Path]::GetRelativePath($Root, $path).Replace('\', '/') }
 function Fail([string]$where, [string]$rule, [string]$why) { $errors.Add("${where}: ${rule}: $why") }
@@ -78,9 +81,15 @@ function Llvm([string]$exe) {
 
 $diffStatus = @()
 $diffNumstat = @()
+$touchedFiles = @()
+$fullRun = $false
 if ($Base) {
     Invoke-Tool 'git' @('-C', $Root, 'rev-parse', '--verify', "$Base^{commit}") | Out-Null
-    $mergeBase = @((Invoke-Tool 'git' @('-C', $Root, 'merge-base', $Base, 'HEAD')).Lines)[0].Trim()
+    $mb = Invoke-Tool 'git' @('-C', $Root, 'merge-base', $Base, 'HEAD') -AllowNonZero
+    if ($mb.ExitCode -ne 0 -or -not $mb.Lines) {
+        throw "lint: git merge-base $Base HEAD failed (shallow clone or no common ancestor): $(Tail $mb.Lines)"
+    }
+    $mergeBase = @($mb.Lines)[0].Trim()
     $prevIndex = $env:GIT_INDEX_FILE
     $realIndex = if ($prevIndex) { $prevIndex } else {
         @((Invoke-Tool 'git' @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-path', 'index')).Lines)[0].Trim()
@@ -97,6 +106,17 @@ if ($Base) {
         $env:GIT_INDEX_FILE = $prevIndex
         Remove-Item $tmpIndex, "$tmpIndex.lock" -ErrorAction SilentlyContinue
     }
+    $touchedFiles = @($diffStatus | ForEach-Object {
+        $parts = $_ -split "`t"
+        if ($parts[0] -like 'R*') { $parts[1], $parts[2] } elseif ($parts[0] -like 'C*') { $parts[2] } else { $parts[1] }
+    })
+    $fullConfig = '.clang-tidy', '.clang-format', '.editorconfig', '.gitattributes', 'Directory.Build.props', 'global.json',
+        'tools/lint.ps1', 'tools/lint-baseline.json', 'tools/check-localization.ps1',
+        'native/CMakeLists.txt', 'native/**/CMakeLists.txt', 'native/CMakePresets.json', '.github/workflows/**'
+    $fullRun = [bool]($touchedFiles | Where-Object { Test-Glob $_ $fullConfig } | Select-Object -First 1)
+    if ($fullRun -and ($touchedFiles | Where-Object {
+        Test-Glob $_ @('**/*.cs', '**/*.xaml', '**/*.csproj', '.editorconfig', 'Directory.Build.props', 'global.json')
+    } | Select-Object -First 1)) { $DotNet = $true }
 }
 
 $files = @((Invoke-Tool 'git' @('-C', $Root, '-c', 'core.quotepath=false', 'ls-files', '--cached', '--others', '--exclude-standard')).Lines |
@@ -292,17 +312,16 @@ if ($Tidy) {
     Invoke-Tool 'cmake' @('--build', $build) | Out-Null # the generated shader headers
     $units = @((Get-Content (Join-Path $build 'compile_commands.json') -Raw | ConvertFrom-Json).file |
         Where-Object { $_ -match '[\\/]native[\\/](core|tests)[\\/].*\.cpp$' } | Sort-Object -Unique) # not core.rc: rc.exe's command is no compiler's
-    if ($Base) {
-        $touched = @($diffStatus | ForEach-Object {
-            $parts = $_ -split "`t"
-            if ($parts[0] -like 'R*') { $parts[1], $parts[2] } elseif ($parts[0] -like 'C*') { $parts[2] } else { $parts[1] }
-        } | Where-Object { $_ -like 'native/*' } | ForEach-Object { [IO.Path]::GetFileName($_) })
+    if ($Base -and -not $fullRun) {
+        $touched = @($touchedFiles | Where-Object { $_ -like 'native/*' } | ForEach-Object { [IO.Path]::GetFileName($_) })
         $headers = @($touched | Where-Object { $_ -match '\.h$' })
         $units = @($units | Where-Object {
             $touched -contains [IO.Path]::GetFileName($_) -or
             ($headers -and (Select-String -Path $_ -Pattern ($headers | ForEach-Object { [regex]::Escape($_) + '"' }) -Quiet))
         })
     }
+    $analysed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($u in $units) { [void]$analysed.Add((Rel $u).Substring(7)) }
     $clangTidy = Llvm 'clang-tidy.exe'
     if (-not $clangTidy) { throw "lint: clang-tidy $llvmMajor not found" }
     $tidyConfig = Join-Path $rules '.clang-tidy'
@@ -390,29 +409,106 @@ if ($DotNet) {
 }
 
 # --- Ratchets ---------------------------------------------------------------------------------------------------
-if ($UpdateBaseline) {
-    $sorted = [ordered]@{}
-    foreach ($key in $counts.Keys | Sort-Object) { $sorted[$key] = $counts[$key] }
-    [IO.File]::WriteAllText($baselinePath, ($sorted | ConvertTo-Json).Replace("`r`n", "`n") + "`n")
-    "baseline: $($counts.Count) entries"
-    exit 0
+function Read-Baseline([hashtable]$map) {
+    foreach ($k in @($map.Keys)) {
+        $v = $map[$k]
+        if (($v -is [int] -or $v -is [long]) -and $v -gt 0 -and $v -le [int]::MaxValue) { $map[$k] = [int]$v }
+        else { Fail 'tools/lint-baseline.json' 'baseline' "$k must be a positive integer"; $map[$k] = 0 }
+    }
+    $map
 }
-$baseline = if (Test-Path $baselinePath) { Get-Content $baselinePath -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
+function Match-BaselineMoves([System.Collections.IDictionary]$oldMap, [System.Collections.IDictionary]$newMap) {
+    $shrank = @{}
+    $isShrank = {
+        param([string]$relNative)
+        if ($shrank.Contains($relNative)) { return $shrank[$relNative] }
+        $full = Join-Path $Root "native/$relNative"
+        if (-not (Test-Path $full)) { return ($shrank[$relNative] = $true) }
+        $cur = [IO.File]::ReadAllLines($full).Count
+        $rev = if ($Base) { $mergeBase } else { 'HEAD' }
+        $res = Invoke-Tool 'git' @('-C', $Root, 'show', "${rev}:native/$relNative") -AllowNonZero
+        # A file added and split in the same change has no prior version here; it cannot count as shrunk.
+        $old = if ($res.ExitCode -eq 0) { $res.Lines.Count }
+            elseif ($oldMap.Contains("$relNative|file-lines")) { [int]$oldMap["$relNative|file-lines"] } else { 0 }
+        $shrank[$relNative] = ($cur -lt $old)
+        $shrank[$relNative]
+    }
+    $added = @($newMap.Keys | Where-Object { -not $oldMap.Contains($_) } | Sort-Object { -[int]$newMap[$_] }, { $_ })
+    $removed = [System.Collections.Generic.List[string]]::new()
+    foreach ($k in ($oldMap.Keys | Sort-Object)) { if (-not $newMap.Contains($k)) { $removed.Add($k) } }
+    $matched = @{}
+    foreach ($samePass in @($false, $true)) {
+        foreach ($k in $added) {
+            if ($matched.Contains($k)) { continue }
+            $p = $k.Split('|', 3)
+            if ($p.Count -lt 3) { continue }
+            $best = -1
+            for ($i = 0; $i -lt $removed.Count; $i++) {
+                $rp = $removed[$i].Split('|', 3)
+                if ($rp.Count -lt 3 -or $rp[1] -ne $p[1] -or [int]$newMap[$k] -gt [int]$oldMap[$removed[$i]]) { continue }
+                $same = $rp[0] -eq $p[0]
+                if ($same -ne $samePass) { continue }
+                if (-not $same -and ($rp[2] -ne $p[2] -or $p[2] -in @('(lambda)', 'operator()') -or -not (& $isShrank $rp[0]))) { continue }
+                if ($best -lt 0 -or [int]$oldMap[$removed[$i]] -lt [int]$oldMap[$removed[$best]]) { $best = $i }
+            }
+            if ($best -ge 0) { $matched[$k] = $removed[$best]; $removed.RemoveAt($best) }
+        }
+    }
+    $matched
+}
+$baseline = Read-Baseline $(if (Test-Path $baselinePath) { Get-Content $baselinePath -Raw | ConvertFrom-Json -AsHashtable } else { @{} })
+if ($Base) {
+    $tree = Invoke-Tool 'git' @('-C', $Root, 'ls-tree', $mergeBase, '--', 'tools/lint-baseline.json') -AllowNonZero
+    $gitOk = $tree.ExitCode -eq 0
+    $baseBaseline = @{}
+    if (-not $gitOk) {
+        $errors.Add("tool-error: git ls-tree $mergeBase failed (exit $($tree.ExitCode)): $(Tail $tree.Lines)")
+    } elseif ($tree.Lines | Where-Object { $_ }) {
+        $res = Invoke-Tool 'git' @('-C', $Root, 'show', "${mergeBase}:tools/lint-baseline.json") -AllowNonZero
+        if ($res.ExitCode -ne 0) {
+            $gitOk = $false
+            $errors.Add("tool-error: git show ${mergeBase}:tools/lint-baseline.json failed (exit $($res.ExitCode)): $(Tail $res.Lines)")
+        } elseif ($res.Lines) {
+            $baseBaseline = Read-Baseline (($res.Lines -join "`n") | ConvertFrom-Json -AsHashtable)
+        }
+    }
+    if ($gitOk) {
+        foreach ($k in $baseline.Keys) {
+            if ($baseBaseline.Contains($k) -and [int]$baseline[$k] -gt [int]$baseBaseline[$k]) {
+                Fail 'tools/lint-baseline.json' 'baseline' "$k rose ($($baseBaseline[$k]) -> $($baseline[$k]))"
+            }
+        }
+        $baseMoves = Match-BaselineMoves $baseBaseline $baseline
+        foreach ($k in $baseline.Keys) {
+            if (-not $baseBaseline.Contains($k) -and -not $baseMoves.Contains($k)) {
+                Fail 'tools/lint-baseline.json' 'baseline' "$k added without a matching removed key"
+            }
+        }
+    }
+}
+$updateMoves = if ($UpdateBaseline) { Match-BaselineMoves $baseline $counts } else { @{} }
 $advice = @{ 'file-lines' = "split it by what it does (at most $fileLines lines)"; 'complexity' = 'simplify it (cognitive complexity 40 at most)'
     'function-lines' = 'split it (120 lines at most)' }
 foreach ($key in $counts.Keys) {
-    $limit = if ($baseline.ContainsKey($key)) { $baseline[$key] } else { 0 }
-    if ($counts[$key] -gt $limit) {
+    if ($UpdateBaseline -and $updateMoves.Contains($key)) { continue }
+    $limit = if ($baseline.Contains($key)) { [int]$baseline[$key] } else { 0 }
+    if ([int]$counts[$key] -gt $limit) {
         $parts = $key.Split('|')
         $why = if ($ratcheted.Contains($parts[1])) { $ratcheted[$parts[1]][1] } else { $advice[$parts[1]] }
         Fail "native/$($parts[0])" "$($parts[1..($parts.Count - 1)] -join ' ')" "$($counts[$key]) > $limit; $why"
     }
 }
-foreach ($key in $baseline.Keys) {
-    $tidyKey = $key -match '\|(complexity|function-lines)\|'
-    if (($tidyKey -and -not $Tidy) -or ($Base -and $tidyKey)) { continue }
-    if (-not $counts.Contains($key) -or $counts[$key] -lt $baseline[$key]) {
-        $errors.Add("lint: $key is below its baseline; run ./tools/lint.ps1 -Tidy -UpdateBaseline")
+if (-not $UpdateBaseline -and (-not $Paths -or (Test-Glob 'tools/lint-baseline.json' $Paths))) {
+    foreach ($key in $baseline.Keys) {
+        $tidyKey = $key -match '\|(complexity|function-lines)\|'
+        if ($tidyKey -and -not $Tidy) { continue }
+        if ($Base -and $tidyKey -and -not $fullRun) {
+            $keyFile = $key.Split('|')[0]
+            if ((Test-Path (Join-Path $Root "native/$keyFile")) -and -not $analysed.Contains($keyFile)) { continue }
+        }
+        if (-not $counts.Contains($key) -or [int]$counts[$key] -lt [int]$baseline[$key]) {
+            $errors.Add("lint: $key is below its baseline; run ./tools/lint.ps1 -Tidy -UpdateBaseline")
+        }
     }
 }
 
@@ -436,9 +532,20 @@ $problems = @($errors | Sort-Object -Unique)
 if ($Paths) {
     $problems = @($problems | Where-Object {
         $file = if ($_ -match '^([^:]+?)(:\d+)?: ') { $Matches[1] } else { '' }
-        -not $file -or $_ -match '^(lint|diff|tool-error): |: (scope|version|clang-diagnostic-error|(?:CS|MC|WMC|RZ)\d+): ' -or (Test-Glob $file $Paths)
+        -not $file -or $_ -match '^(lint|diff|tool-error): ' -or
+            $_ -match ': (scope|version|baseline|clang-diagnostic-error|(?:CS|MC|WMC|RZ)\d+): ' -or (Test-Glob $file $Paths)
     })
 }
 $problems | ForEach-Object { Write-Output $_ }
 if ($problems.Count) { Write-Output "lint: $($problems.Count) problem(s)"; exit 1 }
+if ($UpdateBaseline) {
+    $next = [ordered]@{}
+    foreach ($key in $counts.Keys | Sort-Object) {
+        if ($baseline.Contains($key)) { $next[$key] = [Math]::Min([int]$baseline[$key], [int]$counts[$key]) }
+        elseif ($updateMoves.Contains($key)) { $next[$key] = [int]$counts[$key] }
+    }
+    [IO.File]::WriteAllText($baselinePath, ($next | ConvertTo-Json).Replace("`r`n", "`n") + "`n")
+    "baseline: $($next.Count) entries"
+    exit 0
+}
 Write-Output 'lint: clean'
