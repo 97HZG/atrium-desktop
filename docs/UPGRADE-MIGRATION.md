@@ -9,3 +9,15 @@
    - 您的个人设置、主题配置与桌面小组件布局保存在 `%LOCALAPPDATA%\Atrium` 中，新版会无缝沿用。
    - 若旧版正在运行，新版会提示是否接管运行，并在启动后自动将 Windows 开机自启项与注册信息更新到新目录。
 3. **后续更新与卸载**：完成本次迁入新版目录后，之后的程序内更新与 `Uninstall.ps1` 均会基于 `package-manifest.json` 精准操作官方文件，不会再动到您的个人或自定义文件。
+
+## Upgrading from v2.7.0 or earlier
+
+Starting with this release, the in-app updater and uninstaller are driven by `package-manifest.json`, replacing or removing only official release files while leaving any extra files you placed in the install folder untouched.
+
+If you are currently running **`v2.7.0` or earlier**, an in-app update still runs **the old `Update.ps1` inside the existing folder**, which moves and clears the whole folder during an update. If you keep custom files in that folder (including the root directory, `Settings\`, or `locales\`), migrate once as follows:
+
+1. **Do not overwrite the old folder or trigger an in-app update from the old version**: download the new release archive and **extract it to a brand-new empty folder**, leaving the old folder as-is.
+2. **Launch the new build**: run `Atrium.exe` in the new folder.
+   - Your personal settings, themes, and desktop widget layouts live in `%LOCALAPPDATA%\Atrium` and carry over automatically.
+   - If the old version is running, the new build will ask to take over and automatically update the Windows startup entry and registration to the new folder.
+3. **Future updates and uninstalls**: once moved to the new folder, subsequent in-app updates and `Uninstall.ps1` use `package-manifest.json` and will no longer touch your custom files.

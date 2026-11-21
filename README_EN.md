@@ -56,6 +56,8 @@ The glass bends what is behind it, with a touch of highlight and dispersion at t
 - Rest on an open app to see a live preview of each of its windows, and switch to or close one from there.
 - Right-click an icon for the app's own jump list, as on the Windows taskbar: pinned and recent files, folders and workspaces, and the app's tasks (a browser's new or private window), plus run as administrator and properties. The settings can turn it off for the plain menu.
 - Drag pinned apps to reorder them. When the app in front goes full screen or maximised, the bar steps aside (or keep it up, or always hidden). While a game, video or anything else fills the whole screen, the pointer at the bottom edge does not bring the bar up, just like the Windows taskbar, so a full-screen game is never pushed back to the desktop. Optionally, Win + 1…9 open the bar's apps.
+- Multiple displays: dwell at the bottom edge of another monitor to summon the dock, or pin it to the primary display, a chosen display, or all displays. Under Displays in Settings, choose whether taskbar apps appear on all displays, the primary display plus the window's display, or only the window's display, and tune the cross-display dwell time.
+- Widgets and Stage Manager can each target a chosen display; if that display disconnects, they fall back to the primary display and return automatically when it reconnects.
 
 ### Start menu
 
@@ -66,7 +68,7 @@ The glass bends what is behind it, with a touch of highlight and dispersion at t
   </tr>
 </table>
 
-Opened from the Windows logo at the left of the bar, or optionally the Windows key. The apps pinned in the Windows start menu are here, and the sync button beside the search box brings in what was pinned there since, and the folders of All apps with their apps; drag them around, drop one onto another to make a folder and name it. Three sizes: small, medium and large. Just start typing to search apps and folders, no need to click the search box first; pinyin initials work too (wx finds 微信). All apps lists them A to Z with a letter index to jump through, and a right-click runs an app as administrator, opens its file location, or hides an app you do not want to see. The strip below holds your account, network, volume, battery and power; the settings pick the menu's size and can leave out its tray or status buttons.
+Opened from the Windows logo at the left of the bar, or optionally the Windows key. The apps pinned in the Windows start menu are here, and the sync button beside the search box brings in what was pinned there since, and the folders of All apps with their apps; drag them around, drop one onto another to make a folder and name it. Four sizes (small, medium, large, huge) with an independent icon size setting. Just start typing to search apps and folders, no need to click the search box first; pinyin initials work too (wx finds 微信). All apps lists them A to Z with a letter index to jump through, and a right-click runs an app as administrator, opens its file location, or hides an app you do not want to see. The strip below holds your account, network, volume, battery and power; the settings pick the menu's size and can leave out its tray or status buttons.
 
 ### Status ring and control centre
 
@@ -84,6 +86,8 @@ Instead of a row of battery, network and volume icons, the right of the bar has 
 </table>
 
 Click the ring for the control centre: Wi‑Fi, Bluetooth, battery, casting, Stage Manager, display brightness, sound and output device, and a volume for each app. Click the bell for notifications: new ones stack up, and a click lays the stack out as a list. Click the clock for a calendar with the Chinese lunar calendar and holidays.
+
+Under Notifications → Notification position in Settings, choose Follow taskbar (default) or any of the primary screen's four corners (top left, top right, bottom left, bottom right); in corner mode, new notifications slide in from the screen edge, existing ones shift smoothly to make room, long lists scroll, and the notification centre opens in that corner.
 
 ### Desktop widgets
 
@@ -124,7 +128,9 @@ Additional strip controls:
 3. Double-click Atrium's tray icon, or right-click it and choose 外观设置… (Appearance settings…), to open the settings: material, size, pinned apps, notifications, widgets and the three modules' switches. Check for updates on the 关于 (About) page.
 4. Right-click the tray icon and choose 退出 Atrium (Quit Atrium) to exit completely. Settings are kept in `%LOCALAPPDATA%\Atrium`.
 
-Requirements: Windows 10 19041 or later; Windows 11 recommended. The interface is in Simplified Chinese.
+> Upgrading from `v2.7.0` or earlier with custom files inside the install folder? Extract the new release to a fresh empty folder first — see [docs/UPGRADE-MIGRATION.md](docs/UPGRADE-MIGRATION.md).
+
+Requirements: Windows 10 19041 or later; Windows 11 recommended.
 
 ### If Windows blocks it
 

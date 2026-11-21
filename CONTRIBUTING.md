@@ -13,6 +13,34 @@ Thanks for your interest. The most valuable contributions to Atrium right now ar
 - Report results honestly: a test is `PASS`, `FAIL` or `SKIP`. Missing hardware is a skip, not "should work".
 - Do not commit screenshots or data that show other people's windows, notifications or personal content. Use `ATRIUM_PRIVACY=1` and a synthetic backdrop for images.
 
+## Local checks
+
+Run these from the repository root before opening a pull request:
+
+```powershell
+# Build core, Settings, tests, and portable zip
+./tools/build.ps1 -Zip -Tests -Ninja
+
+# Native unit tests & settings / localization checks
+ctest --test-dir native/build/win-x64 --output-on-failure --timeout 60
+dotnet run --project tests/SettingsChecks/SettingsChecks.csproj -c Release -- --core-normalizer native/build/win-x64/tests/display_settings_tests.exe
+dotnet run --project tests/LocalizationChecks -c Release
+./tools/check-localization.ps1
+./tools/tests/check-localization.tests.ps1
+
+# Lint & script checks (add -Base origin/main for PR diffs)
+./tools/lint.ps1 -Tidy -DotNet -BuildDir native/build/win-x64
+./tools/tests/lint.tests.ps1
+```
+
+If your change touches `Update.ps1`, `Uninstall.ps1`, or packaging scripts, also run:
+
+```powershell
+./tools/tests/update.tests.ps1            # optional: -CandidateZipPath <zip>
+./tools/tests/uninstall.tests.ps1
+./tools/verify-package.ps1 -ZipPath <zip> # exit any running Atrium instance first or omit -SmokeStart
+```
+
 ## Pull requests
 
 1. Open an issue first for anything larger than a typo, so the approach can be agreed on.
