@@ -8,6 +8,22 @@ using Microsoft.Win32;
 
 namespace Atrium.Settings;
 
+internal enum CommitStatus { Saved, Conflict, Error }
+
+internal sealed record CoreState(BarSettings Saved, BarSettings Current, string? InstanceId, ulong Revision, bool FromCore);
+
+internal sealed record CommitResult(
+    CommitStatus Status,
+    BarSettings? ServerSaved = null,
+    string? InstanceId = null,
+    ulong Revision = 0,
+    string? Warning = null,
+    string? Error = null)
+{
+    public bool Succeeded => Status == CommitStatus.Saved;
+    public bool IsConflict => Status == CommitStatus.Conflict;
+}
+
 // Client of the Atrium.Core settings pipe (docs/SETTINGS-PROTOCOL.md). When the
 // core is not running, settings are read from and written to the file directly.
 internal sealed partial class CoreClient : IDisposable
@@ -16,9 +32,20 @@ internal sealed partial class CoreClient : IDisposable
     private static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint processId);
 
     private readonly string _pipeName;
-    internal CoreClient(string? pipeName = null)
+    private readonly string _settingsPath;
+    private readonly string? _expectedServerExe;
+    private readonly Func<BarSettings, string?>? _writeFileOverride;
+
+    internal CoreClient(
+        string? pipeName = null,
+        string? settingsPath = null,
+        string? expectedServerExe = null,
+        Func<BarSettings, string?>? writeFileOverride = null)
     {
         _pipeName = pipeName ?? "Atrium.Core." + Process.GetCurrentProcess().SessionId;
+        _settingsPath = settingsPath ?? SettingsPath;
+        _expectedServerExe = expectedServerExe;
+        _writeFileOverride = writeFileOverride;
     }
 
     public static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "settings.json");
@@ -48,6 +75,8 @@ internal sealed partial class CoreClient : IDisposable
     public bool Connected => _pipe is { IsConnected: true };
     public int ProcessId { get; private set; }
     public bool StateConfirmed { get; private set; }
+    public string? InstanceId { get; private set; }
+    public ulong Revision { get; private set; }
 
     public static string? CoreExe()
     {
@@ -63,7 +92,7 @@ internal sealed partial class CoreClient : IDisposable
         try
         {
             await pipe.ConnectAsync(timeoutMs, _lifetime.Token);
-            pipe.ReadMode = PipeTransmissionMode.Message;
+            if (OperatingSystem.IsWindows()) pipe.ReadMode = PipeTransmissionMode.Message;
             // The name is session-wide; only this distribution's executable owns our settings.
             if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out uint pid))
             {
@@ -71,7 +100,7 @@ internal sealed partial class CoreClient : IDisposable
                 return false;
             }
             using var process = Process.GetProcessById((int)pid);
-            string? expected = CoreExe();
+            string? expected = _expectedServerExe ?? CoreExe();
             if (expected == null || !string.Equals(process.MainModule?.FileName, expected, StringComparison.OrdinalIgnoreCase))
             {
                 _connectionLost = true;
@@ -109,6 +138,8 @@ internal sealed partial class CoreClient : IDisposable
         _pipe = null;
         ProcessId = 0;
         StateConfirmed = false;
+        InstanceId = null;
+        Revision = 0;
         if (coreStopped) { _connectionLost = false; ConnectionError = null; }
     }
 
@@ -156,36 +187,75 @@ internal sealed partial class CoreClient : IDisposable
         }
     }
 
-    // (saved, current) from the core, or (file, file) when it is not running.
-    public async Task<(BarSettings Saved, BarSettings Current)> GetAsync()
+    // State from the core, or from the file when it is not running.
+    public async Task<CoreState> GetAsync()
     {
         var r = await RequestAsync(new JsonObject { ["op"] = "get" });
         if (r?["op"]?.GetValue<string>() == "state")
         {
             StateConfirmed = true;
-            return (BarSettings.FromJson(r["saved"] as JsonObject, new()), BarSettings.FromJson(r["current"] as JsonObject, new()));
+            InstanceId = ParseNonEmptyString(r["instanceId"]);
+            Revision = ParseRevision(r["revision"]);
+            return new CoreState(
+                BarSettings.FromJson(r["saved"] as JsonObject, new()),
+                BarSettings.FromJson(r["current"] as JsonObject, new()),
+                InstanceId,
+                Revision,
+                true);
         }
-        var file = await Task.Run(ReadFile);
-        return (file, file.Clone());
+        var file = await ReadFileSerializedAsync();
+        return new CoreState(file, file.Clone(), null, 0, false);
     }
 
     public Task<string?> PreviewAsync(BarSettings s) => Send("preview", s);
 
-    public async Task<string?> CommitAsync(BarSettings s)
+    public async Task<CommitResult> CommitAsync(BarSettings s, string? expectedInstanceId = null, ulong expectedRevision = 0)
     {
         LastSaveWarning = null;
         if (Connected)
-            return await Send("commit", s);
+            return await SendCommitAsync(s, expectedInstanceId ?? InstanceId, expectedRevision > 0 ? expectedRevision : Revision);
         if (_connectionLost || _lifetime.IsCancellationRequested)
-            return Loc.T("The connection to the core was lost; the save result is not confirmed. Reconnect and check the saved settings.");
+        {
+            return new CommitResult(
+                CommitStatus.Error,
+                Error: Loc.T("The connection to the core was lost; the save result is not confirmed. Reconnect and check the saved settings."));
+        }
+        var snapshot = s.Clone();
+        bool entered = false;
         try
         {
-            LastSaveWarning = await Task.Run(() => WriteFile(s.Clone()));
-            return null;
+            await _io.WaitAsync(_lifetime.Token);
+            entered = true;
+            if (_lifetime.IsCancellationRequested)
+            {
+                return new CommitResult(
+                    CommitStatus.Error,
+                    Error: Loc.T("The connection to the core was lost; the save result is not confirmed. Reconnect and check the saved settings."));
+            }
+            if (Connected)
+            {
+                _io.Release();
+                entered = false;
+                return await SendCommitAsync(snapshot, expectedInstanceId ?? InstanceId, expectedRevision > 0 ? expectedRevision : Revision);
+            }
+            LastSaveWarning = await Task.Run(() => _writeFileOverride != null
+                ? _writeFileOverride(snapshot)
+                : WriteFile(_settingsPath, snapshot));
+            return new CommitResult(CommitStatus.Saved, Warning: LastSaveWarning);
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommitResult(
+                CommitStatus.Error,
+                Error: Loc.T("The connection to the core was lost; the save result is not confirmed. Reconnect and check the saved settings."));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return e.Message;
+            return new CommitResult(CommitStatus.Error, Error: e.Message);
+        }
+        finally
+        {
+            if (entered) _io.Release();
         }
     }
 
@@ -197,6 +267,42 @@ internal sealed partial class CoreClient : IDisposable
         var r = await RequestAsync(new JsonObject { ["op"] = "add-widget", ["kind"] = kind, ["size"] = size });
         if (r == null) return Loc.T("Atrium is not running");
         return r["op"]?.GetValue<string>() == "ok" ? null : r["message"]?.GetValue<string>() ?? "error";
+    }
+
+    private async Task<CommitResult> SendCommitAsync(BarSettings s, string? expectedInstanceId, ulong expectedRevision)
+    {
+        var request = new JsonObject { ["op"] = "commit", ["settings"] = s.ToJson() };
+        if (!string.IsNullOrEmpty(expectedInstanceId)) request["instanceId"] = expectedInstanceId;
+        if (expectedRevision > 0) request["expectedRevision"] = expectedRevision;
+        var r = await RequestAsync(request);
+        if (r == null)
+        {
+            return new CommitResult(
+                CommitStatus.Error,
+                Error: Loc.T("The core did not reply in time or the connection closed; the result is not confirmed. Please reconnect."));
+        }
+        string? op = r["op"]?.GetValue<string>();
+        if (op == "ok")
+        {
+            string? id = ParseNonEmptyString(r["instanceId"]) ?? InstanceId;
+            ulong rev = ParseRevision(r["revision"]);
+            if (rev == 0) rev = Revision;
+            InstanceId = id;
+            Revision = rev;
+            LastSaveWarning = r["warning"]?.GetValue<string>();
+            return new CommitResult(CommitStatus.Saved, InstanceId: id, Revision: rev, Warning: LastSaveWarning);
+        }
+        if (op == "conflict")
+        {
+            var serverSaved = BarSettings.FromJson(r["saved"] as JsonObject, new());
+            string? id = ParseNonEmptyString(r["instanceId"]) ?? InstanceId;
+            ulong rev = ParseRevision(r["revision"]);
+            InstanceId = id;
+            Revision = rev;
+            string message = r["message"]?.GetValue<string>() ?? "conflict";
+            return new CommitResult(CommitStatus.Conflict, serverSaved, id, rev, Error: message);
+        }
+        return new CommitResult(CommitStatus.Error, Error: r["message"]?.GetValue<string>() ?? "error");
     }
 
     // Null on success, otherwise an error message.
@@ -213,13 +319,41 @@ internal sealed partial class CoreClient : IDisposable
                 ? Loc.T("The core did not reply in time or the connection closed; the result is not confirmed. Please reconnect.")
                 : null;
         }
-        if (op == "commit") LastSaveWarning = r["warning"]?.GetValue<string>();
         return r["op"]?.GetValue<string>() == "ok" ? null : r["message"]?.GetValue<string>() ?? "error";
     }
 
-    private static BarSettings ReadFile()
+    private async Task<BarSettings> ReadFileSerializedAsync()
     {
-        var s = SettingsPersistence.ReadSettings(SettingsPath);
+        bool entered = false;
+        try
+        {
+            await _io.WaitAsync(_lifetime.Token);
+            entered = true;
+            return await Task.Run(() => ReadFile(_settingsPath));
+        }
+        catch (OperationCanceledException)
+        {
+            return new BarSettings();
+        }
+        finally
+        {
+            if (entered) _io.Release();
+        }
+    }
+
+    private static string? ParseNonEmptyString(JsonNode? node) =>
+        node is JsonValue v && v.TryGetValue(out string? s) && !string.IsNullOrEmpty(s) ? s : null;
+
+    private static ulong ParseRevision(JsonNode? node)
+    {
+        if (node is not JsonValue v) return 0;
+        if (v.TryGetValue(out ulong u)) return u;
+        return v.TryGetValue(out double d) && double.IsFinite(d) && d >= 0 ? (ulong)d : 0;
+    }
+
+    private static BarSettings ReadFile(string path)
+    {
+        var s = SettingsPersistence.ReadSettings(path);
         // First run (no "pins" key yet): show what the core would import.
         s.Pins ??= ImportTaskbarPins();
         return s;
@@ -252,10 +386,10 @@ internal sealed partial class CoreClient : IDisposable
         _ => string.Format(System.Globalization.CultureInfo.InvariantCulture, key, args),
     };
 
-    private static string? WriteFile(BarSettings s)
+    private static string? WriteFile(string settingsPath, BarSettings s)
     {
-        bool startupChanged = SettingsPersistence.WriteSettings(SettingsPath, s, FormatPersistenceError);
-        if (!startupChanged || Development) return null;
+        bool startupChanged = SettingsPersistence.WriteSettings(settingsPath, s, FormatPersistenceError);
+        if (!startupChanged || Development || !OperatingSystem.IsWindows()) return null;
         try
         {
             using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
@@ -284,6 +418,7 @@ internal sealed partial class CoreClient : IDisposable
     // itself, from the Run entry written above, when it next starts.
     private static void RemoveLogonTask(string exe)
     {
+        if (!OperatingSystem.IsWindows()) return;
         string name = "Atrium Startup-" + System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
         dynamic? service = null, folder = null, task = null, definition = null, actions = null, action = null;
         try

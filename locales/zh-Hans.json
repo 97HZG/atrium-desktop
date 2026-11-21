@@ -904,6 +904,8 @@
   "Could not save %s: settings file uses a newer format version (v%.0f > v%d). Update Atrium before saving.": "无法保存 %s：设置文件使用了更高版本的格式（v%.0f > v%d）。请先更新 Atrium 再保存。",
   "Could not back up corrupt settings file %s before saving; original file was kept.": "保存前无法备份已损坏的设置文件 %s，已保留原文件。",
   "Could not save {0}: settings file uses a newer format version (v{1} > v{2}). Update Atrium before saving.": "无法保存 {0}：设置文件使用了更高版本的格式（v{1} > v{2}）。请先更新 Atrium 再保存。",
-  "Could not back up corrupt settings file {0} before saving; original file was kept.": "保存前无法备份已损坏的设置文件 {0}，已保留原文件。"
+  "Could not back up corrupt settings file {0} before saving; original file was kept.": "保存前无法备份已损坏的设置文件 {0}，已保留原文件。",
+  "Settings changed elsewhere": "设置已在别处更改",
+  "The core settings changed before saving. Your unsubmitted edits were kept; review them and click Save again.": "核心中的设置在保存前已被更改。已保留你尚未提交的修改，请确认后再点一次“保存”。"
  }
 }

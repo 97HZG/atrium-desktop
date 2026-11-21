@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -21,15 +22,36 @@ internal static class ReleaseInstaller
     private sealed record Download(ReleaseInfo Release, Guid Job, string? Error = null);
     internal sealed record TransferStatus(string Text, bool CanRetry = false);
 
-    internal static Prepared? ReadPrepared(Version current)
+    internal static Prepared? ReadPrepared(Version current) =>
+        ReadPrepared(current, CacheDirectory, StatePath);
+
+    internal static Prepared? ReadPrepared(
+        Version current,
+        string cacheDirectory,
+        string statePath,
+        Func<string, Version>? versionReader = null)
     {
-        var ready = ReadJson<Prepared>(StatePath);
+        var ready = ReadJson<Prepared>(statePath);
         if (ready == null || !Version.TryParse(ready.Version, out var version) || version <= current) return null;
-        if (!Path.GetFullPath(ready.Directory).StartsWith(CacheDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        string cacheRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(cacheDirectory)) + Path.DirectorySeparatorChar;
+        if (!Path.GetFullPath(ready.Directory).StartsWith(cacheRoot, StringComparison.OrdinalIgnoreCase))
             throw new IOException(Loc.T("The update cache path is invalid. Download again."));
-        ValidatePackage(ready.Directory, version);
+        ValidatePackage(ready.Directory, version, versionReader);
         return ready;
     }
+
+    internal static Prepared? ReadPreparedRecovering(Version current) =>
+        ReadPreparedRecovering(current, CacheDirectory, StatePath, WorkDirectory, App.LogCrash);
+
+    internal static Prepared? ReadPreparedRecovering(
+        Version current,
+        string cacheDirectory,
+        string statePath,
+        string workDirectory,
+        Action<Exception>? logError = null,
+        Func<string, Version>? versionReader = null) =>
+        ReleaseValidation.TryRecoverPrepared(
+            () => ReadPrepared(current, cacheDirectory, statePath, versionReader), statePath, workDirectory, logError);
 
     internal static string? ReadFailure() =>
         ReleaseValidation.ReadFailureWithLock(ResultPath, @"Local\Atrium.Update." + Path.GetFileName(CacheDirectory), App.LogCrash);
@@ -51,6 +73,7 @@ internal static class ReleaseInstaller
         return start;
     }
 
+    [SupportedOSPlatform("windows")]
     internal static TransferStatus? ReadTransferStatus()
     {
         var download = ReadDownload();
@@ -89,6 +112,7 @@ internal static class ReleaseInstaller
 
     // Called before XAML starts. The mutex covers the short queue/finalize work,
     // not the transfer; closing any Atrium process never calls BITS.Cancel().
+    [SupportedOSPlatform("windows")]
     internal static int RunBackground(string[] args)
     {
         Download? pending = null;
@@ -154,10 +178,11 @@ internal static class ReleaseInstaller
         }
     }
 
+    [SupportedOSPlatform("windows")]
     private static void Queue(ReleaseInfo release, Download? pending)
     {
         if (release.Download == null || release.Version <= CurrentVersion) return;
-        if (ReleaseValidation.TryRecoverPrepared(() => ReadPrepared(CurrentVersion), StatePath, WorkDirectory, App.LogCrash) is { } ready &&
+        if (ReadPreparedRecovering(CurrentVersion) is { } ready &&
             Version.Parse(ready.Version) >= release.Version)
         { NotifyReady(); return; }
         if (pending != null && pending.Release.Version > release.Version) release = pending.Release;
@@ -195,6 +220,7 @@ internal static class ReleaseInstaller
         catch { job.Cancel(); throw; }
     }
 
+    [SupportedOSPlatform("windows")]
     private static void Finish(Download? pending)
     {
         if (pending == null) { NotifyReady(); return; }
@@ -254,8 +280,8 @@ internal static class ReleaseInstaller
         { /* The core may have exited; it reads ready.json on its next startup. */ }
     }
 
-    private static void ValidatePackage(string directory, Version expected) =>
-        ReleaseValidation.ValidatePackage(directory, expected, localize: LocalizeValidation);
+    private static void ValidatePackage(string directory, Version expected, Func<string, Version>? versionReader = null) =>
+        ReleaseValidation.ValidatePackage(directory, expected, versionReader, LocalizeValidation);
 
     private static string LocalizeValidation(string key) => key switch
     {

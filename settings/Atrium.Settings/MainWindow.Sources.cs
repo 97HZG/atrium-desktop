@@ -95,7 +95,7 @@ public sealed partial class MainWindow
     // The Windows Snipping Tool, one row for its entries (the packaged app and its two programs).
     private const string SnippingToolIcon = @"shell:AppsFolder\Microsoft.ScreenSketch_8wekyb3d8bbwe!App";
 
-    internal BarSettings CurrentSettings { get; private set; } = new();
+    internal BarSettings CurrentSettings => _session.Draft;
 
     private void InitSources()
     {

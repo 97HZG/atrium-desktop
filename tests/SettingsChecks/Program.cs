@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
+using System.IO.Pipes;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -654,6 +656,233 @@ finally
     finally
     {
         if (Directory.Exists(persistTemp)) Directory.Delete(persistTemp, true);
+    }
+}
+{
+    // 1. SettingsSession: edit during reconnect GetAsync() await must survive
+    var session = new SettingsSession();
+    session.ApplyInitialState(new BarSettings { Height = 60, Margin = 10 }, new BarSettings { Height = 60, Margin = 10 }, "inst-1", 1);
+    long draftBeforeReconnect = session.DraftVersion;
+    session.Draft.Height = 76;
+    session.MarkEdited();
+    bool needPreview = session.ApplyReconnectSnapshot(
+        new BarSettings { Height = 60, Margin = 22 },
+        new BarSettings { Height = 60, Margin = 22 },
+        "inst-2",
+        4,
+        draftBeforeReconnect);
+    Require(needPreview && session.HasUnsavedChanges && session.Draft.Height == 76 && session.Draft.Margin == 22 &&
+            session.Saved.Margin == 22 && session.InstanceId == "inst-2" && session.Revision == 4,
+        "ApplyReconnectSnapshot must preserve edits made while GetAsync() was awaiting and merge baseline updates.");
+
+    // 2. SettingsSession: edits made while CommitAsync is in flight stay unsaved after ApplyCommitSuccess
+    var sent = session.Draft.Clone();
+    session.Draft.Blur = 0.85;
+    session.MarkEdited();
+    Require(session.ApplyCommitSuccess(sent, "inst-2", 5) && session.Revision == 5 &&
+            session.Saved.Height == 76 && session.Draft.Blur == 0.85 && session.HasUnsavedChanges,
+        "ApplyCommitSuccess must update Saved/Revision while keeping edits made during commit.");
+
+    // 3. SettingsSession: external changes merge non-conflicting fields while keeping draft edits
+    bool extApplied = session.ApplyExternalChange(new BarSettings { Height = 76, Margin = 22, ShowClock = false, Blur = 0.25 }, 6);
+    Require(extApplied && session.Revision == 6 && !session.Draft.ShowClock && session.Draft.Blur == 0.85 && !session.Saved.ShowClock,
+        "ApplyExternalChange must adopt external field changes while keeping conflicting draft edits.");
+
+    // 4. SettingsSession: 3-way conflict merge preserves unsubmitted draft diff over server baseline
+    var conflictSession = new SettingsSession();
+    conflictSession.ApplyInitialState(
+        new BarSettings { Height = 60, Margin = 10, ShowClock = true },
+        new BarSettings { Height = 60, Margin = 10, ShowClock = true },
+        "inst-a",
+        1);
+    conflictSession.Draft.Height = 84;
+    conflictSession.MarkEdited();
+    conflictSession.ApplyConflict(new BarSettings { Height = 68, Margin = 18, ShowClock = false }, 3, "inst-b");
+    Require(conflictSession.Saved.Height == 68 && conflictSession.Saved.Margin == 18 && !conflictSession.Saved.ShowClock &&
+            conflictSession.Draft.Height == 84 && conflictSession.Draft.Margin == 18 && !conflictSession.Draft.ShowClock &&
+            conflictSession.Revision == 3 && conflictSession.InstanceId == "inst-b" && conflictSession.HasUnsavedChanges,
+        "ApplyConflict must rebase on serverSaved and preserve unsubmitted draft differences via 3-way merge.");
+
+    // 5. SettingsSession: Close() rejects late async responses
+    conflictSession.Close();
+    long closedDraftVer = conflictSession.DraftVersion;
+    Require(!conflictSession.ApplyInitialState(new(), new(), "inst-z", 99) &&
+            !conflictSession.ApplyReconnectSnapshot(new(), new(), "inst-z", 99, closedDraftVer) &&
+            !conflictSession.ApplyCommitSuccess(new(), "inst-z", 99) &&
+            !conflictSession.ApplyExternalChange(new BarSettings { Height = 99 }, 99) &&
+            !conflictSession.ApplyConflict(new BarSettings { Height = 99 }, 99, "inst-z") &&
+            conflictSession.Revision == 3 && conflictSession.InstanceId == "inst-b" && conflictSession.Draft.Height == 84,
+        "Closed SettingsSession must ignore late async state/commit/conflict responses.");
+
+    // 6. CoreClient: concurrent offline CommitAsync writes are serialized via _io (early slow write cannot overwrite later write)
+    string sessionTemp = Path.Combine(Path.GetTempPath(), "atrium-session-cs-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(sessionTemp);
+        string offlinePath = Path.Combine(sessionTemp, "settings.json");
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowFirstToFinish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeOrder = new List<double>();
+        using var offlineClient = new CoreClient(
+            pipeName: "Atrium.Test.Missing." + Guid.NewGuid().ToString("N"),
+            settingsPath: offlinePath,
+            writeFileOverride: s =>
+            {
+                if (s.Height == 44)
+                {
+                    firstStarted.TrySetResult();
+                    allowFirstToFinish.Task.GetAwaiter().GetResult();
+                }
+                SettingsPersistence.WriteSettings(offlinePath, s);
+                lock (writeOrder) writeOrder.Add(s.Height);
+                return null;
+            });
+        var slowFirst = offlineClient.CommitAsync(new BarSettings { Height = 44 });
+        await firstStarted.Task;
+        var fastSecond = offlineClient.CommitAsync(new BarSettings { Height = 88 });
+        var readThird = offlineClient.GetAsync();
+        await Task.Delay(60);
+        Require(!fastSecond.IsCompleted && !readThird.IsCompleted,
+            "Offline CommitAsync and GetAsync must serialize behind an in-flight offline write.");
+        allowFirstToFinish.SetResult();
+        var r1 = await slowFirst;
+        var r2 = await fastSecond;
+        var s3 = await readThird;
+        Require(r1.Succeeded && r2.Succeeded && writeOrder.SequenceEqual([44, 88]) &&
+                s3.Saved.Height == 88 && SettingsPersistence.ReadSettings(offlinePath).Height == 88,
+            "Concurrent offline saves must serialize in order so the newer write wins.");
+
+        // 6b. Disposed CoreClient must not read offline file on GetAsync()
+        offlineClient.Dispose();
+        var afterDispose = await offlineClient.GetAsync();
+        Require(!afterDispose.FromCore && afterDispose.Saved.Height == new BarSettings().Height,
+            "Disposed CoreClient must skip offline disk/pin reads and return default state.");
+
+        // 7. CoreClient + SettingsSession over a real NamedPipeServerStream: conflict -> 3-way merge -> retry commit succeeds
+        string pipeName = "Atrium.Test.Session." + Guid.NewGuid().ToString("N");
+        var pipeSession = new SettingsSession();
+        var serverTask = Task.Run(async () =>
+        {
+            var mode = OperatingSystem.IsWindows() ? PipeTransmissionMode.Message : PipeTransmissionMode.Byte;
+            using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, mode, PipeOptions.Asynchronous);
+            await pipe.WaitForConnectionAsync();
+            static async Task<JsonObject> ReadMsgAsync(NamedPipeServerStream p)
+            {
+                byte[] buf = new byte[4096];
+                using var ms = new MemoryStream();
+                do
+                {
+                    int n = await p.ReadAsync(buf);
+                    if (n == 0) throw new EndOfStreamException();
+                    ms.Write(buf, 0, n);
+                } while (!p.IsMessageComplete);
+                return JsonNode.Parse(ms.ToArray())!.AsObject();
+            }
+            static async Task WriteMsgAsync(NamedPipeServerStream p, JsonObject o)
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(o.ToJsonString());
+                await p.WriteAsync(bytes);
+                await p.FlushAsync();
+            }
+            var m1 = await ReadMsgAsync(pipe);
+            Require(m1["op"]?.GetValue<string>() == "get", "Expected initial get op.");
+            await WriteMsgAsync(pipe, new JsonObject
+            {
+                ["op"] = "state",
+                ["protocol"] = 1,
+                ["instanceId"] = "srv-1",
+                ["revision"] = 1,
+                ["saved"] = new BarSettings { Height = 60, ShowClock = true }.ToJson(),
+                ["current"] = new BarSettings { Height = 60, ShowClock = true }.ToJson(),
+                ["path"] = offlinePath,
+            });
+            var m2 = await ReadMsgAsync(pipe);
+            Require(m2["op"]?.GetValue<string>() == "commit" && m2["instanceId"]?.GetValue<string>() == "srv-1" &&
+                    m2["expectedRevision"]?.GetValue<ulong>() == 1,
+                "First online commit must send instanceId and expectedRevision=1.");
+            await WriteMsgAsync(pipe, new JsonObject
+            {
+                ["op"] = "conflict",
+                ["instanceId"] = "srv-1",
+                ["revision"] = 2,
+                ["saved"] = new BarSettings { Height = 60, ShowClock = false }.ToJson(),
+                ["current"] = new BarSettings { Height = 60, ShowClock = false }.ToJson(),
+                ["message"] = "settings changed since last read",
+            });
+            var m3 = await ReadMsgAsync(pipe);
+            Require(m3["op"]?.GetValue<string>() == "commit" && m3["expectedRevision"]?.GetValue<ulong>() == 2 &&
+                    Math.Abs(m3["settings"]!["height"]!.GetValue<double>() - 92) < 1e-6 &&
+                    !m3["settings"]!["showClock"]!.GetValue<bool>(),
+                "Retry commit after 3-way conflict merge must send expectedRevision=2 with preserved draft and server change.");
+            await WriteMsgAsync(pipe, new JsonObject
+            {
+                ["op"] = "ok",
+                ["instanceId"] = "srv-1",
+                ["revision"] = 3,
+            });
+        });
+
+        using var onlineClient = new CoreClient(pipeName, offlinePath, Environment.ProcessPath);
+        Require(await onlineClient.ConnectAsync(3000), "CoreClient must connect to in-process test pipe.");
+        var initialState = await onlineClient.GetAsync();
+        pipeSession.ApplyInitialState(initialState.Saved, initialState.Current, initialState.InstanceId, initialState.Revision);
+        pipeSession.Draft.Height = 92;
+        pipeSession.MarkEdited();
+        var conflictRes = await onlineClient.CommitAsync(pipeSession.Draft.Clone(), pipeSession.InstanceId, pipeSession.Revision);
+        Require(conflictRes.IsConflict && conflictRes.Revision == 2 && conflictRes.ServerSaved != null,
+            "CoreClient.CommitAsync must surface structured conflict result.");
+        pipeSession.ApplyConflict(conflictRes.ServerSaved!, conflictRes.Revision, conflictRes.InstanceId);
+        Require(pipeSession.Draft.Height == 92 && !pipeSession.Draft.ShowClock,
+            "SettingsSession must keep draft height=92 while merging server showClock=false.");
+        var retrySent = pipeSession.Draft.Clone();
+        var okRes = await onlineClient.CommitAsync(retrySent, pipeSession.InstanceId, pipeSession.Revision);
+        pipeSession.ApplyCommitSuccess(retrySent, okRes.InstanceId, okRes.Revision);
+        await serverTask;
+        Require(okRes.Succeeded && okRes.Revision == 3 && pipeSession.Revision == 3 && !pipeSession.HasUnsavedChanges,
+            "Retry commit after conflict must succeed and advance revision to 3.");
+
+        // 8. ReleaseInstaller.ReadPreparedRecovering: corrupt ready.json, missing files, and escaping path auto-clean and return null
+        string updCache = Path.Combine(sessionTemp, "upd-cache");
+        string updState = Path.Combine(updCache, "ready.json");
+        string updWork = Path.Combine(updCache, "package-background");
+        Version curVer = new(2, 7, 0, 0), nextVer = new(2, 8, 0, 0);
+
+        Directory.CreateDirectory(updWork);
+        File.WriteAllText(updState, "{corrupt-ready-json");
+        Exception? loggedRecover = null;
+        Require(ReleaseInstaller.ReadPreparedRecovering(curVer, updCache, updState, updWork, e => loggedRecover = e) == null &&
+                loggedRecover is JsonException && !File.Exists(updState) && !Directory.Exists(updWork),
+            "ReadPreparedRecovering must clean corrupt ready.json and work directory.");
+
+        string stagedPkg = Path.Combine(updWork, "unpacked");
+        Directory.CreateDirectory(stagedPkg);
+        ReleaseValidation.SaveJsonAtomic(updState, new ReleaseInstaller.Prepared("v2.8.0", "2.8.0.0", stagedPkg));
+        loggedRecover = null;
+        Require(ReleaseInstaller.ReadPreparedRecovering(curVer, updCache, updState, updWork, e => loggedRecover = e) == null &&
+                loggedRecover is IOException && !File.Exists(updState) && !Directory.Exists(updWork),
+            "ReadPreparedRecovering must clean staged package missing binaries.");
+
+        Directory.CreateDirectory(updWork);
+        string outsidePkg = Path.Combine(sessionTemp, "outside");
+        Directory.CreateDirectory(outsidePkg);
+        ReleaseValidation.SaveJsonAtomic(updState, new ReleaseInstaller.Prepared("v2.8.0", "2.8.0.0", outsidePkg));
+        loggedRecover = null;
+        Require(ReleaseInstaller.ReadPreparedRecovering(curVer, updCache, updState, updWork, e => loggedRecover = e) == null &&
+                loggedRecover is IOException && !File.Exists(updState) && !Directory.Exists(updWork),
+            "ReadPreparedRecovering must reject and clean cache-escaping ready.json.");
+
+        Directory.CreateDirectory(Path.Combine(stagedPkg, "Settings"));
+        File.WriteAllText(Path.Combine(stagedPkg, "Atrium.exe"), "");
+        File.WriteAllText(Path.Combine(stagedPkg, "Settings", "Atrium.Settings.exe"), "");
+        File.WriteAllText(Path.Combine(stagedPkg, "Settings", "Atrium.Settings.dll"), "");
+        ReleaseValidation.SaveJsonAtomic(updState, new ReleaseInstaller.Prepared("v2.8.0", "2.8.0.0", stagedPkg));
+        var validPrepared = ReleaseInstaller.ReadPreparedRecovering(curVer, updCache, updState, updWork, null, _ => nextVer);
+        Require(validPrepared != null && validPrepared.Version == "2.8.0.0" && File.Exists(updState),
+            "ReadPreparedRecovering must return valid prepared package untouched.");
+    }
+    finally
+    {
+        if (Directory.Exists(sessionTemp)) Directory.Delete(sessionTemp, true);
     }
 }
 Console.WriteLine("Hardening regression checks passed.");

@@ -3,8 +3,10 @@
 #include "log.h"
 #include "ui/desktop_widgets.h"
 
-#include <winrt/Windows.Foundation.Collections.h>
+#include <sddl.h>
+
 #include <winrt/Windows.Data.Json.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Foundation.h>
 
 namespace json = winrt::Windows::Data::Json;
@@ -41,6 +43,91 @@ std::string Reply(const wchar_t* op, const wchar_t* message = nullptr)
     return Narrow(std::wstring(o.Stringify()));
 }
 
+std::wstring MakeInstanceId()
+{
+    static std::atomic<uint64_t> seq{1};
+    return std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" +
+           std::to_wstring(seq.fetch_add(1, std::memory_order_relaxed));
+}
+
+std::wstring CurrentUserSid()
+{
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return {};
+    DWORD size = 0;
+    GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    std::string buffer(size, '\0');
+    wchar_t* sidText = nullptr;
+    std::wstring result;
+    if (size && GetTokenInformation(token, TokenUser, buffer.data(), size, &size) &&
+        ConvertSidToStringSidW(reinterpret_cast<const TOKEN_USER*>(buffer.data())->User.Sid, &sidText)) {
+        result = sidText;
+        LocalFree(sidText);
+    }
+    CloseHandle(token);
+    return result;
+}
+
+struct PipeSecurity {
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    SECURITY_ATTRIBUTES sa{sizeof(SECURITY_ATTRIBUTES), nullptr, FALSE};
+
+    PipeSecurity()
+    {
+        const std::wstring sid = CurrentUserSid();
+        if (sid.empty()) {
+            Log(L"pipe: could not resolve user SID for DACL (%lu), using default security", GetLastError());
+            return;
+        }
+        const std::wstring sddl = L"D:P(A;;GA;;;" + sid + L")(A;;GA;;;SY)(A;;GA;;;BA)";
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &sd, nullptr)) {
+            Log(L"pipe: ConvertStringSecurityDescriptorToSecurityDescriptorW failed (%lu), using default security", GetLastError());
+            sd = nullptr;
+            return;
+        }
+        sa.lpSecurityDescriptor = sd;
+    }
+
+    ~PipeSecurity()
+    {
+        if (sd)
+            LocalFree(sd);
+    }
+
+    PipeSecurity(const PipeSecurity&) = delete;
+    PipeSecurity& operator=(const PipeSecurity&) = delete;
+
+    SECURITY_ATTRIBUTES* Get() { return sd ? &sa : nullptr; }
+};
+
+bool MatchesExpected(const json::JsonObject& o, const std::wstring& instanceId, uint64_t revision)
+{
+    if (o.HasKey(L"instanceId")) {
+        const auto v = o.GetNamedValue(L"instanceId");
+        if (v.ValueType() != json::JsonValueType::String || std::wstring(v.GetString()) != instanceId)
+            return false;
+    }
+    if (o.HasKey(L"expectedRevision")) {
+        const auto v = o.GetNamedValue(L"expectedRevision");
+        if (v.ValueType() != json::JsonValueType::Number || v.GetNumber() != double(revision))
+            return false;
+    }
+    return true;
+}
+
+std::string ConflictReply(const std::wstring& instanceId, uint64_t revision, const Settings& saved, const Settings& current)
+{
+    json::JsonObject r;
+    r.SetNamedValue(L"op", json::JsonValue::CreateStringValue(L"conflict"));
+    r.SetNamedValue(L"instanceId", json::JsonValue::CreateStringValue(instanceId));
+    r.SetNamedValue(L"revision", json::JsonValue::CreateNumberValue(double(revision)));
+    r.SetNamedValue(L"saved", json::JsonObject::Parse(saved.ToJson()));
+    r.SetNamedValue(L"current", json::JsonObject::Parse(current.ToJson()));
+    r.SetNamedValue(L"message", json::JsonValue::CreateStringValue(L"settings changed since last read"));
+    return Narrow(std::wstring(r.Stringify()));
+}
+
 // Waits for an overlapped operation or the quit event. False on quit or error.
 bool Wait(HANDLE pipe, OVERLAPPED& ov, HANDLE quit, DWORD& bytes, DWORD& error)
 {
@@ -64,8 +151,11 @@ std::wstring SettingsPipeName()
     return L"\\\\.\\pipe\\Atrium.Core." + std::to_wstring(session);
 }
 
-SettingsServer::SettingsServer(HWND host, const Settings& saved)
+SettingsServer::SettingsServer(HWND host, const Settings& saved, std::wstring pipeName, std::wstring settingsPath)
     : host_(host),
+      pipeName_(pipeName.empty() ? SettingsPipeName() : std::move(pipeName)),
+      settingsPath_(std::move(settingsPath)),
+      instanceId_(MakeInstanceId()),
       saved_(saved),
       current_(saved),
       quit_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
@@ -87,6 +177,15 @@ Settings SettingsServer::Current()
     return current_;
 }
 
+bool SettingsServer::Save(const Settings& s, std::wstring* warning, std::wstring* error) const
+{
+    if (settingsPath_.empty())
+        return SaveSettings(s, warning, error);
+    return SaveSettingsTo(settingsPath_, s, warning, error, false);
+}
+
+std::wstring SettingsServer::EffectiveSettingsPath() const { return settingsPath_.empty() ? SettingsPath() : settingsPath_; }
+
 bool SettingsServer::Modify(const std::function<void(Settings&)>& change)
 {
     std::lock_guard t(txn_);
@@ -98,8 +197,8 @@ bool SettingsServer::Modify(const std::function<void(Settings&)>& change)
     }
     change(saved);
     saved.Clamp();
-    if (!SaveSettings(saved)) {
-        Log(L"settings: could not save %s", SettingsPath().c_str());
+    if (!Save(saved)) {
+        Log(L"settings: could not save %s", EffectiveSettingsPath().c_str());
         return false;
     }
     change(current);
@@ -107,6 +206,7 @@ bool SettingsServer::Modify(const std::function<void(Settings&)>& change)
     {
         std::lock_guard g(lock_);
         saved_ = saved;
+        ++revision_;
     }
     SetCurrent(current);
     return true;
@@ -118,17 +218,19 @@ void SettingsServer::SetCurrent(const Settings& s)
         std::lock_guard g(lock_);
         current_ = s;
     }
-    PostMessageW(host_, WM_ATRIUM_SETTINGS, 0, 0);
+    if (host_)
+        PostMessageW(host_, WM_ATRIUM_SETTINGS, 0, 0);
 }
 
 void SettingsServer::Run()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
-    std::wstring name = SettingsPipeName();
+    PipeSecurity security;
     while (WaitForSingleObject(quit_, 0) == WAIT_TIMEOUT) {
         // First instance only: another process cannot pre-create our pipe name.
-        HANDLE pipe = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                                       PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, kBuffer, kBuffer, 0, nullptr);
+        HANDLE pipe =
+            CreateNamedPipeW(pipeName_.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, kBuffer, kBuffer, 0, security.Get());
         if (pipe == INVALID_HANDLE_VALUE) {
             Log(L"pipe: CreateNamedPipe failed (%lu)", GetLastError());
             if (WaitForSingleObject(quit_, 2000) != WAIT_TIMEOUT)
@@ -217,6 +319,8 @@ std::string SettingsServer::Handle(const std::string& request)
 
     if (op == L"add-widget") {
         // Not a settings change (no txn_: the UI thread may be waiting for it in Modify).
+        if (!host_)
+            return Reply(L"error", L"no room for another widget");
         std::wstring kind(o.GetNamedString(L"kind", L"")), size(o.GetNamedString(L"size", L"small"));
         WidgetKind widgetKind;
         WidgetSize widgetSize;
@@ -229,18 +333,22 @@ std::string SettingsServer::Handle(const std::string& request)
 
     std::lock_guard t(txn_);
     Settings saved, current;
+    uint64_t revision = 1;
     {
         std::lock_guard g(lock_);
         saved = saved_;
         current = current_;
+        revision = revision_;
     }
     if (op == L"get") {
         json::JsonObject r;
         r.SetNamedValue(L"op", json::JsonValue::CreateStringValue(L"state"));
         r.SetNamedValue(L"protocol", json::JsonValue::CreateNumberValue(kProtocol));
+        r.SetNamedValue(L"instanceId", json::JsonValue::CreateStringValue(instanceId_));
+        r.SetNamedValue(L"revision", json::JsonValue::CreateNumberValue(double(revision)));
         r.SetNamedValue(L"saved", json::JsonObject::Parse(saved.ToJson()));
         r.SetNamedValue(L"current", json::JsonObject::Parse(current.ToJson()));
-        r.SetNamedValue(L"path", json::JsonValue::CreateStringValue(SettingsPath()));
+        r.SetNamedValue(L"path", json::JsonValue::CreateStringValue(EffectiveSettingsPath()));
         return Narrow(std::wstring(r.Stringify()));
     }
     if (op == L"cancel") {
@@ -255,24 +363,28 @@ std::string SettingsServer::Handle(const std::string& request)
         if (!Settings::FromJson(std::wstring(o.GetNamedObject(L"settings").Stringify()), current, next))
             return Reply(L"error", L"invalid settings");
         if (op == L"commit") {
+            if (!MatchesExpected(o, instanceId_, revision))
+                return ConflictReply(instanceId_, revision, saved, current);
             std::wstring warning, error;
-            if (!SaveSettings(next, &warning, &error)) {
-                Log(L"pipe: could not save settings (%s)", SettingsPath().c_str());
+            if (!Save(next, &warning, &error)) {
+                Log(L"pipe: could not save settings (%s)", EffectiveSettingsPath().c_str());
                 return Reply(L"error", error.empty() ? L"could not save settings" : error.c_str());
             }
             Log(L"pipe: commit saved");
+            uint64_t nextRevision = 0;
             {
                 std::lock_guard g(lock_);
                 saved_ = next;
+                nextRevision = ++revision_;
             }
             SetCurrent(next);
-            if (!warning.empty()) {
-                json::JsonObject reply;
-                reply.SetNamedValue(L"op", json::JsonValue::CreateStringValue(L"ok"));
+            json::JsonObject reply;
+            reply.SetNamedValue(L"op", json::JsonValue::CreateStringValue(L"ok"));
+            reply.SetNamedValue(L"instanceId", json::JsonValue::CreateStringValue(instanceId_));
+            reply.SetNamedValue(L"revision", json::JsonValue::CreateNumberValue(double(nextRevision)));
+            if (!warning.empty())
                 reply.SetNamedValue(L"warning", json::JsonValue::CreateStringValue(warning));
-                return Narrow(std::wstring(reply.Stringify()));
-            }
-            return Reply(L"ok");
+            return Narrow(std::wstring(reply.Stringify()));
         } // lock released before SetCurrent takes it again
         SetCurrent(next);
         return Reply(L"ok");

@@ -126,3 +126,8 @@ set_tests_properties(bar_shutdown PROPERTIES TIMEOUT 15)
 add_executable(persistence_recovery_tests persistence_recovery.cpp)
 target_link_libraries(persistence_recovery_tests PRIVATE atrium_core_lib)
 add_test(NAME persistence_recovery COMMAND persistence_recovery_tests)
+
+add_executable(settings_server_tests settings_server.cpp)
+target_link_libraries(settings_server_tests PRIVATE atrium_core_lib)
+add_test(NAME settings_server COMMAND settings_server_tests)
+set_tests_properties(settings_server PROPERTIES TIMEOUT 20)

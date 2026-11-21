@@ -99,14 +99,15 @@
 ## 管道
 
 - 名称：`\\.\pipe\Atrium.Core.<会话 ID>`；消息模式；拒绝远程客户端；Core 以 `FILE_FLAG_FIRST_PIPE_INSTANCE` 创建，其他进程无法预先占用名称。
+- DACL：使用当前进程令牌的 `TokenUser` SID 构建 `D:P(A;;GA;;;<userSid>)(A;;GA;;;SY)(A;;GA;;;BA)` 安全描述符，使同一 Windows 用户的普通与提权 `Atrium.Settings.exe` 均可连接，并隔离其他本地用户。
 - Settings 连接后用 `GetNamedPipeServerProcessId` 核对对端的完整可执行路径，必须对应本分发目录的 Atrium.exe。不同安装位置不共用设置连接；另一实例已运行时明确提示，仍不支持两套任务栏并行。管道名称沿用内部标识 Atrium.Core。
 - 同一时间只服务一个客户端。每条请求是一个 UTF-8 JSON 消息，对应一条回复。
 
 | 请求 | 回复 | 行为 |
 | --- | --- | --- |
-| `{"op":"get"}` | `{"op":"state","protocol":1,"saved":{…},"current":{…},"path":"…"}` | 已保存值与当前生效值（可能含未保存预览） |
+| `{"op":"get"}` | `{"op":"state","protocol":1,"instanceId":"…","revision":1,"saved":{…},"current":{…},"path":"…"}` | 已保存值与当前生效值（可能含未保存预览）、核心实例标识 `instanceId` 与单调修订号 `revision`（从 1 起，每次 Core 自身修改或 `commit` 成功落盘后递增） |
 | `{"op":"preview","settings":{…}}` | `{"op":"ok"}` | 只改内存，立即重绘；可只发部分键 |
-| `{"op":"commit","settings":{…}}` | `{"op":"ok","warning":…}`（warning 可省）或 `{"op":"error","message":…}` | 写文件成功才更新 saved/current；文件已保存但自启修改失败时仍返回 ok，另给 warning，界面接受保存快照并显示警告 |
+| `{"op":"commit","instanceId":"…","expectedRevision":1,"settings":{…}}` | `{"op":"ok","instanceId":"…","revision":2,"warning":…}`（`warning` 可省）、`{"op":"conflict","instanceId":"…","revision":2,"saved":{…},"current":{…},"message":"settings changed since last read"}` 或 `{"op":"error","message":…}` | 仅当请求中的 `instanceId` 与 `expectedRevision`（若有）均与当前服务端一致时才写盘并递增 `revision`；否则拒绝覆盖并返回 `conflict` 与最新快照（旧客户端不带这两个字段时保持兼容）。文件已保存但自启修改失败时仍返回 `ok` 与 `warning`，界面接受保存快照并显示警告 |
 | `{"op":"cancel"}` | `{"op":"ok"}` | 恢复到已保存值 |
 | `{"op":"add-widget","kind":"clock","size":"small"}` | `{"op":"ok"}` 或 `{"op":"error","message":…}` | 添加小组件并保存布局；不改变设置预览租约 |
 

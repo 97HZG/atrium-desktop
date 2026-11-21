@@ -8,8 +8,9 @@
 
 #include <windows.h>
 
-#include <functional>
 #include <atomic>
+#include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -20,7 +21,7 @@ std::wstring SettingsPipeName();
 
 class SettingsServer {
 public:
-    SettingsServer(HWND host, const Settings& saved);
+    SettingsServer(HWND host, const Settings& saved, std::wstring pipeName = {}, std::wstring settingsPath = {});
     ~SettingsServer();
     SettingsServer(const SettingsServer&) = delete;
     SettingsServer& operator=(const SettingsServer&) = delete;
@@ -36,12 +37,18 @@ private:
     void Serve(HANDLE pipe);
     std::string Handle(const std::string& request);
     void SetCurrent(const Settings& s);
+    bool Save(const Settings& s, std::wstring* warning = nullptr, std::wstring* error = nullptr) const;
+    std::wstring EffectiveSettingsPath() const;
 
     HWND host_;
+    std::wstring pipeName_;
+    std::wstring settingsPath_;
+    std::wstring instanceId_;
     // txn_: one change at a time, from reading the settings to writing the
     // file (the pipe's thread and the UI thread's Modify); lock_ guards the fields.
     std::mutex txn_, lock_;
     Settings saved_, current_;
+    uint64_t revision_ = 1;
     HANDLE quit_;
     std::atomic_bool ready_ = false;
     std::thread thread_;

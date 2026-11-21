@@ -7,3 +7,8 @@ internal static class Loc
     public static string T(string text) => text;
     public static string F(string zh, params object?[] args) => string.Format(zh, args);
 }
+
+internal static class App
+{
+    public static void LogCrash(Exception error) => _ = error;
+}

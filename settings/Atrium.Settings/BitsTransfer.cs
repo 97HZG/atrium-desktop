@@ -1,8 +1,10 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace Atrium.Settings;
 
 // Windows owns the transfer. Releasing these COM proxies never cancels the job.
+[SupportedOSPlatform("windows")]
 internal sealed partial class BitsTransfer : IDisposable
 {
     internal enum State { Queued, Connecting, Transferring, Suspended, Error, TransientError, Transferred, Acknowledged, Cancelled }

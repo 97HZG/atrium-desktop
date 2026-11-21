@@ -3,7 +3,6 @@ using System.Net;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
@@ -89,11 +88,12 @@ public sealed partial class MainWindow : Window, IDisposable
         Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), Loc.T("Input method"), // the bar's parts, listed under it
     ];
     private readonly CoreClient _client = new();
+    private readonly SettingsSession _session = new();
     private readonly List<(SliderDef Def, SliderTile Tile)> _rows = [];
     private readonly List<(uint Rgb, Button Button, FrameworkElement Ring)> _tintButtons = [];
-    private BarSettings _saved = new();
     private bool _loading;
     private bool _previewBusy, _previewPending;
+    private Task<bool>? _saveTask;
     private bool _closePending, _closeAfterCore;
     private ContentDialog? _dialog; // the one shown (AskAsync)
     private readonly FrameworkElement[] _mains = [];
@@ -173,6 +173,7 @@ public sealed partial class MainWindow : Window, IDisposable
             RemoveWindowSubclass(hwnd, _updateMessage, 1);
             _updateCheck?.Cancel();
             _updatesClosed = true;
+            _session.Close();
             _downloadTimer?.Stop();
             _reconnectTimer?.Stop();
             StopDesignAnimations();
@@ -259,6 +260,7 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         RemoveProp(WinRT.Interop.WindowNative.GetWindowHandle(this), App.WindowProp);
         _updatesClosed = true;
+        _session.Close();
         _updateCheck?.Cancel();
         _downloadTimer?.Stop();
         _settingsWatcher?.Dispose();
@@ -542,7 +544,7 @@ public sealed partial class MainWindow : Window, IDisposable
         try
         {
             var state = await Task.Run(() => (Transfer: ReleaseInstaller.ReadTransferStatus(),
-                Ready: ReleaseInstaller.ReadPrepared(typeof(MainWindow).Assembly.GetName().Version!)));
+                Ready: ReleaseInstaller.ReadPreparedRecovering(typeof(MainWindow).Assembly.GetName().Version!)));
             if (_updatesClosed) return;
             _preparedRelease = state.Ready;
             _transferStatus = state.Transfer;
@@ -697,26 +699,23 @@ public sealed partial class MainWindow : Window, IDisposable
     private async Task LoadFromCoreAsync()
     {
         await _client.ConnectAsync(800);
-        var (saved, current) = await _client.GetAsync();
-        if (_updatesClosed) return;
-        _saved = saved;
-        CurrentSettings = current;
-        // A language change re-created the window: restore the edits that
-        // arrived while the save was in flight, then preview them.
+        long draftBefore = _session.DraftVersion;
+        var state = await _client.GetAsync();
+        if (_updatesClosed || _session.Closed) return;
         var pending = App.TakePendingState();
-        bool hasPending = pending.Current != null && pending.Saved != null;
-        if (hasPending)
-        {
-            _saved = pending.Saved!;
-            CurrentSettings = pending.Current!;
-        }
+        if (pending.Current != null && pending.Saved != null)
+            _session.ApplyInitialState(state.Saved, state.Current, state.InstanceId, state.Revision, pending.Saved, pending.Current);
+        else if (draftBefore != _session.DraftVersion)
+            _session.ApplyReconnectSnapshot(state.Saved, state.Current, state.InstanceId, state.Revision, draftBefore);
+        else
+            _session.ApplyInitialState(state.Saved, state.Current, state.InstanceId, state.Revision);
         _coreChanging = false;
         WatchCore();
         WatchSettingsFile();
         ShowStatus(_client.Connected);
         LoadIntoControls();
         UpdateButtons();
-        if (hasPending) SchedulePreview();
+        if (_session.HasUnsavedChanges) SchedulePreview();
         if (Content is FrameworkElement { IsLoaded: true }) App.SignalStartupReady(_client.Connected && _client.StateConfirmed);
         else if (Content is FrameworkElement root) root.Loaded += (_, _) => App.SignalStartupReady(_client.Connected && _client.StateConfirmed);
         if (_reconnectTimer == null && !_updatesClosed)
@@ -725,6 +724,17 @@ public sealed partial class MainWindow : Window, IDisposable
             _reconnectTimer.Tick += async (_, _) => await ReconnectAsync();
             _reconnectTimer.Start();
         }
+    }
+
+    private async Task SyncConnectedStateAsync()
+    {
+        long draftBefore = _session.DraftVersion;
+        var state = await _client.GetAsync();
+        if (_updatesClosed || _session.Closed || !state.FromCore) return;
+        bool preview = _session.ApplyReconnectSnapshot(state.Saved, state.Current, state.InstanceId, state.Revision, draftBefore);
+        LoadIntoControls();
+        UpdateButtons();
+        if (preview) SchedulePreview();
     }
 
     private void FinishCoreChange(bool watch = false)
@@ -752,14 +762,8 @@ public sealed partial class MainWindow : Window, IDisposable
                 if (!_updatesClosed && !_coreChanging) ShowStatus(_client.Connected);
                 return;
             }
-            bool dirty = !CurrentSettings.SameAs(_saved);
-            var (saved, current) = await _client.GetAsync();
+            await SyncConnectedStateAsync();
             if (_updatesClosed) return;
-            _saved = saved;
-            if (!dirty) CurrentSettings = current;
-            LoadIntoControls();
-            UpdateButtons();
-            if (dirty) SchedulePreview();
             WatchCore();
             ShowStatus(_client.Connected);
         }
@@ -861,13 +865,7 @@ public sealed partial class MainWindow : Window, IDisposable
             {
                 using var launched = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
                 if (!await _client.ConnectAsync(8000)) throw new TimeoutException(Loc.T("Could not connect to Atrium. Try again later."));
-                bool dirty = !CurrentSettings.SameAs(_saved);
-                var (saved, current) = await _client.GetAsync();
-                _saved = saved;
-                if (!dirty) CurrentSettings = current;
-                LoadIntoControls();
-                UpdateButtons();
-                if (dirty) SchedulePreview();
+                await SyncConnectedStateAsync();
             }
             else
             {
@@ -915,22 +913,15 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         int id = ++_settingsReload;
         await Task.Delay(120); // one reload for a burst of writes
-        if (id != _settingsReload || _updatesClosed || !_client.Connected) return;
-        var (saved, _) = await _client.GetAsync();
-        if (id != _settingsReload || _updatesClosed) return;
-        var before = _saved.ToJson();
-        var after = saved.ToJson();
-        var changed = after.Select(kv => kv.Key).Where(k => !JsonNode.DeepEquals(before[k], after[k])).ToList();
-        if (changed.Count == 0) return;
-        var current = CurrentSettings.ToJson();
-        foreach (string? k in changed) current[k] = after[k]?.DeepClone();
-        _saved = saved;
-        CurrentSettings = BarSettings.FromJson(current, CurrentSettings);
+        if (id != _settingsReload || _updatesClosed || _session.Closed || !_client.Connected) return;
+        var state = await _client.GetAsync();
+        if (id != _settingsReload || _updatesClosed || _session.Closed || !state.FromCore) return;
+        if (!_session.ApplyExternalChange(state.Saved, state.Revision)) return;
         LoadIntoControls();
         UpdateButtons();
         if (_page == 4) ShowWidgetMap();
         if (_page == 5) ShowStagePreview(true);
-        if (!CurrentSettings.SameAs(_saved)) SchedulePreview(); // the edits made here, over the new state
+        if (_session.HasUnsavedChanges) SchedulePreview(); // the edits made here, over the new state
     }
 
     // ---- Controls <-> settings ----
@@ -941,15 +932,8 @@ public sealed partial class MainWindow : Window, IDisposable
         foreach (var (d, card) in _rows)
             card.SetValue(d.Get(CurrentSettings));
         (CurrentSettings.Preset switch { "liquid" => PresetLiquid, "frosted" => PresetFrosted, _ => PresetCustom }).IsChecked = true;
-        var bg = Photo.Selected switch
-        {
-            "wallpaper" => BgWallpaper,
-            "paper" => BgPaper,
-            "geometry" => BgGeometry,
-            "layers" => BgLayers,
-            _ => BgSpecimen,
-        };
-        bg.IsChecked = true;
+        (Photo.Selected switch
+        { "wallpaper" => BgWallpaper, "paper" => BgPaper, "geometry" => BgGeometry, "layers" => BgLayers, _ => BgSpecimen }).IsChecked = true;
         ClockSwitch.IsOn = CurrentSettings.ShowClock;
         ClockSecondsSwitch.IsOn = CurrentSettings.ShowClockSeconds;
         UpdateClockOptions();
@@ -960,14 +944,8 @@ public sealed partial class MainWindow : Window, IDisposable
         StartCenteredSwitch.IsOn = CurrentSettings.StartCentered;
         StartWithBarSwitch.IsOn = CurrentSettings.StartWithBar;
         (CurrentSettings.StartSize switch { "small" => StartSmall, "large" => StartLarge, "xlarge" => StartXLarge, _ => StartMedium }).IsChecked = true;
-        var startIcon = CurrentSettings.StartIcon switch
-        {
-            "small" => StartIconSmall,
-            "large" => StartIconLarge,
-            "xlarge" => StartIconXLarge,
-            _ => StartIconMedium,
-        };
-        startIcon.IsChecked = true;
+        (CurrentSettings.StartIcon switch
+        { "small" => StartIconSmall, "large" => StartIconLarge, "xlarge" => StartIconXLarge, _ => StartIconMedium }).IsChecked = true;
         StatusSwitch.IsOn = CurrentSettings.ShowStatus;
         NotificationsSwitch.IsOn = CurrentSettings.ShowNotifications;
         DesktopSwitch.IsOn = CurrentSettings.ShowDesktop;
@@ -985,14 +963,8 @@ public sealed partial class MainWindow : Window, IDisposable
         if (notifyCorner) _notifyCorner = CurrentSettings.NotifyPlacement;
         (notifyCorner ? NotifyAtCorner : NotifyAtDock).IsChecked = true;
         NotifyCornerRow.Visibility = notifyCorner ? Visibility.Visible : Visibility.Collapsed;
-        var cornerChoice = _notifyCorner switch
-        {
-            "topLeft" => NotifyTopLeft,
-            "bottomLeft" => NotifyBottomLeft,
-            "bottomRight" => NotifyBottomRight,
-            _ => NotifyTopRight,
-        };
-        cornerChoice.IsChecked = true;
+        (_notifyCorner switch
+        { "topLeft" => NotifyTopLeft, "bottomLeft" => NotifyBottomLeft, "bottomRight" => NotifyBottomRight, _ => NotifyTopRight }).IsChecked = true;
         RefreshSources();
         BarSwitch.IsOn = CurrentSettings.Bar;
         UpdateBarModule();
@@ -1120,24 +1092,16 @@ public sealed partial class MainWindow : Window, IDisposable
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
         CurrentSettings.WidgetsOnRight = tag == "right";
         // With Stage Manager on, it keeps to the widgets' other side.
-        if (CurrentSettings.StageManager) SetStageSide(!CurrentSettings.WidgetsOnRight);
+        if (CurrentSettings.StageManager) SetSide(v => CurrentSettings.StageOnRight = v, StageLeft, StageRight, !CurrentSettings.WidgetsOnRight);
         ShowWidgetMap();
         Changed();
     }
 
-    private void SetStageSide(bool right)
+    private void SetSide(Action<bool> set, RadioButton left, RadioButton right, bool isRight)
     {
-        CurrentSettings.StageOnRight = right;
+        set(isRight);
         _loading = true;
-        (right ? StageRight : StageLeft).IsChecked = true;
-        _loading = false;
-    }
-
-    private void SetWidgetSide(bool right)
-    {
-        CurrentSettings.WidgetsOnRight = right;
-        _loading = true;
-        (right ? WidgetsRight : WidgetsLeft).IsChecked = true;
+        (isRight ? right : left).IsChecked = true;
         _loading = false;
     }
 
@@ -1252,7 +1216,7 @@ public sealed partial class MainWindow : Window, IDisposable
         if (_loading) return;
         CurrentSettings.StageManager = StageSwitch.IsOn;
         // The widgets go to the other side.
-        if (CurrentSettings.StageManager) SetWidgetSide(!CurrentSettings.StageOnRight);
+        if (CurrentSettings.StageManager) SetSide(v => CurrentSettings.WidgetsOnRight = v, WidgetsLeft, WidgetsRight, !CurrentSettings.StageOnRight);
         Changed();
         if (_page == 5) ShowStagePreview(true);
     }
@@ -1261,7 +1225,7 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
         CurrentSettings.StageOnRight = tag == "right";
-        if (CurrentSettings.StageManager) SetWidgetSide(!CurrentSettings.StageOnRight);
+        if (CurrentSettings.StageManager) SetSide(v => CurrentSettings.WidgetsOnRight = v, WidgetsLeft, WidgetsRight, !CurrentSettings.StageOnRight);
         Changed();
         if (_page == 5) ShowStagePreview(true);
     }
@@ -1421,6 +1385,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void Changed()
     {
+        _session.MarkEdited();
         UpdateButtons();
         UpdateHero();
         UpdateCustomSwatch();
@@ -1433,9 +1398,8 @@ public sealed partial class MainWindow : Window, IDisposable
     // Title-bar actions appear while there is something to save, and briefly after a save.
     private void UpdateButtons()
     {
-        bool dirty = !CurrentSettings.SameAs(_saved);
-        SaveButton.IsEnabled = dirty;
-        RevertButton.IsEnabled = dirty;
+        bool dirty = _session.HasUnsavedChanges;
+        SaveButton.IsEnabled = RevertButton.IsEnabled = dirty && _saveTask == null;
         _flashId++;
         DirtyText.Text = Loc.T("Unsaved");
         DirtyDot.Fill = new SolidColorBrush(Color.FromArgb(255, 0xFF, 0x9F, 0x0A));
@@ -1482,41 +1446,73 @@ public sealed partial class MainWindow : Window, IDisposable
         if (!_updatesClosed && !_client.Connected) ShowStatus(false);
     }
 
-    private async void OnSave(object sender, RoutedEventArgs e) => await SaveAsync();
+    private async void OnSave(object sender, RoutedEventArgs e)
+    {
+        if (_saveTask == null) await SaveAsync();
+    }
 
     private async Task<bool> SaveAsync()
     {
-        // What is saved is this snapshot: edits made while it is on its way stay unsaved.
-        var sent = CurrentSettings.Clone();
-        bool languageChanged = sent.Language != _saved.Language;
-        string? error = await _client.CommitAsync(sent.Clone());
-        if (_updatesClosed) return false;
-        if (error != null)
+        if (_saveTask != null)
         {
-            ShowMessage(InfoBarSeverity.Error, Loc.T("Could not save"), error);
+            if (!await _saveTask) return false;
+            if (!_session.HasUnsavedChanges) return true;
+        }
+        var task = SaveCoreAsync();
+        _saveTask = task;
+        UpdateButtons();
+        try { return await task; }
+        finally
+        {
+            if (ReferenceEquals(_saveTask, task)) _saveTask = null;
+            if (!_updatesClosed && !_session.Closed) SaveButton.IsEnabled = RevertButton.IsEnabled = _session.HasUnsavedChanges;
+        }
+    }
+
+    private async Task<bool> SaveCoreAsync()
+    {
+        // What is saved is this snapshot: edits made while it is on its way stay unsaved.
+        var sent = _session.Draft.Clone();
+        bool languageChanged = sent.Language != _session.Saved.Language;
+        var result = await _client.CommitAsync(sent.Clone(), _session.InstanceId, _session.Revision);
+        if (_updatesClosed || _session.Closed) return false;
+        if (result.IsConflict && result.ServerSaved != null)
+        {
+            _session.ApplyConflict(result.ServerSaved, result.Revision, result.InstanceId);
+            LoadIntoControls();
+            UpdateButtons();
+            if (_session.HasUnsavedChanges) SchedulePreview();
+            ShowMessage(InfoBarSeverity.Warning, Loc.T("Settings changed elsewhere"),
+                Loc.T("The core settings changed before saving. Your unsubmitted edits were kept; review them and click Save again."));
+            ShowStatus(_client.Connected);
             return false;
         }
-        _saved = sent;
+        if (!result.Succeeded)
+        {
+            ShowMessage(InfoBarSeverity.Error, Loc.T("Could not save"), result.Error ?? "error");
+            return false;
+        }
+        _session.ApplyCommitSuccess(sent, result.InstanceId, result.Revision);
         // The settings window's XAML is Chinese source text: re-create it in
         // the new language, carrying edits made while the save was in flight.
         if (languageChanged)
         {
             Loc.Apply(sent.Language);
-            App.ReloadWindow(7, CurrentSettings, _saved);
+            App.ReloadWindow(7, _session.Draft, _session.Saved);
             return true;
         }
         Status.IsOpen = false;
         UpdateButtons();
-        if (_client.LastSaveWarning is { } warning)
+        if (result.Warning is { } warning)
             ShowMessage(InfoBarSeverity.Warning, Loc.T("Settings saved"), warning);
-        else if (CurrentSettings.SameAs(_saved)) FlashSaved(); // edits made meanwhile keep the capsule as it is
+        else if (!_session.HasUnsavedChanges) FlashSaved(); // edits made meanwhile keep the capsule as it is
         ShowStatus(_client.Connected);
         return true;
     }
 
     private async void OnRevert(object sender, RoutedEventArgs e)
     {
-        CurrentSettings = _saved.Clone();
+        _session.Revert();
         Status.IsOpen = false;
         LoadIntoControls();
         UpdateButtons();
@@ -1580,7 +1576,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _closePending = true;
         try
         {
-            if (!CurrentSettings.SameAs(_saved))
+            if (_session.HasUnsavedChanges)
             {
                 var dialog = new ContentDialog
                 {
