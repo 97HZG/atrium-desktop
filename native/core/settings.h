@@ -139,19 +139,15 @@ std::wstring ReadTextFile(const std::wstring& path);
 [[nodiscard]] bool BackupCorruptSettings(const std::wstring& path, int maxBackups = 3);
 Settings LoadSettingsFrom(const std::wstring& path, SettingsFileState* stateOut = nullptr, bool* backupOkOut = nullptr);
 Settings LoadSettings();
-// True means the file was saved. A failed startup change is reported separately;
-// callers must accept the saved snapshot even when warning is nonempty. A failed
-// save says why in `error` (the path, the system's reason).
-[[nodiscard]] bool SaveSettingsTo(const std::wstring& path, const Settings& s, std::wstring* warning = nullptr, std::wstring* error = nullptr,
-                                  bool updateStartup = true, const std::function<bool(const std::wstring&)>& backupCorrupt = {});
-[[nodiscard]] bool SaveSettings(const Settings& s, std::wstring* warning = nullptr, std::wstring* error = nullptr);
+// True means the file was saved. A failed save says why in `error` (the path,
+// the system's reason). `startupChangedOut`, when non-null, reports whether
+// `startOnLogin` differs from the prior valid file on disk.
+[[nodiscard]] bool SaveSettingsTo(const std::wstring& path, const Settings& s, std::wstring* error = nullptr,
+                                  const std::function<bool(const std::wstring&)>& backupCorrupt = {}, bool* startupChangedOut = nullptr);
+[[nodiscard]] bool SaveSettings(const Settings& s, std::wstring* error = nullptr, bool* startupChangedOut = nullptr);
 // The process runs below medium integrity (an executable with a Low label):
 // the profile and HKCU are closed to it, and its keys cannot reach other windows.
 bool LowIntegrity();
 bool IsDevelopmentBuild();
-// The current user's Windows logon entry, pointing at this core executable.
-bool SetStartOnLogin(bool enabled);
-// The Run entry turned off in Task Manager's startup apps.
-bool StartupTurnedOff();
 
 } // namespace atrium

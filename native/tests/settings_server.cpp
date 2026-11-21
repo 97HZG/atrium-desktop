@@ -145,7 +145,7 @@ void CheckSettingsServerLifecycle()
     atrium::Settings initial;
     initial.height = 60;
     initial.margin = 10;
-    Check(atrium::SaveSettingsTo(cfgPath.wstring(), initial, nullptr, nullptr, false), "seed initial temp settings.json");
+    Check(atrium::SaveSettingsTo(cfgPath.wstring(), initial), "seed initial temp settings.json");
 
     const std::wstring pipeName = L"\\\\.\\pipe\\Atrium.Core.Test." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetTickCount64());
     atrium::SettingsServer server(nullptr, initial, pipeName, cfgPath.wstring());

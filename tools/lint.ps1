@@ -349,7 +349,9 @@ $configMacros = 'SECURITY_WIN32', 'WIN32_LEAN_AND_MEAN', 'NOMINMAX', 'IDI_ATRIUM
 $rawBanned = [ordered]@{
     'todo'          = @('\b(TODO|FIXME|XXX|HACK)\b', 'open an issue instead')
     'include-guard' = @('^\s*#\s*ifndef\s+\w+_H\w*\s*$', 'use #pragma once')
-    'nolint'        = @('\bNOLINT(?:NEXTLINE|BEGIN)?\b(?!\([\w.,*-]+\): \S)', 'name the check and the reason: NOLINT(check): why')
+    'nolint'        = @(('\bNOLINT(?:NEXTLINE|BEGIN)?\b(?:(?!\([\w.,-]+\): \S)' +
+        '|\([^)]*(?:readability-function-cognitive-complexity|readability-function-size)[^)]*\))'),
+        'name the check and the reason: NOLINT(check): why (no *, cognitive-complexity, or function-size)')
     'narration'     = @(('//\s*(Check|Get|Set|Call|Loop|Iterate|Increment|Decrement|Initialize|Create|Return|Update|Add|Remove|Handle)' +
         '\s+(if|the|a|an|whether|over|through)\b'), 'say why, not what the next line does')
 }
@@ -426,7 +428,7 @@ foreach ($rel in $native) {
                         if (-not $(if ($toLayer) { $toLayer -eq $from -or $layers[$from] -contains $toLayer } else { $foundation -contains $to })) {
                             Fail $where 'layer' "$from/ may not include $to"
                         }
-                    } elseif ($foundation -contains $coreRel -and ($toLayer -or $foundation -notcontains $to)) {
+                    } elseif ($foundation -contains ($coreRel -replace '\.cpp$', '.h') -and ($toLayer -or $foundation -notcontains $to)) {
                         Fail $where 'layer' "$coreRel may not include $to"
                     }
                 }

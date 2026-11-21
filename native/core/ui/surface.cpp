@@ -12,6 +12,7 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
@@ -115,19 +116,23 @@ public:
             thread_ = std::thread([this] { Run(); });
         cv_.notify_one();
     }
-
-private:
-    FramePump() = default;
-    ~FramePump()
+    void Shutdown()
     {
         {
             std::lock_guard g(mutex_);
             stop_ = true;
+            wanting_.clear();
         }
         cv_.notify_one();
         if (thread_.joinable())
             thread_.join();
+        std::lock_guard g(mutex_);
+        stop_ = false;
     }
+
+private:
+    FramePump() = default;
+    ~FramePump() { Shutdown(); }
     void Run()
     {
         std::vector<HWND> due;
@@ -138,10 +143,11 @@ private:
                 if (stop_)
                     return;
             }
-            if (FAILED(DwmFlush()))
-                Sleep(8);
+            const bool flushed = SUCCEEDED(DwmFlush());
             {
-                std::lock_guard g(mutex_);
+                std::unique_lock g(mutex_);
+                if ((!flushed && cv_.wait_for(g, std::chrono::milliseconds(8), [&] { return stop_; })) || stop_)
+                    return;
                 due.swap(wanting_);
             }
             for (HWND h : due)
@@ -177,29 +183,17 @@ Theme Theme::For(bool darkInk)
     t.light = darkInk;
     PanelTone tone = PanelToneFor(g_tint, g_transparency);
     t.panel = Rgba(tone.tint, 0.96f);
-    if (darkInk) {
-        t.border = Rgba(0x000000, 0.10f);
-        t.text = Rgba(0x111317, 0.92f);
-        t.subtext = Rgba(0x111317, 0.66f);
-        t.faint = Rgba(0x111317, 0.46f);
-        t.hover = Rgba(0x000000, 0.10f);
-        t.press = Rgba(0x000000, 0.16f);
-        t.divider = Rgba(0x000000, 0.12f);
-        t.card = Rgba(0x000000, 0.05f);
-        t.cardHot = Rgba(0x000000, 0.10f);
-        t.halo = Rgba(0xFFFFFF, 0.35f);
-    } else {
-        t.border = Rgba(0xFFFFFF, 0.30f);
-        t.text = Rgba(0xFFFFFF, 0.96f);
-        t.subtext = Rgba(0xFFFFFF, 0.76f);
-        t.faint = Rgba(0xFFFFFF, 0.56f);
-        t.hover = Rgba(0xFFFFFF, 0.20f);
-        t.press = Rgba(0xFFFFFF, 0.28f);
-        t.divider = Rgba(0xFFFFFF, 0.24f);
-        t.card = Rgba(0xFFFFFF, 0.08f);
-        t.cardHot = Rgba(0xFFFFFF, 0.20f);
-        t.halo = Rgba(0x000000, 0.32f);
-    }
+    const uint32_t wash = darkInk ? 0x000000 : 0xFFFFFF, textRgb = darkInk ? 0x111317 : 0xFFFFFF;
+    t.border = Rgba(wash, darkInk ? 0.10f : 0.30f);
+    t.text = Rgba(textRgb, darkInk ? 0.92f : 0.96f);
+    t.subtext = Rgba(textRgb, darkInk ? 0.66f : 0.76f);
+    t.faint = Rgba(textRgb, darkInk ? 0.46f : 0.56f);
+    t.hover = Rgba(wash, darkInk ? 0.10f : 0.20f);
+    t.press = Rgba(wash, darkInk ? 0.16f : 0.28f);
+    t.divider = Rgba(wash, darkInk ? 0.12f : 0.24f);
+    t.card = Rgba(wash, darkInk ? 0.05f : 0.08f);
+    t.cardHot = Rgba(wash, darkInk ? 0.10f : 0.20f);
+    t.halo = Rgba(darkInk ? 0xFFFFFF : 0x000000, darkInk ? 0.35f : 0.32f);
     t.accent = Rgba(0x0A84FF, 1);
     t.accentText = Rgba(0xFFFFFF, 1);
     return t;
@@ -313,7 +307,12 @@ Surface::~Surface()
     }
 }
 
-void Surface::SetGlassHost(GlassHost* host) { g_host = host; }
+void Surface::SetGlassHost(GlassHost* host)
+{
+    g_host = host;
+    if (!host)
+        FramePump::Get().Shutdown();
+}
 void Surface::SetCapturable(bool capturable) { g_capturable = capturable; }
 void Surface::ApplyCaptureExclusion() { SetCaptureExclusion(hwnd_, (g_capturable || g_captureVisible) && !private_); }
 

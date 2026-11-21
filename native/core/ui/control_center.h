@@ -293,6 +293,7 @@ private:
     std::unique_ptr<AudioRead> audioSlot_;
     std::optional<std::pair<unsigned, std::vector<WifiNetwork>>> wifiListSlot_;
     std::optional<std::pair<WPARAM, std::wstring>> castSlot_;
+    HANDLE stopEvent_ = nullptr;
     Worker fastWorker_, slowWorker_, wifiWorker_;
 };
 

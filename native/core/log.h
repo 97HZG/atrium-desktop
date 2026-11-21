@@ -4,5 +4,6 @@
 namespace atrium {
 
 void Log(const wchar_t* format, ...);
+void ShutdownLog();
 
 } // namespace atrium

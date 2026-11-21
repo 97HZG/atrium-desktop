@@ -6,6 +6,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <share.h>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <string>
@@ -29,6 +30,8 @@ std::wstring LogPath()
     return dir + L"\\core.log";
 }
 
+std::atomic<bool> g_shutDown{false};
+
 // Lines are written by a thread of their own into a file kept open: opening
 // and closing it for every line (a virus scan each time) took milliseconds,
 // under a lock every thread shared - animations stalled on their own log
@@ -42,9 +45,13 @@ public:
     }
     void Add(std::wstring line)
     {
+        if (g_shutDown.load(std::memory_order_acquire))
+            return;
         constexpr size_t kMaxQueue = 4096;
         {
             std::lock_guard g(mutex_);
+            if (stop_ || g_shutDown.load(std::memory_order_relaxed))
+                return;
             if (queue_.size() >= kMaxQueue) {
                 ++dropped_;
                 return;
@@ -54,6 +61,21 @@ public:
         cv_.notify_one();
     }
 
+    void Shutdown()
+    {
+        std::lock_guard slk(shutdownMutex_);
+        if (g_shutDown.load(std::memory_order_acquire))
+            return;
+        {
+            std::lock_guard g(mutex_);
+            stop_ = true;
+        }
+        g_shutDown.store(true, std::memory_order_release);
+        cv_.notify_one();
+        if (thread_.joinable())
+            thread_.join();
+    }
+
     Writer(const Writer&) = delete;
     Writer& operator=(const Writer&) = delete;
 
@@ -61,13 +83,8 @@ private:
     Writer() : thread_([this] { Run(); }) {}
     ~Writer()
     {
-        {
-            std::lock_guard g(mutex_);
-            stop_ = true;
-        }
-        cv_.notify_one();
-        if (thread_.joinable())
-            thread_.join();
+        if (!g_shutDown.load(std::memory_order_acquire))
+            Shutdown();
     }
     void Run()
     {
@@ -130,6 +147,7 @@ private:
             fclose(f);
     }
 
+    std::mutex shutdownMutex_;
     std::mutex mutex_;
     std::condition_variable cv_;
     std::vector<std::wstring> queue_;
@@ -154,7 +172,15 @@ void Log(const wchar_t* format, ...)
     swprintf_s(line, L"%04u-%02u-%02u %02u:%02u:%02u.%03u [%lu] %s\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds,
                GetCurrentThreadId(), text);
     OutputDebugStringW(line);
+    if (g_shutDown.load(std::memory_order_acquire))
+        return;
     Writer::Get().Add(line);
+}
+
+void ShutdownLog()
+{
+    if (!g_shutDown.load(std::memory_order_acquire))
+        Writer::Get().Shutdown();
 }
 
 } // namespace atrium

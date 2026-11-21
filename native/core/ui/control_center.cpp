@@ -31,9 +31,7 @@ constexpr UINT WM_CC_BRIGHT = WM_APP + 0x53;   // the brightness worker is done 
 constexpr UINT WM_CC_AUDIO = WM_APP + 0x54;    // lParam AudioRead*
 constexpr UINT WM_CC_DISPLAYS = WM_APP + 0x55; // the wireless displays in range changed
 constexpr UINT WM_CC_PROJECTED = WM_APP + 0x56; // wParam (gen << 1) | ok, lParam std::wstring* the display (null: stopped)
-constexpr UINT WM_CC_RADIO_SET = WM_APP + 0x57;
-constexpr UINT WM_CC_OUTPUT_SET = WM_APP + 0x58;
-constexpr UINT WM_CC_MODE = WM_APP + 0x59;
+constexpr UINT WM_CC_RADIO_SET = WM_APP + 0x57, WM_CC_OUTPUT_SET = WM_APP + 0x58, WM_CC_MODE = WM_APP + 0x59;
 } // namespace
 
 struct RadioRead {
@@ -63,12 +61,9 @@ void SendWinK()
     INPUT in[4] = {};
     for (auto& i : in)
         i.type = INPUT_KEYBOARD;
-    in[0].ki.wVk = VK_LWIN;
-    in[1].ki.wVk = 'K';
-    in[2].ki.wVk = 'K';
-    in[2].ki.dwFlags = KEYEVENTF_KEYUP;
-    in[3].ki.wVk = VK_LWIN;
-    in[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    in[0].ki.wVk = in[3].ki.wVk = VK_LWIN;
+    in[1].ki.wVk = in[2].ki.wVk = 'K';
+    in[2].ki.dwFlags = in[3].ki.dwFlags = KEYEVENTF_KEYUP;
     SendInput(4, in, sizeof(INPUT));
 }
 
@@ -77,7 +72,7 @@ void Bars(Canvas& c, float x, float cy, int signal, D2D1_COLOR_F ink) { c.WifiFa
 
 } // namespace
 
-ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium Control Center", true)
+ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium Control Center", true), stopEvent_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
 {
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
@@ -90,6 +85,8 @@ ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium C
 ControlCenter::~ControlCenter()
 {
     StopTimers();
+    if (stopEvent_)
+        SetEvent(stopEvent_);
     {
         std::lock_guard lk(resultLock_);
         resultStop_ = true;
@@ -97,6 +94,8 @@ ControlCenter::~ControlCenter()
     fastWorker_.Stop();
     slowWorker_.Stop();
     wifiWorker_.Stop();
+    if (stopEvent_)
+        CloseHandle(stopEvent_);
 }
 
 float ControlCenter::MainHeight() const { return kTopH + kGap + kStageH + kGap + kSliderH + kGap + kSliderH; }
@@ -236,7 +235,7 @@ void ControlCenter::Scan(bool rescan)
     rescan = std::exchange(scanRescan_, false);
     unsigned gen = ++scanGen_;
     wifiWorker_.Post(L"scan", [this, rescan, gen] {
-        std::vector<WifiNetwork> list = ListWifi(rescan);
+        std::vector<WifiNetwork> list = ListWifi(rescan, stopEvent_);
         PostResult(WM_WIFI_LIST, [this, gen, &list] { wifiListSlot_ = {gen, std::move(list)}; });
     });
 }

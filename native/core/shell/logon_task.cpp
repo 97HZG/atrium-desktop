@@ -1,12 +1,16 @@
 #include "shell/logon_task.h"
 
 #include "log.h"
+#include "settings.h"
 
 #include <windows.h>
 #include <sddl.h>
 #include <taskschd.h>
 
 #include <winrt/base.h>
+
+#include <iterator>
+#include <mutex>
 
 namespace atrium {
 
@@ -140,6 +144,55 @@ bool RemoveLogonTask()
         return false;
     HRESULT hr = folder->DeleteTask(Bstr(TaskName(sid)).b, 0);
     return SUCCEEDED(hr) || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+}
+
+bool SetStartOnLogin(bool enabled)
+{
+    if (IsDevelopmentBuild())
+        return true;
+    static std::mutex mutex;
+    std::lock_guard lock(mutex);
+    constexpr auto kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    wchar_t exe[32768]{};
+    DWORD length = GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe)));
+    if (!length || length == std::size(exe))
+        return false;
+    std::wstring command = L"\"" + std::wstring(exe) + L"\"";
+    wchar_t current[32771]{};
+    DWORD size = sizeof(current);
+    LSTATUS read = RegGetValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium", RRF_RT_REG_SZ, nullptr, current, &size);
+    const bool runEntry = read == ERROR_SUCCESS;
+    const std::wstring task = LogonTaskProgram();
+    if (!enabled) {
+        // Another distribution's entries are not ours to remove.
+        if ((read != ERROR_SUCCESS && read != ERROR_FILE_NOT_FOUND && read != ERROR_PATH_NOT_FOUND) || (runEntry && _wcsicmp(command.c_str(), current) != 0) ||
+            (!task.empty() && _wcsicmp(task.c_str(), exe) != 0))
+            return false;
+        if (!task.empty() && !RemoveLogonTask())
+            return false;
+        if (!runEntry)
+            return true;
+        LSTATUS result = RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium");
+        return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
+    }
+    // The logon task, and no Run entry left to start Atrium a second time (also from
+    // earlier versions, which started from the Run kRunKey).
+    if ((_wcsicmp(task.c_str(), exe) == 0 || RegisterLogonTask(exe)) &&
+        (!runEntry || RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium") == ERROR_SUCCESS))
+        return true;
+    if (read == ERROR_SUCCESS && command == current)
+        return true;
+    return RegSetKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium", REG_SZ, command.c_str(), DWORD((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+}
+
+bool StartupTurnedOff()
+{
+    // The first byte is odd when the switch is off (2 on, 3 off).
+    BYTE state[12]{};
+    DWORD size = sizeof(state);
+    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run", L"Atrium", RRF_RT_REG_BINARY,
+                        nullptr, state, &size) == ERROR_SUCCESS &&
+           size > 0 && (state[0] & 1);
 }
 
 } // namespace atrium

@@ -5,6 +5,8 @@
 // call them from a worker thread.
 #pragma once
 
+#include <windows.h>
+
 #include <string>
 #include <vector>
 
@@ -27,8 +29,8 @@ struct WifiNetwork {
 
 WifiState QueryWifi();
 // Networks in range, strongest first, one entry per SSID. rescan: ask the
-// adapter for a fresh scan first (waits up to ~4 s).
-std::vector<WifiNetwork> ListWifi(bool rescan);
+// adapter for a fresh scan first (waits up to ~4 s unless stopEvent is signaled).
+std::vector<WifiNetwork> ListWifi(bool rescan, HANDLE stopEvent = nullptr);
 bool ConnectWifi(const WifiNetwork& network);
 bool DisconnectWifi();
 

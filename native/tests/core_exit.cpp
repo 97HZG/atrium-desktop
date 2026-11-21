@@ -1,5 +1,8 @@
+#include "log.h"
+#include "shell/wifi.h"
 #include "win32_path.h"
 
+#include <chrono>
 #include <iostream>
 #include <string>
 
@@ -52,6 +55,21 @@ int main()
     UnregisterClassW(className.c_str(), instance);
     if (!ok || !Require(FindWindowForExecutable(className.c_str()) == nullptr, "destroyed window must not be found"))
         return 1;
+
+    HANDLE canceled = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    if (!Require(canceled != nullptr, "CreateEventW must succeed"))
+        return 1;
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::vector<WifiNetwork> nets = ListWifi(true, canceled);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    CloseHandle(canceled);
+    if (!Require(nets.empty() && ms < 1000, "ListWifi(true, signaled) must return empty without 3.5s sleep"))
+        return 1;
+
+    Log(L"core_exit: shutdown check");
+    ShutdownLog();
+    ShutdownLog();
+    Log(L"core_exit: after shutdown");
 
     std::cout << "core exit: all checks passed\n";
     return 0;

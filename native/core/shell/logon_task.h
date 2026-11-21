@@ -12,5 +12,9 @@ bool RegisterLogonTask(const std::wstring& exe);
 // The program the task starts, empty when there is no task.
 std::wstring LogonTaskProgram();
 bool RemoveLogonTask();
+// The current user's Windows logon entry, pointing at this core executable.
+bool SetStartOnLogin(bool enabled);
+// The Run entry turned off in Task Manager's startup apps.
+bool StartupTurnedOff();
 
 } // namespace atrium

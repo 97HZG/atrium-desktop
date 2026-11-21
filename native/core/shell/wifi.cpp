@@ -88,15 +88,24 @@ WifiState QueryWifi()
     return s;
 }
 
-std::vector<WifiNetwork> ListWifi(bool rescan)
+std::vector<WifiNetwork> ListWifi(bool rescan, HANDLE stopEvent)
 {
     std::vector<WifiNetwork> out;
+    if (stopEvent && WaitForSingleObject(stopEvent, 0) == WAIT_OBJECT_0)
+        return out;
     Wlan w;
     const GUID* itf = w.Interface();
     if (!itf)
         return out;
-    if (rescan && WlanScan(w.Handle(), itf, nullptr, nullptr, nullptr) == ERROR_SUCCESS)
-        Sleep(3500); // results arrive within about 4 s (no notification needed for a list)
+    if (rescan && WlanScan(w.Handle(), itf, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+        // results arrive within about 4 s (no notification needed for a list)
+        HANDLE waitEvent = stopEvent ? stopEvent : CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        const bool stopped = waitEvent && WaitForSingleObject(waitEvent, 3500) == WAIT_OBJECT_0;
+        if (!stopEvent && waitEvent)
+            CloseHandle(waitEvent);
+        if (stopped)
+            return out;
+    }
     WLAN_AVAILABLE_NETWORK_LIST* list = nullptr;
     if (WlanGetAvailableNetworkList(w.Handle(), itf, 0, nullptr, &list) != ERROR_SUCCESS || !list)
         return out;

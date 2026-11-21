@@ -131,20 +131,30 @@ void CheckSettingsCorruptAndFuture(const fs::path& root)
 
     atrium::Settings modified;
     modified.height = 72;
-    std::wstring warning, error;
+    std::wstring error;
     for (int i = 0; i < 4; ++i) {
         const std::string payload = "{broken-round-" + std::to_string(i);
         Check(WriteBytes(cfg, payload), "write corrupt file before SaveSettingsTo");
-        Check(atrium::SaveSettingsTo(cfg.wstring(), modified, &warning, &error, false), "SaveSettingsTo backs up corrupt file and saves");
+        bool startupChanged = false;
+        Check(atrium::SaveSettingsTo(cfg.wstring(), modified, &error, {}, &startupChanged) && !startupChanged,
+              "SaveSettingsTo backs up corrupt file and saves");
         Check(error.empty(), "SaveSettingsTo leaves error empty on success");
     }
     const auto backupsN = ListCorruptBackups(dir);
     Check(backupsN.size() == 3, "corrupt backups are capped at 3 files in the directory");
     Check(atrium::LoadSettingsFrom(cfg.wstring(), &state).height == 72 && state == atrium::SettingsFileState::Valid, "saved valid settings reload cleanly");
 
+    atrium::Settings startupFlipped = modified;
+    startupFlipped.startOnLogin = !modified.startOnLogin;
+    bool startupChanged = false;
+    Check(atrium::SaveSettingsTo(cfg.wstring(), startupFlipped, &error, {}, &startupChanged) && startupChanged,
+          "SaveSettingsTo reports startupChanged when startOnLogin changes");
+    Check(atrium::SaveSettingsTo(cfg.wstring(), startupFlipped, &error, {}, &startupChanged) && !startupChanged,
+          "SaveSettingsTo clears startupChanged when startOnLogin is unchanged");
+
     const std::string lockedCorrupt = "{broken-backup-must-fail";
     Check(WriteBytes(cfg, lockedCorrupt), "write corrupt file for backup failure test");
-    Check(!atrium::SaveSettingsTo(cfg.wstring(), modified, &warning, &error, false, [](const std::wstring&) { return false; }),
+    Check(!atrium::SaveSettingsTo(cfg.wstring(), modified, &error, [](const std::wstring&) { return false; }),
           "SaveSettingsTo refuses overwrite when corrupt backup fails");
     Check(!error.empty(), "SaveSettingsTo sets clear error when corrupt backup fails");
     Check(ReadBytes(cfg) == lockedCorrupt, "SaveSettingsTo preserves corrupt original bytes when backup fails");
@@ -154,7 +164,7 @@ void CheckSettingsCorruptAndFuture(const fs::path& root)
     loaded = atrium::LoadSettingsFrom(cfg.wstring(), &state, &backupOk);
     Check(state == atrium::SettingsFileState::FutureVersion && loaded.height == 80, "LoadSettingsFrom reads compatible fields from future version read-only");
     modified.height = 44;
-    Check(!atrium::SaveSettingsTo(cfg.wstring(), modified, &warning, &error, false), "SaveSettingsTo refuses to overwrite future version");
+    Check(!atrium::SaveSettingsTo(cfg.wstring(), modified, &error), "SaveSettingsTo refuses to overwrite future version");
     Check(!error.empty(), "SaveSettingsTo sets clear error when refusing future version");
     Check(ReadBytes(cfg) == futureJson, "SaveSettingsTo preserves future-version file byte-for-byte");
     Check(!atrium::BackupCorruptSettings((dir / L"missing.json").wstring(), 3), "BackupCorruptSettings fails on missing file");

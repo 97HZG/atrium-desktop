@@ -1,6 +1,8 @@
 #include "settings_server.h"
 
+#include "localization.h"
 #include "log.h"
+#include "shell/logon_task.h"
 #include "ui/desktop_widgets.h"
 
 #include <sddl.h>
@@ -179,9 +181,16 @@ Settings SettingsServer::Current()
 
 bool SettingsServer::Save(const Settings& s, std::wstring* warning, std::wstring* error) const
 {
-    if (settingsPath_.empty())
-        return SaveSettings(s, warning, error);
-    return SaveSettingsTo(settingsPath_, s, warning, error, false);
+    if (warning)
+        warning->clear();
+    bool startupChanged = false;
+    const bool ok = settingsPath_.empty() ? SaveSettings(s, error, &startupChanged) : SaveSettingsTo(settingsPath_, s, error);
+    if (ok && settingsPath_.empty() && startupChanged && !SetStartOnLogin(s.startOnLogin)) {
+        Log(L"settings: settings saved, but Windows startup could not be changed");
+        if (warning)
+            *warning = Tr(L"Settings were saved, but Windows startup could not be changed. Toggle Start with Windows again, then save.");
+    }
+    return ok;
 }
 
 std::wstring SettingsServer::EffectiveSettingsPath() const { return settingsPath_.empty() ? SettingsPath() : settingsPath_; }

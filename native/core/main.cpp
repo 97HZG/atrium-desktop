@@ -15,6 +15,7 @@
 #include "shell/app_catalog.h"
 #include "shell/shell_taskbar.h"
 #include "shell/app_registration.h"
+#include "shell/logon_task.h"
 #include "shell/shell_icon.h"
 #include "shell/update_checker.h"
 #include "shell/task_model.h"
@@ -1747,11 +1748,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.tasks->SetOnFlash([](HWND window) { MessengerFlashed(ProgramOf(window)); });
     g_app.catalog = std::make_unique<AppCatalog>(g_app.host, WM_CATALOG);
     g_app.start = std::make_unique<StartMenu>(instance, *g_app.tasks, *g_app.catalog);
-    {
-        MONITORINFO mi{sizeof(mi)};
-        GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-        g_app.catalog->PrefetchStartIcons(StartMenu::TileIconPx(PopupScale(mi.rcWork)));
-    }
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    g_app.catalog->PrefetchStartIcons(StartMenu::TileIconPx(PopupScale(mi.rcWork)));
     g_app.start->onSystem = OpenSystem;
     g_app.start->menu = g_app.menu.get();
     g_app.notes = std::make_unique<Notifications>(instance);
@@ -1845,7 +1844,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         g_app.chrome.reset();
         Log(L"core: exited (render thread stuck)");
         ReleaseMutex(mutex);
-        Sleep(150); // the log line reaches the file
+        ShutdownLog();
         // Not ExitProcess: unloading the graphics DLLs would wait for the same stuck call.
         TerminateProcess(GetCurrentProcess(), 0);
     }
@@ -1874,6 +1873,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     if (startupThread.joinable())
         startupThread.join();
     Log(L"core: exited");
+    ShutdownLog();
     ReleaseMutex(mutex);
     CloseHandle(mutex);
     return 0;

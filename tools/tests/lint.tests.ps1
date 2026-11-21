@@ -115,6 +115,9 @@ try {
         @('native/core/a.cpp', '#pragma comment(lib, "x.lib")', ': pragma-lib:'),
         @('native/core/a.cpp', '// return false;', ': commented-code:'),
         @('native/core/a.cpp', '// NOLINT', ': nolint:'),
+        @('native/core/a.cpp', '// NOLINT(*): skip', ': nolint:'),
+        @('native/core/a.cpp', '// NOLINT(readability-function-cognitive-complexity): too deep', ': nolint:'),
+        @('native/core/a.cpp', '// NOLINTNEXTLINE(readability-function-size): too long', ': nolint:'),
         @('native/core/a.cpp', "#ifndef ATRIUM_DEVELOPMENT`n#define FOO 1`n#endif", ': define:'),
         @('native/core/a.cpp', "#ifndef ATRIUM_DEVELOPMENT`n#define BAD(x) (x)`n#endif", ': define:'),
         @('native/core/a.cpp', 'void F(HWND h) { SendMessageW(h, WM_USER, 0, 0); }', ': send-message:'),
@@ -140,6 +143,7 @@ try {
         "        AttachThreadInput(me, them, TRUE);`n    }`n}")
     Write-RepoFile $r 'native/core/shell/shell_taskbar.h' ("// Taskbar.`n#pragma once`ninline void Tb()`n{`n" +
         "    SHAppBarMessage(0, nullptr);`n    Shell_NotifyIconGetRect(nullptr, nullptr);`n}")
+    Write-RepoFile $r 'native/core/settings.cpp' "#include <winrt/base.h>`nint kSettingsOk = 1;"
     Invoke-LintCase $r @() 0 @('lint: clean')
 
     # 5. Layers, header-cycle, csharp-layer
@@ -147,6 +151,7 @@ try {
     $structCases = @(
         @('layer-render-ui', @{ 'native/core/ui/foo.h' = $hdr; 'native/core/render/bar.cpp' = '#include <ui/foo.h>' }, ': layer:'),
         @('layer-found-bar', @{ 'native/core/bar.h' = $hdr; 'native/core/settings.h' = "$hdr`n#include `"bar.h`"" }, ': layer:'),
+        @('layer-found-cpp-shell', @{ 'native/core/shell/s.h' = $hdr; 'native/core/settings.cpp' = '#include "shell/s.h"' }, ': layer:'),
         @('layer-found-winrt', @{ 'native/core/settings.h' = "$hdr`n#include <winrt/base.h>" }, ': layer:'),
         @('header-cycle', @{ 'native/core/ui/a.h' = "$hdr`n#include `"b.h`""; 'native/core/ui/b.h' = "$hdr`n#include `"a.h`"" }, ': header-cycle:'),
         @('csharp-layer', @{ 'settings/Atrium.Settings/BarSettings.cs' = "using Microsoft.UI.Xaml;`npublic class BarSettings {}" }, ': csharp-layer:'),
