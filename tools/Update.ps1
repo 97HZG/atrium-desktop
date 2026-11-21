@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$StatePath,
     [Parameter(Mandatory)][int]$WaitForProcessId,
     [ValidateSet('0', '1')][string]$StartCore = '1',
-    [ValidateRange(1, 60)][int]$StartupTimeoutSeconds = 20
+    [ValidateRange(1, 60)][int]$StartupTimeoutSeconds = 20,
+    [string]$LegacyManifestPath = ''
 )
 $ErrorActionPreference = 'Stop'
 $install = [IO.Path]::GetFullPath($InstallDirectory).TrimEnd('\')
@@ -23,6 +24,8 @@ $backupStarted = $false
 $incomingStarted = $false
 $confirmed = $false
 $restored = $false
+$installMutex = $null
+$installMutexAcquired = $false
 $started = New-Object 'System.Collections.Generic.List[System.Diagnostics.Process]'
 # Never the install folder: what starts there would hold it, and the next update could not replace it.
 $workingDirectory = [Environment]::GetFolderPath('UserProfile')
@@ -34,41 +37,178 @@ function Assert-TemporaryPath([string]$Path) {
          (Split-Path -Leaf $absolute) -ne "$name.previous-$suffix")) { throw '更新临时目录无效。' }
 }
 
-# Moves what is in $From into $To (merging folders). A folder some process is in (its current
-# directory, e.g. an app started from an older Atrium) cannot be moved itself: its contents go, it stays.
-function Move-Tree([string]$From, [string]$To, [switch]$Keep, [switch]$BestEffort, [System.Collections.Generic.List[string]]$Errors = $null) {
-    if (!(Test-Path -LiteralPath $To)) { New-Item -ItemType Directory -Path $To | Out-Null }
-    foreach ($item in @(Get-ChildItem -LiteralPath $From -Force)) {
-        $target = Join-Path $To $item.Name
-        if ($item.PSIsContainer -and (Test-Path -LiteralPath $target -PathType Container)) {
-            Move-Tree $item.FullName $target -BestEffort:$BestEffort -Errors $Errors; continue
+function Get-StringSha256Prefix([string]$Text) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($Text)
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').Substring(0, 16)
+    } finally { $sha.Dispose() }
+}
+
+function Get-FileSha256([string]$Path) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+        try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+        finally { $stream.Dispose() }
+    } finally { $sha.Dispose() }
+}
+
+function Normalize-ManifestRelPath([string]$Rel, [string]$RootDir) {
+    if ([string]::IsNullOrWhiteSpace($Rel) -or [IO.Path]::IsPathRooted($Rel) -or
+        $Rel.StartsWith('\') -or $Rel.StartsWith('/') -or $Rel.EndsWith('\') -or $Rel.EndsWith('/')) {
+        throw "安装包清单路径无效：$Rel"
+    }
+    $norm = $Rel.Replace('/', '\')
+    if ($norm.Split('\') | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' }) {
+        throw "安装包清单路径越界：$Rel"
+    }
+    $fullRoot = $RootDir.TrimEnd('\') + '\'
+    $full = [IO.Path]::GetFullPath((Join-Path $RootDir $norm))
+    if (!$full.StartsWith($fullRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "安装包清单路径越界：$Rel"
+    }
+    return $norm
+}
+
+function Add-ExpectedHash($Map, [string]$Rel, [string]$Sha) {
+    if ($Sha -cnotmatch '^[0-9a-f]{64}$') { throw "安装包清单摘要格式无效：$Rel" }
+    if (!$Map.ContainsKey($Rel)) {
+        $Map[$Rel] = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    }
+    [void]$Map[$Rel].Add($Sha)
+}
+
+function Read-PackageManifest([string]$RootDir, [string]$Label, [switch]$VerifyHashes) {
+    $manifestPath = Join-Path $RootDir 'package-manifest.json'
+    if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "${Label}缺少 package-manifest.json。"
+    }
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        throw "${Label}的 package-manifest.json 已损坏：$($_.Exception.Message)"
+    }
+    if ($null -eq $manifest -or (($manifest.schema -isnot [int]) -and ($manifest.schema -isnot [long])) -or
+        $manifest.schema -ne 1 -or [string]::IsNullOrWhiteSpace([string]$manifest.version)) {
+        throw "${Label}的 package-manifest.json 格式或 schema 不受支持。"
+    }
+    $entries = @($manifest.files)
+    if ($entries.Count -eq 0) { throw "${Label}的 package-manifest.json 文件列表为空。" }
+    $map = New-Object 'System.Collections.Generic.Dictionary[string, System.Collections.Generic.HashSet[string]]' (
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $entries) {
+        $norm = Normalize-ManifestRelPath ([string]$entry.path) $RootDir
+        if ($map.ContainsKey($norm)) { throw "${Label}的 package-manifest.json 包含重复路径：$norm" }
+        $expected = [string]$entry.sha256
+        Add-ExpectedHash $map $norm $expected
+        if ($VerifyHashes) {
+            $full = Join-Path $RootDir $norm
+            if (!(Test-Path -LiteralPath $full -PathType Leaf)) { throw "${Label}缺少清单文件：$norm" }
+            $actual = Get-FileSha256 $full
+            if ($actual -cne $expected) { throw "${Label}文件校验失败：$norm" }
         }
-        if ($item.PSIsContainer) {
-            try { Move-Item -LiteralPath $item.FullName -Destination $target -Force }
-            catch { Move-Tree $item.FullName $target -BestEffort:$BestEffort -Errors $Errors }
-            continue
+    }
+    return $map
+}
+
+function Read-LegacyHashCatalog([string]$CatalogPath, [string]$RootDir) {
+    try {
+        $catalog = Get-Content -LiteralPath $CatalogPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        throw "已知旧版清单已损坏：$($_.Exception.Message)"
+    }
+    if ($null -eq $catalog -or (($catalog.schema -isnot [int]) -and ($catalog.schema -isnot [long])) -or
+        $catalog.schema -ne 1 -or $null -eq $catalog.releases) {
+        throw '已知旧版清单格式或 schema 不受支持。'
+    }
+    $map = New-Object 'System.Collections.Generic.Dictionary[string, System.Collections.Generic.HashSet[string]]' (
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($release in @($catalog.releases)) {
+        if ($null -eq $release -or $null -eq $release.files) { continue }
+        foreach ($entry in @($release.files)) {
+            $norm = Normalize-ManifestRelPath ([string]$entry.path) $RootDir
+            Add-ExpectedHash $map $norm ([string]$entry.sha256)
         }
-        # A file just written may be open for a moment (a virus scanner reading it).
-        $maxTries = if ($BestEffort) { 3 } else { 6 }
-        for ($try = 1; ; $try++) {
-            try { Move-Item -LiteralPath $item.FullName -Destination $target -Force; break }
-            catch {
+    }
+    return $map
+}
+
+function Resolve-LegacyHashCatalog([string]$ExplicitPath, [string[]]$DefaultCandidates, [string]$RootDir) {
+    if (![string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        if (!(Test-Path -LiteralPath $ExplicitPath -PathType Leaf)) {
+            throw "找不到指定的旧版清单：$ExplicitPath"
+        }
+        return Read-LegacyHashCatalog $ExplicitPath $RootDir
+    }
+    foreach ($candidate in $DefaultCandidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return Read-LegacyHashCatalog $candidate $RootDir
+        }
+    }
+    return New-Object 'System.Collections.Generic.Dictionary[string, System.Collections.Generic.HashSet[string]]' (
+        [StringComparer]::OrdinalIgnoreCase)
+}
+
+function Get-PackageFileOwnership([string]$Rel, [string]$FullPath, $ExpectedHashes) {
+    if ($null -eq $ExpectedHashes -or !$ExpectedHashes.ContainsKey($Rel)) { return 'Unowned' }
+    $actualSha = Get-FileSha256 $FullPath
+    if ($ExpectedHashes[$Rel].Contains($actualSha)) { return 'Owned' }
+    return 'Modified'
+}
+
+function Remove-EmptyDirectoryIfEmpty([string]$DirPath) {
+    if (!(Test-Path -LiteralPath $DirPath -PathType Container)) { return }
+    if (Get-ChildItem -LiteralPath $DirPath -Force | Select-Object -First 1) { return }
+    try {
+        [IO.Directory]::Delete($DirPath, $false)
+    } catch [UnauthorizedAccessException] {
+        try {
+            [IO.File]::SetAttributes($DirPath, ([IO.File]::GetAttributes($DirPath) -band (-bnot [IO.FileAttributes]::ReadOnly)))
+            [IO.Directory]::Delete($DirPath, $false)
+        } catch { }
+    } catch { }
+}
+
+function Move-SingleFile(
+    [string]$Source,
+    [string]$Destination,
+    [switch]$BestEffort,
+    [System.Collections.Generic.List[string]]$Errors = $null
+) {
+    $destDir = Split-Path -Parent $Destination
+    if ($destDir -and !(Test-Path -LiteralPath $destDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    }
+    # A file just written may be open for a moment (a virus scanner reading it).
+    $maxTries = if ($BestEffort) { 3 } else { 6 }
+    for ($try = 1; ; $try++) {
+        try {
+            Move-Item -LiteralPath $Source -Destination $Destination -Force
+            break
+        } catch [UnauthorizedAccessException] {
+            try {
+                if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+                    $attrs = [IO.File]::GetAttributes($Destination)
+                    if ($attrs -band [IO.FileAttributes]::ReadOnly) {
+                        [IO.File]::SetAttributes($Destination, ($attrs -band (-bnot [IO.FileAttributes]::ReadOnly)))
+                    }
+                }
+                Move-Item -LiteralPath $Source -Destination $Destination -Force
+                break
+            } catch {
                 if ($try -lt $maxTries) { Start-Sleep -Milliseconds 300; continue }
-                $message = "无法替换 $($item.FullName)（$($_.Exception.Message.TrimEnd('。', '.'))），请关闭正在使用它的程序后重试。"
+                $message = "无法替换 $Source（$($_.Exception.Message.TrimEnd('。', '.'))），请关闭正在使用它的程序后重试。"
                 if ($BestEffort) { if ($Errors) { $Errors.Add($message) }; break }
                 throw $message
             }
+        } catch {
+            if ($try -lt $maxTries) { Start-Sleep -Milliseconds 300; continue }
+            $message = "无法替换 $Source（$($_.Exception.Message.TrimEnd('。', '.'))），请关闭正在使用它的程序后重试。"
+            if ($BestEffort) { if ($Errors) { $Errors.Add($message) }; break }
+            throw $message
         }
-    }
-    if (!$Keep) {
-        try {
-            [IO.Directory]::Delete($From, $false)
-        } catch [UnauthorizedAccessException] {
-            try {
-                [IO.File]::SetAttributes($From, ([IO.File]::GetAttributes($From) -band (-bnot [IO.FileAttributes]::ReadOnly)))
-                [IO.Directory]::Delete($From, $false)
-            } catch { }
-        } catch { }
     }
 }
 
@@ -174,7 +314,7 @@ function Stop-InstallProcesses([int]$WaitMilliseconds, [System.Diagnostics.Proce
 }
 
 function Write-Result([string]$ErrorText) {
-    $temporary = $result + '.tmp'
+    $temporary = "$result.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
     @{ error = $ErrorText } | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding UTF8
     Move-Item -LiteralPath $temporary -Destination $result -Force
 }
@@ -184,16 +324,83 @@ try {
         !$package.StartsWith($cache + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '更新目录无效。' }
     Assert-TemporaryPath $incoming
     Assert-TemporaryPath $backup
+    $installHash = Get-StringSha256Prefix ($install.ToUpperInvariant())
+    $installMutex = New-Object System.Threading.Mutex($false, "Local\Atrium.Update.Install.$installHash")
+    try {
+        $installMutexAcquired = $installMutex.WaitOne(0)
+    } catch [System.Threading.AbandonedMutexException] {
+        $installMutexAcquired = $true
+    }
+    if (!$installMutexAcquired) { throw '当前安装目录正在执行另一项更新，请等待其完成后重试。' }
     foreach ($root in @($install, $package)) {
         if (!(Test-Path -LiteralPath (Join-Path $root 'Atrium.exe')) -or
             !(Test-Path -LiteralPath (Join-Path $root 'Settings\Atrium.Settings.exe'))) { throw '找不到完整的 Atrium 程序文件。' }
     }
-    # Copy before stopping the app; disk/access failures leave the old app running.
+    $newFiles = Read-PackageManifest $package '新安装包' -VerifyHashes
+    $oldManifestPath = Join-Path $install 'package-manifest.json'
+    $hasOldManifest = Test-Path -LiteralPath $oldManifestPath -PathType Leaf
+    if ($hasOldManifest) {
+        $ownedHashes = Read-PackageManifest $install '当前安装目录'
+    } else {
+        $catalogCandidates = @((Join-Path $package 'Settings\legacy-manifests.json'), (Join-Path $PSScriptRoot 'legacy-manifests.json'))
+        $ownedHashes = Resolve-LegacyHashCatalog $LegacyManifestPath $catalogCandidates $install
+    }
+    $toBackup = New-Object 'System.Collections.Generic.List[string]'
+    $toBackupSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $retired = New-Object 'System.Collections.Generic.List[string]'
+    $conflicts = New-Object 'System.Collections.Generic.List[string]'
+    $existingFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in @(Get-ChildItem -LiteralPath $install -Recurse -File -Force)) {
+        $rel = $file.FullName.Substring($install.Length + 1).Replace('/', '\')
+        [void]$existingFiles.Add($rel)
+        if ($rel -ieq 'development.txt') { continue }
+        if ($hasOldManifest -and $rel -ieq 'package-manifest.json') {
+            $toBackup.Add($rel); [void]$toBackupSet.Add($rel)
+            continue
+        }
+        $ownership = Get-PackageFileOwnership $rel $file.FullName $ownedHashes
+        if ($ownership -eq 'Owned') {
+            $toBackup.Add($rel); [void]$toBackupSet.Add($rel)
+            if (!$newFiles.ContainsKey($rel)) { $retired.Add($rel) }
+        } elseif ($ownership -eq 'Modified') {
+            $conflicts.Add("$rel (已修改的官方文件)")
+        } elseif ($newFiles.ContainsKey($rel)) {
+            $conflicts.Add("$rel (未声明归属的同名文件)")
+        }
+    }
+    foreach ($rel in $newFiles.Keys) {
+        $parts = $rel.Split('\')
+        for ($i = 0; $i -lt $parts.Length - 1; $i++) {
+            $anc = ($parts[0..$i]) -join '\'
+            if ($existingFiles.Contains($anc) -and !$toBackupSet.Contains($anc)) {
+                $conflicts.Add("$rel (与已有文件 $anc 冲突)")
+                break
+            }
+        }
+        $targetPath = Join-Path $install $rel
+        if (Test-Path -LiteralPath $targetPath -PathType Container) {
+            $keptInside = @(Get-ChildItem -LiteralPath $targetPath -Recurse -File -Force | Where-Object {
+                $subRel = $_.FullName.Substring($install.Length + 1).Replace('/', '\')
+                $subRel -ieq 'development.txt' -or !$toBackupSet.Contains($subRel)
+            })
+            if ($keptInside.Count -gt 0) { $conflicts.Add("$rel (与已有非空目录冲突)") }
+        }
+    }
+    if ($conflicts.Count -gt 0) {
+        throw ("检测到文件冲突，已取消更新并保留原文件：" + (($conflicts | Select-Object -Unique) -join '、'))
+    }
+    # Copy only verified manifest files before stopping the app; disk/access failures leave the old app running.
     New-Item -ItemType Directory -Path $incoming | Out-Null
-    Get-ChildItem -LiteralPath $package -Force | Copy-Item -Destination $incoming -Recurse -Force
-    # A downloaded release must retain the development package's explicit identity.
-    if (Test-Path -LiteralPath (Join-Path $install 'development.txt')) {
-        Copy-Item -LiteralPath (Join-Path $install 'development.txt') -Destination $incoming -Force
+    $incomingFiles = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($rel in @($newFiles.Keys) + @('package-manifest.json')) {
+        $src = Join-Path $package $rel
+        $dst = Join-Path $incoming $rel
+        $dstDir = Split-Path -Parent $dst
+        if ($dstDir -and !(Test-Path -LiteralPath $dstDir -PathType Container)) {
+            New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $src -Destination $dst -Force
+        $incomingFiles.Add($rel)
     }
     $settingsProcess = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
     if ($settingsProcess -and !$settingsProcess.WaitForExit(30000)) { throw '设置中心尚未退出，更新未安装。' }
@@ -209,11 +416,39 @@ try {
     Stop-InstallProcesses -WaitMilliseconds 5000
     Assert-TemporaryPath $backup
     Assert-TemporaryPath $incoming
-    # The folder itself stays (an app may be in it); what is in it is replaced.
     $backupStarted = $true
-    Move-Tree $install $backup -Keep
+    New-Item -ItemType Directory -Path $backup | Out-Null
+    $backedUp = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($rel in $toBackup) {
+        Move-SingleFile (Join-Path $install $rel) (Join-Path $backup $rel)
+        $backedUp.Add($rel)
+    }
     $incomingStarted = $true
-    Move-Tree $incoming $install
+    $placed = New-Object 'System.Collections.Generic.List[string]'
+    $createdDirs = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($rel in $incomingFiles) {
+        $target = Join-Path $install $rel
+        if (Test-Path -LiteralPath $target -PathType Container) {
+            foreach ($sub in @(Get-ChildItem -LiteralPath $target -Recurse -Directory -Force | Sort-Object { $_.FullName.Length } -Descending)) {
+                Remove-EmptyDirectoryIfEmpty $sub.FullName
+            }
+            Remove-EmptyDirectoryIfEmpty $target
+        }
+        $parentRel = Split-Path -Parent $rel
+        if ($parentRel) {
+            $curRel = ''
+            foreach ($seg in $parentRel.Split('\')) {
+                $curRel = if ($curRel) { "$curRel\$seg" } else { $seg }
+                $curFull = Join-Path $install $curRel
+                if (!(Test-Path -LiteralPath $curFull -PathType Container)) {
+                    New-Item -ItemType Directory -Path $curFull -Force | Out-Null
+                    $createdDirs.Add($curRel)
+                }
+            }
+        }
+        Move-SingleFile (Join-Path $incoming $rel) $target
+        $placed.Add($rel)
+    }
     if ($StartCore -eq '1') { Start-Verified (Join-Path $install 'Atrium.exe') 'Core' '' }
     $settingsArguments = if ($StartCore -eq '1') { '--page about --require-core-ready' } else { '--page about' }
     Start-Verified (Join-Path $install 'Settings\Atrium.Settings.exe') 'Settings' $settingsArguments
@@ -222,6 +457,13 @@ try {
     }
     # With the core intentionally off, only settings is launched and verified.
     $confirmed = $true
+    foreach ($rel in $retired) {
+        $dirRel = Split-Path -Parent $rel
+        while ($dirRel) {
+            Remove-EmptyDirectoryIfEmpty (Join-Path $install $dirRel)
+            $dirRel = Split-Path -Parent $dirRel
+        }
+    }
     Remove-Item -LiteralPath $StatePath -Force
     Write-Result ''
 } catch {
@@ -239,15 +481,31 @@ try {
             try { Stop-InstallProcesses -WaitMilliseconds 3000 -Tracked @($started) } catch { }
             try {
                 Assert-TemporaryPath $incoming
-                if (Test-Path -LiteralPath $install) { Move-Tree $install $incoming -Keep -BestEffort -Errors $rollbackErrors }
+                foreach ($rel in $placed) {
+                    $src = Join-Path $install $rel
+                    if ([IO.File]::Exists($src)) {
+                        Move-SingleFile $src (Join-Path $incoming $rel) -BestEffort -Errors $rollbackErrors
+                    }
+                }
+                for ($i = $createdDirs.Count - 1; $i -ge 0; $i--) {
+                    Remove-EmptyDirectoryIfEmpty (Join-Path $install $createdDirs[$i])
+                }
             } catch { $rollbackErrors.Add($_.Exception.Message) }
         }
         try {
             Assert-TemporaryPath $backup
-            if (Test-Path -LiteralPath $backup) { Move-Tree $backup $install -BestEffort -Errors $rollbackErrors }
+            foreach ($rel in $backedUp) {
+                $src = Join-Path $backup $rel
+                if ([IO.File]::Exists($src)) {
+                    Move-SingleFile $src (Join-Path $install $rel) -BestEffort -Errors $rollbackErrors
+                }
+            }
         } catch { $rollbackErrors.Add($_.Exception.Message) }
         $restored = $true
-        if ($rollbackErrors.Count -gt 0 -or ((Test-Path -LiteralPath $backup) -and @(Get-ChildItem -LiteralPath $backup -Force).Count -gt 0)) {
+        $remainingBackupFiles = if (Test-Path -LiteralPath $backup) {
+            @(Get-ChildItem -LiteralPath $backup -Recurse -File -Force -ErrorAction SilentlyContinue)
+        } else { @() }
+        if ($rollbackErrors.Count -gt 0 -or $remainingBackupFiles.Count -gt 0) {
             $detail = (($rollbackErrors | Select-Object -Unique) -join ' ')
             if ($detail) { $failure += " 恢复旧包未完成：$detail" }
             $failure += "；恢复副本保留在 $backup。"
@@ -257,7 +515,9 @@ try {
 } finally {
     # Never delete an unconfirmed recovery point, even when rollback itself failed.
     $cleanup = @($incoming)
-    if ($confirmed -or ((Test-Path -LiteralPath $backup) -and @(Get-ChildItem -LiteralPath $backup -Force).Count -eq 0)) { $cleanup += $backup }
+    $backupEmpty = !(Test-Path -LiteralPath $backup) -or
+        (@(Get-ChildItem -LiteralPath $backup -Recurse -File -Force -ErrorAction SilentlyContinue).Count -eq 0)
+    if ($confirmed -or $backupEmpty) { $cleanup += $backup }
     foreach ($temporary in $cleanup) {
         Assert-TemporaryPath $temporary
         if (Test-Path -LiteralPath $temporary) {
@@ -288,4 +548,6 @@ try {
         }
     }
     foreach ($process in $started) { $process.Dispose() }
+    if ($installMutexAcquired) { try { $installMutex.ReleaseMutex() } catch { } }
+    if ($installMutex) { $installMutex.Dispose() }
 }

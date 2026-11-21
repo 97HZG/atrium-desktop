@@ -19,6 +19,7 @@ public partial class App : Application
     private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, char[] buffer, ref uint size);
     internal const string WindowProp = "Atrium.Settings.Window";
     internal const uint OpenPageMessage = 0x8000 + 31;
+    internal const uint CloseForUninstallMessage = 0x8000 + 32;
 
     public static string WindowTitle => Loc.T("Atrium Settings");
     internal static MainWindow? CurrentWindow { get; private set; }

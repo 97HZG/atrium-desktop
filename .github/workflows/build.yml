@@ -20,7 +20,7 @@ jobs:
     # Visual Studio 2022 (MSVC 14.4x), as the developers': windows-latest moved to Visual Studio 18, whose
     # standard library refuses clang-tidy 19. A newer toolchain is an upgrade of its own (LLVM 20, the baseline).
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -68,9 +68,6 @@ jobs:
       - name: Test localization validation
         shell: pwsh
         run: ./tools/tests/check-localization.tests.ps1
-      - name: Test updater and package scripts
-        shell: pwsh
-        run: ./tools/tests/update.tests.ps1
       - name: Build native, settings, the tests and the portable package
         shell: pwsh
         run: ./tools/build.ps1 -Zip -Tests -Ninja
@@ -108,6 +105,15 @@ jobs:
           dotnet run --project tests/SettingsChecks/SettingsChecks.csproj -c Release -- --core-normalizer native/build/win-x64/tests/display_settings_tests.exe
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet run --project tests/LocalizationChecks/LocalizationChecks.csproj -c Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Test updater and package scripts
+        shell: pwsh
+        run: |
+          $zips = @(Get-ChildItem -LiteralPath dist -Filter 'Atrium-*-win-x64.zip')
+          if ($zips.Count -ne 1) { throw "Expected 1 package zip in dist/, found $($zips.Count)." }
+          ./tools/tests/update.tests.ps1 -CandidateZipPath $zips[0].FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./tools/tests/uninstall.tests.ps1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify packaged portable zip
         shell: pwsh

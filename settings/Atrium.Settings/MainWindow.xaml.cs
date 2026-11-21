@@ -158,12 +158,8 @@ public sealed partial class MainWindow : Window, IDisposable
         VisibilityChanged += OnWindowVisibilityChanged;
         _updateMessage = (handle, message, wparam, lparam, id, data) =>
         {
-            if (message == App.OpenPageMessage)
-            {
-                ulong page = wparam.ToUInt64();
-                if (page < (ulong)_mains.Length) SelectPage((int)page);
-                return IntPtr.Zero;
-            }
+            if (message == App.OpenPageMessage) { if (wparam.ToUInt64() < (ulong)_mains.Length) SelectPage((int)wparam.ToUInt64()); return IntPtr.Zero; }
+            if (message == App.CloseForUninstallMessage) { _client.Dispose(); Close(); return IntPtr.Zero; }
             if (message == 0x02E0) UpdateWindowMinimumSize((uint)(wparam.ToUInt64() & 0xFFFF), lparam);
             if (message is 0x007E or 0x02E0 || (message == 0x001A && wparam.ToUInt64() == 0x002F))
                 DispatcherQueue.TryEnqueue(() => { RefreshDisplays(); UpdateWindowMinimumSize(); }); // hotplug, DPI or work-area changed

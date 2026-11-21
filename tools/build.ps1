@@ -93,9 +93,34 @@ try {
     }
     Copy-Item (Join-Path $PSScriptRoot "Uninstall.ps1") $dist
     Copy-Item LICENSE $dist
+    $version = (Select-String -Path native/CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+    $distFull = [IO.Path]::GetFullPath($dist).TrimEnd('\')
+    $manifestEntries = [System.Collections.Generic.List[object]]::new()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $relPaths = [System.Collections.Generic.List[string]]::new()
+        foreach ($file in @(Get-ChildItem -LiteralPath $distFull -Recurse -File -Force)) {
+            $rel = $file.FullName.Substring($distFull.Length + 1).Replace('/', '\')
+            if ($rel -ieq 'package-manifest.json' -or $rel -ieq 'development.txt') { continue }
+            $relPaths.Add($rel)
+        }
+        $relPaths.Sort([StringComparer]::OrdinalIgnoreCase)
+        foreach ($rel in $relPaths) {
+            $stream = [IO.File]::OpenRead((Join-Path $distFull $rel))
+            try {
+                $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+            } finally {
+                $stream.Dispose()
+            }
+            $manifestEntries.Add([ordered]@{ path = $rel; sha256 = $hash })
+        }
+    } finally {
+        $sha.Dispose()
+    }
+    $manifestJson = ([ordered]@{ schema = 1; version = $version; files = $manifestEntries } | ConvertTo-Json -Depth 4) -replace "`r`n", "`n"
+    [IO.File]::WriteAllText((Join-Path $distFull 'package-manifest.json'), $manifestJson + "`n", (New-Object System.Text.UTF8Encoding $false))
 
     if ($Zip) {
-        $version = (Select-String -Path native/CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
         $zipPath = if ($Development) { Join-Path $root "dist/Development/Atrium-$version-development-win-x64.zip" }
                    else { Join-Path $root "dist/Atrium-$version-win-x64.zip" }
         if (Test-Path $zipPath) { Remove-Item $zipPath }

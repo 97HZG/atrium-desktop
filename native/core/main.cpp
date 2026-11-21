@@ -194,19 +194,7 @@ std::wstring ExeDir()
     return p.substr(0, p.find_last_of(L'\\'));
 }
 
-bool SameCoreExecutable(HWND window)
-{
-    DWORD pid = 0;
-    GetWindowThreadProcessId(window, &pid);
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    wchar_t other[32768]{}, current[32768]{};
-    DWORD length = DWORD(std::size(other));
-    bool same = process && QueryFullProcessImageNameW(process, 0, other, &length) && GetModuleFileNameW(nullptr, current, DWORD(std::size(current))) &&
-                _wcsicmp(other, current) == 0;
-    if (process)
-        CloseHandle(process);
-    return same;
-}
+bool SameCoreExecutable(HWND window) { return atrium::SameExecutableWindow(window); }
 
 // page: the settings app opens on it ("widgets"); an open window just comes to the front.
 void OpenSettings(const wchar_t* page = nullptr)
@@ -1634,11 +1622,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     }
     // `Atrium.exe --exit` asks a running instance to quit (installer, updater).
     if (wcsstr(cmdLine, L"--exit")) {
-        HWND other = FindWindowW(kHostClass, nullptr);
+        HWND other = atrium::FindWindowForExecutable(kHostClass);
         if (!other)
             return 0;
-        if (!SameCoreExecutable(other))
-            return 1;
         DWORD pid = 0;
         GetWindowThreadProcessId(other, &pid);
         HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);

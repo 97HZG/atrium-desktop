@@ -112,3 +112,8 @@ set_tests_properties(shell_taskbar PROPERTIES TIMEOUT 15)
 add_executable(parsers_tests parsers.cpp)
 target_link_libraries(parsers_tests PRIVATE atrium_core_lib)
 add_test(NAME parsers COMMAND parsers_tests)
+
+add_executable(core_exit_tests core_exit.cpp)
+target_link_libraries(core_exit_tests PRIVATE atrium_core_lib)
+add_test(NAME core_exit COMMAND core_exit_tests)
+set_tests_properties(core_exit PROPERTIES TIMEOUT 15)

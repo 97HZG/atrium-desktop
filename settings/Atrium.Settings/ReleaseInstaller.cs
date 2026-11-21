@@ -31,14 +31,8 @@ internal static class ReleaseInstaller
         return ready;
     }
 
-    internal static string? ReadFailure()
-    {
-        if (!File.Exists(ResultPath)) return null;
-        using var result = JsonDocument.Parse(File.ReadAllText(ResultPath));
-        string? error = result.RootElement.GetProperty("error").GetString();
-        File.Delete(ResultPath);
-        return string.IsNullOrEmpty(error) ? null : error;
-    }
+    internal static string? ReadFailure() =>
+        ReleaseValidation.ReadFailureWithLock(ResultPath, @"Local\Atrium.Update." + Path.GetFileName(CacheDirectory), App.LogCrash);
 
     internal static Process StartBackgroundDownload(ReleaseInfo release)
     {
@@ -91,12 +85,7 @@ internal static class ReleaseInstaller
         catch (FileNotFoundException) { return default; }
         catch (DirectoryNotFoundException) { return default; }
     }
-    private static void SaveJson<T>(string path, T value)
-    {
-        string temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(value));
-        File.Move(temporary, path, true);
-    }
+    private static void SaveJson<T>(string path, T value) => ReleaseValidation.SaveJsonAtomic(path, value);
 
     // Called before XAML starts. The mutex covers the short queue/finalize work,
     // not the transfer; closing any Atrium process never calls BITS.Cancel().
@@ -168,7 +157,8 @@ internal static class ReleaseInstaller
     private static void Queue(ReleaseInfo release, Download? pending)
     {
         if (release.Download == null || release.Version <= CurrentVersion) return;
-        if (ReadPrepared(CurrentVersion) is { } ready && Version.Parse(ready.Version) >= release.Version)
+        if (ReleaseValidation.TryRecoverPrepared(() => ReadPrepared(CurrentVersion), StatePath, WorkDirectory, App.LogCrash) is { } ready &&
+            Version.Parse(ready.Version) >= release.Version)
         { NotifyReady(); return; }
         if (pending != null && pending.Release.Version > release.Version) release = pending.Release;
         if (release.Download == null) return;
@@ -280,8 +270,10 @@ internal static class ReleaseInstaller
         ValidatePackage(ready.Directory, Version.Parse(ready.Version));
         // Copy the helper out of the install directory before replacing that directory.
         string script = Path.Combine(CacheDirectory, "Update.ps1");
+        string packagedScript = Path.Combine(ready.Directory, "Settings", "Update.ps1");
+        string sourceScript = File.Exists(packagedScript) ? packagedScript : Path.Combine(AppContext.BaseDirectory, "Update.ps1");
         // Windows PowerShell 5.1 needs a BOM to read the helper's Chinese messages.
-        File.WriteAllText(script, File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Update.ps1")), new System.Text.UTF8Encoding(true));
+        File.WriteAllText(script, File.ReadAllText(sourceScript), new System.Text.UTF8Encoding(true));
         var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
             "WindowsPowerShell", "v1.0", "powershell.exe"))
         { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = CacheDirectory };

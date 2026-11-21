@@ -16,9 +16,50 @@ try {
     Expand-Archive -LiteralPath $ZipPath -DestinationPath $temp -Force
     $pkg = Join-Path $temp 'Atrium'; if (!(Test-Path -LiteralPath $pkg -PathType Container)) { $pkg = $temp }
     $required = @('Atrium.exe', 'Settings\Atrium.Settings.exe', 'Settings\Atrium.Settings.dll',
-        'Settings\Update.ps1', 'Uninstall.ps1', 'LICENSE', 'locales\manifest.json')
+        'Settings\Update.ps1', 'Uninstall.ps1', 'LICENSE', 'locales\manifest.json', 'package-manifest.json')
     foreach ($rel in $required) {
         if (!(Test-Path -LiteralPath (Join-Path $pkg $rel) -PathType Leaf)) { throw "Missing package file: $rel" }
+    }
+    $pkgFull = [IO.Path]::GetFullPath($pkg).TrimEnd('\')
+    $pkgManifest = Get-Content -LiteralPath (Join-Path $pkgFull 'package-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($null -eq $pkgManifest -or (($pkgManifest.schema -isnot [int]) -and ($pkgManifest.schema -isnot [long])) -or
+        $pkgManifest.schema -ne 1) { throw 'Invalid package-manifest.json schema.' }
+    if ($pkgManifest.version -ne $expectedVersion) { throw "package-manifest.json version '$($pkgManifest.version)' != $expectedVersion." }
+    $manifestFiles = @($pkgManifest.files)
+    if ($manifestFiles.Count -eq 0) { throw 'package-manifest.json files list is empty.' }
+    $listed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        foreach ($entry in $manifestFiles) {
+            $rel = [string]$entry.path
+            if ([string]::IsNullOrWhiteSpace($rel) -or [IO.Path]::IsPathRooted($rel) -or
+                $rel.StartsWith('\') -or $rel.StartsWith('/') -or $rel.EndsWith('\') -or $rel.EndsWith('/')) {
+                throw "Invalid manifest path: '$rel'"
+            }
+            $norm = $rel.Replace('/', '\')
+            if ($norm.Split('\') | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' }) {
+                throw "Unsafe manifest path: '$rel'"
+            }
+            $full = [IO.Path]::GetFullPath((Join-Path $pkgFull $norm))
+            if (!$full.StartsWith($pkgFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Out-of-bounds manifest path: '$rel'"
+            }
+            if (!$listed.Add($norm)) { throw "Duplicate manifest path: '$rel'" }
+            if (!(Test-Path -LiteralPath $full -PathType Leaf)) { throw "Missing file listed in package-manifest.json: $norm" }
+            $expectedHash = [string]$entry.sha256
+            if ($expectedHash -cnotmatch '^[0-9a-f]{64}$') { throw "Invalid SHA-256 in manifest for $norm" }
+            $stream = [IO.File]::OpenRead($full)
+            try { $actualHash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+            finally { $stream.Dispose() }
+            if ($actualHash -cne $expectedHash) { throw "SHA-256 mismatch for $norm" }
+        }
+    } finally {
+        $sha.Dispose()
+    }
+    foreach ($file in @(Get-ChildItem -LiteralPath $pkgFull -Recurse -File -Force)) {
+        $rel = $file.FullName.Substring($pkgFull.Length + 1).Replace('/', '\')
+        if ($rel -ieq 'package-manifest.json' -or $rel -ieq 'development.txt') { continue }
+        if (!$listed.Contains($rel)) { throw "File not listed in package-manifest.json: $rel" }
     }
     foreach ($ps in @('Uninstall.ps1', 'Settings\Update.ps1')) {
         $bom = [IO.File]::ReadAllBytes((Join-Path $pkg $ps))

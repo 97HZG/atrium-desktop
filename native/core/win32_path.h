@@ -73,4 +73,27 @@ inline std::wstring FoldCase(const std::wstring& text)
     return folded;
 }
 
+inline bool SameExecutableWindow(HWND window, const std::wstring& exePath = ModulePath())
+{
+    if (!window || exePath.empty())
+        return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    if (!pid)
+        return false;
+    const std::wstring other = ProcessImagePath(pid);
+    return !other.empty() && FoldCase(other) == FoldCase(exePath);
+}
+
+inline HWND FindWindowForExecutable(const wchar_t* className, const std::wstring& exePath = ModulePath())
+{
+    if (!className || exePath.empty())
+        return nullptr;
+    for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, className, nullptr)) != nullptr;) {
+        if (SameExecutableWindow(w, exePath))
+            return w;
+    }
+    return nullptr;
+}
+
 } // namespace atrium

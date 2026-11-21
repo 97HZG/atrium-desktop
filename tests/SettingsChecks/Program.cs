@@ -475,6 +475,58 @@ try
     File.Delete(coreExe);
     ExpectThrows<IOException>(() => ReleaseValidation.ValidatePackage(pkg, v27, _ => v27), "Missing Atrium.exe must throw.");
 
+    string cacheDir = Path.Combine(temp, "cache");
+    string stateFile = Path.Combine(cacheDir, "ready.json");
+    string workDir = Path.Combine(cacheDir, "package-background");
+    Directory.CreateDirectory(workDir);
+    ReleaseValidation.SaveJsonAtomic(stateFile, new { Tag = "v2.8.0", Version = "2.8.0" });
+    Require(File.Exists(stateFile) && Directory.GetFiles(cacheDir, "*.tmp").Length == 0,
+        "SaveJsonAtomic must write target without leaving temporary files.");
+    ReleaseValidation.SaveJsonAtomic(stateFile, new { Tag = "v2.9.0", Version = "2.9.0" });
+    Require(JsonNode.Parse(File.ReadAllText(stateFile))!["Version"]!.GetValue<string>() == "2.9.0",
+        "SaveJsonAtomic must overwrite existing JSON atomically.");
+    Require(ReleaseValidation.TryRecoverPrepared(() => "ok", stateFile, workDir) == "ok" && File.Exists(stateFile),
+        "TryRecoverPrepared must reuse valid prepared package.");
+    foreach (var ex in new Exception[]
+    {
+        new JsonException("corrupt"),
+        new IOException("missing"),
+        new FormatException("bad version"),
+        new InvalidDataException("bad zip"),
+        new ArgumentException("bad path"),
+    })
+    {
+        Directory.CreateDirectory(workDir);
+        File.WriteAllText(Path.Combine(workDir, "stale.txt"), "x");
+        File.WriteAllText(stateFile, "{corrupt");
+        Exception? logged = null;
+        string? recovered = ReleaseValidation.TryRecoverPrepared<string>(
+            () => throw ex, stateFile, workDir, e => logged = e);
+        Require(recovered == null && ReferenceEquals(logged, ex) && !File.Exists(stateFile) && !Directory.Exists(workDir),
+            $"TryRecoverPrepared must log and clean up on {ex.GetType().Name}.");
+    }
+    Directory.CreateDirectory(workDir);
+    File.WriteAllText(stateFile, "{}");
+    ExpectThrows<UnauthorizedAccessException>(
+        () => ReleaseValidation.TryRecoverPrepared<string>(() => throw new UnauthorizedAccessException("denied"), stateFile, workDir),
+        "TryRecoverPrepared must not swallow UnauthorizedAccessException.");
+
+    string mutexName = @"Local\Atrium.Update.Test." + Guid.NewGuid().ToString("N");
+    string resultFile = Path.Combine(cacheDir, "result.json");
+    Require(ReleaseValidation.ReadFailureWithLock(resultFile, mutexName) == null,
+        "ReadFailureWithLock must return null when result.json is absent.");
+    ReleaseValidation.SaveJsonAtomic(resultFile, new { error = "boom" });
+    Require(ReleaseValidation.ReadFailureWithLock(resultFile, mutexName) == "boom" && !File.Exists(resultFile),
+        "ReadFailureWithLock must return error and delete result.json.");
+    ReleaseValidation.SaveJsonAtomic(resultFile, new { error = "" });
+    Require(ReleaseValidation.ReadFailureWithLock(resultFile, mutexName) == null && !File.Exists(resultFile),
+        "ReadFailureWithLock must return null on empty error and delete result.json.");
+    File.WriteAllText(resultFile, "{broken");
+    Exception? corruptLogged = null;
+    Require(ReleaseValidation.ReadFailureWithLock(resultFile, mutexName, e => corruptLogged = e) == null &&
+            corruptLogged is JsonException && !File.Exists(resultFile),
+        "ReadFailureWithLock must log, clean up corrupt result.json, and not throw.");
+
     Require(ShellIcons.ExecutableForIcon("foo.exe") == "foo.exe", "Bare exe must return itself.");
     Require(ShellIcons.ExecutableForIcon(@"C:\app\foo.lnk") == @"C:\app\foo.lnk", "Non-exe must return itself.");
     string iconExe = Path.Combine(temp, "MyApp.exe");
