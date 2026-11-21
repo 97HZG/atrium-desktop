@@ -1171,26 +1171,26 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
 {
     const auto displays = ConnectedDisplays();
     // Keep existing renderers when changing appearance; only retire disconnected or unused bars.
-    std::erase_if(g_app.secondaryBars, [&](const auto& bar) {
-        const bool connected =
-            settings.bar && settings.dockDisplayMode == L"all" &&
-            std::any_of(displays.begin(), displays.end(), [&](const DisplayInfo& display) { return !display.primary && display.id == bar->DisplayOverride(); });
-        if (connected)
+    const bool all = settings.bar && settings.dockDisplayMode == L"all";
+    std::vector<std::unique_ptr<Bar>> retired;
+    std::erase_if(g_app.secondaryBars, [&](auto& bar) {
+        if (all && std::ranges::any_of(displays, [&](const DisplayInfo& d) { return !d.primary && d.id == bar->DisplayOverride(); }))
             return false;
-        if (g_app.activeBar == bar.get()) {
-            CloseBarPopups();
-            g_app.activeBar = g_app.bar.get();
-        }
+        if (g_app.activeBar == bar.get())
+            CloseBarPopups(), g_app.activeBar = g_app.bar.get();
         bar->SetVisible(false);
+        retired.push_back(std::move(bar));
+        return true;
+    });
+    for (const auto& bar : retired)
         // Same bounded shutdown as the primary renderer: restore the Windows shell if a driver hangs.
         if (!bar->StopRendering(3000)) {
             g_app.chrome->RestoreForExit();
             Log(L"core: secondary display renderer stuck during removal");
             TerminateProcess(GetCurrentProcess(), 0);
         }
-        return true;
-    });
-    if (settings.bar && settings.dockDisplayMode == L"all")
+    retired.clear();
+    if (all)
         for (const DisplayInfo& display : displays) {
             if (display.primary || std::ranges::any_of(g_app.secondaryBars, [&](const auto& bar) { return bar->DisplayOverride() == display.id; }))
                 continue;

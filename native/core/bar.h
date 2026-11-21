@@ -188,7 +188,7 @@ private:
     void Raise();
 
     bool debugCapturable_ = false;
-    void ShowOwnWindowsToCapture(bool visible); // render thread; waits for the UI thread
+    bool ShowOwnWindowsToCapture(bool visible); // render thread; waits for the UI thread
     HWND visual_ = nullptr;
     HWND input_ = nullptr;
     void UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve);

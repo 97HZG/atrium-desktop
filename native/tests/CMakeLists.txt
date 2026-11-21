@@ -118,6 +118,11 @@ target_link_libraries(core_exit_tests PRIVATE atrium_core_lib)
 add_test(NAME core_exit COMMAND core_exit_tests)
 set_tests_properties(core_exit PROPERTIES TIMEOUT 15)
 
+add_executable(bar_shutdown_tests bar_shutdown.cpp)
+target_link_libraries(bar_shutdown_tests PRIVATE atrium_core_lib)
+add_test(NAME bar_shutdown COMMAND bar_shutdown_tests)
+set_tests_properties(bar_shutdown PROPERTIES TIMEOUT 15)
+
 add_executable(persistence_recovery_tests persistence_recovery.cpp)
 target_link_libraries(persistence_recovery_tests PRIVATE atrium_core_lib)
 add_test(NAME persistence_recovery COMMAND persistence_recovery_tests)

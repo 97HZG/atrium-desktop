@@ -9,6 +9,7 @@
 #include "render/capture.h"
 #include "render/desktop_backdrop.h"
 #include "render/glass_renderer.h"
+#include "render/shutdown_wait.h"
 #include "render/ui_font.h"
 #include "ui/surface.h"
 
@@ -421,18 +422,9 @@ bool Bar::StopRendering(DWORD timeoutMs)
         return true;
     // The render thread may wait for this thread (ShowOwnWindowsToCapture, DirectComposition):
     // keep its messages flowing while waiting, never a bare join.
-    HANDLE thread = render_.native_handle();
-    const ULONGLONG until = GetTickCount64() + timeoutMs;
-    while (MsgWaitForMultipleObjects(1, &thread, FALSE, 50, QS_ALLINPUT) != WAIT_OBJECT_0) {
-        MSG msg;
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-        if (GetTickCount64() > until) {
-            Log(L"core: the render thread did not stop in %lu ms", timeoutMs);
-            return false;
-        }
+    if (!WaitRenderShutdown(render_.native_handle(), visual_, WM_BAR_CAPTURE, timeoutMs)) {
+        Log(L"core: the render thread did not stop in %lu ms", timeoutMs);
+        return false;
     }
     render_.join();
     return true;
@@ -1950,19 +1942,25 @@ void Bar::Publish(bool bar)
     SetEvent(wake_);
 }
 
-void Bar::ShowOwnWindowsToCapture(bool visible)
+bool Bar::ShowOwnWindowsToCapture(bool visible)
 {
+    if (WaitForSingleObject(quit_, 0) != WAIT_TIMEOUT)
+        return false;
     if (debugCapturable_)
         visible = true;
     if (visible == captureVisible_)
-        return;
+        return true;
     // The windows belong to the UI thread; it answers once they are changed.
     ResetEvent(captureAck_);
     PostMessageW(visual_, WM_BAR_CAPTURE, visible ? 1 : 0, 0);
-    if (WaitForSingleObject(captureAck_, 1000) != WAIT_OBJECT_0)
+    if (!WaitCaptureAckOrQuit(quit_, captureAck_, 1000)) {
+        if (WaitForSingleObject(quit_, 0) != WAIT_TIMEOUT)
+            return false;
         Log(L"render: the UI thread did not confirm the capture exclusion in time");
+    }
     captureVisible_ = visible;
     Log(L"render: Atrium %s screenshots", visible ? L"shows in" : L"is kept out of");
+    return true;
 }
 
 void Bar::RenderThread()
@@ -2037,6 +2035,59 @@ bool ScreenLitAbove(BarEdge edge, RECT bar)
     return lit;
 }
 
+void FreezeBackdrop(const Gpu& gpu, winrt::com_ptr<ID3D11Texture2D>& frozen, winrt::com_ptr<ID3D11Texture2D>& frame)
+{
+    if (!frame)
+        return;
+    if (!frozen) {
+        D3D11_TEXTURE2D_DESC d{};
+        frame->GetDesc(&d);
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        d.MiscFlags = 0;
+        winrt::check_hresult(gpu.device->CreateTexture2D(&d, nullptr, frozen.put()));
+        gpu.context->CopyResource(frozen.get(), frame.get());
+    }
+    frame = frozen;
+}
+
+void UpdatePanelInkGrid(const Readback& rb, const Settings& settings, float panelScale, int w, int h, InkGrid& current, bool& dark, bool& inkOwed)
+{
+    const float padX = float(rb.origin.x), padY = float(rb.origin.y);
+    const float cell = std::max(8.f, 20.f * panelScale);
+    InkGrid grid;
+    grid.w = std::max(1, int(std::ceil(float(w) / cell)));
+    grid.h = std::max(1, int(std::ceil(float(h) / cell)));
+    grid.cellX = float(w) / float(grid.w);
+    grid.cellY = float(h) / float(grid.h);
+    grid.dark.resize(size_t(grid.w) * size_t(grid.h));
+    const std::wstring& tc = settings.textColor;
+    const bool sameSize = current.w == grid.w && current.h == grid.h;
+    int darkCells = 0;
+    for (int y = 0; y < grid.h; ++y)
+        for (int x = 0; x < grid.w; ++x) {
+            const size_t i = size_t(y) * size_t(grid.w) + size_t(x);
+            const bool was = sameSize ? current.dark[i] != 0 : dark;
+            bool d = was;
+            if (tc == L"dark" || tc == L"light") {
+                d = tc == L"dark";
+            } else {
+                const float x0 = float(x) * grid.cellX, y0 = float(y) * grid.cellY;
+                const float lum = GlassLuma(settings, rb.RegionLuma(x0 + padX, y0 + padY, x0 + grid.cellX + padX, y0 + grid.cellY + padY));
+                if (!was && lum > kDarkInkAbove)
+                    d = true;
+                else if (was && lum < kLightInkBelow)
+                    d = false;
+            }
+            grid.dark[i] = d ? 1 : 0;
+            darkCells += d ? 1 : 0;
+        }
+    dark = 2 * darkCells >= int(grid.dark.size());
+    if (!(grid == current)) {
+        current = grid;
+        inkOwed = true;
+    }
+}
+
 } // namespace
 
 Bar::SessionEnd Bar::RenderSession()
@@ -2090,10 +2141,11 @@ Bar::SessionEnd Bar::RenderSession()
         }
     }
     if (!capture) {
-        ShowOwnWindowsToCapture(false); // before the first frame, or the glass would sample itself
+        if (!ShowOwnWindowsToCapture(false)) // before the first frame, or the glass would sample itself
+            return SessionEnd::Exit;
         capture = std::make_unique<MonitorCapture>(gpu, snap.hmonitor, frame_);
-    } else {
-        ShowOwnWindowsToCapture(true);
+    } else if (!ShowOwnWindowsToCapture(true)) {
+        return SessionEnd::Exit;
     }
     // --debug-capturable with Windows.Graphics.Capture: a frozen backdrop (later frames contain the glass).
     const bool freeze = debugCapturable_ && !capture->KeepsOwnWindowsOut();
@@ -2205,7 +2257,7 @@ Bar::SessionEnd Bar::RenderSession()
     constexpr double kDesktopSettleMs = 250;
     bool inkDue = false;
     // Draws the panels; true while one of them animates.
-    auto renderPanels = [&](const Snapshot& snap, ID3D11Texture2D* source, bool& lost) {
+    auto renderPanels = [&](const Snapshot& snap, ID3D11Texture2D* source, SessionEnd& stop) {
         inkDue = false;
         // A menu or Stage Manager can remain on a different display from the Dock.
         std::erase_if(panelCaptures, [&](const auto& entry) {
@@ -2227,7 +2279,8 @@ Bar::SessionEnd Bar::RenderSession()
             else
                 extra.source = DuplicationCapture::Create(gpu, monitor, frame_, why, elsewhere);
             if (!extra.source) {
-                ShowOwnWindowsToCapture(false);
+                if (!ShowOwnWindowsToCapture(false))
+                    return stop = SessionEnd::Exit, false;
                 mayShowInCapture = false;
                 extra.source = std::make_unique<MonitorCapture>(gpu, monitor, frame_);
             }
@@ -2235,15 +2288,14 @@ Bar::SessionEnd Bar::RenderSession()
         const bool canShow =
             capture->KeepsOwnWindowsOut() && std::ranges::all_of(panelCaptures, [](const auto& entry) { return entry.second.source->KeepsOwnWindowsOut(); });
         if (canShow != mayShowInCapture) {
-            ShowOwnWindowsToCapture(canShow);
+            if (!ShowOwnWindowsToCapture(canShow))
+                return stop = SessionEnd::Exit, false;
             mayShowInCapture = canShow;
         }
         for (auto& [monitor, extra] : panelCaptures) {
             ID3D11Texture2D* frame = extra.source->Acquire();
-            if (extra.source->Lost()) {
-                lost = true;
-                return false;
-            }
+            if (extra.source->Lost())
+                return stop = SessionEnd::Retry, false;
             extra.fresh = frame && !(debugCapturable_ && extra.texture);
             if (extra.fresh) {
                 D3D11_TEXTURE2D_DESC desc{}, previous{};
@@ -2356,40 +2408,7 @@ Bar::SessionEnd Bar::RenderSession()
                 // The ink region by region (cells of about 20 DIP), from what
                 // the glass shows there, each cell with the bar's hysteresis;
                 // the popup's own ink is what most of it needs.
-                const float padX = float(rb->origin.x), padY = float(rb->origin.y);
-                const float cell = std::max(8.f, 20.f * panelScale);
-                InkGrid grid;
-                grid.w = std::max(1, int(std::ceil(float(w) / cell)));
-                grid.h = std::max(1, int(std::ceil(float(h) / cell)));
-                grid.cellX = float(w) / float(grid.w);
-                grid.cellY = float(h) / float(grid.h);
-                grid.dark.resize(size_t(grid.w) * size_t(grid.h));
-                const std::wstring& tc = snap.settings.textColor;
-                bool sameSize = ps.grid.w == grid.w && ps.grid.h == grid.h;
-                int darkCells = 0;
-                for (int y = 0; y < grid.h; ++y)
-                    for (int x = 0; x < grid.w; ++x) {
-                        size_t i = size_t(y) * size_t(grid.w) + size_t(x);
-                        bool was = sameSize ? ps.grid.dark[i] != 0 : ps.dark;
-                        bool d = was;
-                        if (tc == L"dark" || tc == L"light") {
-                            d = tc == L"dark";
-                        } else {
-                            float x0 = float(x) * grid.cellX, y0 = float(y) * grid.cellY;
-                            float lum = GlassLuma(snap.settings, rb->RegionLuma(x0 + padX, y0 + padY, x0 + grid.cellX + padX, y0 + grid.cellY + padY));
-                            if (!was && lum > kDarkInkAbove)
-                                d = true;
-                            else if (was && lum < kLightInkBelow)
-                                d = false;
-                        }
-                        grid.dark[i] = d ? 1 : 0;
-                        darkCells += d ? 1 : 0;
-                    }
-                ps.dark = 2 * darkCells >= int(grid.dark.size());
-                if (!(grid == ps.grid)) {
-                    ps.grid = grid;
-                    ps.inkOwed = true;
-                }
+                UpdatePanelInkGrid(*rb, snap.settings, panelScale, w, h, ps.grid, ps.dark, ps.inkOwed);
             }
             if (ps.inkOwed && ps.ink >= 0 && now - ps.desktopMs < kDesktopSettleMs) {
                 inkDue = true;
@@ -2438,10 +2457,8 @@ Bar::SessionEnd Bar::RenderSession()
             ps.drawnTick = tick;
             if (p.desktop)
                 r.SetOffset(p.offset);
-            if (!r.Present(gp, nullptr)) {
-                lost = true;
-                return false;
-            }
+            if (!r.Present(gp, nullptr))
+                return stop = SessionEnd::Retry, false;
             ps.presentedGen = p.gen;
             GlassPresented(p.hwnd, p.gen);
             // A panel that holds the render thread up: what took the time (rate-limited).
@@ -2516,22 +2533,19 @@ Bar::SessionEnd Bar::RenderSession()
         if (w == WAIT_OBJECT_0)
             return SessionEnd::Exit;
         if (GetTickCount64() - statsStart >= 60000) {
-            std::ranges::sort(workMs);
-            auto pct = [&](double q) { return workMs.empty() ? 0.0 : workMs[std::min(workMs.size() - 1, size_t(q * double(workMs.size())))]; };
-            std::ranges::sort(presentMs);
-            double presentP95 = presentMs.empty() ? 0.0 : presentMs[std::min(presentMs.size() - 1, size_t(0.95 * double(presentMs.size())))];
-            std::ranges::sort(panelsMs);
-            double panelsP95 = panelsMs.empty() ? 0.0 : panelsMs[std::min(panelsMs.size() - 1, size_t(0.95 * double(panelsMs.size())))];
+            auto pct = [](std::vector<double>& v, double q) {
+                std::ranges::sort(v);
+                return v.empty() ? 0.0 : v[std::min(v.size() - 1, size_t(q * double(v.size())))];
+            };
+            const double w50 = pct(workMs, 0.5), w95 = pct(workMs, 0.95), p95 = pct(presentMs, 0.95), pan95 = pct(panelsMs, 0.95);
             PROCESS_MEMORY_COUNTERS_EX mem{sizeof(mem)};
             GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&mem), sizeof(mem));
             Log(L"render: last minute %u frames, %u presents, %u echoes skipped; work p50 %.2f ms, p95 %.2f ms, max %.2f ms; "
                 L"presenting p95 %.2f ms; popups and widgets p95 %.2f ms, max %.2f ms; private %zu MB",
-                frames, presents, skipped, pct(0.5), pct(0.95), workMs.empty() ? 0.0 : workMs.back(), presentP95, panelsP95,
-                panelsMs.empty() ? 0.0 : panelsMs.back(), size_t(mem.PrivateUsage >> 20));
+                frames, presents, skipped, w50, w95, workMs.empty() ? 0.0 : workMs.back(), p95, pan95, panelsMs.empty() ? 0.0 : panelsMs.back(),
+                size_t(mem.PrivateUsage >> 20));
             frames = presents = skipped = 0;
-            workMs.clear();
-            presentMs.clear();
-            panelsMs.clear();
+            workMs.clear(), presentMs.clear(), panelsMs.clear();
             statsStart = GetTickCount64();
         }
         LARGE_INTEGER t0;
@@ -2577,24 +2591,15 @@ Bar::SessionEnd Bar::RenderSession()
             renderer.Poll();
             drawnGeneration = 0; // its ink and glass are measured again when revealed
             missedFrame |= frame != nullptr;
-            bool lost = false;
+            SessionEnd stop = SessionEnd::Switch;
             winrt::com_ptr<ID3D11Texture2D> hidden;
             hidden.copy_from(frame);
-            if (freeze && hidden) { // the popups show in screenshots: they must not sample themselves
-                if (!frozen) {
-                    D3D11_TEXTURE2D_DESC d{};
-                    hidden->GetDesc(&d);
-                    d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                    d.MiscFlags = 0;
-                    winrt::check_hresult(gpu.device->CreateTexture2D(&d, nullptr, frozen.put()));
-                    gpu.context->CopyResource(frozen.get(), hidden.get());
-                }
-                hidden = frozen;
-            }
-            if (!freeze)
+            if (freeze) // the popups show in screenshots: they must not sample themselves
+                FreezeBackdrop(gpu, frozen, hidden);
+            else
                 keepFrame(frame);
             double p0 = elapsedMs();
-            panelsMoving = renderPanels(snap, hidden.get(), lost);
+            panelsMoving = renderPanels(snap, hidden.get(), stop);
             if (!snap.panels.empty())
                 panelsMs.push_back(elapsedMs() - p0);
             hidden = nullptr;
@@ -2603,8 +2608,8 @@ Bar::SessionEnd Bar::RenderSession()
             // lock, so unsubmitted copies would wait for a Flush that can no longer get the lock.
             if (needScreen)
                 gpu.context->Flush(), capture->Release();
-            if (lost)
-                return SessionEnd::Retry;
+            if (stop != SessionEnd::Switch)
+                return stop;
             animating = barOwed = false; // drawn afresh when the bar shows again
             continue;
         }
@@ -2616,17 +2621,8 @@ Bar::SessionEnd Bar::RenderSession()
         if (frame) {
             source.copy_from(frame);
             ++frames;
-            if (freeze) {
-                if (!frozen) {
-                    D3D11_TEXTURE2D_DESC d{};
-                    source->GetDesc(&d);
-                    d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                    d.MiscFlags = 0;
-                    winrt::check_hresult(gpu.device->CreateTexture2D(&d, nullptr, frozen.put()));
-                    gpu.context->CopyResource(frozen.get(), source.get());
-                }
-                source = frozen;
-            }
+            if (freeze)
+                FreezeBackdrop(gpu, frozen, source);
         } else if (frozen && snap.generation != drawnGeneration) {
             source = frozen; // size-dependent textures were recreated
         } else if (missedFrame || !renderer.HasBackdrop() || !EqualRect(&backdropAt, &snap.window)) {
@@ -2645,16 +2641,17 @@ Bar::SessionEnd Bar::RenderSession()
             missedFrame = false;
         }
         {
-            bool lost = false;
+            SessionEnd stop = SessionEnd::Switch;
             if (!freeze)
                 keepFrame(frame);
             double p0 = elapsedMs();
-            panelsMoving = renderPanels(snap, source.get(), lost);
+            panelsMoving = renderPanels(snap, source.get(), stop);
             if (!snap.panels.empty())
                 panelsMs.push_back(elapsedMs() - p0);
-            if (lost) {
-                Log(L"render: device lost (popup glass)");
-                return SessionEnd::Retry;
+            if (stop != SessionEnd::Switch) {
+                if (stop == SessionEnd::Retry)
+                    Log(L"render: device lost (popup glass)");
+                return stop;
             }
         }
         source = nullptr;
