@@ -35,9 +35,20 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace atrium {
+
+template<class Writer> [[nodiscard]] bool SaveStageState(const std::wstring& text, std::wstring& saved, Writer&& write)
+{
+    if (text == saved)
+        return true;
+    if (!std::forward<Writer>(write)(text))
+        return false;
+    saved = text;
+    return true;
+}
 
 class StageManager {
 public:

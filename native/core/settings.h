@@ -7,6 +7,7 @@
 #include "stage_excluded.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -127,16 +128,23 @@ struct Settings {
     static bool FromJson(const std::wstring& text, const Settings& base, Settings& out);
 };
 
+enum class SettingsFileState { Missing, Valid, Corrupt, FutureVersion };
+
 // %LOCALAPPDATA%\Atrium\settings.json
 std::wstring SettingsPath();
 // UTF-8 text files (a BOM is skipped); the write replaces the file at once.
 std::wstring ReadTextFile(const std::wstring& path);
-bool WriteTextFile(const std::wstring& path, const std::wstring& text);
+[[nodiscard]] bool WriteTextFile(const std::wstring& path, const std::wstring& text);
+// Copies a corrupt file to `<stem>.corrupt.<YYYYMMDD-HHMMSS>[.<n>].json` (keeping at most `maxBackups`).
+[[nodiscard]] bool BackupCorruptSettings(const std::wstring& path, int maxBackups = 3);
+Settings LoadSettingsFrom(const std::wstring& path, SettingsFileState* stateOut = nullptr, bool* backupOkOut = nullptr);
 Settings LoadSettings();
 // True means the file was saved. A failed startup change is reported separately;
 // callers must accept the saved snapshot even when warning is nonempty. A failed
 // save says why in `error` (the path, the system's reason).
-bool SaveSettings(const Settings& s, std::wstring* warning = nullptr, std::wstring* error = nullptr);
+[[nodiscard]] bool SaveSettingsTo(const std::wstring& path, const Settings& s, std::wstring* warning = nullptr, std::wstring* error = nullptr,
+                                  bool updateStartup = true, const std::function<bool(const std::wstring&)>& backupCorrupt = {});
+[[nodiscard]] bool SaveSettings(const Settings& s, std::wstring* warning = nullptr, std::wstring* error = nullptr);
 // The process runs below medium integrity (an executable with a Low label):
 // the profile and HKCU are closed to it, and its keys cannot reach other windows.
 bool LowIntegrity();

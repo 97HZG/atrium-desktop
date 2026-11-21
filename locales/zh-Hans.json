@@ -900,6 +900,10 @@
   "Top": "顶部",
   "Position": "位置",
   "Input method": "输入法",
-  "Show input method": "显示输入法"
+  "Show input method": "显示输入法",
+  "Could not save %s: settings file uses a newer format version (v%.0f > v%d). Update Atrium before saving.": "无法保存 %s：设置文件使用了更高版本的格式（v%.0f > v%d）。请先更新 Atrium 再保存。",
+  "Could not back up corrupt settings file %s before saving; original file was kept.": "保存前无法备份已损坏的设置文件 %s，已保留原文件。",
+  "Could not save {0}: settings file uses a newer format version (v{1} > v{2}). Update Atrium before saving.": "无法保存 {0}：设置文件使用了更高版本的格式（v{1} > v{2}）。请先更新 Atrium 再保存。",
+  "Could not back up corrupt settings file {0} before saving; original file was kept.": "保存前无法备份已损坏的设置文件 {0}，已保留原文件。"
  }
 }

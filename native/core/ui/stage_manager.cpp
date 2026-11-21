@@ -1004,12 +1004,9 @@ void StageManager::Save()
     json::JsonObject root;
     root.SetNamedValue(L"parked", list);
     root.SetNamedValue(L"sets", sets);
-    std::wstring text(root.Stringify());
-    if (text == saved_)
-        return;
-    saved_ = text;
-    if (!WriteTextFile(StatePath(), text))
-        Log(L"stage: could not write %s", StatePath().c_str());
+    const std::wstring path = StatePath();
+    if (!SaveStageState(std::wstring(root.Stringify()), saved_, [&](const std::wstring& text) { return WriteTextFile(path, text); }))
+        Log(L"stage: could not write %s", path.c_str());
 }
 
 void StageManager::Load()

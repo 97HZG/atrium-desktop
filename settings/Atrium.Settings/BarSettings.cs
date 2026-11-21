@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Atrium.Settings;
@@ -18,6 +20,8 @@ internal sealed record PinnedApp(string Name, string Path, string Args, string A
 // Mirrors native/core/settings.h (same keys, ranges and presets). Lengths in DIP.
 internal sealed class BarSettings
 {
+    public const int CurrentVersion = 2;
+
     public string Preset { get; set; } = "liquid";
     public double Transparency { get; set; } = 0.95;
     public double CornerRadius { get; set; } = 30;
@@ -149,7 +153,7 @@ internal sealed class BarSettings
     {
         var o = new JsonObject
         {
-            ["version"] = 2,
+            ["version"] = CurrentVersion,
             ["preset"] = Preset,
             ["transparency"] = Transparency,
             ["cornerRadius"] = CornerRadius,
@@ -417,4 +421,206 @@ internal sealed class BarSettings
     public bool SameMaterial(BarSettings o) =>
         Transparency == o.Transparency && Blur == o.Blur && Refraction == o.Refraction && Edge == o.Edge && Dispersion == o.Dispersion &&
         Highlight == o.Highlight && Shadow == o.Shadow && Tint == o.Tint;
+}
+
+internal static class SettingsPersistence
+{
+    private static readonly SemaphoreSlim WriteGate = new(1, 1);
+
+    public static void WriteAtomicText(string path, string text)
+    {
+        string full = Path.GetFullPath(path);
+        string tmp = $"{full}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            byte[] bytes = new UTF8Encoding(false).GetBytes(text);
+            using (var stream = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(tmp, full, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tmp); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
+    }
+
+    public static bool TryBackupCorrupt(string path, int maxBackups = 3)
+    {
+        if (!File.Exists(path)) return false;
+        string full = Path.GetFullPath(path);
+        string dir = Path.GetDirectoryName(full) ?? ".";
+        string stem = Path.GetFileNameWithoutExtension(full);
+        if (string.IsNullOrEmpty(stem)) stem = "settings";
+        string ext = Path.GetExtension(full);
+        if (string.IsNullOrEmpty(ext)) ext = ".json";
+        var existing = FindCorruptBackups(dir, stem, ext);
+        if (existing.Count > 0 && FilesEqual(full, existing[^1].Path)) return true;
+        string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        for (int i = 0; i < 100; i++)
+        {
+            string suffix = i == 0 ? "" : "." + i.ToString(CultureInfo.InvariantCulture);
+            string candidate = Path.Combine(dir, $"{stem}.corrupt.{stamp}{suffix}{ext}");
+            try
+            {
+                File.Copy(full, candidate, overwrite: false);
+                PruneCorruptBackups(dir, stem, ext, maxBackups);
+                return true;
+            }
+            catch (IOException) when (File.Exists(candidate))
+            {
+                continue;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    public static BarSettings ReadSettings(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return new BarSettings();
+            string text = File.ReadAllText(path, Encoding.UTF8);
+            if (text.Length == 0) return new BarSettings();
+            if (JsonNode.Parse(text) is JsonObject obj)
+                return BarSettings.FromJson(obj, new());
+        }
+        catch (JsonException)
+        {
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return new BarSettings();
+        }
+        TryBackupCorrupt(path);
+        return new BarSettings();
+    }
+
+    public static bool WriteSettings(
+        string path, BarSettings s, Func<string, object?[], string>? formatError = null, Func<string, bool>? backupCorrupt = null)
+    {
+        WriteGate.Wait();
+        try
+        {
+            bool startupChanged = new BarSettings().StartOnLogin != s.StartOnLogin;
+            if (File.Exists(path))
+            {
+                string text = File.ReadAllText(path, Encoding.UTF8);
+                if (text.Length > 0)
+                {
+                    JsonObject? obj = null;
+                    try { obj = JsonNode.Parse(text) as JsonObject; }
+                    catch (JsonException) { }
+                    if (obj == null)
+                    {
+                        bool backedUp = backupCorrupt != null ? backupCorrupt(path) : TryBackupCorrupt(path);
+                        if (!backedUp)
+                        {
+                            throw new IOException(Format(
+                                formatError,
+                                "Could not back up corrupt settings file {0} before saving; original file was kept.",
+                                path));
+                        }
+                    }
+                    else
+                    {
+                        if (obj["version"] is JsonValue verNode && verNode.TryGetValue(out double ver) &&
+                            double.IsFinite(ver) && ver > BarSettings.CurrentVersion)
+                        {
+                            throw new IOException(Format(
+                                formatError,
+                                "Could not save {0}: settings file uses a newer format version (v{1} > v{2}). Update Atrium before saving.",
+                                path, ver, BarSettings.CurrentVersion));
+                        }
+                        startupChanged = BarSettings.FromJson(obj, new()).StartOnLogin != s.StartOnLogin;
+                    }
+                }
+            }
+            string? dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            WriteAtomicText(path, s.ToJson().ToJsonString());
+            return startupChanged;
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
+    }
+
+    private static string Format(Func<string, object?[], string>? formatError, string key, params object?[] args) =>
+        formatError != null ? formatError(key, args) : string.Format(CultureInfo.InvariantCulture, key, args);
+
+    private static bool FilesEqual(string a, string b)
+    {
+        try
+        {
+            if (new FileInfo(a).Length != new FileInfo(b).Length) return false;
+            return File.ReadAllBytes(a).AsSpan().SequenceEqual(File.ReadAllBytes(b));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static List<(string Stamp, int Seq, string Path)> FindCorruptBackups(string dir, string stem, string ext)
+    {
+        var entries = new List<(string Stamp, int Seq, string Path)>();
+        if (!Directory.Exists(dir)) return entries;
+        string prefix = stem + ".corrupt.";
+        foreach (string file in Directory.EnumerateFiles(dir, $"{prefix}*{ext}"))
+        {
+            string name = Path.GetFileName(file);
+            if (name.Length <= prefix.Length + ext.Length ||
+                !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                !name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var middle = name.AsSpan(prefix.Length, name.Length - prefix.Length - ext.Length);
+            if (TryParseBackupSuffix(middle, out string stamp, out int seq))
+                entries.Add((stamp, seq, file));
+        }
+        entries.Sort((a, b) =>
+        {
+            int cmp = StringComparer.Ordinal.Compare(a.Stamp, b.Stamp);
+            return cmp != 0 ? cmp : a.Seq.CompareTo(b.Seq);
+        });
+        return entries;
+    }
+
+    private static void PruneCorruptBackups(string dir, string stem, string ext, int maxBackups)
+    {
+        if (maxBackups < 1) return;
+        var entries = FindCorruptBackups(dir, stem, ext);
+        if (entries.Count <= maxBackups) return;
+        for (int i = 0; i < entries.Count - maxBackups; i++)
+        {
+            try { File.Delete(entries[i].Path); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    private static bool TryParseBackupSuffix(ReadOnlySpan<char> middle, out string stamp, out int seq)
+    {
+        stamp = "";
+        seq = 0;
+        if (middle.Length < 15 || middle[8] != '-') return false;
+        for (int i = 0; i < 15; i++)
+        {
+            if (i != 8 && !char.IsAsciiDigit(middle[i])) return false;
+        }
+        stamp = middle[..15].ToString();
+        if (middle.Length == 15) return true;
+        return middle[15] == '.' && middle.Length > 16 &&
+            int.TryParse(middle[16..], NumberStyles.None, CultureInfo.InvariantCulture, out seq);
+    }
 }

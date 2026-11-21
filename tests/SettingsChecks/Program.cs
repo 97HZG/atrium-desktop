@@ -579,6 +579,83 @@ finally
     Require(cppWidgets.Contains("CanonicalCity(") && csFaces.Contains("CanonicalCity("),
         "Both C++ and C# must normalize legacy city keys on load.");
 }
+{
+    string persistTemp = Path.Combine(Path.GetTempPath(), "atrium-persist-cs-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(persistTemp);
+        string atomicPath = Path.Combine(persistTemp, "atomic.json");
+        SettingsPersistence.WriteAtomicText(atomicPath, "{\"ok\":true}");
+        byte[] atomicBytes = File.ReadAllBytes(atomicPath);
+        Require(atomicBytes.Length > 0 && !(atomicBytes.Length >= 3 && atomicBytes[0] == 0xEF && atomicBytes[1] == 0xBB && atomicBytes[2] == 0xBF),
+            "WriteAtomicText must write UTF-8 without BOM.");
+        Require(!Directory.EnumerateFiles(persistTemp, "*.tmp").Any(), "WriteAtomicText must not leave .tmp files on success.");
+
+        string dirTarget = Path.Combine(persistTemp, "dir-target");
+        Directory.CreateDirectory(dirTarget);
+        bool moveFailed = false;
+        try { SettingsPersistence.WriteAtomicText(dirTarget, "fail"); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { moveFailed = true; }
+        Require(moveFailed && !Directory.EnumerateFiles(persistTemp, "*.tmp").Any(),
+            "WriteAtomicText must clean up .tmp when File.Move fails.");
+
+        string settingsPath = Path.Combine(persistTemp, "settings.json");
+        var tasks = Enumerable.Range(0, 8).Select(i => Task.Run(() =>
+        {
+            var s = new BarSettings { Height = 40 + i, StartOnLogin = i % 2 == 0 };
+            SettingsPersistence.WriteSettings(settingsPath, s);
+        })).ToArray();
+        await Task.WhenAll(tasks);
+        var concurrentLoaded = SettingsPersistence.ReadSettings(settingsPath);
+        Require(concurrentLoaded.Height is >= 40 and <= 47 && !Directory.EnumerateFiles(persistTemp, "*.tmp").Any(),
+            "Concurrent WriteSettings must serialize cleanly without .tmp leftovers.");
+
+        byte[] corruptBytes = System.Text.Encoding.UTF8.GetBytes("{broken-cs");
+        File.WriteAllBytes(settingsPath, corruptBytes);
+        var fallback = SettingsPersistence.ReadSettings(settingsPath);
+        Require(fallback.Height == new BarSettings().Height && File.ReadAllBytes(settingsPath).SequenceEqual(corruptBytes),
+            "ReadSettings must return defaults and keep corrupt original bytes until overwrite.");
+        string[] backupsAfterRead = Directory.GetFiles(persistTemp, "settings.corrupt.*.json");
+        Require(backupsAfterRead.Length == 1 && File.ReadAllBytes(backupsAfterRead[0]).SequenceEqual(corruptBytes),
+            "ReadSettings must back up corrupt settings with exact original bytes.");
+        _ = SettingsPersistence.ReadSettings(settingsPath);
+        Require(Directory.GetFiles(persistTemp, "settings.corrupt.*.json").Length == 1,
+            "Repeated ReadSettings on unchanged corrupt file must deduplicate backups.");
+
+        for (int i = 0; i < 4; i++)
+        {
+            File.WriteAllText(settingsPath, $"{{broken-round-{i}", new System.Text.UTF8Encoding(false));
+            SettingsPersistence.WriteSettings(settingsPath, new BarSettings { Height = 64 });
+        }
+        Require(Directory.GetFiles(persistTemp, "settings.corrupt.*.json").Length == 3 &&
+                SettingsPersistence.ReadSettings(settingsPath).Height == 64,
+            "WriteSettings must cap corrupt backups at 3 and persist valid settings.");
+
+        byte[] lockedCorrupt = System.Text.Encoding.UTF8.GetBytes("{broken-no-backup");
+        File.WriteAllBytes(settingsPath, lockedCorrupt);
+        bool localizedCalled = false;
+        ExpectThrows<IOException>(
+            () => SettingsPersistence.WriteSettings(settingsPath, new BarSettings { Height = 50 },
+                (key, fmtArgs) => { localizedCalled = true; return "LOC:" + string.Format(CultureInfo.InvariantCulture, key, fmtArgs); }, _ => false),
+            "WriteSettings must refuse overwrite when corrupt backup fails.");
+        Require(localizedCalled && File.ReadAllBytes(settingsPath).SequenceEqual(lockedCorrupt),
+            "Failed corrupt backup must preserve original bytes and invoke localize callback.");
+
+        byte[] futureBytes = System.Text.Encoding.UTF8.GetBytes("""{"version":99,"height":80,"futureNested":{"k":"v"}}""");
+        File.WriteAllBytes(settingsPath, futureBytes);
+        var futureRead = SettingsPersistence.ReadSettings(settingsPath);
+        Require(futureRead.Height == 80, "ReadSettings must parse compatible fields from future version read-only.");
+        ExpectThrows<IOException>(
+            () => SettingsPersistence.WriteSettings(settingsPath, new BarSettings { Height = 44 }),
+            "WriteSettings must refuse to overwrite future-version settings.");
+        Require(File.ReadAllBytes(settingsPath).SequenceEqual(futureBytes),
+            "Future-version refusal must leave original bytes untouched.");
+    }
+    finally
+    {
+        if (Directory.Exists(persistTemp)) Directory.Delete(persistTemp, true);
+    }
+}
 Console.WriteLine("Hardening regression checks passed.");
 
 internal partial class Program

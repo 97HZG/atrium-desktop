@@ -149,7 +149,214 @@ bool SetAutoPlayBanner(bool shown)
     return status == ERROR_SUCCESS;
 }
 
+void ApplyBannersEnable(BannerChromeState& state, const ChromeRecord& taskbarRecord, const BannerChromeOps& ops)
+{
+    const std::wstring now = ops.quietProfile();
+    const QuietPlan plan = PlanQuiet(now, true, state.quietOurs, state.quietBefore);
+    const bool needAutoPlay = !state.autoPlayBannerReady && ops.autoPlayBannerShown();
+    ChromeRecord intended = taskbarRecord;
+    intended.quiet = state.quietOurs || plan.action == QuietAction::Hide;
+    intended.quietRestore = plan.action == QuietAction::Hide ? now : state.quietBefore;
+    intended.autoPlayBanner = state.autoPlayBannerOurs || needAutoPlay;
+    if ((plan.action == QuietAction::Hide || needAutoPlay) && !ops.saveRecord(intended)) {
+        Log(L"chrome: could not save recovery record; system banners left as they are");
+        return;
+    }
+    state.bannersHidden = true;
+    if (plan.action == QuietAction::Hide) {
+        if (ops.setQuietProfile(plan.profile.c_str())) {
+            state.quietBefore = now;
+            state.quietOurs = true;
+            state.quietReady = true;
+            // "Priority only" and "unrestricted" both let banners through; only
+            // alarms-only hides the system's own toasts as well as apps'.
+            Log(L"chrome: Do Not Disturb on (alarms only; was %s)", now.c_str());
+        } else {
+            state.quietReady = false;
+            Log(L"chrome: Do Not Disturb could not be turned on (was %s)", now.c_str());
+        }
+    } else if (now.empty()) {
+        state.quietReady = false;
+        Log(L"chrome: Do Not Disturb is not available; banners stay");
+    } else {
+        state.quietReady = true;
+        Log(L"chrome: Do Not Disturb already hides banners (alarms only); left as it is");
+    }
+    if (!state.autoPlayBannerReady) {
+        if (!needAutoPlay) {
+            state.autoPlayBannerReady = true;
+            Log(L"chrome: AutoPlay banners already off; left as it is");
+        } else if (ops.setAutoPlayBanner(false)) {
+            state.autoPlayBannerOurs = true;
+            state.autoPlayBannerReady = true;
+            Log(L"chrome: AutoPlay banners off (the drive toast bypasses Do Not Disturb)");
+        } else {
+            Log(L"chrome: could not turn off AutoPlay banners");
+        }
+    }
+    ChromeRecord actual = taskbarRecord;
+    actual.quiet = state.quietOurs;
+    actual.quietRestore = state.quietBefore;
+    actual.autoPlayBanner = state.autoPlayBannerOurs;
+    if (actual != intended && !ops.saveRecord(actual))
+        Log(L"chrome: could not update recovery record");
+}
+
+void ApplyBannersDisable(BannerChromeState& state, const ChromeRecord& taskbarRecord, const BannerChromeOps& ops)
+{
+    state.bannersHidden = false;
+    const std::wstring now = ops.quietProfile();
+    const QuietPlan plan = PlanQuiet(now, false, state.quietOurs, state.quietBefore);
+    state.quietReady = false;
+    if (plan.action == QuietAction::Restore) {
+        if (now == kQuietProfile) {
+            if (ops.setQuietProfile(plan.profile.c_str())) {
+                Log(L"chrome: Do Not Disturb restored (%s)", plan.profile.c_str());
+                state.quietOurs = false;
+                state.quietBefore.clear();
+            } else {
+                Log(L"chrome: Do Not Disturb could not be restored (%s)", plan.profile.c_str());
+            }
+        } else if (!now.empty()) {
+            // The user chose another profile while it was Atrium's: leave theirs.
+            Log(L"chrome: Do Not Disturb changed by the user (%s); left as it is", now.c_str());
+            state.quietOurs = false;
+            state.quietBefore.clear();
+        } else {
+            // Keep ownership so system.json / next retry restores Do Not Disturb when available.
+            Log(L"chrome: Do Not Disturb is not available; keeping restore record (%s)", plan.profile.c_str());
+        }
+    } else {
+        Log(L"chrome: Do Not Disturb off (banners shown)");
+    }
+    state.autoPlayBannerReady = false;
+    if (state.autoPlayBannerOurs) {
+        if (ops.setAutoPlayBanner(true)) {
+            state.autoPlayBannerOurs = false;
+            Log(L"chrome: AutoPlay banners restored");
+        } else {
+            // Keep the ownership so system.json (and the guard) retries it.
+            Log(L"chrome: could not restore AutoPlay banners");
+        }
+    }
+    ChromeRecord after = taskbarRecord;
+    after.quiet = state.quietOurs;
+    after.quietRestore = state.quietBefore;
+    after.autoPlayBanner = state.autoPlayBannerOurs;
+    if (!ops.saveRecord(after))
+        Log(L"chrome: could not update recovery record after restoring banners");
+}
+
+void UndoQuietLeftover(const json::JsonObject& o, const UndoLeftoverOps& ops, ChromeRecord& remaining)
+{
+    std::wstring restore = kQuietProfileOff;
+    if (o.HasKey(L"quietRestore") && o.GetNamedValue(L"quietRestore").ValueType() == json::JsonValueType::String)
+        restore = std::wstring(o.GetNamedString(L"quietRestore"));
+    if (restore.empty() || restore == kQuietProfile)
+        restore = kQuietProfileOff;
+    const std::wstring now = ops.quietProfile();
+    if (now == kQuietProfile) {
+        if (ops.setQuietProfile(restore.c_str())) {
+            Log(L"chrome: Do Not Disturb restored (%s)", restore.c_str());
+        } else {
+            remaining.quiet = true;
+            remaining.quietRestore = restore;
+            Log(L"chrome: could not restore Do Not Disturb (%s)", restore.c_str());
+        }
+        return;
+    }
+    if (now.empty()) {
+        remaining.quiet = true;
+        remaining.quietRestore = restore;
+        Log(L"chrome: Do Not Disturb service unavailable; keeping restore record (%s)", restore.c_str());
+        return;
+    }
+    Log(L"chrome: Do Not Disturb changed by the user (%s); left as it is", now.c_str());
+}
+
 } // namespace
+
+bool SaveChromeRecord(const std::wstring& path, const ChromeRecord& record)
+{
+    if (record.Empty()) {
+        if (DeleteFileW(path.c_str()) != 0)
+            return true;
+        const DWORD err = GetLastError();
+        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
+            return true;
+        Log(L"chrome: could not remove %s (%lu)", path.c_str(), err);
+        return false;
+    }
+    json::JsonObject o;
+    o.SetNamedValue(L"taskbarHidden", json::JsonValue::CreateBooleanValue(record.taskbarHidden));
+    o.SetNamedValue(L"autoHide", json::JsonValue::CreateBooleanValue(record.autoHide));
+    o.SetNamedValue(L"quiet", json::JsonValue::CreateBooleanValue(record.quiet));
+    if (record.quiet && !record.quietRestore.empty())
+        o.SetNamedValue(L"quietRestore", json::JsonValue::CreateStringValue(record.quietRestore));
+    if (record.autoPlayBanner)
+        o.SetNamedValue(L"autoPlayBanner", json::JsonValue::CreateBooleanValue(true));
+    if (!WriteTextFile(path, std::wstring(o.Stringify()))) {
+        Log(L"chrome: could not write %s (%lu)", path.c_str(), GetLastError());
+        return false;
+    }
+    return true;
+}
+
+void ApplyTaskbarHidden(bool hidden, TaskbarChromeState& state, const ChromeRecord& bannerRecord, const TaskbarChromeOps& ops)
+{
+    if (hidden == state.hidden && (hidden || !state.autoHideOurs))
+        return;
+    if (hidden) {
+        const auto autoHide = ops.queryAutoHide();
+        const bool needAutoHide = autoHide.has_value() && !*autoHide;
+        ChromeRecord intended = bannerRecord;
+        intended.taskbarHidden = true;
+        intended.autoHide = state.autoHideOurs || needAutoHide;
+        if (!ops.saveRecord(intended)) {
+            Log(L"chrome: could not save recovery record; system taskbar left visible");
+            return;
+        }
+        state.hidden = true;
+        ops.setHidden(true);
+        if (needAutoHide) {
+            if (ops.setAutoHide(true)) {
+                state.autoHideOurs = true;
+                ops.scheduleRefit();
+            } else {
+                intended.autoHide = state.autoHideOurs;
+                if (!ops.saveRecord(intended))
+                    Log(L"chrome: could not update recovery record after SetAutoHide failed");
+            }
+        }
+        ops.hideTaskbars();
+        ops.watch();
+    } else {
+        state.hidden = false;
+        ops.setHidden(false);
+        ops.stopWatch();
+        ops.showTaskbars();
+        if (state.autoHideOurs && (ops.setAutoHide(false) || !ops.hasShellTaskbar()))
+            state.autoHideOurs = false;
+        ChromeRecord after = bannerRecord;
+        after.taskbarHidden = false;
+        after.autoHide = state.autoHideOurs;
+        if (!ops.saveRecord(after))
+            Log(L"chrome: could not update recovery record after restoring taskbar");
+    }
+    Log(L"chrome: system taskbar %s", hidden ? L"hidden" : L"shown");
+}
+
+void ApplyBannersHidden(bool hidden, BannerChromeState& state, const ChromeRecord& taskbarRecord, const BannerChromeOps& ops)
+{
+    if (hidden == state.bannersHidden) {
+        if (hidden ? (state.quietReady && state.autoPlayBannerReady) : (!state.quietOurs && !state.autoPlayBannerOurs))
+            return;
+    }
+    if (hidden)
+        ApplyBannersEnable(state, taskbarRecord, ops);
+    else
+        ApplyBannersDisable(state, taskbarRecord, ops);
+}
 
 std::wstring QuietProfile()
 {
@@ -180,45 +387,66 @@ SystemChrome::SystemChrome()
     g_chrome = this;
     g_taskbarVisibility.stopping = false;
     // Left over from a run that did not end cleanly: put it back first (the
-    // settings then hide again what they ask for).
-    UndoLeftover();
+    // settings then hide again what they ask for), and keep ownership of
+    // anything that could not be restored yet so the next exit/toggle retries it.
+    ChromeRecord leftover{};
+    UndoLeftover(&leftover);
+    autoHideOurs_ = leftover.autoHide;
+    quietOurs_ = leftover.quiet;
+    quietBefore_ = std::move(leftover.quietRestore);
+    autoPlayBannerOurs_ = leftover.autoPlayBanner;
 }
 
-bool SystemChrome::UndoLeftover()
+bool ApplyUndoLeftover(const std::wstring& statePath, const UndoLeftoverOps& ops, ChromeRecord* remainingOut)
 {
-    std::wstring left = ReadTextFile(StatePath());
+    if (remainingOut)
+        *remainingOut = {};
+    const std::wstring left = ReadTextFile(statePath);
     if (left.empty())
         return false;
     Log(L"chrome: undoing the last run's changes: %s", left.c_str());
+    ops.showTaskbars();
     json::JsonObject o{nullptr};
     if (!json::JsonObject::TryParse(left, o)) {
-        ShowTaskbars();
-        DeleteFileW(StatePath().c_str());
+        if (!ops.saveRecord({}))
+            Log(L"chrome: could not remove corrupt recovery record");
         return true;
     }
     auto flag = [&](const wchar_t* key) { return o.HasKey(key) && o.GetNamedValue(key).ValueType() == json::JsonValueType::Boolean && o.GetNamedBoolean(key); };
-    if (flag(L"autoHide"))
-        SetAutoHide(false);
-    ShowTaskbars();
-    if (flag(L"quiet") && QuietProfile() == kQuietProfile) {
-        // The profile Atrium changed it from. Files from before this field have
-        // no record and are restored to unrestricted, as they were then.
-        std::wstring restore = kQuietProfileOff;
-        if (o.HasKey(L"quietRestore") && o.GetNamedValue(L"quietRestore").ValueType() == json::JsonValueType::String)
-            restore = std::wstring(o.GetNamedString(L"quietRestore"));
-        if (restore.empty() || restore == kQuietProfile)
-            restore = kQuietProfileOff;
-        SetQuietProfile(restore.c_str());
-        Log(L"chrome: Do Not Disturb restored (%s)", restore.c_str());
+    ChromeRecord remaining{};
+    if (flag(L"autoHide") && !ops.setAutoHide(false)) {
+        remaining.autoHide = true;
+        Log(L"chrome: could not restore taskbar auto-hide");
     }
+    if (flag(L"quiet"))
+        UndoQuietLeftover(o, ops, remaining);
     if (flag(L"autoPlayBanner")) {
-        if (SetAutoPlayBanner(true))
+        if (ops.setAutoPlayBanner(true))
             Log(L"chrome: AutoPlay banners restored");
-        else
+        else {
+            remaining.autoPlayBanner = true;
             Log(L"chrome: could not restore AutoPlay banners");
+        }
     }
-    DeleteFileW(StatePath().c_str());
+    if (!ops.saveRecord(remaining))
+        Log(L"chrome: could not update recovery record after UndoLeftover");
+    if (remainingOut)
+        *remainingOut = remaining;
     return true;
+}
+
+bool SystemChrome::UndoLeftover(ChromeRecord* remainingOut)
+{
+    const std::wstring path = StatePath();
+    UndoLeftoverOps ops{
+        .showTaskbars = ShowTaskbars,
+        .setAutoHide = [](bool on) { return SetAutoHide(on); },
+        .quietProfile = QuietProfile,
+        .setQuietProfile = SetQuietProfile,
+        .setAutoPlayBanner = SetAutoPlayBanner,
+        .saveRecord = [&path](const ChromeRecord& record) { return SaveChromeRecord(path, record); },
+    };
+    return ApplyUndoLeftover(path, ops, remainingOut);
 }
 
 void SystemChrome::ShowTaskbarsNow() { ShowTaskbars(); }
@@ -269,114 +497,56 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
 {
     if (hidden && exiting_)
         return;
-    if (hidden == g_taskbarVisibility.hidden)
-        return;
-    g_taskbarVisibility.hidden = hidden;
-    if (hidden) {
-        // Auto-hide first: a hidden taskbar that is not auto-hide would still
-        // keep its strip of the work area.
-        if (const auto autoHide = QueryAutoHide(); autoHide.has_value() && !*autoHide) {
-            SetAutoHide(true);
-            autoHideOurs_ = true;
-            ScheduleRefit();
-        }
-        Save();
-        HideTaskbars();
-        Watch();
-    } else {
-        StopRefit(false);
-        if (hook_)
-            UnhookWinEvent(hook_);
-        hook_ = nullptr;
-        hookedPid_ = 0;
-        ShowTaskbars();
-        if (autoHideOurs_ && (SetAutoHide(false) || !ShellTaskbar()))
-            autoHideOurs_ = false;
-        Save();
-    }
-    Log(L"chrome: system taskbar %s", hidden ? L"hidden" : L"shown");
+    TaskbarChromeState state{g_taskbarVisibility.hidden.load(), autoHideOurs_.load()};
+    ChromeRecord bannerRecord;
+    bannerRecord.quiet = quietOurs_;
+    bannerRecord.quietRestore = quietBefore_;
+    bannerRecord.autoPlayBanner = autoPlayBannerOurs_;
+    TaskbarChromeOps ops{
+        .queryAutoHide = QueryAutoHide,
+        .setAutoHide = [](bool on) { return SetAutoHide(on); },
+        .hasShellTaskbar = [] { return ShellTaskbar() != nullptr; },
+        .hideTaskbars = HideTaskbars,
+        .showTaskbars = ShowTaskbars,
+        .watch = [this] { Watch(); },
+        .stopWatch =
+            [this] {
+                StopRefit(false);
+                if (hook_)
+                    UnhookWinEvent(hook_);
+                hook_ = nullptr;
+                hookedPid_ = 0;
+            },
+        .scheduleRefit = [this] { ScheduleRefit(); },
+        .setHidden = [](bool on) { g_taskbarVisibility.hidden = on; },
+        .saveRecord = [this](const ChromeRecord& record) { return SaveRecord(record); },
+    };
+    ApplyTaskbarHidden(hidden, state, bannerRecord, ops);
+    autoHideOurs_ = state.autoHideOurs;
 }
 
 void SystemChrome::SetBannersHidden(bool hidden)
 {
     if (hidden && exiting_)
         return;
-    // The setting is idempotent. A failed attempt (the service was unavailable)
-    // or a setting the user changed since is retried on the next apply; turning
-    // it off retries a restore that failed.
-    if (hidden == bannersHidden_) {
-        if (hidden ? (quietReady_ && autoPlayBannerReady_) : (!quietOurs_ && !autoPlayBannerOurs_))
-            return;
-    }
-    bannersHidden_ = hidden;
-    const std::wstring now = QuietProfile();
-    const QuietPlan plan = PlanQuiet(now, hidden, quietOurs_, quietBefore_);
-    if (plan.action == QuietAction::Hide) {
-        if (SetQuietProfile(plan.profile.c_str())) {
-            quietBefore_ = now;
-            quietOurs_ = true;
-            quietReady_ = true;
-            // "Priority only" and "unrestricted" both let banners through; only
-            // alarms-only hides the system's own toasts as well as apps'.
-            Log(L"chrome: Do Not Disturb on (alarms only; was %s)", now.c_str());
-        } else {
-            quietReady_ = false;
-            Log(L"chrome: Do Not Disturb could not be turned on (was %s)", now.c_str());
-        }
-    } else if (plan.action == QuietAction::Restore) {
-        quietReady_ = false;
-        if (now == kQuietProfile) {
-            if (SetQuietProfile(plan.profile.c_str()))
-                Log(L"chrome: Do Not Disturb restored (%s)", plan.profile.c_str());
-            else
-                Log(L"chrome: Do Not Disturb could not be restored (%s)", plan.profile.c_str());
-        } else if (!now.empty()) {
-            // The user chose another profile while it was Atrium's: leave theirs.
-            Log(L"chrome: Do Not Disturb changed by the user (%s); left as it is", now.c_str());
-        }
-        quietOurs_ = false;
-        quietBefore_.clear();
-    } else if (hidden) {
-        if (now.empty()) {
-            quietReady_ = false;
-            Log(L"chrome: Do Not Disturb is not available; banners stay");
-        } else {
-            quietReady_ = true;
-            Log(L"chrome: Do Not Disturb already hides banners (alarms only); left as it is");
-        }
-    } else {
-        quietReady_ = false;
-        Log(L"chrome: Do Not Disturb off (banners shown)");
-    }
-
-    // AutoPlay's toast goes through "alarms only", so its own banner switch is
-    // what keeps the USB notification quiet.
-    if (hidden) {
-        if (!autoPlayBannerReady_) {
-            if (!AutoPlayBannerShown()) {
-                autoPlayBannerReady_ = true;
-                Log(L"chrome: AutoPlay banners already off; left as it is");
-            } else if (SetAutoPlayBanner(false)) {
-                autoPlayBannerOurs_ = true;
-                autoPlayBannerReady_ = true;
-                Log(L"chrome: AutoPlay banners off (the drive toast bypasses Do Not Disturb)");
-            } else {
-                Log(L"chrome: could not turn off AutoPlay banners");
-            }
-        }
-    } else {
-        autoPlayBannerReady_ = false;
-        if (autoPlayBannerOurs_) {
-            if (SetAutoPlayBanner(true)) {
-                autoPlayBannerOurs_ = false;
-                Log(L"chrome: AutoPlay banners restored");
-            } else {
-                // Keep the ownership so system.json (and the guard) retries it.
-                Log(L"chrome: could not restore AutoPlay banners");
-            }
-        }
-    }
-    Save();
+    BannerChromeState state{bannersHidden_, quietReady_, quietOurs_, quietBefore_, autoPlayBannerOurs_, autoPlayBannerReady_};
+    ChromeRecord taskbarRecord;
+    taskbarRecord.taskbarHidden = g_taskbarVisibility.hidden.load();
+    taskbarRecord.autoHide = autoHideOurs_.load();
+    BannerChromeOps ops{
+        .quietProfile = QuietProfile,
+        .setQuietProfile = SetQuietProfile,
+        .autoPlayBannerShown = AutoPlayBannerShown,
+        .setAutoPlayBanner = SetAutoPlayBanner,
+        .saveRecord = [this](const ChromeRecord& record) { return SaveRecord(record); },
+    };
+    ApplyBannersHidden(hidden, state, taskbarRecord, ops);
+    bannersHidden_ = state.bannersHidden;
+    quietReady_ = state.quietReady;
+    quietOurs_ = state.quietOurs;
+    quietBefore_ = std::move(state.quietBefore);
+    autoPlayBannerOurs_ = state.autoPlayBannerOurs;
+    autoPlayBannerReady_ = state.autoPlayBannerReady;
 }
 
 void SystemChrome::Enforce()
@@ -388,11 +558,19 @@ void SystemChrome::Enforce()
         // windows stop its height short of the bottom. Auto-hide can be lost after it was set:
         // set before Explorer's taskbar was ready at sign-in, Explorer restarted, another program.
         if (const auto autoHide = QueryAutoHide(); autoHide.has_value() && !*autoHide) {
-            SetAutoHide(true);
-            autoHideOurs_ = true;
-            Save();
-            Log(L"chrome: the taskbar was no longer auto-hide; set again");
-            ScheduleRefit();
+            ChromeRecord intended = CurrentRecord();
+            intended.autoHide = true;
+            if (!SaveRecord(intended)) {
+                Log(L"chrome: could not save recovery record; taskbar auto-hide not re-applied");
+            } else if (SetAutoHide(true)) {
+                autoHideOurs_ = true;
+                Log(L"chrome: the taskbar was no longer auto-hide; set again");
+                ScheduleRefit();
+            } else {
+                intended.autoHide = autoHideOurs_.load();
+                if (!SaveRecord(intended))
+                    Log(L"chrome: could not update recovery record after SetAutoHide failed");
+            }
         }
         HideTaskbars();
         Watch(); // Explorer may have been restarted
@@ -405,7 +583,8 @@ void SystemChrome::Enforce()
             quietReady_ = false;
             quietOurs_ = false;
             quietBefore_.clear();
-            Save();
+            if (!SaveRecord(CurrentRecord()))
+                Log(L"chrome: could not update recovery record");
         }
     }
     if (autoPlayBannerOurs_ && AutoPlayBannerShown()) {
@@ -413,7 +592,8 @@ void SystemChrome::Enforce()
         Log(L"chrome: AutoPlay banners changed by the user; no longer hidden by Atrium");
         autoPlayBannerOurs_ = false;
         autoPlayBannerReady_ = false;
-        Save();
+        if (!SaveRecord(CurrentRecord()))
+            Log(L"chrome: could not update recovery record");
     }
 }
 
@@ -508,21 +688,17 @@ void SystemChrome::RefitWorker()
     }
 }
 
-void SystemChrome::Save() const
+ChromeRecord SystemChrome::CurrentRecord() const
 {
-    if (!g_taskbarVisibility.hidden && !autoHideOurs_ && !quietOurs_ && !autoPlayBannerOurs_) {
-        DeleteFileW(StatePath().c_str());
-        return;
-    }
-    json::JsonObject o;
-    o.SetNamedValue(L"taskbarHidden", json::JsonValue::CreateBooleanValue(g_taskbarVisibility.hidden.load()));
-    o.SetNamedValue(L"autoHide", json::JsonValue::CreateBooleanValue(autoHideOurs_.load()));
-    o.SetNamedValue(L"quiet", json::JsonValue::CreateBooleanValue(quietOurs_));
-    if (quietOurs_ && !quietBefore_.empty())
-        o.SetNamedValue(L"quietRestore", json::JsonValue::CreateStringValue(quietBefore_));
-    if (autoPlayBannerOurs_)
-        o.SetNamedValue(L"autoPlayBanner", json::JsonValue::CreateBooleanValue(true));
-    WriteTextFile(StatePath(), std::wstring(o.Stringify()));
+    return {
+        .taskbarHidden = g_taskbarVisibility.hidden.load(),
+        .autoHide = autoHideOurs_.load(),
+        .quiet = quietOurs_,
+        .quietRestore = quietBefore_,
+        .autoPlayBanner = autoPlayBannerOurs_,
+    };
 }
+
+bool SystemChrome::SaveRecord(const ChromeRecord& record) const { return SaveChromeRecord(StatePath(), record); }
 
 } // namespace atrium

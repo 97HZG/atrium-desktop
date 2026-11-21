@@ -621,7 +621,8 @@ bool WeatherSource::State::Fetch(bool english)
     }
     if (quit_.load())
         return false;
-    WriteTextFile(cachePath_, std::wstring(ToJson(w).Stringify()));
+    if (!WriteTextFile(cachePath_, std::wstring(ToJson(w).Stringify())))
+        Log(L"weather: could not write cache %s (%lu)", cachePath_.c_str(), GetLastError());
     if (quit_.load())
         return false;
     Log(L"weather: %s %.0f° %s", w.city.c_str(), w.temp, WeatherCondition(w.code).c_str());

@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.CSharp.RuntimeBinder;
@@ -220,15 +219,7 @@ internal sealed partial class CoreClient : IDisposable
 
     private static BarSettings ReadFile()
     {
-        BarSettings s;
-        try
-        {
-            s = BarSettings.FromJson(JsonNode.Parse(File.ReadAllText(SettingsPath)) as JsonObject, new());
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
-        {
-            s = new BarSettings();
-        }
+        var s = SettingsPersistence.ReadSettings(SettingsPath);
         // First run (no "pins" key yet): show what the core would import.
         s.Pins ??= ImportTaskbarPins();
         return s;
@@ -252,13 +243,18 @@ internal sealed partial class CoreClient : IDisposable
         return pins.Count > 64 ? pins.GetRange(0, 64) : pins;
     }
 
+    private static string FormatPersistenceError(string key, object?[] args) => key switch
+    {
+        "Could not save {0}: settings file uses a newer format version (v{1} > v{2}). Update Atrium before saving." =>
+            Loc.F("Could not save {0}: settings file uses a newer format version (v{1} > v{2}). Update Atrium before saving.", args),
+        "Could not back up corrupt settings file {0} before saving; original file was kept." =>
+            Loc.F("Could not back up corrupt settings file {0} before saving; original file was kept.", args),
+        _ => string.Format(System.Globalization.CultureInfo.InvariantCulture, key, args),
+    };
+
     private static string? WriteFile(BarSettings s)
     {
-        bool startupChanged = ReadFile().StartOnLogin != s.StartOnLogin;
-        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-        string tmp = SettingsPath + ".tmp";
-        File.WriteAllText(tmp, s.ToJson().ToJsonString(), new UTF8Encoding(false));
-        File.Move(tmp, SettingsPath, overwrite: true);
+        bool startupChanged = SettingsPersistence.WriteSettings(SettingsPath, s, FormatPersistenceError);
         if (!startupChanged || Development) return null;
         try
         {

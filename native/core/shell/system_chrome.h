@@ -15,7 +15,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -61,6 +63,66 @@ inline QuietPlan PlanQuiet(const std::wstring& current, bool hide, bool ours, co
     return plan;
 }
 
+struct ChromeRecord {
+    bool taskbarHidden = false;
+    bool autoHide = false;
+    bool quiet = false;
+    std::wstring quietRestore;
+    bool autoPlayBanner = false;
+
+    bool Empty() const { return !taskbarHidden && !autoHide && !quiet && !autoPlayBanner; }
+    bool operator==(const ChromeRecord&) const = default;
+};
+
+struct TaskbarChromeState {
+    bool hidden = false;
+    bool autoHideOurs = false;
+};
+
+struct TaskbarChromeOps {
+    std::function<std::optional<bool>()> queryAutoHide;
+    std::function<bool(bool)> setAutoHide;
+    std::function<bool()> hasShellTaskbar;
+    std::function<void()> hideTaskbars;
+    std::function<void()> showTaskbars;
+    std::function<void()> watch;
+    std::function<void()> stopWatch;
+    std::function<void()> scheduleRefit;
+    std::function<void(bool)> setHidden;
+    std::function<bool(const ChromeRecord&)> saveRecord;
+};
+
+struct BannerChromeState {
+    bool bannersHidden = false;
+    bool quietReady = false;
+    bool quietOurs = false;
+    std::wstring quietBefore;
+    bool autoPlayBannerOurs = false;
+    bool autoPlayBannerReady = false;
+};
+
+struct BannerChromeOps {
+    std::function<std::wstring()> quietProfile;
+    std::function<bool(const wchar_t*)> setQuietProfile;
+    std::function<bool()> autoPlayBannerShown;
+    std::function<bool(bool)> setAutoPlayBanner;
+    std::function<bool(const ChromeRecord&)> saveRecord;
+};
+
+struct UndoLeftoverOps {
+    std::function<void()> showTaskbars;
+    std::function<bool(bool)> setAutoHide;
+    std::function<std::wstring()> quietProfile;
+    std::function<bool(const wchar_t*)> setQuietProfile;
+    std::function<bool(bool)> setAutoPlayBanner;
+    std::function<bool(const ChromeRecord&)> saveRecord;
+};
+
+[[nodiscard]] bool SaveChromeRecord(const std::wstring& path, const ChromeRecord& record);
+void ApplyTaskbarHidden(bool hidden, TaskbarChromeState& state, const ChromeRecord& bannerRecord, const TaskbarChromeOps& ops);
+void ApplyBannersHidden(bool hidden, BannerChromeState& state, const ChromeRecord& taskbarRecord, const BannerChromeOps& ops);
+bool ApplyUndoLeftover(const std::wstring& statePath, const UndoLeftoverOps& ops, ChromeRecord* remainingOut = nullptr);
+
 class SystemChrome {
 public:
     SystemChrome();
@@ -85,7 +147,7 @@ public:
     static void EmergencyRestore();
     // What a run that did not end cleanly left changed (system.json), put back; false if nothing
     // was. COM must be initialised (Do Not Disturb).
-    static bool UndoLeftover();
+    static bool UndoLeftover(ChromeRecord* remainingOut = nullptr);
     // The taskbars shown, nothing else changed (Atrium is not responding).
     static void ShowTaskbarsNow();
     // Around one real mouse click on a tray icon the taskbars must be visible;
@@ -101,7 +163,8 @@ private:
     void StopRefit(bool stop);
     void RefitWorker();
     void Watch();
-    void Save() const;
+    ChromeRecord CurrentRecord() const;
+    [[nodiscard]] bool SaveRecord(const ChromeRecord& record) const;
     static void CALLBACK OnShow(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD);
 
     std::atomic_bool autoHideOurs_ = false; // Atrium switched the taskbar to auto-hide
