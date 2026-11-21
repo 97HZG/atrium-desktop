@@ -119,7 +119,8 @@ try {
                 $pipe.Connect(5000)
                 $pipe.ReadMode = [System.IO.Pipes.PipeTransmissionMode]::Message
                 $state = Send-PipeRequest $pipe '{"op":"get"}'
-                if ($state.op -ne 'state' -or [int]$state.protocol -ne 1) {
+                if ($state.op -ne 'state' -or [int]$state.protocol -ne 1 -or
+                    [string]::IsNullOrWhiteSpace([string]$state.instanceId) -or [int64]$state.revision -lt 1) {
                     throw "Unexpected get reply: $($state | ConvertTo-Json -Compress)"
                 }
                 $savedHeight = [double]$state.saved.height
@@ -140,8 +141,33 @@ try {
                 $pipe2.Connect(5000)
                 $pipe2.ReadMode = [System.IO.Pipes.PipeTransmissionMode]::Message
                 $after = Send-PipeRequest $pipe2 '{"op":"get"}'
-                if ([double]$after.current.height -ne $savedHeight) {
-                    throw "Preview lease did not roll back: current=$($after.current.height), expected=$savedHeight"
+                $expectedInstanceId = [string]$state.instanceId
+                $expectedRev = [int64]$state.revision
+                if ([double]$after.current.height -ne $savedHeight -or
+                    [string]$after.instanceId -ne $expectedInstanceId -or [int64]$after.revision -ne $expectedRev) {
+                    throw "Preview lease rollback mismatch: $($after | ConvertTo-Json -Compress)"
+                }
+                $conflictReq = @{
+                    op = 'commit'
+                    instanceId = $expectedInstanceId
+                    expectedRevision = 0
+                    settings = $state.saved
+                } | ConvertTo-Json -Depth 16 -Compress
+                $conflict = Send-PipeRequest $pipe2 $conflictReq
+                if ($conflict.op -ne 'conflict' -or [string]$conflict.instanceId -ne $expectedInstanceId -or
+                    [int64]$conflict.revision -ne $expectedRev -or $null -eq $conflict.saved) {
+                    throw "Expected conflict at revision ${expectedRev}: $($conflict | ConvertTo-Json -Compress)"
+                }
+                $commitReq = @{
+                    op = 'commit'
+                    instanceId = $expectedInstanceId
+                    expectedRevision = $expectedRev
+                    settings = $state.saved
+                } | ConvertTo-Json -Depth 16 -Compress
+                $commitReply = Send-PipeRequest $pipe2 $commitReq
+                if ($commitReply.op -ne 'ok' -or [string]$commitReply.instanceId -ne $expectedInstanceId -or
+                    [int64]$commitReply.revision -ne ($expectedRev + 1)) {
+                    throw "Expected commit ok at revision $($expectedRev + 1): $($commitReply | ConvertTo-Json -Compress)"
                 }
             } finally {
                 $pipe2.Dispose()

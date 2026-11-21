@@ -89,7 +89,6 @@ add_library(atrium_core_lib STATIC
 add_dependencies(atrium_core_lib atrium_shaders)
 # C++/WinRT headers come with the Windows SDK.
 target_include_directories(atrium_core_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${shader_out})
-target_compile_options(atrium_core_lib PRIVATE /bigobj)
 target_compile_definitions(atrium_core_lib PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 if(ATRIUM_DEVELOPMENT)
     target_compile_definitions(atrium_core_lib PUBLIC ATRIUM_DEVELOPMENT)
@@ -109,5 +108,4 @@ add_custom_command(TARGET atrium_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:atrium_core>/Fonts
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ui_fonts} $<TARGET_FILE_DIR:atrium_core>/Fonts
     VERBATIM)
-target_compile_options(atrium_core PRIVATE /bigobj)
 target_link_libraries(atrium_core PRIVATE atrium_core_lib)
