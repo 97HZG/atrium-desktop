@@ -6,6 +6,7 @@
 #include "bar_edge.h"
 #include "render/capture.h"
 #include "clock.h"
+#include "guard_process.h"
 #include "host_messages.h"
 #include "launch_args.h"
 #include "localization.h"
@@ -66,7 +67,6 @@ namespace {
 using namespace atrium;
 
 constexpr wchar_t kHostClass[] = L"AtriumCoreHost";
-constexpr wchar_t kGuardMutex[] = L"Local\\Atrium.Guard"; // held by the guard while it runs
 constexpr wchar_t kInstanceMutex[] = L"Local\\Atrium.Core";
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
@@ -546,8 +546,6 @@ void PostMessengerCard(Messenger m)
 }
 
 // Applies settings to the bar and the task model.
-void EnsureGuard();
-
 void ApplySettings(const Settings& s)
 {
     if (SetLanguage(s.language) && g_app.widgets)
@@ -658,107 +656,8 @@ void ApplySettings(const Settings& s)
         g_app.chrome->SetTaskbarHidden(s.bar && s.hideTaskbar);
         g_app.chrome->SetBannersHidden(s.bar && s.hideBanners);
         if ((s.bar && (s.hideTaskbar || s.hideBanners)) || s.trayHost)
-            EnsureGuard();
+            EnsureGuard(g_app.guard);
     }
-}
-
-// While Windows' taskbar or its banners are hidden, a second Atrium.exe (`--guard`, RunGuard)
-// watches this one: however it ends (a crash past the exception filter, abort, being killed),
-// what it changed in Windows is put back at once; while it does not respond, the taskbar shows.
-void EnsureGuard()
-{
-    if (g_app.guard && WaitForSingleObject(g_app.guard, 0) == WAIT_TIMEOUT)
-        return;
-    if (g_app.guard) {
-        CloseHandle(g_app.guard);
-        g_app.guard = nullptr;
-    }
-    wchar_t exe[MAX_PATH * 2];
-    if (!GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe))))
-        return;
-    std::wstring command = L"\"" + std::wstring(exe) + L"\" --guard " + std::to_wstring(GetCurrentProcessId()) + DataDirectoryArgs();
-    STARTUPINFOW si{sizeof(si)};
-    PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        Log(L"guard: could not start (%lu)", GetLastError());
-        return;
-    }
-    CloseHandle(pi.hThread);
-    g_app.guard = pi.hProcess;
-    Log(L"guard: started (%lu)", pi.dwProcessId);
-}
-
-HWND FindProcessWindow(const wchar_t* className, DWORD pid)
-{
-    for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, className, nullptr)) != nullptr;) {
-        DWORD owner = 0;
-        if (GetWindowThreadProcessId(w, &owner); owner == pid)
-            return w;
-    }
-    return nullptr;
-}
-
-int RunGuard(DWORD pid)
-{
-    HANDLE held = CreateMutexW(nullptr, TRUE, kGuardMutex);
-    if (held && GetLastError() == ERROR_ALREADY_EXISTS)
-        if (const DWORD wait = WaitForSingleObject(held, 5000); wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
-            CloseHandle(held);
-            held = nullptr;
-        }
-    auto release = [](HANDLE h) {
-        ReleaseMutex(h);
-        CloseHandle(h);
-    };
-    std::unique_ptr<void, decltype(release)> guard(held, release);
-    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!process)
-        return 1;
-    HWND host = nullptr;
-    int silent = 0, traySilent = 0; // checks in a row without an answer (and Atrium's tray host)
-    bool shown = false, trayBack = false;
-    while (WaitForSingleObject(process, 2000) == WAIT_TIMEOUT) {
-        // Apps' tray calls go to the tray host first and wait for it. Not answering
-        // (Atrium hung, or its host thread), Explorer's taskbar goes in front of it so
-        // that they reach Explorer; the host moves back once it runs again.
-        HWND trayHost = FindProcessWindow(L"Shell_TrayWnd", pid);
-        DWORD_PTR answer = 0;
-        const bool trayAlive = !trayHost || SendMessageTimeoutW(trayHost, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 1500, &answer);
-        traySilent = trayAlive ? 0 : traySilent + 1;
-        if (traySilent >= 2) {
-            if (HWND shell = ShellTaskbar(pid))
-                SetWindowPos(shell, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
-            if (!trayBack)
-                Log(L"guard: Atrium's tray host (%lu) is not responding: Explorer's tray in front", pid);
-            trayBack = true;
-        } else if (trayAlive && trayBack) {
-            Log(L"guard: Atrium's tray host (%lu) responds again", pid);
-            trayBack = false;
-        }
-        if (!host || !IsWindow(host))
-            host = FindProcessWindow(kHostClass, pid);
-        const bool alive = !host || SendMessageTimeoutW(host, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &answer);
-        silent = alive ? 0 : silent + 1;
-        if (silent >= 4 && !shown) {
-            // About 15 s without an answer: the taskbar back (Atrium hides it again if it recovers).
-            Log(L"guard: Atrium (%lu) is not responding: Windows' taskbar shown", pid);
-            SystemChrome::ShowTaskbarsNow();
-            shown = true;
-        } else if (alive && shown) {
-            Log(L"guard: Atrium (%lu) responds again", pid);
-            shown = false;
-        }
-    }
-    DWORD code = 0;
-    GetExitCodeProcess(process, &code);
-    CloseHandle(process);
-    // A clean exit put everything back (system.json is gone); anything else is put back here.
-    if (SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {
-        if (SystemChrome::UndoLeftover())
-            Log(L"guard: Atrium (%lu) ended without putting Windows back (exit 0x%08lX): done here", pid, code);
-        CoUninitialize();
-    }
-    return 0;
 }
 
 // Folders and project/workspace files: what the taskbar menu shows above a
@@ -1449,7 +1348,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 AddTrayIcon();
             if (g_app.guard && WaitForSingleObject(g_app.guard, 0) == WAIT_OBJECT_0) {
                 Log(L"guard: it went away; started again");
-                EnsureGuard();
+                EnsureGuard(g_app.guard);
             }
             UpdateStatus();
             if (g_app.chrome)
@@ -1566,17 +1465,6 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-// The guard of a copy that quits: it puts Windows' taskbar back as that copy ends.
-void WaitForGuard()
-{
-    if (HANDLE guard = OpenMutexW(SYNCHRONIZE, FALSE, kGuardMutex)) {
-        DWORD done = WaitForSingleObject(guard, 5000);
-        if (done == WAIT_OBJECT_0 || done == WAIT_ABANDONED)
-            ReleaseMutex(guard);
-        CloseHandle(guard);
-    }
-}
-
 std::thread StartLogonUpdate(bool registeredHere, const Settings& settings)
 {
     if (!IsRegisteredApplication(ExeDir()) || (registeredHere && (!settings.startOnLogin || StartupTurnedOff())))
@@ -1617,7 +1505,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     }
     // `Atrium.exe --guard <pid>`: the guard of a run hiding Windows' taskbar (EnsureGuard).
     if (launch.guard)
-        return launch.guardPid ? RunGuard(launch.guardPid) : 1;
+        return launch.guardPid ? RunGuard(launch.guardPid, kHostClass) : 1;
     // `Atrium.exe --exit` asks a running instance to quit (installer, updater).
     if (launch.exitRequested) {
         HWND other = atrium::FindWindowForExecutable(kHostClass);

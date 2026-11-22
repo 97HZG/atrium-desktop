@@ -10,6 +10,7 @@
 #include "../bar_edge.h"
 #include "../icon_image.h"
 #include "../status.h"
+#include "bar_extras_painter.h"
 #include "glass_panel.h"
 #include "hover_wave.h"
 
@@ -113,6 +114,14 @@ public:
     // Each running dot follows only the backdrop at its displayed position.
     bool UpdateDotInk(const BarScene& scene, const Readback& backdrop, const Settings& settings, double nowMs);
     const BarFrame& Frame() const { return frame_; }
+    // The playing app's level (0..1, linear) and state, and the motion setting (0 still .. 1.5
+    // vivid), for the now-playing bars: Animate moves them while the bar shows the entry.
+    void SetMusic(float peak, bool playing, float intensity)
+    {
+        musicPeak_ = peak;
+        musicPlaying_ = playing;
+        musicIntensity_ = intensity;
+    }
     // Draws the content. It is rendered into a cached layer and only redrawn
     // when `contentKey` changes or an animation runs; a present caused by the
     // backdrop alone just composites the cached layer.
@@ -123,7 +132,8 @@ private:
     void DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date);
     ID2D1Bitmap1* BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& item);
     IDWriteTextFormat* Format(float px, DWRITE_FONT_WEIGHT weight, const wchar_t* family = nullptr); // nullptr: the interface face
-    void DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity);
+    bool AnimateSlide(const BarScene& scene, double nowMs);
+    bool AnimateMusic(const BarScene& scene, double dt);
     // The status icon in `r` (icon height): a ring open at the bottom with the
     // battery's level (the volume without a battery) round the Wi-Fi fan (or
     // wired / offline); while the volume or the brightness changes the ring
@@ -156,8 +166,10 @@ private:
     winrt::com_ptr<IDWriteFactory3> dwrite_;
     winrt::com_ptr<ID2D1SolidColorBrush> contentBrush_;
     winrt::com_ptr<ID2D1Effect> shadow_;
-    winrt::com_ptr<ID2D1LinearGradientBrush> logoBlue_; // the start logo's panes and their lit edge (DrawLogo)
-    winrt::com_ptr<ID2D1SolidColorBrush> logoSheen_;
+    BarExtrasPainter extras_;
+    MusicBars music_;
+    float musicPeak_ = 0, musicIntensity_ = 1;
+    bool musicPlaying_ = false;
     struct StatusArc {
         winrt::com_ptr<ID2D1PathGeometry> path;
         float sweep = -1;

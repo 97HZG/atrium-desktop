@@ -1,4 +1,5 @@
 #include "bar.h"
+#include "bar_drop.h"
 
 #include "localization.h"
 #include "render/continuous_corners.h"
@@ -272,63 +273,6 @@ bool AllowRaise(std::map<HWND, std::pair<int, ULONGLONG>>& raises, HWND target)
 } // namespace
 
 void RefreshCaptureExclusion() { ApplyCapturePolicies(); }
-
-// OLE drop target on the input window: files dragged over an app bring it to
-// the front after a moment; dropping opens them with that app.
-struct BarDropTarget : winrt::implements<BarDropTarget, IDropTarget> {
-    Bar* bar;
-    bool files = false;
-    explicit BarDropTarget(Bar* b) : bar(b) {}
-
-    DWORD Effect(POINTL pt)
-    {
-        std::wstring key = bar->FileDragOver(POINT{pt.x, pt.y});
-        return files && !key.empty() && bar->canOpenFiles && bar->canOpenFiles(key) ? DROPEFFECT_COPY : DROPEFFECT_NONE;
-    }
-    HRESULT __stdcall DragEnter(IDataObject* data, DWORD, POINTL pt, DWORD* effect) override
-    {
-        FORMATETC fe{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-        files = data && data->QueryGetData(&fe) == S_OK;
-        *effect = Effect(pt);
-        return S_OK;
-    }
-    HRESULT __stdcall DragOver(DWORD, POINTL pt, DWORD* effect) override
-    {
-        *effect = Effect(pt);
-        return S_OK;
-    }
-    HRESULT __stdcall DragLeave() override
-    {
-        bar->FileDragLeave();
-        return S_OK;
-    }
-    HRESULT __stdcall Drop(IDataObject* data, DWORD, POINTL pt, DWORD* effect) override
-    {
-        *effect = Effect(pt);
-        std::wstring key = bar->fileHoverKey_;
-        bar->FileDragLeave();
-        if (*effect == DROPEFFECT_NONE || !data)
-            return S_OK;
-        FORMATETC fe{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-        STGMEDIUM sm{};
-        if (FAILED(data->GetData(&fe, &sm)))
-            return S_OK;
-        std::vector<std::wstring> paths;
-        if (auto* drop = static_cast<HDROP>(GlobalLock(sm.hGlobal))) {
-            UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
-            for (UINT i = 0; i < count && i < 64; ++i) {
-                std::wstring p(DragQueryFileW(drop, i, nullptr, 0) + 1, L'\0');
-                p.resize(DragQueryFileW(drop, i, p.data(), UINT(p.size())));
-                paths.push_back(std::move(p));
-            }
-            GlobalUnlock(sm.hGlobal);
-        }
-        ReleaseStgMedium(&sm);
-        if (!paths.empty() && bar->onDropFiles)
-            bar->onDropFiles(key, paths);
-        return S_OK;
-    }
-};
 
 Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display)
     : debugCapturable_(debugCapturable),

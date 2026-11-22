@@ -1,6 +1,7 @@
 #include "bar_painter.h"
 #include "continuous_corners.h"
 
+#include "ime_glyph.h"
 #include "round_stroke.h"
 #include "ui_font.h"
 #include "wifi_glyph.h"
@@ -270,29 +271,8 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     imeFade_ = scene.imeMs > 0 ? float(std::clamp((nowMs - scene.imeMs) / kImeFadeMs, 0.0, 1.0)) : 1.f;
     moving |= imeFade_ < 1;
 
-    // Auto-hide slide.
-    if (scene.tucked != slideDown_) {
-        slideDown_ = scene.tucked;
-        slideFrom_ = slide_;
-        slideStartMs_ = nowMs;
-        Log(L"bar: slide %s", slideDown_ ? L"down" : L"up");
-    }
-    {
-        const float target = slideDown_ ? 1.f : 0.f;
-        if (slide_ != target) {
-            double length = slideDown_ ? kSlideOutMs : kSlideInMs;
-            float u = float(std::clamp((nowMs - slideStartMs_) / length, 0.0, 1.0));
-            float e;
-            if (slideDown_) {
-                e = 0.5f - 0.5f * std::cos(std::numbers::pi_v<float> * u); // eases in and out
-            } else {
-                e = motion::EaseOutBack(u, 1.2f); // a slight overshoot
-            }
-            slide_ = u >= 1 ? target : slideFrom_ + (target - slideFrom_) * e;
-            moving = true;
-        }
-    }
-    frame_.slideY = slide_ * std::max(0.f, scene.windowH - scene.bar.top);
+    moving |= AnimateSlide(scene, nowMs);
+    moving |= AnimateMusic(scene, dt);
 
     // What the glass shows this frame: the stretched shape and the ripple.
     frame_.shape = D2D1::RectF(MapX(barL_), scene.bar.top + frame_.slideY, MapX(barR_), scene.bar.bottom + frame_.slideY);
@@ -323,6 +303,43 @@ D2D1_ELLIPSE BarPainter::RunningDot(const BarScene& scene, const SceneItem& item
     float y = (item.icon.bottom + scene.bar.bottom) / 2;
     float radius = (item.active ? 2.3f : 1.9f) * scene.scale;
     return D2D1::Ellipse(D2D1::Point2F(x, y), radius, radius);
+}
+
+// The now-playing bars, while the bar shows them; true while they move.
+bool BarPainter::AnimateMusic(const BarScene& scene, double dt)
+{
+    if (std::ranges::none_of(scene.extras, [](const SceneItem& it) { return it.key == L"#music"; }))
+        return false;
+    return music_.Step(musicPeak_, musicPlaying_, musicIntensity_, dt);
+}
+
+// Auto-hide: the slide down off the screen and back up; true while it moves.
+bool BarPainter::AnimateSlide(const BarScene& scene, double nowMs)
+{
+    bool moving = false;
+    if (scene.tucked != slideDown_) {
+        slideDown_ = scene.tucked;
+        slideFrom_ = slide_;
+        slideStartMs_ = nowMs;
+        Log(L"bar: slide %s", slideDown_ ? L"down" : L"up");
+    }
+    {
+        const float target = slideDown_ ? 1.f : 0.f;
+        if (slide_ != target) {
+            double length = slideDown_ ? kSlideOutMs : kSlideInMs;
+            float u = float(std::clamp((nowMs - slideStartMs_) / length, 0.0, 1.0));
+            float e;
+            if (slideDown_) {
+                e = 0.5f - 0.5f * std::cos(std::numbers::pi_v<float> * u); // eases in and out
+            } else {
+                e = motion::EaseOutBack(u, 1.2f); // a slight overshoot
+            }
+            slide_ = u >= 1 ? target : slideFrom_ + (target - slideFrom_) * e;
+            moving = true;
+        }
+    }
+    frame_.slideY = slide_ * std::max(0.f, scene.windowH - scene.bar.top);
+    return moving;
 }
 
 bool BarPainter::UpdateDotInk(const BarScene& scene, const Readback& backdrop, const Settings& settings, double nowMs)
@@ -527,24 +544,11 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     const D2D1_POINT_2F iconShift = VectorToArea(frame, cx - bx, -up);
     d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, iconAnchor) * D2D1::Matrix3x2F::Translation(iconShift.x, iconShift.y));
     if (it.key == L"#ime") {
-        const float w = iconArea.right - iconArea.left, h = iconArea.bottom - iconArea.top;
-        if (IDWriteTextFormat* f = Format(h * 0.74f, DWRITE_FONT_WEIGHT_LIGHT)) {
-            auto glyph = [&](const std::wstring& text, float alpha) {
-                winrt::com_ptr<IDWriteTextLayout> layout;
-                if (text.empty() || alpha <= 0.003f || FAILED(dwrite_->CreateTextLayout(text.c_str(), UINT32(text.size()), f, w, h, layout.put())))
-                    return;
-                // Centred by its ink, as the tray's icons are: a lowercase "a" would sit below the middle of its line.
-                DWRITE_OVERHANG_METRICS over{};
-                layout->GetOverhangMetrics(&over);
-                D2D1_COLOR_F c = ink;
-                c.a *= alpha * m.appear;
-                brush->SetColor(c);
-                d2d->DrawTextLayout(D2D1::Point2F(iconArea.left, iconArea.top + (over.top - over.bottom) / 2), layout.get(), brush);
-            };
-            const float e = motion::EaseOut(imeFade_);
-            glyph(scene.imePrevGlyph, 1 - e);
-            glyph(scene.imeGlyph, e);
-        }
+        // The letter cross-fades from the one before; built-in outlines for the usual five (ime_glyph).
+        IDWriteTextFormat* f = Format((iconArea.bottom - iconArea.top) * 0.74f, DWRITE_FONT_WEIGHT_NORMAL);
+        const float e = motion::EaseOut(imeFade_);
+        DrawImeGlyph(d2d, dwrite_.get(), f, scene.imePrevGlyph, iconArea, brush, ink, (1 - e) * m.appear);
+        DrawImeGlyph(d2d, dwrite_.get(), f, scene.imeGlyph, iconArea, brush, ink, e * m.appear);
         d2d->SetTransform(D2D1::Matrix3x2F::Identity());
         return;
     }
@@ -568,8 +572,8 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         d2d->SetTransform(D2D1::Matrix3x2F::Identity());
         return;
     }
-    if (it.key == L"#start") {
-        DrawLogo(d2d, iconArea, m.appear);
+    if (extras_.Draw(it.key, d2d, iconArea, brush, ink, m.appear, music_)) {
+        // the bar's own entries, drawn rather than read from an app
     } else if (!it.glyph.empty()) {
         if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
             brush->SetColor(ink);
@@ -894,39 +898,6 @@ void BarPainter::DrawStatusIcons(ID2D1DeviceContext2* d2d, const SystemStatus& s
         } else if (levelShape) {
             d2d->FillGeometry(levelShape.get(), brush);
         }
-    }
-}
-
-// The start entry: the Windows logo, redrawn as four panes with Windows 11's
-// light-to-deep blue, slightly smaller than an app icon's square.
-void BarPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity)
-{
-    float w = std::min(r.right - r.left, r.bottom - r.top) * 0.80f;
-    float cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
-    float left = cx - w / 2, top = cy - w / 2;
-    float gap = w * 0.08f, pane = (w - gap) / 2, corner = pane * 0.10f;
-    if (!logoBlue_) {
-        D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(0x5CCBFF)}, {0.5f, D2D1::ColorF(0x1A9BF0)}, {1.f, D2D1::ColorF(0x0060C8)}};
-        winrt::com_ptr<ID2D1GradientStopCollection> coll;
-        if (FAILED(d2d->CreateGradientStopCollection(stops, 3, coll.put())) ||
-            FAILED(d2d->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties({}, {}), coll.get(), logoBlue_.put())) ||
-            FAILED(d2d->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.16f), logoSheen_.put()))) {
-            logoBlue_ = nullptr;
-            return;
-        }
-    }
-    ID2D1LinearGradientBrush* grad = logoBlue_.get();
-    grad->SetStartPoint(D2D1::Point2F(left, top));
-    grad->SetEndPoint(D2D1::Point2F(left + w, top + w));
-    grad->SetOpacity(opacity);
-    ID2D1SolidColorBrush* sheen = logoSheen_.get();
-    sheen->SetOpacity(opacity);
-    for (int i = 0; i < 4; ++i) {
-        float x = left + float(i % 2) * (pane + gap), y = top + float(i >> 1) * (pane + gap);
-        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(x, y, x + pane, y + pane), corner, corner);
-        FillContinuousRect(d2d, rr.rect, rr.radiusX, grad);
-        // A faint lit edge on top of each pane.
-        d2d->FillRectangle(D2D1::RectF(x + corner, y, x + pane - corner, y + std::max(0.6f, pane * 0.06f)), sheen);
     }
 }
 

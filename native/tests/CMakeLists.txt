@@ -148,3 +148,15 @@ add_executable(folder_stacks_tests folder_stacks.cpp)
 target_link_libraries(folder_stacks_tests PRIVATE atrium_core_lib)
 add_test(NAME folder_stacks COMMAND folder_stacks_tests)
 set_tests_properties(folder_stacks PROPERTIES TIMEOUT 15)
+
+add_executable(music_bars_tests music_bars.cpp)
+target_link_libraries(music_bars_tests PRIVATE atrium_core_lib)
+add_test(NAME music_bars COMMAND music_bars_tests)
+
+add_executable(folder_stack_layout_tests folder_stack_layout.cpp)
+target_link_libraries(folder_stack_layout_tests PRIVATE atrium_core_lib)
+add_test(NAME folder_stack_layout COMMAND folder_stack_layout_tests)
+
+add_executable(ime_glyph_tests ime_glyph.cpp)
+target_link_libraries(ime_glyph_tests PRIVATE atrium_core_lib)
+add_test(NAME ime_glyph COMMAND ime_glyph_tests)

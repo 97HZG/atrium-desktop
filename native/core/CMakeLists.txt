@@ -28,9 +28,12 @@ add_custom_target(atrium_shaders DEPENDS ${shader_headers})
 
 add_library(atrium_core_lib STATIC
     bar.cpp
+    bar_drop.cpp
+    guard_process.cpp
     near_hover.cpp
     log.cpp
     settings.cpp
+    settings_io.cpp
     settings_server.cpp
     localization.cpp
     shell/ime_status.cpp
@@ -50,6 +53,8 @@ add_library(atrium_core_lib STATIC
     shell/lunar.cpp
     shell/audio_devices.cpp
     shell/audio_meter.cpp
+    shell/media_app.cpp
+    shell/media_session.cpp
     shell/projection.cpp
     shell/displays.cpp
     shell/tray_host.cpp
@@ -68,7 +73,11 @@ add_library(atrium_core_lib STATIC
     ui/calendar_panel.cpp
     ui/control_center.cpp
     ui/desktop_widgets.cpp
+    ui/folder_stack_popup.cpp
     ui/glass_menu.cpp
+    ui/launchpad.cpp
+    ui/launchpad_input.cpp
+    ui/now_playing_card.cpp
     ui/stage_manager.cpp
     ui/window_snapshot.cpp
     shell/weather.cpp
@@ -80,6 +89,8 @@ add_library(atrium_core_lib STATIC
     shell/notification_listener.cpp
     shell/usb_volume.cpp
     render/bar_painter.cpp
+    render/bar_extras_painter.cpp
+    render/ime_glyph.cpp
     render/hover_wave.cpp
     render/capture.cpp
     render/desktop_backdrop.cpp
