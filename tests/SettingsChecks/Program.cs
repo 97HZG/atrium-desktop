@@ -841,6 +841,165 @@ finally
         Require(okRes.Succeeded && okRes.Revision == 3 && pipeSession.Revision == 3 && !pipeSession.HasUnsavedChanges,
             "Retry commit after conflict must succeed and advance revision to 3.");
 
+        // 7b. SettingsSession: 3-way list merge for Pins and StageExcluded
+        static PinnedApp Pin(string name, string path, string args = "", string aumid = "", bool? multiple = null) =>
+            new(name, path, args, aumid, multiple);
+
+        var pinA = Pin("A", @"C:\Apps\a.exe");
+        var pinB = Pin("B", @"C:\Apps\b.exe");
+        var pinC = Pin("C", @"C:\Apps\c.exe");
+        var pinH = Pin("H", @"C:\Apps\h.exe");
+        var pinM = Pin("M", @"C:\Apps\m.exe");
+        var pinT = Pin("T", @"C:\Apps\t.exe");
+
+        // Reorder + tail pin in both ApplyConflict and ApplyExternalChange: [A,B] + draft=[B,A] + target=[A,B,C] -> [B,A,C]
+        foreach (bool viaExternal in new[] { false, true })
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(new BarSettings { Pins = [pinA, pinB] }, new BarSettings { Pins = [pinA, pinB] }, "i1", 1);
+            s.Draft.Pins = [pinB, pinA];
+            s.MarkEdited();
+            if (viaExternal) s.ApplyExternalChange(new BarSettings { Pins = [pinA, pinB, pinC] }, 2);
+            else s.ApplyConflict(new BarSettings { Pins = [pinA, pinB, pinC] }, 2, "i1");
+            Require(s.Draft.Pins != null && s.Draft.Pins.SequenceEqual([pinB, pinA, pinC]),
+                $"3-way Pins merge ({(viaExternal ? "ApplyExternalChange" : "ApplyConflict")}) must keep reorder and tail-append C.");
+            Require(s.HasUnsavedChanges, "Merged Pins must stay dirty when local reorder differs from server.");
+        }
+
+        // Local unpin + remote add
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(new BarSettings { Pins = [pinA, pinB] }, new BarSettings { Pins = [pinA, pinB] }, "i1", 1);
+            s.Draft.Pins = [pinA];
+            s.ApplyConflict(new BarSettings { Pins = [pinA, pinB, pinC] }, 2, "i1");
+            Require(s.Draft.Pins!.SequenceEqual([pinA, pinC]), "Local unpin must survive remote tail add.");
+        }
+
+        // Remote unpin + local reorder
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(new BarSettings { Pins = [pinA, pinB, pinC] }, new BarSettings { Pins = [pinA, pinB, pinC] }, "i1", 1);
+            s.Draft.Pins = [pinC, pinB, pinA];
+            s.ApplyConflict(new BarSettings { Pins = [pinA, pinC] }, 2, "i1");
+            Require(s.Draft.Pins!.SequenceEqual([pinC, pinA]), "Remote unpin must remove B while keeping local reorder.");
+        }
+
+        // Local add + remote reorder
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(new BarSettings { Pins = [pinA, pinB] }, new BarSettings { Pins = [pinA, pinB] }, "i1", 1);
+            s.Draft.Pins = [pinA, pinB, pinC];
+            s.ApplyExternalChange(new BarSettings { Pins = [pinB, pinA] }, 2);
+            Require(s.Draft.Pins!.SequenceEqual([pinB, pinA, pinC]), "Local add must append to tail after remote reorder.");
+        }
+
+        // Concurrent same-key add deduped (draft wins; Path/Aumid OrdinalIgnoreCase, Args Ordinal) + input dedup
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(new BarSettings { Pins = [pinA] }, new BarSettings { Pins = [pinA] }, "i1", 1);
+            var draftC = Pin("C-Draft", @"c:\apps\c.exe", "--x", "App.C", true);
+            var targetC = Pin("C-Target", @"C:\Apps\C.EXE", "--x", "app.c", false);
+            var diffArgsC = Pin("C-Args", @"C:\Apps\C.EXE", "--X", "app.c", false);
+            s.Draft.Pins = [pinA, draftC, Pin("C-Dup", @"C:\Apps\C.EXE", "--x", "APP.C")];
+            s.ApplyConflict(new BarSettings { Pins = [pinA, targetC, diffArgsC] }, 2, "i1");
+            Require(s.Draft.Pins!.Count == 3 && s.Draft.Pins[1] == draftC && s.Draft.Pins[2] == diffArgsC,
+                "Concurrent same-key pin add must dedupe by (Path/Aumid CI, Args CS) preferring draft.");
+        }
+
+        // Head and middle anchor insertions
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(new BarSettings { Pins = [pinA, pinB, pinC] }, new BarSettings { Pins = [pinA, pinB, pinC] }, "i1", 1);
+            s.Draft.Pins = [pinC, pinB, pinA];
+            s.ApplyConflict(new BarSettings { Pins = [pinH, pinA, pinM, pinB, pinC, pinT] }, 2, "i1");
+            Require(s.Draft.Pins!.SequenceEqual([pinH, pinC, pinB, pinA, pinM, pinT]),
+                "Head, middle, and tail anchor splicing must place secondary additions accurately.");
+        }
+
+        // Concurrent non-key field updates on surviving pin (MultipleWindows + Name)
+        {
+            var s = new SettingsSession();
+            var basePin = Pin("OldName", @"C:\Apps\app.exe", "", "", null);
+            s.ApplyInitialState(new BarSettings { Pins = [basePin] }, new BarSettings { Pins = [basePin] }, "i1", 1);
+            s.Draft.Pins = [Pin("OldName", @"C:\Apps\app.exe", "", "", true)];
+            s.ApplyConflict(new BarSettings { Pins = [Pin("NewName", @"C:\Apps\app.exe", "", "", null)] }, 2, "i1");
+            Require(s.Draft.Pins!.Count == 1 && s.Draft.Pins[0].Name == "NewName" && s.Draft.Pins[0].MultipleWindows == true,
+                "Surviving pin must merge concurrent Name and MultipleWindows edits.");
+        }
+
+        // Pins null vs [] semantics
+        {
+            var sn1 = new SettingsSession();
+            sn1.ApplyInitialState(new BarSettings { Pins = null }, new BarSettings { Pins = null }, "i1", 1);
+            sn1.ApplyExternalChange(new BarSettings { Pins = [pinA] }, 2);
+            Require(sn1.Draft.Pins != null && sn1.Draft.Pins.SequenceEqual([pinA]), "Unedited null Pins must adopt server pins.");
+
+            var sn2 = new SettingsSession();
+            sn2.ApplyInitialState(new BarSettings { Pins = null }, new BarSettings { Pins = null }, "i1", 1);
+            sn2.Draft.Pins = [];
+            sn2.ApplyConflict(new BarSettings { Pins = [pinA] }, 2, "i1");
+            Require(sn2.Draft.Pins != null && sn2.Draft.Pins.Count == 0, "Explicit empty Pins must stay empty against server import.");
+
+            var sn3 = new SettingsSession();
+            sn3.ApplyInitialState(new BarSettings { Pins = [pinA] }, new BarSettings { Pins = [pinA] }, "i1", 1);
+            sn3.Draft.Pins = [];
+            sn3.ApplyConflict(new BarSettings { Pins = [pinA] }, 2, "i1");
+            Require(sn3.Draft.Pins != null && sn3.Draft.Pins.Count == 0, "Explicit empty Pins must stay empty when server Pins unchanged.");
+
+            var sn4 = new SettingsSession();
+            sn4.ApplyInitialState(new BarSettings { Pins = null }, new BarSettings { Pins = null }, "i1", 1);
+            sn4.Draft.Pins = [pinB];
+            sn4.ApplyConflict(new BarSettings { Pins = [pinA] }, 2, "i1");
+            Require(sn4.Draft.Pins != null && sn4.Draft.Pins.SequenceEqual([pinA, pinB]),
+                "Null base with non-empty edits on both sides must merge additions.");
+        }
+
+        // 64-pin clamp after merge
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(new BarSettings { Pins = [] }, new BarSettings { Pins = [] }, "i1", 1);
+            var target40 = Enumerable.Range(0, 40).Select(i => Pin($"T{i}", $@"C:\t{i}.exe")).ToList();
+            var draft40 = Enumerable.Range(0, 40).Select(i => Pin($"D{i}", $@"C:\d{i}.exe")).ToList();
+            s.Draft.Pins = draft40;
+            s.ApplyConflict(new BarSettings { Pins = target40 }, 2, "i1");
+            Require(s.Draft.Pins!.Count == 64 && s.Draft.Pins[0] == target40[0] && s.Draft.Pins[40] == draft40[0] &&
+                    s.Draft.Pins[63] == draft40[23],
+                "Merged Pins exceeding 64 items must truncate cleanly to the first 64.");
+        }
+
+        // Identical changes on both sides leave HasUnsavedChanges == false
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(new BarSettings { Pins = [pinA, pinB] }, new BarSettings { Pins = [pinA, pinB] }, "i1", 1);
+            s.Draft.Pins = [pinA];
+            s.ApplyConflict(new BarSettings { Pins = [pinA] }, 2, "i1");
+            Require(!s.HasUnsavedChanges && s.Draft.Pins!.SequenceEqual([pinA]) && s.Saved.Pins!.SequenceEqual([pinA]),
+                "Identical changes on both sides must converge with HasUnsavedChanges == false.");
+        }
+
+        // StageExcluded 3-way merge (ASCII trim + OrdinalIgnoreCase + reorder/tail)
+        {
+            var s = new SettingsSession();
+            s.ApplyInitialState(
+                new BarSettings { StageExcluded = ["snippingtool.exe", "screenclippinghost.exe"] },
+                new BarSettings { StageExcluded = ["snippingtool.exe", "screenclippinghost.exe"] },
+                "i1", 1);
+            s.Draft.StageExcluded = [" screenclippinghost.exe ", "snippingtool.exe"];
+            s.ApplyConflict(new BarSettings { StageExcluded = ["SNIPPINGTOOL.EXE", "screenclippinghost.exe", "game.exe"] }, 2, "i1");
+            Require(s.Draft.StageExcluded.SequenceEqual([" screenclippinghost.exe ", "SNIPPINGTOOL.EXE", "game.exe"]),
+                "StageExcluded 3-way merge must preserve reorder, ASCII-trimmed CI identity, target edit, and tail addition.");
+
+            var se2 = new SettingsSession();
+            se2.ApplyInitialState(
+                new BarSettings { StageExcluded = ["snippingtool.exe", "screenclippinghost.exe"] },
+                new BarSettings { StageExcluded = ["snippingtool.exe", "screenclippinghost.exe"] },
+                "i1", 1);
+            se2.Draft.StageExcluded = ["screenclippinghost.exe"];
+            se2.ApplyExternalChange(new BarSettings { StageExcluded = ["snippingtool.exe", "screenclippinghost.exe", "obs64.exe"] }, 2);
+            Require(se2.Draft.StageExcluded.SequenceEqual(["screenclippinghost.exe", "obs64.exe"]),
+                "StageExcluded 3-way merge must drop locally removed item while keeping remote addition.");
+        }
+
         // 8. ReleaseInstaller.ReadPreparedRecovering: corrupt ready.json, missing files, and escaping path auto-clean and return null
         string updCache = Path.Combine(sessionTemp, "upd-cache");
         string updState = Path.Combine(updCache, "ready.json");

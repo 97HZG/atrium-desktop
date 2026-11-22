@@ -72,6 +72,11 @@ public sealed partial class ToggleTile : UserControl
         grid.Children.Add(Switch);
         Content = _surface = new Border { Style = Res<Style>("TileStyle"), Child = grid };
         Switch.Toggled += (_, e) => Toggled?.Invoke(this, e);
+        Loaded += (_, _) =>
+        {
+            if (Name.Length > 0 && AutomationProperties.GetAutomationId(Switch).Length == 0)
+                AutomationProperties.SetAutomationId(Switch, Name);
+        };
     }
 
     private readonly Border _surface;

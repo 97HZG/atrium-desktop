@@ -108,15 +108,15 @@ public sealed partial class MainWindow : Window, IDisposable
     public MainWindow(int startPage = -1)
     {
         InitializeComponent();
+        AutomationProperties.SetAutomationId(SaveButton, "SaveButton");
+        AutomationProperties.SetAutomationId(ClockSecondsSwitch.Switch, "ClockSecondsSwitch");
         // Windows 10 (#106): no Mica there, and a bitmap decoded during the first frame takes its XAML
         // renderer down; the logos come once the window is up.
-        if (MicaController.IsSupported())
-            SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+        if (MicaController.IsSupported()) SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
         RootGrid.Loaded += (_, _) => DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             var logo = new BitmapImage(new Uri("ms-appx:///Assets/atrium-256.png"));
-            TitleLogo.Source = logo;
-            AboutLogo.Source = logo;
+            TitleLogo.Source = AboutLogo.Source = logo;
         });
         PopulateLanguagePicker();
         Title = App.WindowTitle;
@@ -220,7 +220,7 @@ public sealed partial class MainWindow : Window, IDisposable
         int page = startPage >= 0 ? startPage : App.PageFromArgs(Environment.GetCommandLineArgs()) ?? 0;
         SelectPage(page);
         _ = ConnectAndLoadAsync();
-        _ = CheckForUpdatesAsync(); // once per settings window; no resident polling
+        if (!Environment.GetCommandLineArgs().Contains("--development")) _ = CheckForUpdatesAsync();
     }
 
     private void UpdateWindowMinimumSize(uint dpi = 0, IntPtr suggestedRect = 0)
@@ -1446,10 +1446,7 @@ public sealed partial class MainWindow : Window, IDisposable
         if (!_updatesClosed && !_client.Connected) ShowStatus(false);
     }
 
-    private async void OnSave(object sender, RoutedEventArgs e)
-    {
-        if (_saveTask == null) await SaveAsync();
-    }
+    private async void OnSave(object sender, RoutedEventArgs e) { if (_saveTask == null) await SaveAsync(); }
 
     private async Task<bool> SaveAsync()
     {
@@ -1481,18 +1478,21 @@ public sealed partial class MainWindow : Window, IDisposable
             _session.ApplyConflict(result.ServerSaved, result.Revision, result.InstanceId);
             LoadIntoControls();
             UpdateButtons();
-            if (_session.HasUnsavedChanges) SchedulePreview();
-            ShowMessage(InfoBarSeverity.Warning, Loc.T("Settings changed elsewhere"),
-                Loc.T("The core settings changed before saving. Your unsubmitted edits were kept; review them and click Save again."));
-            ShowStatus(_client.Connected);
-            return false;
+            if (_session.HasUnsavedChanges)
+            {
+                SchedulePreview();
+                ShowMessage(InfoBarSeverity.Warning, Loc.T("Settings changed elsewhere"),
+                    Loc.T("The core settings changed before saving. Your unsubmitted edits were kept; review them and click Save again."));
+                ShowStatus(_client.Connected);
+                return false;
+            }
         }
-        if (!result.Succeeded)
+        else if (!result.Succeeded)
         {
             ShowMessage(InfoBarSeverity.Error, Loc.T("Could not save"), result.Error ?? "error");
             return false;
         }
-        _session.ApplyCommitSuccess(sent, result.InstanceId, result.Revision);
+        else { _session.ApplyCommitSuccess(sent, result.InstanceId, result.Revision); }
         // The settings window's XAML is Chinese source text: re-create it in
         // the new language, carrying edits made while the save was in flight.
         if (languageChanged)
