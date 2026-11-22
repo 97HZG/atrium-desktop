@@ -863,7 +863,7 @@ public sealed partial class MainWindow : Window, IDisposable
             string exe = CoreClient.CoreExe() ?? throw new FileNotFoundException(Loc.T("Atrium.exe was not found"));
             if (start)
             {
-                using var launched = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+                using var launched = Process.Start(CoreClient.CoreStartInfo(exe));
                 if (!await _client.ConnectAsync(8000)) throw new TimeoutException(Loc.T("Could not connect to Atrium. Try again later."));
                 await SyncConnectedStateAsync();
             }

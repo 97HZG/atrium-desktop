@@ -139,6 +139,20 @@ internal sealed partial class CoreClient : IDisposable
         return null;
     }
 
+    internal static ProcessStartInfo CoreStartInfo(string exe, string[]? args = null, bool? development = null)
+    {
+        bool dev = development ?? Development;
+        if (dev && TryParseDataDirArgument(args ?? Environment.GetCommandLineArgs(), out string? custom, out bool specified) && specified && custom != null)
+        {
+            var info = new ProcessStartInfo(exe) { UseShellExecute = false };
+            info.ArgumentList.Add("--development");
+            info.ArgumentList.Add("--data-dir");
+            info.ArgumentList.Add(custom);
+            return info;
+        }
+        return new ProcessStartInfo(exe) { UseShellExecute = true };
+    }
+
     public async Task<bool> ConnectAsync(int timeoutMs)
     {
         Disconnect();

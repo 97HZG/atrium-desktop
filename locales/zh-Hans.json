@@ -908,7 +908,7 @@
   "Settings changed elsewhere": "设置已在别处更改",
   "The core settings changed before saving. Your unsubmitted edits were kept; review them and click Save again.": "核心中的设置在保存前已被更改。已保留你尚未提交的修改，请确认后再点一次“保存”。",
   "Too many pinned apps": "固定的应用过多",
-  "Pinned apps now total {0} / 64. Cannot save: {1}. Remove the extra apps to save, or click Revert to discard these additions.": "当前固定应用共 {0} / 64 项，超出上限。未能保存：{1}。请移除多余项后再保存，或点“撤销”放弃此次新增。",
-  "Pinned apps now total {0} / 64. Cannot save: {1} (+{2} more). Remove the extra apps to save, or click Revert to discard these additions.": "当前固定应用共 {0} / 64 项，超出上限。未能保存：{1}（另有 {2} 项）。请移除多余项后再保存，或点“撤销”放弃此次新增。"
+  "Pinned apps now total {0} / 64. Cannot save: {1}. Remove the extra apps to save, or click Revert to discard all unsaved changes.": "当前固定应用共 {0} / 64 项，超出上限。未能保存：{1}。请移除多余项后再保存，或点“撤销”以撤销全部未保存的更改。",
+  "Pinned apps now total {0} / 64. Cannot save: {1} (+{2} more). Remove the extra apps to save, or click Revert to discard all unsaved changes.": "当前固定应用共 {0} / 64 项，超出上限。未能保存：{1}（另有 {2} 项）。请移除多余项后再保存，或点“撤销”以撤销全部未保存的更改。"
  }
 }

@@ -98,10 +98,10 @@ public sealed partial class MainWindow
         string names = string.Join(Loc.T(", "), overflow.Take(PreviewCount).Select(PinTitle));
         string body = overflow.Count > PreviewCount
             ? Loc.F(
-                "Pinned apps now total {0} / 64. Cannot save: {1} (+{2} more). Remove the extra apps to save, or click Revert to discard these additions.",
+                "Pinned apps now total {0} / 64. Cannot save: {1} (+{2} more). Remove the extra apps to save, or click Revert to discard all unsaved changes.",
                 total, names, overflow.Count - PreviewCount)
             : Loc.F(
-                "Pinned apps now total {0} / 64. Cannot save: {1}. Remove the extra apps to save, or click Revert to discard these additions.",
+                "Pinned apps now total {0} / 64. Cannot save: {1}. Remove the extra apps to save, or click Revert to discard all unsaved changes.",
                 total, names);
         ShowMessage(InfoBarSeverity.Warning, Loc.T("Too many pinned apps"), body);
     }

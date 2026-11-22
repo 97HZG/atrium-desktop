@@ -999,17 +999,18 @@ finally
                     $"Reordering while overflowing ({mode}) must keep HasPinOverflow and OverflowPins=[X].");
             }
 
-            // Resolution path (a): Revert() discards X and restores server's 64 pins
+            // Resolution path (a): Revert() discards X and restores server's 64 pins along with any scalar edits
             {
                 var s = new SettingsSession();
-                s.ApplyInitialState(new BarSettings { Pins = [.. base63] }, new BarSettings { Pins = [.. base63] }, "i1", 1);
+                s.ApplyInitialState(new BarSettings { Height = 60, Pins = [.. base63] }, new BarSettings { Height = 60, Pins = [.. base63] }, "i1", 1);
+                s.Draft.Height = 84;
                 s.Draft.Pins = [.. reorderedBase, pinX];
-                s.ApplyConflict(new BarSettings { Pins = [.. base63, pinY] }, 2, "i1");
-                Require(s.HasPinOverflow, "Precondition: 65-pin conflict must overflow.");
+                s.ApplyConflict(new BarSettings { Height = 60, Pins = [.. base63, pinY] }, 2, "i1");
+                Require(s.HasPinOverflow && s.Draft.Height == 84, "Precondition: 65-pin conflict must overflow and preserve draft height.");
                 s.Revert();
                 Require(!s.HasPinOverflow && s.OverflowPins.Count == 0 && !s.HasUnsavedChanges &&
-                        s.Draft.Pins!.SequenceEqual([.. base63, pinY]),
-                    "Revert() must clear overflow and restore server's 64 pins.");
+                        s.Draft.Height == 60 && s.Draft.Pins!.SequenceEqual([.. base63, pinY]),
+                    "Revert() must clear overflow, revert scalar edits, and restore server's 64 pins.");
             }
 
             // Resolution path (b): removing 1 pin drops to 64, round-trips JSON and commits cleanly
@@ -1146,6 +1147,33 @@ finally
     finally
     {
         if (Directory.Exists(sessionTemp)) Directory.Delete(sessionTemp, true);
+    }
+
+    // 9. CoreClient.CoreStartInfo: propagate --development and normalized --data-dir only in dev mode
+    {
+        string exe = @"C:\Apps\Atrium\Atrium.exe";
+        var prod = CoreClient.CoreStartInfo(exe, ["Atrium.Settings.exe", "--development", "--data-dir", @"C:\tmp\iso"], development: false);
+        Require(prod.FileName == exe && prod.UseShellExecute && prod.ArgumentList.Count == 0,
+            "Production mode CoreStartInfo must use shell execute and ignore --data-dir.");
+
+        var devDefault = CoreClient.CoreStartInfo(exe, ["Atrium.Settings.exe", "--development"], development: true);
+        Require(devDefault.FileName == exe && devDefault.UseShellExecute && devDefault.ArgumentList.Count == 0,
+            "Dev mode CoreStartInfo without --data-dir must fall back to default UseShellExecute=true launch.");
+
+        var devExitCase = CoreClient.CoreStartInfo(exe, ["Atrium.Settings.exe", "--development", "--data-dir", @"D:\tmp\--exit-case"], development: true);
+        Require(devExitCase.FileName == exe && !devExitCase.UseShellExecute &&
+                devExitCase.ArgumentList.SequenceEqual(["--development", "--data-dir", @"D:\tmp\--exit-case"]),
+            "Dev mode CoreStartInfo must forward --development and --data-dir via ArgumentList.");
+
+        var devSpaces = CoreClient.CoreStartInfo(exe, ["Atrium.Settings.exe", "--data-dir", @"D:\tmp\my data\iso\"], development: true);
+        Require(!devSpaces.UseShellExecute &&
+                devSpaces.ArgumentList.SequenceEqual(["--development", "--data-dir", @"D:\tmp\my data\iso"]),
+            "Dev mode CoreStartInfo must normalize trailing separator and preserve spaces in ArgumentList.");
+
+        var devRoot = CoreClient.CoreStartInfo(exe, ["Atrium.Settings.exe", "--data-dir", @"D:\"], development: true);
+        Require(!devRoot.UseShellExecute &&
+                devRoot.ArgumentList.SequenceEqual(["--development", "--data-dir", @"D:\"]),
+            "Dev mode CoreStartInfo must preserve root drive trailing backslash in ArgumentList.");
     }
 }
 Console.WriteLine("Hardening regression checks passed.");
