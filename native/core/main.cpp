@@ -7,6 +7,7 @@
 #include "render/capture.h"
 #include "clock.h"
 #include "host_messages.h"
+#include "launch_args.h"
 #include "localization.h"
 #include "log.h"
 #include "resource.h"
@@ -209,12 +210,12 @@ void OpenSettings(const wchar_t* page = nullptr)
             break;
         up.resize(pos);
     }
+    const std::wstring args = FormatSettingsLaunchArgs(page, DataDirectoryArgs());
     for (const std::wstring& exe : candidates) {
         if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES)
             continue;
         // The settings app keeps a single instance itself and activates it.
-        if (reinterpret_cast<INT_PTR>(
-                ShellExecuteW(nullptr, L"open", exe.c_str(), page ? (std::wstring(L"--page ") + page).c_str() : nullptr, nullptr, SW_SHOWNORMAL)) > 32)
+        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), args.empty() ? nullptr : args.c_str(), nullptr, SW_SHOWNORMAL)) > 32)
             return;
     }
     Log(L"settings: Atrium.Settings.exe not found next to %s", dir.c_str());
@@ -1590,7 +1591,7 @@ std::thread StartLogonUpdate(bool registeredHere, const Settings& settings)
 
 } // namespace
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
     SetLanguage(L"auto"); // before any message; the saved choice follows with LoadSettings
     // Never in the install folder (started from it in Explorer, or by the updater): the apps started
@@ -1601,11 +1602,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     }
     int argumentCount = 0;
     auto* startupArguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
-    for (int i = 1; startupArguments && i + 1 < argumentCount; ++i)
-        if (wcscmp(startupArguments[i], L"--ready-event") == 0 && std::wstring_view(startupArguments[i + 1]).starts_with(L"Local\\Atrium.Update.Core."))
-            g_readyEvent = startupArguments[i + 1];
+    std::vector<std::wstring> args(startupArguments, startupArguments + (startupArguments ? argumentCount : 0));
     LocalFree(static_cast<HLOCAL>(startupArguments));
-    if (wcscmp(cmdLine, L"--uninstall") == 0) {
+    const atrium::CoreLaunchOptions launch = atrium::ParseCoreLaunchOptions(args);
+    g_readyEvent = launch.readyEvent;
+    if (launch.uninstall) {
         if (MessageBoxW(nullptr, Tr(L"Uninstall Atrium? Your personal settings and desktop widget layout will be kept."), L"Atrium",
                         MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND) != IDYES)
             return 0;
@@ -1617,12 +1618,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", powershell.c_str(), arguments.c_str(), nullptr, SW_HIDE)) > 32 ? 0 : 1;
     }
     // `Atrium.exe --guard <pid>`: the guard of a run hiding Windows' taskbar (EnsureGuard).
-    if (const wchar_t* guard = wcsstr(cmdLine, L"--guard ")) {
-        const DWORD pid = wcstoul(guard + 8, nullptr, 10);
-        return pid ? RunGuard(pid) : 1;
-    }
+    if (launch.guard)
+        return launch.guardPid ? RunGuard(launch.guardPid) : 1;
     // `Atrium.exe --exit` asks a running instance to quit (installer, updater).
-    if (wcsstr(cmdLine, L"--exit")) {
+    if (launch.exitRequested) {
         HWND other = atrium::FindWindowForExecutable(kHostClass);
         if (!other)
             return 0;
@@ -1706,7 +1705,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         settings.pins = TaskModel::ImportWindowsPins();
         Log(L"core: imported %zu Windows taskbar pins", settings.pins->size());
     }
-    const bool capturable = wcsstr(cmdLine, L"--debug-capturable") != nullptr;
+    const bool capturable = launch.debugCapturable;
     g_app.capturable = capturable;
     // Before the bar: its render thread chooses its backdrop from it at once (else it starts on
     // the screen's capture and starts again on the wallpaper when the settings are applied).

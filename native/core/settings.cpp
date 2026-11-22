@@ -284,7 +284,12 @@ std::wstring DataDirectory() { return ResolveDataDirState().dir; }
 std::wstring DataDirectoryArgs()
 {
     const DataDirState state = ResolveDataDirState();
-    return state.overridden ? L" --development --data-dir \"" + state.dir + L"\"" : std::wstring{};
+    if (!state.overridden)
+        return {};
+    std::wstring escaped = state.dir;
+    const size_t tail = escaped.find_last_not_of(L'\\');
+    escaped.append(tail == std::wstring::npos ? escaped.size() : escaped.size() - 1 - tail, L'\\');
+    return L" --development --data-dir \"" + escaped + L"\"";
 }
 
 void Settings::Clamp()
