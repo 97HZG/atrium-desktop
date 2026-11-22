@@ -1,4 +1,5 @@
 #include "tray_match.h"
+#include <windows.h>
 #include <algorithm>
 #include <cwctype>
 #include <map>
@@ -24,7 +25,94 @@ std::wstring Key(const std::wstring& text)
             out += c >= L'A' && c <= L'Z' ? wchar_t(c + L'a' - L'A') : c;
     return out;
 }
+bool IsShellExplorerExe(const std::wstring& exe)
+{
+    constexpr std::wstring_view kName = L"explorer.exe";
+    if (exe.size() < kName.size())
+        return false;
+    const size_t start = exe.size() - kName.size();
+    if (start > 0 && exe[start - 1] != L'\\' && exe[start - 1] != L'/')
+        return false;
+    for (size_t i = 0; i < kName.size(); ++i) {
+        wchar_t c = exe[start + i];
+        if (c >= L'A' && c <= L'Z')
+            c = wchar_t(c + L'a' - L'A');
+        if (c != kName[i])
+            return false;
+    }
+    return true;
+}
+std::optional<ShellTrayKnown> KnownShellTray(const std::wstring& guidOrId)
+{
+    std::wstring norm;
+    for (wchar_t c : guidOrId) {
+        if (c == L'{' || c == L'}' || iswspace(c))
+            continue;
+        norm += c >= L'a' && c <= L'z' ? wchar_t(c + L'A' - L'a') : c;
+    }
+    if (norm.starts_with(L"GUID:"))
+        norm.erase(0, 5);
+    if (norm == L"6DA68F06-00F1-4E6E-8158-7F1FFD4F9DB9")
+        return ShellTrayKnown{{L"蓝牙设备", L"Bluetooth Devices", L"Bluetooth"}, L"bthprops.cpl"};
+    if (norm == L"7820AE78-23E3-4229-82C1-E41CB67D5B9C")
+        return ShellTrayKnown{{L"安全删除硬件并弹出媒体", L"Safely Remove Hardware and Eject Media"}, L"hotplug.dll"};
+    return std::nullopt;
+}
+std::wstring FallbackRecordTip(const Record& r)
+{
+    if (!r.tip.empty())
+        return r.tip;
+    if (IsShellExplorerExe(r.exe)) {
+        const auto known = KnownShellTray(r.identity.empty() ? r.id : r.identity);
+        return known && !known->aliases.empty() ? known->aliases.front() : std::wstring{};
+    }
+    for (size_t i : {size_t(1), size_t(2), size_t(3)})
+        if (r.names.size() > i && !r.names[i].empty())
+            return r.names[i];
+    return {};
+}
 namespace {
+std::wstring RepairMojibakeSegment(const std::wstring& seg)
+{
+    if (seg.empty() || std::ranges::all_of(seg, [](wchar_t ch) { return ch < 0x80; }))
+        return seg;
+    const UINT acp = GetACP();
+    if (acp == CP_UTF8)
+        return seg;
+    BOOL usedDefault = FALSE;
+    const int byteCount = WideCharToMultiByte(acp, WC_NO_BEST_FIT_CHARS, seg.data(), int(seg.size()), nullptr, 0, nullptr, &usedDefault);
+    if (byteCount <= 0 || usedDefault)
+        return seg;
+    std::string bytes(size_t(byteCount), '\0');
+    if (WideCharToMultiByte(acp, WC_NO_BEST_FIT_CHARS, seg.data(), int(seg.size()), bytes.data(), byteCount, nullptr, &usedDefault) != byteCount || usedDefault)
+        return seg;
+    const int acpChars = MultiByteToWideChar(acp, MB_ERR_INVALID_CHARS, bytes.data(), byteCount, nullptr, 0);
+    if (acpChars != int(seg.size()))
+        return seg;
+    std::wstring roundTrip(size_t(acpChars), L'\0');
+    if (MultiByteToWideChar(acp, MB_ERR_INVALID_CHARS, bytes.data(), byteCount, roundTrip.data(), acpChars) != acpChars || roundTrip != seg)
+        return seg;
+    if (std::ranges::none_of(bytes, [](unsigned char b) { return b >= 0x80; }))
+        return seg;
+    const int utf16Chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), byteCount, nullptr, 0);
+    if (utf16Chars <= 0)
+        return seg;
+    std::wstring decoded(size_t(utf16Chars), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), byteCount, decoded.data(), utf16Chars) != utf16Chars || decoded == seg)
+        return seg;
+    const bool inputHasEastAsian = std::ranges::any_of(seg, [](wchar_t ch) { return ch >= 0x2E80; });
+    const bool inputHasPua = std::ranges::any_of(seg, [](wchar_t ch) { return ch >= 0xE000 && ch <= 0xF8FF; });
+    bool decodedHasHigh = false;
+    for (wchar_t ch : decoded) {
+        if ((ch >= 0x0080 && ch <= 0x009F) || ch == 0xFFFD || (ch < 0x20 && ch != L'\t') || (!inputHasPua && ch >= 0xE000 && ch <= 0xF8FF))
+            return seg;
+        if (ch >= 0x0800)
+            decodedHasHigh = true;
+    }
+    if (inputHasEastAsian && !decodedHasHigh)
+        return seg;
+    return decoded;
+}
 bool DelimitedPrefix(const std::wstring& text, const std::wstring& name)
 {
     // Keep the boundary that Key removes: Steam - syncing is a status suffix,
@@ -39,6 +127,29 @@ bool DelimitedPrefix(const std::wstring& text, const std::wstring& name)
     }
     return false;
 }
+bool DelimitedContains(const std::wstring& haystack, const std::wstring& needleKey)
+{
+    if (needleKey.size() < 4)
+        return false;
+    for (size_t start = 0; start < haystack.size(); ++start) {
+        if (start > 0 && !Key(haystack.substr(start - 1, 1)).empty())
+            continue;
+        if (Key(haystack.substr(start, 1)).empty())
+            continue;
+        std::wstring prefix;
+        for (size_t i = start; i < haystack.size(); ++i) {
+            prefix += Key(haystack.substr(i, 1));
+            if (prefix == needleKey) {
+                if (i + 1 == haystack.size() || Key(haystack.substr(i + 1, 1)).empty())
+                    return true;
+                break;
+            }
+            if (!needleKey.starts_with(prefix))
+                break;
+        }
+    }
+    return false;
+}
 int Score(const std::wstring& tip, const std::vector<std::wstring>& names, size_t firstTitle)
 {
     const auto title = Title(tip), key = Key(title);
@@ -46,12 +157,16 @@ int Score(const std::wstring& tip, const std::vector<std::wstring>& names, size_
         return 0;
     int best = 0;
     for (size_t n = 0; n < names.size(); ++n) {
-        const auto name = Key(Title(names[n]));
+        const auto nameTitle = Title(names[n]), name = Key(nameTitle);
         if (name.size() < 2)
             continue;
-        int score = key == name ? 100 : DelimitedPrefix(title, name) ? 80 : 0;
-        if (n >= firstTitle && score != 100)
-            score = 0;
+        int score = 0;
+        if (key == name)
+            score = 100;
+        else if (n < firstTitle && DelimitedPrefix(title, name))
+            score = 80;
+        else if (n < firstTitle && ((name.size() >= 4 && DelimitedContains(title, name)) || (key.size() >= 4 && DelimitedContains(nameTitle, key))))
+            score = 60;
         best = std::max(best, score);
     }
     return best;
@@ -64,23 +179,14 @@ bool ContainsCenter(const Rect& cell, const Rect& icon)
     const long y = icon.top + (icon.bottom - icon.top) / 2;
     return x >= cell.left && x < cell.right && y >= cell.top && y < cell.bottom;
 }
-} // namespace
-const wchar_t* MethodName(Method m)
+void AssignMatch(Result& out, std::vector<bool>& used, size_t b, size_t r, Method method)
 {
-    switch (m) {
-    case Method::Geometry: return L"geometry";
-    case Method::Name: return L"name";
-    case Method::Order: return L"order";
-    case Method::Running: return L"running";
-    case Method::Record: return L"record";
-    default: return L"unknown";
-    }
+    out.items[b].record = r;
+    out.items[b].method = method;
+    used[r] = true;
 }
-Result Match(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<Program>& programs)
+std::vector<size_t> CollectLiveRecords(const std::vector<Record>& records, Result& out)
 {
-    Result out;
-    out.aliases.resize(records.size(), kNone);
-    out.sharedPlace.resize(records.size(), false);
     std::vector<size_t> sorted(records.size());
     std::iota(sorted.begin(), sorted.end(), 0);
     std::ranges::stable_sort(sorted, [&](size_t a, size_t b) {
@@ -103,14 +209,11 @@ Result Match(const std::vector<Button>& buttons, const std::vector<Record>& reco
         for (size_t s : live)
             if (r != s && records[r].bounds.Valid() && records[r].bounds == records[s].bounds)
                 out.sharedPlace[r] = true;
-    std::vector<bool> used(records.size(), false);
-    for (size_t b = 0; b < buttons.size(); ++b)
-        out.items.push_back({b});
-    auto assign = [&](size_t b, size_t r, Method method) {
-        out.items[b].record = r;
-        out.items[b].method = method;
-        used[r] = true;
-    };
+    return live;
+}
+void MatchByGeometry(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<size_t>& live, std::vector<bool>& used,
+                     Result& out)
+{
     // Geometry is usable only when unique in BOTH directions, before any records are consumed.
     for (size_t b = 0; b < buttons.size(); ++b) {
         std::vector<size_t> hits;
@@ -123,10 +226,13 @@ Result Match(const std::vector<Button>& buttons, const std::vector<Record>& reco
         for (const auto& button : buttons)
             count += ContainsCenter(button.bounds, records[r].bounds);
         if (count == 1)
-            assign(b, r, Method::Geometry);
+            AssignMatch(out, used, b, r, Method::Geometry);
     }
+}
+void MatchByName(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<size_t>& live, std::vector<bool>& used, Result& out)
+{
     // Mutual unique best name. Equal scores never silently select the first executable.
-    for (int threshold : {100, 80}) {
+    for (int threshold : {100, 80, 60}) {
         for (size_t b = 0; b < buttons.size(); ++b) {
             if (out.items[b].record != kNone)
                 continue;
@@ -149,33 +255,45 @@ Result Match(const std::vector<Button>& buttons, const std::vector<Record>& reco
                 if (other != b && out.items[other].record == kNone && Score(buttons[other].tip, records[chosen].names, records[chosen].firstTitle) >= best)
                     contested = true;
             if (!contested)
-                assign(b, chosen, Method::Name);
+                AssignMatch(out, used, b, chosen, Method::Name);
         }
     }
-    // Order is a weak hint: require complete equal-size groups and agreement with every anchor.
-    // Never zip a partial UIA tree to a longer list of records, or override a name anchor.
+}
+void MatchByOrder(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<size_t>& live, std::vector<bool>& used, Result& out)
+{
+    // Order is a weak hint: require equal unmatched counts per partition and relative order with anchors.
     for (bool promoted : {true, false}) {
-        std::vector<size_t> bs, rs;
+        std::vector<size_t> ub, ur;
         for (size_t b = 0; b < buttons.size(); ++b)
-            if (buttons[b].promoted == promoted)
-                bs.push_back(b);
+            if (buttons[b].promoted == promoted && out.items[b].record == kNone)
+                ub.push_back(b);
         for (size_t r : live)
-            if (records[r].promoted == promoted)
-                rs.push_back(r);
-        if (bs.empty() || bs.size() != rs.size())
+            if (records[r].promoted == promoted && !used[r])
+                ur.push_back(r);
+        if (ub.empty() || ub.size() != ur.size())
             continue;
         bool agrees = true;
-        for (size_t i = 0; i < bs.size(); ++i) {
-            const size_t b = bs[i], r = rs[i];
-            if (records[r].order == kNone || (i && records[r].order == records[rs[i - 1]].order) ||
-                (out.items[b].record != kNone && out.items[b].record != r) || (used[r] && out.items[b].record != r))
+        size_t prevOrder = 0;
+        bool hasPrev = false;
+        size_t uIdx = 0;
+        for (size_t b = 0; b < buttons.size() && agrees; ++b) {
+            if (buttons[b].promoted != promoted)
+                continue;
+            const size_t r = out.items[b].record != kNone ? out.items[b].record : ur[uIdx++];
+            if (out.items[b].record != kNone && records[r].promoted != promoted)
+                continue;
+            if (records[r].order == kNone || (hasPrev && records[r].order <= prevOrder))
                 agrees = false;
+            prevOrder = records[r].order;
+            hasPrev = true;
         }
         if (agrees)
-            for (size_t i = 0; i < bs.size(); ++i)
-                if (out.items[bs[i]].record == kNone)
-                    assign(bs[i], rs[i], Method::Order);
+            for (size_t i = 0; i < ub.size(); ++i)
+                AssignMatch(out, used, ub[i], ur[i], Method::Order);
     }
+}
+void MatchRunningPrograms(const std::vector<Button>& buttons, const std::vector<Program>& programs, Result& out)
+{
     for (auto& item : out.items) {
         if (item.record != kNone)
             continue;
@@ -193,10 +311,195 @@ Result Match(const std::vector<Button>& buttons, const std::vector<Record>& reco
         if (item.program != kNone)
             item.method = Method::Running;
     }
-    // Identity-only deduplication. Neither exe, name, nor geometry proves two icons are one.
+}
+void AttachRemaining(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<size_t>& live, std::vector<bool>& used,
+                     Result& out)
+{
+    for (size_t r : live) {
+        if (used[r])
+            continue;
+        size_t hit = kNone;
+        int best = 59;
+        bool tied = false;
+        for (size_t b = 0; b < buttons.size(); ++b) {
+            if (out.items[b].record != kNone || out.items[b].program != kNone || buttons[b].promoted != records[r].promoted)
+                continue;
+            int score = Score(buttons[b].tip, records[r].names, records[r].firstTitle);
+            if (score > best)
+                best = score, hit = b, tied = false;
+            else if (score == best)
+                tied = true;
+        }
+        if (hit != kNone && !tied)
+            AssignMatch(out, used, hit, r, Method::Name);
+    }
+    for (bool promoted : {true, false}) {
+        size_t ub = kNone, ur = kNone, nb = 0, nr = 0;
+        for (size_t b = 0; b < buttons.size(); ++b)
+            if (buttons[b].promoted == promoted && out.items[b].record == kNone && out.items[b].program == kNone)
+                ub = b, ++nb;
+        for (size_t r : live)
+            if (records[r].promoted == promoted && !used[r])
+                ur = r, ++nr;
+        if (nb == 1 && nr == 1 && Title(buttons[ub].tip).empty())
+            AssignMatch(out, used, ub, ur, Method::Order);
+    }
     for (size_t r : live)
         if (!used[r])
             out.items.push_back({kNone, r, kNone, Method::Record});
+}
+uint64_t UidOf(const std::wstring& id)
+{
+    const size_t colon = id.rfind(L':');
+    if (colon == std::wstring::npos || (!id.starts_with(L"uid:") && !id.starts_with(L"hwnd:")))
+        return ~0ull;
+    return wcstoull(&id[colon + 1], nullptr, 10);
+}
+std::wstring ExeStem(const std::wstring& exe)
+{
+    if (exe.empty())
+        return {};
+    const size_t slash = exe.find_last_of(L"\\/");
+    std::wstring name = slash == std::wstring::npos ? exe : exe.substr(slash + 1);
+    if (const size_t dot = name.rfind(L'.'); dot != std::wstring::npos)
+        name.resize(dot);
+    return name;
+}
+bool TipMatches(const std::wstring& expTip, const std::wstring& hostTip)
+{
+    const auto et = Title(expTip), ek = Key(et);
+    const auto ht = Title(hostTip), hk = Key(ht);
+    if (ek.empty() || hk.empty())
+        return false;
+    return ek == hk || DelimitedPrefix(et, hk) || DelimitedPrefix(ht, ek);
+}
+bool HostedMatchesTier(const HostedEntry& h, const ExplorerEntry& e, int tier)
+{
+    const bool sameExe = !h.exe.empty() && e.exe == h.exe;
+    const bool compatExe = e.exe.empty() || h.exe.empty() || e.exe == h.exe;
+    switch (tier) {
+    case 0: return sameExe && !e.recordId.empty() && e.recordId == h.key;
+    case 1: return sameExe && h.hasUid && UidOf(e.recordId) == h.uid;
+    case 2: return sameExe && !Key(Title(h.tip)).empty() && Key(Title(h.tip)) == Key(Title(e.tip));
+    case 3: {
+        const auto ek = Key(Title(e.tip));
+        return compatExe && !ek.empty() && (ek == Key(Title(h.tip)) || ek == Key(Title(h.fallbackTip)));
+    }
+    case 4: return compatExe && (TipMatches(e.tip, h.tip) || TipMatches(e.tip, h.fallbackTip));
+    case 5: return sameExe;
+    default: return false;
+    }
+}
+bool HostedClaimsUnknown(const std::vector<HostedEntry>& hosted, const ExplorerEntry& exp)
+{
+    if (hosted.empty() || exp.hasImage)
+        return false;
+    if (Key(Title(exp.tip)).empty())
+        return true;
+    return std::ranges::any_of(hosted, [&](const HostedEntry& h) {
+        return TipMatches(exp.tip, h.tip) || TipMatches(exp.tip, h.fallbackTip) || TipMatches(exp.tip, h.productName) || TipMatches(exp.tip, ExeStem(h.exe));
+    });
+}
+bool HostedSuppressesDuplicateExe(const std::vector<HostedEntry>& hosted, const std::vector<ExplorerEntry>& explorer, const std::vector<size_t>& hostedFallback,
+                                  const ExplorerEntry& exp)
+{
+    if (exp.exe.empty() || std::ranges::none_of(hosted, [&](const HostedEntry& h) { return !h.exe.empty() && h.exe == exp.exe; }))
+        return false;
+    if (!exp.recordId.starts_with(L"guid:"))
+        return true;
+    for (size_t hi = 0; hi < hosted.size(); ++hi) {
+        if (hosted[hi].key == exp.recordId)
+            return true;
+        if (hostedFallback[hi] != kNone && explorer[hostedFallback[hi]].recordId == exp.recordId)
+            return true;
+    }
+    return false;
+}
+} // namespace
+std::wstring RepairMojibakeTip(const std::wstring& tip)
+{
+    if (tip.empty() || std::ranges::all_of(tip, [](wchar_t ch) { return ch < 0x80; }))
+        return tip;
+    std::wstring out;
+    out.reserve(tip.size());
+    size_t start = 0;
+    while (start <= tip.size()) {
+        const size_t end = tip.find(L'\n', start);
+        const size_t len = (end == std::wstring::npos ? tip.size() : end) - start;
+        std::wstring seg = tip.substr(start, len);
+        const bool cr = !seg.empty() && seg.back() == L'\r';
+        if (cr)
+            seg.pop_back();
+        out += RepairMojibakeSegment(seg);
+        if (cr)
+            out += L'\r';
+        if (end == std::wstring::npos)
+            break;
+        out += L'\n';
+        start = end + 1;
+    }
     return out;
+}
+const wchar_t* MethodName(Method m)
+{
+    switch (m) {
+    case Method::Geometry: return L"geometry";
+    case Method::Name: return L"name";
+    case Method::Order: return L"order";
+    case Method::Running: return L"running";
+    case Method::Record: return L"record";
+    default: return L"unknown";
+    }
+}
+Result Match(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<Program>& programs)
+{
+    Result out;
+    out.aliases.resize(records.size(), kNone);
+    out.sharedPlace.resize(records.size(), false);
+    const auto live = CollectLiveRecords(records, out);
+    std::vector<bool> used(records.size(), false);
+    for (size_t b = 0; b < buttons.size(); ++b)
+        out.items.push_back({b});
+    MatchByGeometry(buttons, records, live, used, out);
+    MatchByName(buttons, records, live, used, out);
+    MatchByOrder(buttons, records, live, used, out);
+    MatchRunningPrograms(buttons, programs, out);
+    AttachRemaining(buttons, records, live, used, out);
+    return out;
+}
+MergedTrayView MergeHostedIcons(const std::vector<HostedEntry>& hosted, const std::vector<ExplorerEntry>& explorer)
+{
+    MergedTrayView view;
+    view.hostedFallback.assign(hosted.size(), kNone);
+    std::vector<bool> usedExp(explorer.size(), false);
+    for (int tier = 0; tier < 6; ++tier)
+        for (size_t hi = 0; hi < hosted.size(); ++hi)
+            for (size_t ei = 0; ei < explorer.size(); ++ei)
+                if (view.hostedFallback[hi] == kNone && !usedExp[ei] && HostedMatchesTier(hosted[hi], explorer[ei], tier))
+                    view.hostedFallback[hi] = ei, usedExp[ei] = true;
+    for (size_t hi = 0; hi < hosted.size(); ++hi) {
+        if (view.hostedFallback[hi] != kNone || hosted[hi].exe.empty())
+            continue;
+        size_t match = kNone;
+        for (size_t ei = 0; ei < explorer.size(); ++ei) {
+            if (explorer[ei].exe != hosted[hi].exe)
+                continue;
+            if (hosted[hi].hasUid && UidOf(explorer[ei].recordId) == hosted[hi].uid) {
+                match = ei;
+                break;
+            }
+            match = match == kNone ? ei : kNone - 1;
+        }
+        if (match < explorer.size())
+            view.hostedFallback[hi] = match;
+    }
+    for (size_t ei = 0; ei < explorer.size(); ++ei) {
+        if (usedExp[ei])
+            continue;
+        if (HostedClaimsUnknown(hosted, explorer[ei]) || HostedSuppressesDuplicateExe(hosted, explorer, view.hostedFallback, explorer[ei]))
+            continue;
+        view.extraExplorer.push_back(ei);
+    }
+    return view;
 }
 } // namespace atrium::tray

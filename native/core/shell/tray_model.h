@@ -95,6 +95,7 @@ private:
     };
     void Worker();
     bool ClickHosted(const TrayIcon& icon, tray::HostAction action);
+    void EnqueueUrgent(Job job);
     HWND notify_;
     UINT msg_;
     std::function<std::vector<PinnedApp>()> appNames_;
@@ -107,7 +108,7 @@ private:
     std::unique_ptr<TrayHost> host_;
     // Ink for a hosted one-shade glyph, by picture version.
     mutable std::map<uint64_t, std::pair<std::shared_ptr<const IconImage>, bool>> hostInk_;
-    mutable std::map<std::wstring, std::wstring> hostNames_; // program descriptions, for icons without a tooltip
+    mutable std::map<std::wstring, std::pair<std::wstring, std::wstring>> hostNames_; // FileDescription and ProductName, for icons without a tooltip
     // Windows' order of the icons by "guid:{...}", "uid:<exe>|<uid>" and "exe:<exe>" (the first of the program).
     std::map<std::wstring, size_t> windowsOrder_;
 };

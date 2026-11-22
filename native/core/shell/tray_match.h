@@ -1,6 +1,8 @@
 // Value-only notification-area reconciliation. No Windows headers or calls.
 #pragma once
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,7 +44,35 @@ struct Result {
     std::vector<size_t> aliases; // canonical record index; none for dead/unprobeable records
     std::vector<bool> sharedPlace;
 };
+struct ShellTrayKnown {
+    std::vector<std::wstring> aliases;
+    const wchar_t* iconDll = nullptr;
+};
+struct HostedEntry {
+    std::wstring key;
+    std::wstring exe;
+    std::wstring tip;
+    std::wstring fallbackTip;
+    std::wstring productName;
+    uint64_t uid = 0;
+    bool hasUid = false;
+};
+struct ExplorerEntry {
+    std::wstring recordId;
+    std::wstring exe;
+    std::wstring tip;
+    bool hasImage = false;
+};
+struct MergedTrayView {
+    std::vector<size_t> hostedFallback;
+    std::vector<size_t> extraExplorer;
+};
+bool IsShellExplorerExe(const std::wstring& exe);
+std::optional<ShellTrayKnown> KnownShellTray(const std::wstring& guidOrId);
+std::wstring RepairMojibakeTip(const std::wstring& tip);
+std::wstring FallbackRecordTip(const Record& r);
 std::wstring Title(const std::wstring& tip);
 std::wstring Key(const std::wstring& text);
 Result Match(const std::vector<Button>& buttons, const std::vector<Record>& records, const std::vector<Program>& programs = {});
+MergedTrayView MergeHostedIcons(const std::vector<HostedEntry>& hosted, const std::vector<ExplorerEntry>& explorer);
 } // namespace atrium::tray

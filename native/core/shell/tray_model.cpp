@@ -205,7 +205,7 @@ std::vector<Record> ReadRecords(bool& ordered)
             r.exe = Lower(AppExecutable(ResolveKnownFolder(buf)));
         size = sizeof(buf);
         if (RegGetValueW(root, name, L"InitialTooltip", RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
-            r.tip = buf;
+            r.tip = tray::RepairMojibakeTip(buf);
         size = 0;
         if (RegGetValueW(root, name, L"IconSnapshot", RRF_RT_REG_BINARY, nullptr, nullptr, &size) == ERROR_SUCCESS && size && size < (1u << 20)) {
             r.png.resize(size);
@@ -406,11 +406,16 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
             (xaml ? f.host : f.toolbar) = host;
             BSTR name = nullptr;
             f.element->get_CurrentName(&name);
-            f.tip = name ? name : L"";
+            f.tip = name ? tray::RepairMojibakeTip(name) : L"";
             SysFreeString(name);
+            f.element->get_CurrentBoundingRectangle(&f.bounds);
+            if (xaml && f.tip.empty() && f.bounds.left == 0 && f.bounds.top == 0 && f.bounds.right == 0 && f.bounds.bottom == 0) {
+                BOOL offscreen = FALSE;
+                if (SUCCEEDED(f.element->get_CurrentIsOffscreen(&offscreen)) && offscreen)
+                    continue;
+            }
             f.promoted = promoted;
             f.index = int(std::count_if(out.begin(), out.end(), [&](const Found& o) { return o.promoted == promoted; }));
-            f.element->get_CurrentBoundingRectangle(&f.bounds);
             f.runtimeId = RuntimeId(f.element.get());
             out.push_back(std::move(f));
         }
@@ -544,6 +549,64 @@ bool ShowOverflow(IUIAutomation* uia)
 struct ReadDiagnostics {
     size_t records = 0, live = 0, aliases = 0, shared = 0, unknown = 0;
 };
+using InkCache = std::map<uint64_t, std::pair<std::shared_ptr<const IconImage>, bool>>;
+using HostNameMap = std::map<std::wstring, std::pair<std::wstring, std::wstring>>;
+std::wstring GuidString(const GUID& guid)
+{
+    wchar_t buf[40]{};
+    return guid != GUID_NULL && StringFromGUID2(guid, buf, 40) ? buf : std::wstring{};
+}
+std::pair<std::wstring, std::wstring> ExeVersionNames(const std::wstring& path, HostNameMap& cache, HostNameMap* added = nullptr)
+{
+    if (path.empty() || tray::IsShellExplorerExe(path))
+        return {};
+    if (cache.size() > 512)
+        cache.clear();
+    auto [it, fresh] = cache.try_emplace(path);
+    if (fresh) {
+        it->second = {VersionString(path, L"FileDescription"), VersionString(path, L"ProductName")};
+        if (added)
+            added->emplace(path, it->second);
+    }
+    return it->second;
+}
+void FillRecordNames(const std::wstring& path, const Program& program, const std::wstring& tip, const std::wstring& guidOrId,
+                     const std::map<std::wstring, std::vector<std::wstring>>& labels, HostNameMap& version, std::vector<std::wstring>& out, size_t& firstTitle)
+{
+    if (tray::IsShellExplorerExe(path)) {
+        out = {tip};
+        if (const auto known = tray::KnownShellTray(guidOrId))
+            out.insert(out.end(), known->aliases.begin(), known->aliases.end());
+        firstTitle = out.size();
+        return;
+    }
+    auto [desc, prod] = ExeVersionNames(path, version);
+    std::wstring stem = PathFindFileNameW(path.c_str());
+    if (auto dot = stem.rfind(L'.'); dot != std::wstring::npos)
+        stem.resize(dot);
+    out = {tip, std::move(desc), std::move(prod), stem};
+    if (auto it = labels.find(path); it != labels.end())
+        out.insert(out.end(), it->second.begin(), it->second.end());
+    firstTitle = out.size();
+    out.insert(out.end(), program.titles.begin(), program.titles.end());
+}
+bool HasUnmatchedLive(const std::vector<tray::Record>& rs, const tray::Result& initial, const std::wstring& path)
+{
+    return std::ranges::any_of(rs, [&](const tray::Record& r) {
+        const size_t idx = size_t(&r - rs.data());
+        return r.live && r.exe == path && std::ranges::none_of(initial.items, [&](const tray::Pair& item) { return item.record == idx; });
+    });
+}
+void FillDiagnostics(const std::vector<tray::Record>& rs, const tray::Result& result, ReadDiagnostics* d)
+{
+    if (!d)
+        return;
+    *d = {rs.size()};
+    for (size_t r = 0; r < rs.size(); ++r)
+        d->live += rs[r].live, d->aliases += result.aliases[r] != tray::kNone && result.aliases[r] != r, d->shared += result.sharedPlace[r];
+    for (const auto& item : result.items)
+        d->unknown += item.method == tray::Method::Unknown;
+}
 std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& records, bool& ordered, const std::vector<PinnedApp>& apps = {},
                               ReadDiagnostics* diagnostics = nullptr)
 {
@@ -553,22 +616,7 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
     for (const auto& app : apps)
         if (!app.path.empty() && !app.name.empty())
             labels[Lower(AppExecutable(app.path))].push_back(app.name);
-    static std::map<std::wstring, std::pair<std::wstring, std::wstring>> version;
-    if (version.size() > 512)
-        version.clear();
-    auto names = [&](const std::wstring& path, const Program& program, const std::wstring& tip, std::vector<std::wstring>& out, size_t& firstTitle) {
-        auto [at, fresh] = version.try_emplace(path);
-        if (fresh)
-            at->second = {VersionString(path, L"FileDescription"), VersionString(path, L"ProductName")};
-        std::wstring stem = PathFindFileNameW(path.c_str());
-        if (auto dot = stem.rfind(L'.'); dot != std::wstring::npos)
-            stem.resize(dot);
-        out = {tip, at->second.first, at->second.second, stem};
-        if (auto it = labels.find(path); it != labels.end())
-            out.insert(out.end(), it->second.begin(), it->second.end());
-        firstTitle = out.size();
-        out.insert(out.end(), program.titles.begin(), program.titles.end());
-    };
+    static HostNameMap version;
     auto rect = [](const RECT& r) { return tray::Rect{r.left, r.top, r.right, r.bottom}; };
     std::vector<tray::Button> bs;
     bs.reserve(buttons.size());
@@ -581,66 +629,48 @@ std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& 
         auto run = running.find(r.exe);
         // A filename-only process result is not proof of a full executable path.
         const Program& program = run == running.end() ? empty : run->second;
-        tray::Record value;
-        value.id = r.id;
-        value.exe = r.exe;
-        value.tip = r.tip;
-        value.promoted = r.promoted;
-        value.order = r.order;
+        tray::Record value{r.id, r.exe, r.tip, {}, false, r.promoted, r.order};
         RECT bounds{};
         value.live = LiveIcon(r, program, bounds, value.identity, probe);
         value.bounds = rect(bounds);
-        if (value.live)
-            names(r.exe, program, r.tip, value.names, value.firstTitle);
+        if (value.live) {
+            const std::wstring guid = GuidString(r.guid);
+            FillRecordNames(r.exe, program, r.tip, guid.empty() ? r.id : guid, labels, version, value.names, value.firstTitle);
+        }
         rs.push_back(std::move(value));
     }
     std::vector<tray::Program> ps;
     const auto initial = tray::Match(bs, rs);
     const bool needPrograms = std::ranges::any_of(initial.items, [](const auto& item) { return item.button != tray::kNone && item.record == tray::kNone; });
     for (const auto& [path, program] : running) {
-        if (!needPrograms || path.empty() || path[0] == L'|' || program.windows.empty() ||
-            std::ranges::any_of(rs, [&](const auto& r) { return r.live && r.exe == path; }))
+        if (!needPrograms || path.empty() || path[0] == L'|' || tray::IsShellExplorerExe(path) || program.windows.empty() ||
+            HasUnmatchedLive(rs, initial, path))
             continue;
-        tray::Program value;
-        value.exe = path;
-        names(path, program, {}, value.names, value.firstTitle);
+        tray::Program value{path};
+        FillRecordNames(path, program, {}, {}, labels, version, value.names, value.firstTitle);
         ps.push_back(std::move(value));
     }
     const auto result = tray::Match(bs, rs, ps);
-    if (diagnostics) {
-        *diagnostics = {};
-        diagnostics->records = rs.size();
-        for (size_t r = 0; r < rs.size(); ++r) {
-            diagnostics->live += rs[r].live;
-            diagnostics->aliases += result.aliases[r] != tray::kNone && result.aliases[r] != r;
-            diagnostics->shared += result.sharedPlace[r];
-        }
-        for (const auto& item : result.items)
-            diagnostics->unknown += item.method == tray::Method::Unknown;
-    }
+    FillDiagnostics(rs, result, diagnostics);
     std::vector<int> match;
     for (const auto& item : result.items) {
         if (item.button == tray::kNone) {
             const auto& r = rs[item.record];
             Found f;
-            f.tip = r.tip;
-            if (f.tip.empty() && r.names.size() > 1)
-                f.tip = r.names[1];
-            if (f.tip.empty() && r.names.size() > 3)
-                f.tip = r.names[3];
-            f.promoted = r.promoted;
+            f.tip = tray::FallbackRecordTip(r), f.promoted = r.promoted;
             f.index = int(std::count_if(buttons.begin(), buttons.end(), [&](const Found& b) { return b.promoted == f.promoted; }));
             buttons.push_back(std::move(f)); // no element or fake clickable rectangle
         }
         Found& f = buttons[match.size()];
         f.method = item.method;
         if (item.record != tray::kNone) {
+            if (f.tip.empty())
+                f.tip = tray::FallbackRecordTip(rs[item.record]);
             f.recordId = rs[item.record].identity;
             match.push_back(int(item.record));
         } else if (item.program != tray::kNone) {
             Record r;
-            r.exe = ps[item.program].exe;
-            r.id = L"run:" + r.exe;
+            r.exe = ps[item.program].exe, r.id = L"run:" + r.exe;
             records.push_back(std::move(r));
             match.push_back(int(records.size() - 1));
         } else
@@ -906,25 +936,6 @@ uint64_t Uid(const std::wstring& s)
     return s.rfind(L':') < s.size() && (s.starts_with(L"uid:") || s.starts_with(L"hwnd:")) ? wcstoull(&s[s.rfind(L':') + 1], nullptr, 10) : ~0ull;
 }
 
-std::vector<const TrayIcon*> PairHosted(const std::vector<HostIcon>& h, const std::vector<TrayIcon>& e, std::vector<bool>& used)
-{
-    std::vector<const TrayIcon*> fb(h.size(), nullptr);
-    used.assign(e.size(), false);
-    for (int tier = 0; tier < 4; ++tier)
-        for (size_t hi = 0; hi < h.size(); ++hi)
-            for (size_t ei = 0; ei < e.size(); ++ei)
-                if (!fb[hi] && !h[hi].exe.empty() && !used[ei] && e[ei].exe == h[hi].exe &&
-                    (tier == 3 || (tier == 0 && e[ei].recordId == h[hi].key) || (tier == 1 && h[hi].uid && Uid(e[ei].recordId) == h[hi].uid) ||
-                     (tier == 2 && !NormTip(h[hi].tip).empty() && NormTip(h[hi].tip) == NormTip(e[ei].tip))))
-                    fb[hi] = &e[ei], used[ei] = true;
-    for (size_t hi = 0; hi < h.size(); ++hi)
-        if (!fb[hi] && !h[hi].exe.empty())
-            for (int n = 0; const TrayIcon& x : e)
-                if (x.exe == h[hi].exe && n >= 0)
-                    fb[hi] = h[hi].uid && Uid(x.recordId) == h[hi].uid ? (n = -1, &x) : n++ ? nullptr : &x;
-    return fb;
-}
-
 TrayIcon FindClickFallback(const TrayIcon& icon, const std::vector<TrayIcon>& icons)
 {
     std::vector<const TrayIcon*> same;
@@ -945,6 +956,97 @@ TrayIcon FindClickFallback(const TrayIcon& icon, const std::vector<TrayIcon>& ic
             return *hit;
     }
     return icon.exeOrdinal >= 0 && size_t(icon.exeOrdinal) < same.size() ? *same[size_t(icon.exeOrdinal)] : *same.front();
+}
+
+std::vector<TrayIcon> InWindowsOrder(std::vector<TrayIcon> list)
+{
+    std::ranges::stable_sort(list, [](const TrayIcon& a, const TrayIcon& b) { return a.order < b.order; });
+    std::map<std::wstring, int> counts;
+    for (size_t i = 0; i < list.size(); ++i)
+        list[i].index = int(i), list[i].exeOrdinal = list[i].exe.empty() ? -1 : counts[list[i].exe]++;
+    return list;
+}
+
+std::pair<std::shared_ptr<const IconImage>, bool> MakeInked(const IconImage& img)
+{
+    const int tone = img.Empty() ? 0 : GlyphTone(img);
+    return {tone ? std::make_shared<const IconImage>(InkedGlyph(img, tone)) : nullptr, tone > 0};
+}
+
+TrayIcon BuildHostedIcon(const HostIcon& h, const tray::HostedEntry& entry, const TrayIcon* fb, const std::map<std::wstring, size_t>& order, InkCache& ink,
+                         InkCache& newInk)
+{
+    static const tray::ShellSession kHostShell{1, 1, 1};
+    TrayIcon t{entry.tip, h.exe, h.image, h.imageVersion};
+    t.hostKey = h.key, t.pid = h.pid, t.appTooltip = h.version >= 4 && !h.showTip, t.flashing = h.flashUntil > GetTickCount64();
+    t.order = fb && fb->order != SIZE_MAX ? fb->order : order.contains(L"exe:" + h.exe) ? order.at(L"exe:" + h.exe) : SIZE_MAX;
+    for (const auto& k : {L"uid:" + h.exe + L"|" + std::to_wstring(h.uid), h.key})
+        if (auto o = order.find(k); o != order.end())
+            t.order = o->second;
+    if (t.tip.empty())
+        t.tip = fb && !fb->tip.empty() ? fb->tip : entry.fallbackTip;
+    t.recordId = L"host:" + h.key, t.shell = kHostShell, t.matchMethod = L"host";
+    if (!t.image && fb && fb->image)
+        t.image = fb->image, t.imageVersion = fb->imageVersion, t.inked = fb->inked, t.inkedOnLight = fb->inkedOnLight;
+    else if (t.image) {
+        if (auto [it, fresh] = ink.try_emplace(h.imageVersion); fresh) {
+            it->second = MakeInked(*t.image);
+            newInk.try_emplace(h.imageVersion, it->second);
+        }
+        t.inked = ink[h.imageVersion].first, t.inkedOnLight = ink[h.imageVersion].second;
+    }
+    return t;
+}
+
+struct Picture {
+    uint64_t version = 0;
+    std::wstring exe;
+    std::vector<BYTE> snapshot;
+    std::shared_ptr<const IconImage> image, inked;
+    bool inkedOnLight = false;
+};
+
+void ResolveRecordPicture(const Record& r, const std::wstring& recordId, Picture& pic, uint64_t& nextImageVersion)
+{
+    if (pic.image && pic.exe == r.exe && pic.snapshot == r.png)
+        return;
+    IconImage img;
+    const auto art = tray::LoadArtwork([&] { return !r.png.empty() && DecodePng(r.png, img); },
+                                       [&] {
+                                           if (tray::IsShellExplorerExe(r.exe)) {
+                                               const auto known = tray::KnownShellTray(recordId.empty() ? GuidString(r.guid) : recordId);
+                                               return known && known->iconDll && LoadShellImage(known->iconDll, kIconPx, img);
+                                           }
+                                           return LoadAtriumIcon(r.exe, kIconPx, img) || LoadShellImage(r.exe, kIconPx, img);
+                                       });
+    if (art == tray::Artwork::Missing)
+        img = {};
+    pic.version = ++nextImageVersion, pic.exe = r.exe, pic.snapshot = r.png;
+    Log(L"tray: artwork identity=%s source=%s version=%llu bytes=%zu", recordId.c_str(),
+        art == tray::Artwork::Snapshot    ? L"snapshot" :
+        art == tray::Artwork::Application ? L"application" :
+                                            L"missing",
+        pic.version, r.png.size());
+    std::tie(pic.inked, pic.inkedOnLight) = MakeInked(img);
+    if (pic.inked)
+        Log(L"tray: %s draws a %s glyph: it follows the ink", PathFindFileNameW(r.exe.c_str()), pic.inkedOnLight ? L"white" : L"black");
+    pic.image = img.Empty() ? nullptr : std::make_shared<const IconImage>(std::move(img));
+}
+
+std::map<std::wstring, size_t> BuildWindowsOrder(const std::vector<Record>& records)
+{
+    std::map<std::wstring, size_t> out;
+    for (const Record& r : records) {
+        if (r.order == SIZE_MAX)
+            continue;
+        if (const std::wstring guid = GuidString(r.guid); !guid.empty())
+            out.try_emplace(L"guid:" + guid, r.order);
+        if (r.hasUid)
+            out.try_emplace(L"uid:" + r.exe + L"|" + std::to_wstring(r.uid), r.order);
+        if (auto [it, fresh] = out.try_emplace(L"exe:" + r.exe, r.order); !fresh)
+            it->second = std::min(it->second, r.order);
+    }
+    return out;
 }
 
 } // namespace
@@ -1023,6 +1125,13 @@ void TrayModel::Hover(const TrayIcon* icon)
         host_->Hover(icon ? icon->hostKey : L"", at);
 }
 
+void TrayModel::EnqueueUrgent(Job job)
+{
+    std::lock_guard g(mutex_);
+    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), std::move(job));
+    cv_.notify_all();
+}
+
 bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction)
 {
     if (icon.hostKey.empty())
@@ -1038,38 +1147,27 @@ bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction)
                                 hostAction == tray::HostAction::DoubleContinuation ? tray::Action::DoubleContinuation :
                                                                                      tray::Action::Left;
     // The host could not send it (an elevated app, the host off): Explorer's button, by program.
+    TrayIcon fallback;
     {
         std::lock_guard g(mutex_);
-        jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), {false, FindClickFallback(icon, icons_), action});
+        fallback = FindClickFallback(icon, icons_);
     }
-    cv_.notify_all();
+    EnqueueUrgent({false, std::move(fallback), action});
     return true;
 }
 
 void TrayModel::Click(const TrayIcon& icon, bool right)
 {
-    if (ClickHosted(icon, right ? tray::HostAction::Right : tray::HostAction::Left))
-        return;
-    std::lock_guard g(mutex_);
-    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), {false, icon, right ? tray::Action::Right : tray::Action::Left});
-    cv_.notify_all();
+    if (!ClickHosted(icon, right ? tray::HostAction::Right : tray::HostAction::Left))
+        EnqueueUrgent({false, icon, right ? tray::Action::Right : tray::Action::Left});
 }
 
 void TrayModel::DoubleClick(const TrayIcon& icon, bool continuation)
 {
-    if (ClickHosted(icon, continuation ? tray::HostAction::DoubleContinuation : tray::HostAction::Double))
-        return;
-    std::lock_guard g(mutex_);
-    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }),
-                 {false, icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double});
-    cv_.notify_all();
+    if (!ClickHosted(icon, continuation ? tray::HostAction::DoubleContinuation : tray::HostAction::Double))
+        EnqueueUrgent({false, icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double});
 }
-void TrayModel::OpenSystemTray()
-{
-    std::lock_guard g(mutex_);
-    jobs_.insert(std::ranges::find_if(jobs_, [](const Job& j) { return j.refresh; }), {false, {}, tray::Action::Left, true});
-    cv_.notify_all();
-}
+void TrayModel::OpenSystemTray() { EnqueueUrgent({false, {}, tray::Action::Left, true}); }
 
 bool TrayModel::OpenExisting(const std::wstring& exe)
 {
@@ -1119,87 +1217,45 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
 
 std::vector<TrayIcon> TrayModel::Icons() const
 {
-    auto inWindowsOrder = [](std::vector<TrayIcon> list) {
-        std::ranges::stable_sort(list, [](const TrayIcon& a, const TrayIcon& b) { return a.order < b.order; });
-        std::map<std::wstring, int> counts;
-        for (size_t i = 0; i < list.size(); ++i)
-            list[i].index = int(i), list[i].exeOrdinal = list[i].exe.empty() ? -1 : counts[list[i].exe]++;
-        return list;
-    };
     std::vector<HostIcon> hosted;
     std::vector<TrayIcon> explorer;
     std::map<std::wstring, size_t> order;
-    std::map<std::wstring, std::wstring> names, newNames;
-    std::map<uint64_t, std::pair<std::shared_ptr<const IconImage>, bool>> ink, newInk;
+    HostNameMap names, newNames;
+    InkCache ink, newInk;
     const TrayHost* hostPtr = nullptr;
     {
         std::lock_guard g(mutex_);
         if (!host_ || host_->Yielded())
-            return inWindowsOrder(icons_);
+            return InWindowsOrder(icons_);
         hostPtr = host_.get();
         hosted = host_->Icons();
-        explorer = inWindowsOrder(icons_);
+        explorer = InWindowsOrder(icons_);
         order = windowsOrder_;
         names = hostNames_;
         ink = hostInk_;
     }
     std::erase_if(hosted, [](const HostIcon& h) { return h.hidden; });
-    std::vector<bool> usedExp;
-    const auto fbList = PairHosted(hosted, explorer, usedExp);
-    static const tray::ShellSession kHostShell{1, 1, 1};
-    auto make = [&](const HostIcon& h, const TrayIcon* fb) {
-        TrayIcon t;
-        t.tip = h.tip;
-        t.exe = h.exe;
-        t.hostKey = h.key;
-        t.pid = h.pid;
-        t.appTooltip = h.version >= 4 && !h.showTip;
-        t.flashing = h.flashUntil > GetTickCount64();
-        t.order = fb && fb->order != SIZE_MAX ? fb->order : order.contains(L"exe:" + h.exe) ? order.at(L"exe:" + h.exe) : SIZE_MAX;
-        for (const auto& k : {L"uid:" + h.exe + L"|" + std::to_wstring(h.uid), h.key})
-            if (auto o = order.find(k); o != order.end())
-                t.order = o->second;
-        if (t.tip.empty() && fb && !fb->tip.empty())
-            t.tip = fb->tip;
-        if (t.tip.empty() && !h.exe.empty()) {
-            auto [it, fresh] = names.try_emplace(h.exe);
-            if (fresh) {
-                it->second = VersionString(h.exe, L"FileDescription");
-                if (it->second.empty())
-                    it->second = PathFindFileNameW(h.exe.c_str());
-                newNames.try_emplace(h.exe, it->second);
-            }
-            t.tip = it->second;
-        }
-        t.recordId = L"host:" + h.key;
-        t.shell = kHostShell;
-        t.matchMethod = L"host";
-        t.image = h.image;
-        t.imageVersion = h.imageVersion;
-        if (!t.image && fb && fb->image) {
-            t.image = fb->image;
-            t.imageVersion = fb->imageVersion;
-            t.inked = fb->inked;
-            t.inkedOnLight = fb->inkedOnLight;
-        } else if (t.image) {
-            if (auto [it, fresh] = ink.try_emplace(h.imageVersion); fresh) {
-                const int tone = GlyphTone(*t.image);
-                it->second = {tone ? std::make_shared<const IconImage>(InkedGlyph(*t.image, tone)) : nullptr, tone > 0};
-                newInk.try_emplace(h.imageVersion, it->second);
-            }
-            t.inked = ink[h.imageVersion].first;
-            t.inkedOnLight = ink[h.imageVersion].second;
-        }
-        return t;
-    };
+    std::vector<tray::HostedEntry> hostEntries;
+    hostEntries.reserve(hosted.size());
+    for (const auto& h : hosted) {
+        auto [desc, prod] = ExeVersionNames(h.exe, names, &newNames);
+        if (desc.empty() && !h.exe.empty() && !tray::IsShellExplorerExe(h.exe))
+            desc = prod.empty() ? PathFindFileNameW(h.exe.c_str()) : prod;
+        hostEntries.push_back(
+            {h.key, h.exe, tray::RepairMojibakeTip(h.tip), std::move(desc), std::move(prod), h.uid, h.uid != 0 || h.key.starts_with(L"hwnd:")});
+    }
+    std::vector<tray::ExplorerEntry> expEntries;
+    expEntries.reserve(explorer.size());
+    for (const auto& e : explorer)
+        expEntries.push_back({e.recordId, e.exe, e.tip, e.image != nullptr});
+    const auto merged = tray::MergeHostedIcons(hostEntries, expEntries);
     std::vector<TrayIcon> out;
-    out.reserve(hosted.size() + explorer.size());
+    out.reserve(hosted.size() + merged.extraExplorer.size());
     for (size_t i = 0; i < hosted.size(); ++i)
-        out.push_back(make(hosted[i], fbList[i]));
-    for (size_t i = 0; i < explorer.size(); ++i)
-        if (!usedExp[i] && (!explorer[i].exe.empty() || explorer[i].tip.empty() ||
-                            std::ranges::none_of(hosted, [&](const HostIcon& h) { return !h.tip.empty() && Title(h.tip) == Title(explorer[i].tip); })))
-            out.push_back(explorer[i]);
+        out.push_back(BuildHostedIcon(hosted[i], hostEntries[i], merged.hostedFallback[i] != tray::kNone ? &explorer[merged.hostedFallback[i]] : nullptr, order,
+                                      ink, newInk));
+    for (size_t ei : merged.extraExplorer)
+        out.push_back(explorer[ei]);
     if (!newNames.empty() || !newInk.empty()) {
         std::lock_guard g(mutex_);
         if (hostNames_.size() > 256)
@@ -1211,7 +1267,7 @@ std::vector<TrayIcon> TrayModel::Icons() const
             hostInk_.insert(newInk.begin(), newInk.end());
         }
     }
-    return inWindowsOrder(std::move(out));
+    return InWindowsOrder(std::move(out));
 }
 
 bool TrayModel::Loaded() const
@@ -1219,7 +1275,6 @@ bool TrayModel::Loaded() const
     std::lock_guard g(mutex_);
     return loaded_;
 }
-
 bool TrayModel::Available() const
 {
     std::lock_guard g(mutex_);
@@ -1235,18 +1290,9 @@ void TrayModel::Worker()
         created = CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put()));
     if (FAILED(created))
         Log(L"tray: UI Automation unavailable");
-    if (auto options = uia.try_as<IUIAutomation2>()) {
-        options->put_ConnectionTimeout(250);
-        options->put_TransactionTimeout(250);
-    }
+    if (auto options = uia.try_as<IUIAutomation2>())
+        options->put_ConnectionTimeout(250), options->put_TransactionTimeout(250);
     uint64_t nextImageVersion = 0;
-    struct Picture {
-        uint64_t version = 0;
-        std::wstring exe;
-        std::vector<BYTE> snapshot;
-        std::shared_ptr<const IconImage> image, inked;
-        bool inkedOnLight = false;
-    };
     std::map<std::wstring, Picture> pictures;
     using Clock = std::chrono::steady_clock;
     auto retryAt = Clock::time_point::max();
@@ -1310,10 +1356,9 @@ void TrayModel::Worker()
                 auto resolve = [&]() -> Found* {
                     std::vector<tray::TargetKey> candidates;
                     candidates.reserve(buttons.size());
-                    for (size_t b = 0; b < buttons.size(); ++b) {
+                    for (size_t b = 0; b < buttons.size(); ++b)
                         candidates.push_back(
                             {session, buttons[b].runtimeId, buttons[b].recordId, match[b] >= 0 ? records[size_t(match[b])].exe : L"", buttons[b].tip});
-                    }
                     const auto resolved = tray::ResolveTarget(job.icon.Target(), ReadShellSession(), candidates);
                     Log(L"tray: click resolve=%s shellPid=%lu shellStarted=%llu shellWindow=%llu", tray::ResolutionName(resolved.reason), DWORD(session.pid),
                         session.started, session.window);
@@ -1403,7 +1448,7 @@ void TrayModel::Worker()
                     continue;
                 }
                 // Only an existing visible/minimized main window, and only for a left action.
-                if (!observed && job.action != tray::Action::Right && !job.icon.exe.empty()) {
+                if (!observed && job.action != tray::Action::Right && !job.icon.exe.empty() && !tray::IsShellExplorerExe(job.icon.exe)) {
                     observed = ForegroundExisting(job.icon.exe);
                     Log(L"tray: click foreground-existing observed=%d", observed);
                 }
@@ -1427,79 +1472,31 @@ void TrayModel::Worker()
                 Refresh();
                 continue;
             }
-            if (!session.Valid()) {
-                buttons.clear();
-                match.clear();
-                available = false;
-            }
+            if (!session.Valid())
+                buttons.clear(), match.clear(), available = false;
 
             std::vector<TrayIcon> icons;
             std::set<std::wstring> livePictures;
             int recognised = 0;
             for (size_t b = 0; b < buttons.size(); ++b) {
                 TrayIcon t;
-                t.tip = buttons[b].tip;
-                t.promoted = buttons[b].promoted;
-                t.index = buttons[b].index;
-                t.recordId = buttons[b].recordId;
-                t.runtimeId = buttons[b].runtimeId;
-                t.shell = session;
-                t.matchMethod = tray::MethodName(buttons[b].method);
+                t.tip = buttons[b].tip, t.promoted = buttons[b].promoted, t.index = buttons[b].index, t.recordId = buttons[b].recordId;
+                t.runtimeId = buttons[b].runtimeId, t.shell = session, t.matchMethod = tray::MethodName(buttons[b].method);
                 t.fromRecord = !buttons[b].element;
                 if (match[b] >= 0) {
                     const Record& r = records[size_t(match[b])];
-                    t.exe = r.exe;
-                    t.order = r.order;
-                    ++recognised;
-                    const std::wstring& key = r.id;
-                    livePictures.insert(key);
-                    auto& pic = pictures[key];
-                    if (!pic.image || pic.exe != r.exe || pic.snapshot != r.png) {
-                        IconImage img;
-                        const auto art = tray::LoadArtwork([&] { return !r.png.empty() && DecodePng(r.png, img); },
-                                                           [&] { return LoadAtriumIcon(r.exe, kIconPx, img) || LoadShellImage(r.exe, kIconPx, img); });
-                        if (art == tray::Artwork::Missing)
-                            img = {};
-                        pic.version = ++nextImageVersion;
-                        Log(L"tray: artwork identity=%s source=%s version=%llu bytes=%zu", t.recordId.c_str(),
-                            art == tray::Artwork::Snapshot    ? L"snapshot" :
-                            art == tray::Artwork::Application ? L"application" :
-                                                                L"missing",
-                            pic.version, r.png.size());
-                        pic.exe = r.exe;
-                        pic.snapshot = r.png;
-                        const int tone = img.Empty() ? 0 : GlyphTone(img);
-                        pic.inked = tone ? std::make_shared<const IconImage>(InkedGlyph(img, tone)) : nullptr;
-                        if (tone)
-                            Log(L"tray: %s draws a %s glyph: it follows the ink", PathFindFileNameW(r.exe.c_str()), tone > 0 ? L"white" : L"black");
-                        pic.inkedOnLight = tone > 0;
-                        pic.image = img.Empty() ? nullptr : std::make_shared<const IconImage>(std::move(img));
-                    }
-                    t.imageVersion = pic.version;
-                    t.image = pic.image;
-                    t.inked = pic.inked;
-                    t.inkedOnLight = pic.inkedOnLight;
+                    t.exe = r.exe, t.order = r.order, ++recognised;
+                    livePictures.insert(r.id);
+                    auto& pic = pictures[r.id];
+                    ResolveRecordPicture(r, t.recordId, pic, nextImageVersion);
+                    t.imageVersion = pic.version, t.image = pic.image, t.inked = pic.inked, t.inkedOnLight = pic.inkedOnLight;
                 }
                 icons.push_back(std::move(t));
             }
             std::erase_if(pictures, [&](const auto& item) { return !livePictures.contains(item.first); });
             // Windows' own order of the icons, for a list that does not depend on how much of
             // Explorer's tray has been built (and for the hosted icons).
-            std::map<std::wstring, size_t> windowsOrder;
-            for (const Record& r : records) {
-                if (r.order == SIZE_MAX)
-                    continue;
-                if (r.guid != GUID_NULL) {
-                    wchar_t guid[40]{};
-                    StringFromGUID2(r.guid, guid, 40);
-                    windowsOrder.try_emplace(L"guid:" + std::wstring(guid), r.order);
-                }
-                if (r.hasUid)
-                    windowsOrder.try_emplace(L"uid:" + r.exe + L"|" + std::to_wstring(r.uid), r.order);
-                auto [it, fresh] = windowsOrder.try_emplace(L"exe:" + r.exe, r.order);
-                if (!fresh)
-                    it->second = std::min(it->second, r.order);
-            }
+            std::map<std::wstring, size_t> windowsOrder = BuildWindowsOrder(records);
             bool changed;
             {
                 std::lock_guard g(mutex_);

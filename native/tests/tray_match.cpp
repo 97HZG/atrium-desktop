@@ -1,4 +1,5 @@
 #include "shell/tray_match.h"
+#include <windows.h>
 #include <iostream>
 #include <stdexcept>
 using namespace atrium::tray;
@@ -20,6 +21,83 @@ Record R(const std::wstring& name, size_t order, bool promoted = false)
     r.names = {name};
     r.bounds = {900, 1000, 920, 1020};
     return r;
+}
+void TestMojibakeAndKnownShell()
+{
+    Check(IsShellExplorerExe(L"C:\\Windows\\explorer.exe") && IsShellExplorerExe(L"EXPLORER.EXE"), "explorer exe detection");
+    Check(!IsShellExplorerExe(L"C:\\Tools\\myexplorer.exe") && !IsShellExplorerExe(L""), "non-explorer exe rejected");
+    const auto bt = KnownShellTray(L"{6DA68F06-00F1-4E6E-8158-7F1FFD4F9DB9}");
+    Check(bt && std::wstring(bt->iconDll) == L"bthprops.cpl" && bt->aliases.size() == 3, "known bluetooth shell tray");
+    const auto usb = KnownShellTray(L"guid:{7820ae78-23e3-4229-82c1-e41cb67d5b9c}");
+    Check(usb && std::wstring(usb->iconDll) == L"hotplug.dll" && usb->aliases.size() == 2, "known safely remove shell tray");
+    Check(!KnownShellTray(L"{00000000-0000-0000-0000-000000000000}"), "unknown guid returns nullopt");
+
+    for (const std::wstring& clean : {std::wstring(L"蓝牙设备"), std::wstring(L"安全删除硬件并弹出媒体"), std::wstring(L"模式"),
+                                      std::wstring(L"Steam - syncing"), std::wstring(L"100% ↑↓ •"), std::wstring()})
+        Check(RepairMojibakeTip(clean) == clean, "clean UTF-16 and ASCII tooltips stay untouched");
+
+    const UINT acp = GetACP();
+    if (acp != CP_UTF8) {
+        const std::wstring expected = L"VPN - 中文测试";
+        const int utf8Len = WideCharToMultiByte(CP_UTF8, 0, expected.data(), int(expected.size()), nullptr, 0, nullptr, nullptr);
+        std::string utf8(size_t(utf8Len), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, expected.data(), int(expected.size()), utf8.data(), utf8Len, nullptr, nullptr);
+        const int wLen = MultiByteToWideChar(acp, MB_ERR_INVALID_CHARS, utf8.data(), utf8Len, nullptr, 0);
+        if (wLen > 0) {
+            std::wstring mojibake(size_t(wLen), L'\0');
+            if (MultiByteToWideChar(acp, MB_ERR_INVALID_CHARS, utf8.data(), utf8Len, mojibake.data(), wLen) == wLen) {
+                const int rtLen = WideCharToMultiByte(acp, WC_NO_BEST_FIT_CHARS, mojibake.data(), wLen, nullptr, 0, nullptr, nullptr);
+                std::string rt(size_t(rtLen), '\0');
+                BOOL usedDef = FALSE;
+                if (rtLen == utf8Len && WideCharToMultiByte(acp, WC_NO_BEST_FIT_CHARS, mojibake.data(), wLen, rt.data(), rtLen, nullptr, &usedDef) == rtLen &&
+                    !usedDef && rt == utf8)
+                    Check(RepairMojibakeTip(mojibake) == expected, "UTF-8-as-ACP mojibake Chinese+English round-trip repaired");
+            }
+        }
+    }
+}
+void TestOrderAndDedup()
+{
+    auto rWork = R(L"WorkBuddy", 0);
+    auto result = Match({{L"Tencent WorkBuddy (Online)", false}}, {rWork});
+    Check(result.items.size() == 1 && result.items[0].record == 0 && result.items[0].method == Method::Name, "delimited contains score 60 match");
+
+    auto a = R(L"Alpha", 0), b = R(L"Beta", 1), c = R(L"Charlie", 2);
+    result = Match({{L"Alpha", false}, {L"Custom Tip", false}, {L"Charlie", false}}, {a, b, c});
+    Check(result.items.size() == 3 && result.items[1].record == 1 && result.items[1].method == Method::Order, "remainder Order after partial Name anchors");
+
+    auto top = R(L"TopApp", 0, true);
+    result = Match({{L"TopApp", false}, {L"X1", false}, {L"X2", false}}, {top, a, b});
+    Check(result.items.size() == 3 && result.items[1].record == 1 && result.items[2].record == 2 && result.items[1].method == Method::Order,
+          "remainder Order ignores cross-partition anchor");
+
+    auto wb = R(L"WorkBuddy", 0);
+    wb.order = kNone;
+    result = Match({{L"", false}}, {wb});
+    Check(result.items.size() == 1 && result.items[0].button == 0 && result.items[0].record == 0,
+          "single empty button attaches single unmatched record instead of gray disc");
+
+    std::vector<HostedEntry> hosted{
+        {L"hwnd:1:1", L"c:\\vpn\\vpn.exe", L"VPN - Connected", L"VPN Client", L"VPN App", 1, true},
+        {L"hwnd:2:2", L"", L"NVIDIA Settings", L"", L"", 2, true},
+        {L"hwnd:3:3", L"c:\\app\\workbuddy.exe", L"", L"WorkBuddy", L"Tencent WorkBuddy", 3, true},
+    };
+    std::vector<ExplorerEntry> explorer{
+        {L"uid:10:1:1", L"c:\\vpn\\vpn.exe", L"VPN - Connected", true},
+        {L"uid:10:9:9", L"c:\\vpn\\vpn.exe", L"VPN - Idle", true},
+        {L"guid:{11111111-1111-1111-1111-111111111111}", L"c:\\vpn\\vpn.exe", L"VPN Helper", true},
+        {L"uid:20:2:2", L"c:\\nvidia\\nv.exe", L"NVIDIA Settings - GPU", true},
+        {L"", L"", L"WorkBuddy - Online", false},
+        {L"", L"", L"Tencent WorkBuddy - Status", false},
+        {L"", L"", L"", false},
+        {L"guid:{22222222-2222-2222-2222-222222222222}", L"c:\\other\\other.exe", L"Other", true},
+    };
+    const auto merged = MergeHostedIcons(hosted, explorer);
+    Check(merged.hostedFallback[0] == 0, "hosted VPN paired by uid");
+    Check(merged.hostedFallback[1] == 3, "elevated empty-exe hosted paired by delimited-prefix tip");
+    Check(merged.hostedFallback[2] == 4, "empty-exe explorer paired against hosted fallbackTip");
+    Check(merged.extraExplorer.size() == 2 && merged.extraExplorer[0] == 2 && merged.extraExplorer[1] == 7,
+          "suppresses duplicate VPN uid, ghost empty tip, productName gray disc, and keeps distinct unpaired GUID and unrelated app");
 }
 int main()
 {
@@ -79,6 +157,8 @@ int main()
         result = Match({{L"", false, a.bounds}}, {a, b});
         Check(result.items[0].record == kNone, "shared rectangle never becomes unique after consumption");
         Check(Title(L" \r\n Steam \r\n status") == L"Steam", "tooltip first line");
+        TestMojibakeAndKnownShell();
+        TestOrderAndDedup();
         std::cout << "tray matching: all scenarios passed\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

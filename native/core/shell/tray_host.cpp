@@ -3,11 +3,13 @@
 #include "log.h"
 #include "shell/shell_icon.h"
 #include "shell/shell_taskbar.h"
+#include "shell/tray_match.h"
 #include "win32_path.h"
 
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <tlhelp32.h>
 
 #include <algorithm>
 #include <iterator>
@@ -102,6 +104,33 @@ DWORD PidOf(HWND h)
 
 // The shell's process: the desktop's (Explorer, or whatever shell Windows runs).
 DWORD ShellPid() { return PidOf(GetShellWindow()); }
+
+bool HasStartAllBackModule(DWORD shellPid)
+{
+    if (!shellPid)
+        return false;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, shellPid);
+    if (snap == INVALID_HANDLE_VALUE)
+        return false;
+    bool found = false;
+    MODULEENTRY32W me{sizeof(me)};
+    for (BOOL ok = Module32FirstW(snap, &me); ok; ok = Module32NextW(snap, &me)) {
+        if (_wcsnicmp(me.szModule, L"StartAllBack", 12) == 0 || _wcsnicmp(me.szModule, L"StartIsBack", 11) == 0) {
+            found = true;
+            break;
+        }
+    }
+    CloseHandle(snap);
+    return found;
+}
+
+struct KeepFirstState {
+    const TrayHost* host = nullptr;
+    DWORD cachedShellPid = 0;
+    bool hasStartAllBack = false;
+    ULONGLONG lossWindowStart = 0;
+    int rapidLosses = 0;
+};
 
 const wchar_t* Name(DWORD message)
 {
@@ -495,7 +524,7 @@ void TrayHost::Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage
     icon.uid = nid.uID;
     if (nid.uFlags & NIF_MESSAGE)
         icon.callback = nid.uCallbackMessage;
-    if (nid.uFlags & NIF_ICON) {
+    if ((nid.uFlags & NIF_ICON) && image) {
         icon.image = std::move(image);
         icon.imageVersion = kImageBase + ++nextImage_;
         // Four picture changes within three seconds: it flashes (an icon blinking for a message).
@@ -505,8 +534,11 @@ void TrayHost::Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage
         if (icon.pictureChanges.size() >= 4)
             icon.flashUntil = now + 2500;
     }
-    if (nid.uFlags & NIF_TIP)
-        icon.tip.assign(nid.szTip, wcsnlen(nid.szTip, std::size(nid.szTip)));
+    if (nid.uFlags & NIF_TIP) {
+        std::wstring tip = tray::RepairMojibakeTip(std::wstring(nid.szTip, wcsnlen(nid.szTip, std::size(nid.szTip))));
+        if (!tip.empty() || icon.tip.empty())
+            icon.tip = std::move(tip);
+    }
     icon.showTip = (nid.uFlags & NIF_SHOWTIP) != 0 || icon.showTip;
     if ((nid.uFlags & NIF_STATE) && (nid.dwStateMask & NIS_HIDDEN))
         icon.hidden = (nid.dwState & NIS_HIDDEN) != 0;
@@ -550,8 +582,22 @@ void TrayHost::KeepFirst()
     // E_NOTIMPL: apps that show progress on their button would not start (TeraCopy #90, NanaZip #86).
     if (HANDLE band = shell ? GetPropW(shell, kTaskband) : nullptr; band != GetPropW(w, kTaskband))
         SetPropW(w, kTaskband, band);
+    thread_local KeepFirstState state;
+    if (state.host != this)
+        state = {this};
+    const DWORD shellPid = shell ? PidOf(shell) : ShellPid();
+    if (shellPid != state.cachedShellPid) {
+        state.cachedShellPid = shellPid;
+        state.hasStartAllBack = HasStartAllBackModule(shellPid);
+        state.lossWindowStart = 0;
+        state.rapidLosses = 0;
+        if (yielded_.exchange(false))
+            dirty_ = true;
+    }
     HWND first = FindWindowW(L"Shell_TrayWnd", nullptr);
     if (first == w) {
+        state.lossWindowStart = 0;
+        state.rapidLosses = 0;
         if (yielded_.exchange(false)) {
             Log(L"tray host: in front again");
             dirty_ = true;
@@ -560,16 +606,38 @@ void TrayHost::KeepFirst()
         return;
     }
     const DWORD owner = PidOf(first);
-    if (first && owner != GetCurrentProcessId() && owner != PidOf(shell)) {
+    if (first && owner != GetCurrentProcessId() && owner != shellPid) {
         if (!yielded_.exchange(true)) {
             Log(L"tray host: another program's tray (pid %lu) is in front: left there", owner);
             dirty_ = true;
         }
         return;
     }
+    if (yielded_.load())
+        return;
+    const ULONGLONG now = GetTickCount64();
+    if (state.hasStartAllBack) {
+        if (!yielded_.exchange(true)) {
+            Log(L"tray host: StartAllBack detected in explorer.exe (pid %lu); yielding", shellPid);
+            dirty_ = true;
+        }
+        return;
+    }
+    if (state.rapidLosses == 0 || now - state.lossWindowStart > 5000) {
+        state.lossWindowStart = now;
+        state.rapidLosses = 1;
+    } else {
+        ++state.rapidLosses;
+    }
+    if (state.rapidLosses >= 6) {
+        if (!yielded_.exchange(true)) {
+            Log(L"tray host: Explorer's taskbar repeatedly reclaimed first (%d times); yielding", state.rapidLosses);
+            dirty_ = true;
+        }
+        return;
+    }
     SetWindowPos(w, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     const bool again = FindWindowW(L"Shell_TrayWnd", nullptr) == w;
-    const ULONGLONG now = GetTickCount64();
     if (now - lostAt_ > 60000) // not on every round
         Log(L"tray host: Explorer's taskbar came first; moved back (%s)", again ? L"first again" : L"still second");
     lostAt_ = now;
