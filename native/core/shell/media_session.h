@@ -30,7 +30,6 @@ public:
     void Previous() { Command(MediaCommand::Previous, 0); }
     void Seek(int64_t positionUs) { Command(MediaCommand::Seek, positionUs); }
     void CycleSession(int delta);
-    void AdjustVolume(int deltaPercent);
     void ActivateApp() { Command(MediaCommand::ActivateApp, 0); }
 
 private:

@@ -1,7 +1,11 @@
 #include "shell/media_players.h"
 #include "shell/media_timeline.h"
+#include "shell/netease_tracks.h"
+
+#include <roapi.h>
 
 #include <iostream>
+#include <limits>
 
 using namespace atrium;
 
@@ -55,6 +59,15 @@ void CheckEstimate()
     MediaTimeline unknown;
     e.Update(L"c", true, 0, 400'000, unknown);
     Require(!unknown.Seekable(), "no length: no timeline");
+
+    TimelineEstimate emptyFirst;
+    MediaTimeline emptyOut;
+    emptyFirst.Update(L"", true, 180'000'000, 0, emptyOut);
+    emptyFirst.Update(L"\nSome Artist", true, 180'000'000, 500, emptyOut);
+    emptyFirst.Update(L"First Real\nSome Artist", true, 180'000'000, 1000, emptyOut);
+    Require(!emptyOut.Seekable(), "initial empty title does not mark first real track as seen from start");
+    emptyFirst.Update(L"Second Real\nSome Artist", true, 190'000'000, 2000, emptyOut);
+    Require(emptyOut.Seekable() && emptyOut.endUs == 190'000'000, "second real track after empty initial titles gets timeline");
 }
 
 void CheckTimeline()
@@ -88,6 +101,40 @@ void CheckTimeline()
     Require(!live.Seekable(), "endUs <= startUs is live and not seekable");
     Require(live.PositionUs(2000.0) == 6'000'000, "live timeline still advances");
     Require(live.PositionUs(-10'000.0) == 0, "live timeline clamps at startUs");
+
+    const double qnan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    MediaTimeline extreme = tl;
+    extreme.playing = true;
+    extreme.rate = inf;
+    Require(extreme.PositionUs(2000.0) == 20'000'000, "+Inf playback rate is ignored safely");
+    extreme.rate = qnan;
+    Require(extreme.PositionUs(2000.0) == 20'000'000, "NaN playback rate is ignored safely");
+    extreme.rate = -1.0;
+    Require(extreme.PositionUs(2000.0) == 20'000'000, "non-positive playback rate is ignored safely");
+    extreme.rate = 1e300;
+    Require(extreme.PositionUs(2000.0) == 70'000'000, "extreme finite playback rate clamps cleanly to endUs");
+    extreme.rate = 1.0;
+    Require(extreme.PositionUs(qnan) == 20'000'000, "NaN nowMs is ignored safely");
+    Require(extreme.PositionUs(inf) == 20'000'000, "+Inf nowMs is ignored safely");
+    Require(extreme.PositionUs(1e300) == 70'000'000, "extreme finite nowMs clamps cleanly to endUs");
+
+    MediaTimeline a;
+    a.startUs = 0;
+    a.endUs = 180'000'000;
+    a.anchorPosUs = 0;
+    a.anchorMs = 1000.0;
+    a.rate = 1.0;
+    a.playing = true;
+    MediaTimeline b = a;
+    b.anchorMs = 1050.0;
+    Require(!TimelineChanged(a, b), "small anchorMs clock jitter while playing is ignored");
+    b.anchorMs = 2000.0;
+    Require(TimelineChanged(a, b), "Repeat-One / seek-to-0 anchorMs jump while playing is detected");
+    a.playing = false;
+    b.playing = false;
+    b.anchorMs = 9000.0;
+    Require(!TimelineChanged(a, b), "anchorMs drift while paused does not trigger timeline change");
 }
 
 void CheckAppFilter()
@@ -144,6 +191,33 @@ void CheckPickSession()
     Require(PickMediaSession(emptyTitlePlaying, true, L"all", {}, L"") == 0, "Playing session without title is still eligible");
 }
 
+void CheckNeteaseQueueCache()
+{
+    const HRESULT roHr = RoInitialize(RO_INIT_MULTITHREADED);
+    Require(SUCCEEDED(roHr) || roHr == RPC_E_CHANGED_MODE, "RoInitialize succeeds for NeteaseQueueCache");
+
+    NeteaseQueueCache cache;
+    const std::wstring validJson = LR"({"list":[{"track":{"name":"Blue Bird","duration":215000,"artists":[{"name":"Ikimonogakari"}]}},)"
+                                   LR"({"track":{"name":"BadZero","duration":0}},{"track":{"name":"BadHuge","duration":90000000}},)"
+                                   LR"({"track":{"name":"BadNeg","duration":-500}}]})";
+    Require(cache.NeedsRead(100, 200), "fresh cache needs read");
+    Require(cache.Update(validJson, 100, 200), "valid queue JSON parses");
+    Require(!cache.NeedsRead(100, 200), "matching stamp/size skips re-read");
+    Require(cache.FindLengthUs(L"Blue Bird", L"Ikimonogakari") == 215'000'000, "valid track duration parsed");
+    Require(cache.FindLengthUs(L"BadZero", L"") == 0, "zero duration ignored");
+    Require(cache.FindLengthUs(L"BadHuge", L"") == 0, "out-of-range duration ignored");
+    Require(cache.FindLengthUs(L"BadNeg", L"") == 0, "negative duration ignored");
+
+    Require(!cache.Update(L"", 101, 0), "empty text fails update");
+    Require(!cache.Update(LR"({"list":)", 101, 9), "truncated JSON fails update");
+    Require(!cache.Update(LR"({"other":1})", 101, 11), "JSON missing list array fails update");
+    Require(!cache.NeedsRead(100, 200), "transient failure preserves previous file stamp/size");
+    Require(cache.FindLengthUs(L"Blue Bird", L"Ikimonogakari") == 215'000'000, "transient failure preserves previous tracks");
+
+    if (SUCCEEDED(roHr))
+        RoUninitialize();
+}
+
 } // namespace
 
 int main()
@@ -153,6 +227,7 @@ int main()
     CheckPlayers();
     CheckAppFilter();
     CheckPickSession();
+    CheckNeteaseQueueCache();
     if (g_failures > 0)
         return 1;
     std::cout << "media model: all checks passed\n";

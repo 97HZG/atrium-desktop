@@ -3,9 +3,10 @@
 
 #include "win32_path.h"
 
-#include <appmodel.h>
+#include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <tlhelp32.h>
 
 #include <winrt/base.h>
 
@@ -15,34 +16,33 @@ namespace atrium {
 
 namespace {
 
-std::wstring StripExeStem(std::wstring value)
-{
-    value = FoldCase(value);
-    const size_t slash = value.find_last_of(L"\\/");
-    if (slash != std::wstring::npos)
-        value = value.substr(slash + 1);
-    if (value.size() > 4 && value.compare(value.size() - 4, 4, L".exe") == 0)
-        value.resize(value.size() - 4);
-    return value;
-}
-
-bool ProcessMatchesAppId(DWORD pid, const std::wstring& targetFolded, const std::wstring& targetStem)
+bool ProcessMatchesAppId(DWORD pid, const std::wstring& targetFolded, const std::wstring& targetStem, std::wstring* outImagePath = nullptr)
 {
     const winrt::handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)};
     if (!process)
         return false;
-    UINT32 len = 0;
-    if (GetApplicationUserModelId(process.get(), &len, nullptr) == ERROR_INSUFFICIENT_BUFFER && len > 0) {
-        std::wstring aumid(len, L'\0');
-        if (GetApplicationUserModelId(process.get(), &len, aumid.data()) == ERROR_SUCCESS) {
-            if (!aumid.empty() && aumid.back() == L'\0')
-                aumid.pop_back();
-            if (FoldCase(aumid) == targetFolded)
-                return true;
-        }
+    const std::wstring aumid = FoldCase(ProcessAumid(process.get()));
+    const std::wstring rawPath = ProcessImagePath(process.get());
+    const std::wstring path = FoldCase(rawPath);
+    const bool matched =
+        (!aumid.empty() && aumid == targetFolded) || (!path.empty() && (path == targetFolded || (!targetStem.empty() && ExeStemFolded(path) == targetStem)));
+    if (matched && outImagePath)
+        *outImagePath = rawPath;
+    return matched;
+}
+
+std::wstring FindRunningProcessImage(const std::wstring& targetFolded, const std::wstring& targetStem)
+{
+    const winrt::handle snap{CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)};
+    if (!snap)
+        return {};
+    PROCESSENTRY32W pe{sizeof(pe)};
+    std::wstring imagePath;
+    for (BOOL ok = Process32FirstW(snap.get(), &pe); ok; ok = Process32NextW(snap.get(), &pe)) {
+        if (ProcessMatchesAppId(pe.th32ProcessID, targetFolded, targetStem, &imagePath) && !imagePath.empty())
+            return imagePath;
     }
-    const std::wstring path = FoldCase(ProcessImagePath(process.get()));
-    return !path.empty() && (path == targetFolded || (!targetStem.empty() && StripExeStem(path) == targetStem));
+    return {};
 }
 
 struct FindWindowCtx {
@@ -70,7 +70,7 @@ void ActivatePlayerApp(const std::wstring& appId)
 {
     if (appId.empty())
         return;
-    FindWindowCtx ctx{FoldCase(appId), StripExeStem(appId), nullptr};
+    FindWindowCtx ctx{FoldCase(appId), ExeStemFolded(appId), nullptr};
     EnumWindows(EnumAppWindowProc, reinterpret_cast<LPARAM>(&ctx));
     if (ctx.found) {
         DWORD pid = 0;
@@ -85,10 +85,22 @@ void ActivatePlayerApp(const std::wstring& appId)
         return;
     }
     winrt::com_ptr<IApplicationActivationManager> aam;
-    if (SUCCEEDED(CoCreateInstance(CLSID_ApplicationActivationManager, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(aam.put()))) && aam) {
-        DWORD pid = 0;
-        aam->ActivateApplication(appId.c_str(), nullptr, AO_NONE, &pid);
-    }
+    DWORD pid = 0;
+    if (SUCCEEDED(CoCreateInstance(CLSID_ApplicationActivationManager, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(aam.put()))) && aam &&
+        SUCCEEDED(aam->ActivateApplication(appId.c_str(), nullptr, AO_NONE, &pid)))
+        return;
+
+    std::wstring target = FindRunningProcessImage(ctx.targetFolded, ctx.targetStem);
+    if (target.empty())
+        target = appId.find(L'!') != std::wstring::npos ? (L"shell:AppsFolder\\" + appId) : appId;
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_FLAG_NO_UI;
+    sei.lpVerb = L"open";
+    sei.lpFile = target.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+    ShellExecuteExW(&sei);
 }
 
 std::wstring ResolveAppName(const std::wstring& appId, std::unordered_map<std::wstring, std::wstring>& cache)

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <windows.h>
+#include <appmodel.h>
 
 #include <string>
 
@@ -71,6 +72,32 @@ inline std::wstring FoldCase(const std::wstring& text)
     if (LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, text.data(), int(text.size()), folded.data(), count, nullptr, nullptr, 0) <= 0)
         return text;
     return folded;
+}
+
+inline std::wstring ExeStemFolded(const std::wstring& path)
+{
+    std::wstring folded = FoldCase(path);
+    const size_t slash = folded.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        folded = folded.substr(slash + 1);
+    if (folded.size() > 4 && folded.ends_with(L".exe"))
+        folded.resize(folded.size() - 4);
+    return folded;
+}
+
+inline std::wstring ProcessAumid(HANDLE process)
+{
+    if (!process)
+        return {};
+    UINT32 len = 0;
+    if (GetApplicationUserModelId(process, &len, nullptr) != ERROR_INSUFFICIENT_BUFFER || len == 0)
+        return {};
+    std::wstring aumid(len, L'\0');
+    if (GetApplicationUserModelId(process, &len, aumid.data()) != ERROR_SUCCESS)
+        return {};
+    while (!aumid.empty() && aumid.back() == L'\0')
+        aumid.pop_back();
+    return aumid;
 }
 
 inline bool SameExecutableWindow(HWND window, const std::wstring& exePath = ModulePath())

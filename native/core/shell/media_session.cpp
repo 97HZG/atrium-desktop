@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cwctype>
 #include <deque>
@@ -171,12 +172,13 @@ bool ReadStreamBytes(IStream* stream, std::vector<uint8_t>& bytes)
 {
     bytes.clear();
     uint8_t chunk[16384]{};
-    for (ULONG read = 0; SUCCEEDED(stream->Read(chunk, sizeof(chunk), &read)) && read > 0;) {
+    HRESULT hr = S_OK;
+    for (ULONG read = 0; SUCCEEDED(hr = stream->Read(chunk, sizeof(chunk), &read)) && read > 0;) {
         if (bytes.size() + read > kMaxArtworkBytes)
             return false;
         bytes.insert(bytes.end(), chunk, chunk + read);
     }
-    return !bytes.empty();
+    return SUCCEEDED(hr) && !bytes.empty();
 }
 
 bool DecodeWicSquare(IWICImagingFactory* wic, std::vector<uint8_t>& bytes, IconImage& out)
@@ -207,12 +209,18 @@ bool DecodeWicSquare(IWICImagingFactory* wic, std::vector<uint8_t>& bytes, IconI
 
 bool SnapshotChanged(const MediaSnapshot& a, const MediaSnapshot& b)
 {
-    const bool tlSame = a.timeline.startUs == b.timeline.startUs && a.timeline.endUs == b.timeline.endUs && a.timeline.anchorPosUs == b.timeline.anchorPosUs &&
-                        a.timeline.rate == b.timeline.rate && a.timeline.playing == b.timeline.playing;
-    return !tlSame || a.active != b.active || a.sessionId != b.sessionId || a.appId != b.appId || a.appName != b.appName || a.title != b.title ||
-           a.artist != b.artist || a.album != b.album || a.state != b.state || a.canPlayPause != b.canPlayPause || a.canNext != b.canNext ||
-           a.canPrevious != b.canPrevious || a.canSeek != b.canSeek || a.canLike != b.canLike || a.canLyrics != b.canLyrics || a.artworkVersion != b.artworkVersion || a.sessionIndex != b.sessionIndex ||
-           a.sessionCount != b.sessionCount;
+    return TimelineChanged(a.timeline, b.timeline) || a.active != b.active || a.sessionId != b.sessionId || a.appId != b.appId || a.appName != b.appName ||
+           a.title != b.title || a.artist != b.artist || a.album != b.album || a.state != b.state || a.canPlayPause != b.canPlayPause ||
+           a.canNext != b.canNext || a.canPrevious != b.canPrevious || a.canSeek != b.canSeek || a.canLike != b.canLike || a.canLyrics != b.canLyrics ||
+           a.artworkVersion != b.artworkVersion || a.sessionIndex != b.sessionIndex || a.sessionCount != b.sessionCount;
+}
+
+bool IsRpcError(HRESULT hr)
+{
+    if (SUCCEEDED(hr))
+        return false;
+    return HRESULT_FACILITY(hr) == FACILITY_RPC || hr == HRESULT_FROM_WIN32(RPC_S_SERVER_UNAVAILABLE) || hr == HRESULT_FROM_WIN32(RPC_S_CALL_FAILED) ||
+           hr == HRESULT_FROM_WIN32(RPC_S_CALL_FAILED_DNE) || hr == HRESULT_FROM_WIN32(RPC_S_SERVER_TOO_BUSY);
 }
 
 struct TrackedSession {
@@ -235,7 +243,7 @@ struct FilterConfig {
 };
 
 struct QueuedAction {
-    enum class Kind { Command, Cycle, Volume };
+    enum class Kind { Command, Cycle };
     Kind kind = Kind::Command;
     MediaCommand command = MediaCommand::PlayPause;
     int64_t positionUs = 0;
@@ -299,6 +307,7 @@ private:
     winrt::com_ptr<IWICImagingFactory> wic_;
     winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSessionManager> manager_;
     EventRegistrationToken sessionsToken_{}, currentToken_{};
+    int managerFailStreak_ = 0;
     std::vector<std::unique_ptr<TrackedSession>> sessions_;
     std::unordered_map<std::wstring, std::wstring> appNameCache_;
     uint64_t nextSessionUid_ = 1, artworkVersion_ = 0;
@@ -318,6 +327,25 @@ private:
             ts.session->remove_MediaPropertiesChanged(ts.mediaToken);
         if (ts.timelineToken.value)
             ts.session->remove_TimelinePropertiesChanged(ts.timelineToken);
+    }
+
+    void ResetManager()
+    {
+        for (auto& ts : sessions_)
+            UnsubscribeSession(*ts);
+        sessions_.clear();
+        if (manager_) {
+            if (sessionsToken_.value) {
+                manager_->remove_SessionsChanged(sessionsToken_);
+                sessionsToken_ = {};
+            }
+            if (currentToken_.value) {
+                manager_->remove_CurrentSessionChanged(currentToken_);
+                currentToken_ = {};
+            }
+            manager_ = nullptr;
+        }
+        managerFailStreak_ = 0;
     }
 
     void RunBoolCommand(Wmc::IGlobalSystemMediaTransportControlsSession* session,
@@ -352,17 +380,27 @@ private:
                 wake_.handle);
         manager_->add_SessionsChanged(sessHandler.get(), &sessionsToken_);
         manager_->add_CurrentSessionChanged(curHandler.get(), &currentToken_);
+        managerFailStreak_ = 0;
         return true;
     }
 
-    void SyncSessionList()
+    bool SyncSessionList()
     {
         if (!manager_)
-            return;
+            return false;
         winrt::com_ptr<__FIVectorView_1_Windows__CMedia__CControl__CGlobalSystemMediaTransportControlsSession> list;
         UINT32 count = 0;
-        if (FAILED(manager_->GetSessions(list.put())) || !list || FAILED(list->get_Size(&count)))
-            return;
+        const HRESULT hr = manager_->GetSessions(list.put());
+        const HRESULT sizeHr = (SUCCEEDED(hr) && list) ? list->get_Size(&count) : hr;
+        if (FAILED(hr) || !list || FAILED(sizeHr)) {
+            const HRESULT err = FAILED(hr) ? hr : sizeHr;
+            if (IsRpcError(err) || ++managerFailStreak_ >= 3) {
+                Log(L"media: resetting GSMTC manager (hr=%08x)", static_cast<unsigned>(err));
+                ResetManager();
+            }
+            return false;
+        }
+        managerFailStreak_ = 0;
 
         std::vector<std::unique_ptr<TrackedSession>> next;
         next.reserve(count);
@@ -408,6 +446,7 @@ private:
         for (auto& removed : sessions_)
             UnsubscribeSession(*removed);
         sessions_ = std::move(next);
+        return true;
     }
 
     void ReadMediaProperties(TrackedSession& ts)
@@ -447,8 +486,10 @@ private:
         }
         if (FAILED(thumbRef->OpenReadAsync(streamOp.put())) || !streamOp || !AwaitAsync<StreamHandler>(streamOp.get(), stopEvent_.handle, kAsyncTimeoutMs) ||
             stop_.load(std::memory_order_acquire) || FAILED(streamOp->GetResults(stream.put())) || !stream ||
-            FAILED(CreateStreamOverRandomAccessStream(stream.get(), IID_PPV_ARGS(comStream.put()))) || !comStream)
+            FAILED(CreateStreamOverRandomAccessStream(stream.get(), IID_PPV_ARGS(comStream.put()))) || !comStream) {
+            clearArt();
             return;
+        }
 
         std::vector<uint8_t> bytes;
         if (!ReadStreamBytes(comStream.get(), bytes)) {
@@ -491,7 +532,7 @@ private:
                 outSnap.state = ToPlaybackState(rawStatus);
             winrt::com_ptr<__FIReference_1_double> rateRef;
             double r = 1.0;
-            if (SUCCEEDED(pb->get_PlaybackRate(rateRef.put())) && rateRef && SUCCEEDED(rateRef->get_Value(&r)) && r > 0.0)
+            if (SUCCEEDED(pb->get_PlaybackRate(rateRef.put())) && rateRef && SUCCEEDED(rateRef->get_Value(&r)) && std::isfinite(r) && r > 0.0 && r <= 16.0)
                 outSnap.timeline.rate = r;
             winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSessionPlaybackControls> ctrl;
             if (SUCCEEDED(pb->get_Controls(ctrl.put())) && ctrl) {
@@ -522,9 +563,14 @@ private:
             tl->get_EndTime(&end);
             tl->get_Position(&pos);
             tl->get_LastUpdatedTime(&updated);
-            outSnap.timeline.startUs = start.Duration / 10;
-            outSnap.timeline.endUs = end.Duration / 10;
-            outSnap.timeline.anchorPosUs = pos.Duration / 10;
+            const int64_t rawStartUs = std::max<int64_t>(0, start.Duration / 10);
+            int64_t rawEndUs = end.Duration / 10;
+            constexpr int64_t kMaxDurationUs = 86400LL * 1'000'000 * 30;
+            if (rawEndUs <= rawStartUs || rawEndUs - rawStartUs > kMaxDurationUs)
+                rawEndUs = 0;
+            outSnap.timeline.startUs = rawStartUs;
+            outSnap.timeline.endUs = rawEndUs;
+            outSnap.timeline.anchorPosUs = std::max<int64_t>(0, pos.Duration / 10);
             double anchorMs = nowMs;
             if (updated.UniversalTime > 0) {
                 const double ageMs = static_cast<double>(CurrentFileTime100Ns() - updated.UniversalTime) / 10000.0;
@@ -566,10 +612,6 @@ private:
         if (activeIdx < 0 || activeIdx >= static_cast<int>(sessions_.size()))
             return;
         TrackedSession& active = *sessions_[activeIdx];
-        if (action.kind == QueuedAction::Kind::Volume) {
-            meter_.AdjustAppVolume(active.appId, action.delta);
-            return;
-        }
         switch (action.command) {
         case MediaCommand::PlayPause: RunBoolCommand(active.session.get(), &Wmc::IGlobalSystemMediaTransportControlsSession::TryTogglePlayPauseAsync); break;
         case MediaCommand::Next: RunBoolCommand(active.session.get(), &Wmc::IGlobalSystemMediaTransportControlsSession::TrySkipNextAsync); break;
@@ -604,8 +646,13 @@ private:
         SyncSessionList();
         winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSession> sysCur;
         winrt::com_ptr<IUnknown> sysCurId;
-        if (manager_ && SUCCEEDED(manager_->GetCurrentSession(sysCur.put())) && sysCur)
-            sysCur->QueryInterface(IID_PPV_ARGS(sysCurId.put()));
+        if (manager_) {
+            const HRESULT curHr = manager_->GetCurrentSession(sysCur.put());
+            if (SUCCEEDED(curHr) && sysCur)
+                sysCur->QueryInterface(IID_PPV_ARGS(sysCurId.put()));
+            else if (IsRpcError(curHr))
+                ResetManager();
+        }
 
         std::vector<MediaSnapshot> snaps(sessions_.size());
         std::vector<MediaSessionSummary> summaries(sessions_.size());
@@ -687,25 +734,18 @@ private:
             if (stop_.load(std::memory_order_acquire))
                 break;
 
-            const bool wantSample = lastPosted_.active && lastPosted_.state == MediaPlaybackState::Playing && samplingActive_.load(std::memory_order_acquire);
+            const bool hasActivePlayingSession = lastPosted_.active && lastPosted_.state == MediaPlaybackState::Playing;
+            const bool wantSample = hasActivePlayingSession && samplingActive_.load(std::memory_order_acquire);
             if (wantSample || lastPeakPlaying_) {
                 const float peak = wantSample ? meter_.Sample(lastPosted_.appId) : 0.0f;
                 lastPeakPlaying_ = wantSample;
                 if (onPeak_)
                     onPeak_(peak, wantSample);
             }
-            woke = WaitForSingleObject(wake_.handle, wantSample ? kSampleIntervalMs : INFINITE) == WAIT_OBJECT_0;
+            const DWORD waitMs = wantSample ? kSampleIntervalMs : (hasActivePlayingSession ? static_cast<DWORD>(kRefreshMs) : INFINITE);
+            woke = WaitForSingleObject(wake_.handle, waitMs) == WAIT_OBJECT_0;
         }
-        for (auto& ts : sessions_)
-            UnsubscribeSession(*ts);
-        sessions_.clear();
-        if (manager_) {
-            if (sessionsToken_.value)
-                manager_->remove_SessionsChanged(sessionsToken_);
-            if (currentToken_.value)
-                manager_->remove_CurrentSessionChanged(currentToken_);
-            manager_ = nullptr;
-        }
+        ResetManager();
         wic_ = nullptr;
         meter_.Reset();
     }
@@ -725,6 +765,5 @@ void MediaSessionWatcher::SetSamplingActive(bool barVisible) { impl_->SetSamplin
 
 void MediaSessionWatcher::Command(MediaCommand command, int64_t positionUs) { impl_->Enqueue({QueuedAction::Kind::Command, command, positionUs, 0}); }
 void MediaSessionWatcher::CycleSession(int delta) { impl_->Enqueue({QueuedAction::Kind::Cycle, MediaCommand::NextSession, 0, delta}); }
-void MediaSessionWatcher::AdjustVolume(int deltaPercent) { impl_->Enqueue({QueuedAction::Kind::Volume, MediaCommand::PlayPause, 0, deltaPercent}); }
 
 } // namespace atrium

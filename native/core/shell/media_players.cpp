@@ -70,11 +70,12 @@ bool QqMusicSeek(int64_t positionUs)
     const std::wstring exe = RunningImage(L"QQMusic.exe");
     if (exe.empty())
         return false;
-    const std::wstring dir = exe.substr(0, exe.find_last_of(L'\\'));
+    const size_t slash = exe.find_last_of(L"\\/");
+    const std::wstring dir = slash == std::wstring::npos ? std::wstring{} : exe.substr(0, slash);
     std::wstring cmd = L"\"" + exe + L"\" /seekto " + std::to_wstring(std::max<int64_t>(0, (positionUs + 500000) / 1000000));
     STARTUPINFOW si{sizeof(si)};
     PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, dir.c_str(), &si, &pi))
+    if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, dir.empty() ? nullptr : dir.c_str(), &si, &pi))
         return false;
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
