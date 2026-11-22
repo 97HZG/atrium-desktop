@@ -57,6 +57,7 @@ add_library(atrium_core_lib STATIC
     shell/tray_match.cpp
     shell/shell_verbs.cpp
     shell/jump_list.cpp
+    shell/folder_stacks.cpp
     shell/wechat_source.cpp
     shell/feishu_source.cpp
     ui/surface.cpp

@@ -143,3 +143,8 @@ add_test(NAME launchpad_model COMMAND launchpad_model_tests)
 add_executable(media_model_tests media_model.cpp)
 target_link_libraries(media_model_tests PRIVATE atrium_core_lib)
 add_test(NAME media_model COMMAND media_model_tests)
+
+add_executable(folder_stacks_tests folder_stacks.cpp)
+target_link_libraries(folder_stacks_tests PRIVATE atrium_core_lib)
+add_test(NAME folder_stacks COMMAND folder_stacks_tests)
+set_tests_properties(folder_stacks PROPERTIES TIMEOUT 15)
