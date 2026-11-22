@@ -48,7 +48,61 @@ internal sealed partial class CoreClient : IDisposable
         _writeFileOverride = writeFileOverride;
     }
 
-    public static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "settings.json");
+    internal static bool TryParseDataDirArgument(string[] args, out string? dir, out bool specified)
+    {
+        dir = null;
+        specified = false;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (!string.Equals(args[i], "--data-dir", StringComparison.Ordinal)) continue;
+            specified = true;
+            if (i + 1 >= args.Length) { dir = null; return false; }
+            string raw = args[++i];
+            if (string.IsNullOrWhiteSpace(raw) || !Path.IsPathFullyQualified(raw)) { dir = null; return false; }
+            if (raw.StartsWith(@"\\", StringComparison.Ordinal) &&
+                !raw.StartsWith(@"\\?\", StringComparison.Ordinal) &&
+                !raw.StartsWith(@"\\.\", StringComparison.Ordinal))
+            {
+                string trimmed = raw.TrimEnd('\\', '/');
+                int slash = trimmed.IndexOfAny(['\\', '/'], 2);
+                if (slash < 0 || slash + 1 >= trimmed.Length) { dir = null; return false; }
+            }
+            try
+            {
+                dir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(raw));
+            }
+            catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                dir = null;
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static string DataDirectory
+    {
+        get
+        {
+            string dir;
+            if (Development)
+            {
+                if (!TryParseDataDirArgument(Environment.GetCommandLineArgs(), out string? custom, out bool specified))
+                    throw new ArgumentException("Invalid --data-dir argument; expected a fully qualified absolute path.", "--data-dir");
+                dir = specified && custom != null
+                    ? custom
+                    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium");
+            }
+            else
+            {
+                dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium");
+            }
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+    }
+
+    public static string SettingsPath => Path.Combine(DataDirectory, "settings.json");
 
     private readonly SemaphoreSlim _io = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();

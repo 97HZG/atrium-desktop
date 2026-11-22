@@ -1,5 +1,17 @@
-param([string]$ZipPath, [string]$Root = (Split-Path -Parent $PSScriptRoot), [switch]$SmokeStart)
+param(
+    [string]$ZipPath,
+    [string]$Root = (Split-Path -Parent $PSScriptRoot),
+    [switch]$SmokeStart,
+    [string]$EvidenceDirectory = '',
+    [int]$UiaTimeoutMs = 10000,
+    [string]$PipeName = '',
+    [switch]$SkipRunningProcessCheck,
+    [string]$BeforeSaveMarkerPath = '',
+    [string]$BeforeSaveResumeEvent = '',
+    [string]$HangUiaStep = ''
+)
 $ErrorActionPreference = 'Stop'
+if ($UiaTimeoutMs -lt 100) { throw "UiaTimeoutMs must be >= 100 (got $UiaTimeoutMs)." }
 if (!$ZipPath) {
     $candidates = @(Get-ChildItem -LiteralPath (Join-Path $Root 'dist') -Filter 'Atrium-*-win-x64.zip' -ErrorAction SilentlyContinue)
     if ($candidates.Count -ne 1) { throw "Expected 1 package zip in dist/, found $($candidates.Count)." }
@@ -27,7 +39,7 @@ try {
     if ($pkgManifest.version -ne $expectedVersion) { throw "package-manifest.json version '$($pkgManifest.version)' != $expectedVersion." }
     $manifestFiles = @($pkgManifest.files)
     if ($manifestFiles.Count -eq 0) { throw 'package-manifest.json files list is empty.' }
-    $listed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $listed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
         foreach ($entry in $manifestFiles) {
@@ -95,12 +107,10 @@ try {
                 $ms.Dispose()
             }
         }
-        function Read-LogDelta([string]$path, [long]$initialLen) {
+        function Read-LogText([string]$path) {
             if (!(Test-Path -LiteralPath $path -PathType Leaf)) { return '(missing)' }
             $fs = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
             try {
-                $offset = if ($fs.Length -lt $initialLen) { 0L } else { $initialLen }
-                [void]$fs.Seek($offset, [IO.SeekOrigin]::Begin)
                 $sr = New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8, $true)
                 try { $sr.ReadToEnd() } finally { $sr.Dispose() }
             } finally {
@@ -116,24 +126,140 @@ try {
             if (& $cond) { return }
             throw $failMessage
         }
-        $running = @(Get-Process -Name Atrium -ErrorAction SilentlyContinue)
-        if ($running.Count -gt 0) {
-            throw "Atrium is already running (PID: $($running.Id -join ', ')); stop it before -SmokeStart."
+        function Format-ProcessArg([string]$arg) {
+            if ($arg -match '[\s"]') { return '"' + $arg.Replace('"', '\"') + '"' }
+            return $arg
         }
-        $runningSettings = @(Get-Process -Name 'Atrium.Settings' -ErrorAction SilentlyContinue)
-        if ($runningSettings.Count -gt 0) {
-            throw "Atrium.Settings is already running (PID: $($runningSettings.Id -join ', ')); stop it before -SmokeStart."
+        if (!$SkipRunningProcessCheck) {
+            $running = @(Get-Process -Name Atrium -ErrorAction SilentlyContinue)
+            if ($running.Count -gt 0) {
+                throw "Atrium is already running (PID: $($running.Id -join ', ')); stop it before -SmokeStart."
+            }
+            $runningSettings = @(Get-Process -Name 'Atrium.Settings' -ErrorAction SilentlyContinue)
+            if ($runningSettings.Count -gt 0) {
+                throw "Atrium.Settings is already running (PID: $($runningSettings.Id -join ', ')); stop it before -SmokeStart."
+            }
         }
-        if (!('AtriumVerify.UiaSmoke' -as [type])) {
+        if (!('AtriumVerify.NativeHost' -as [type])) {
             Add-Type -Language CSharp -TypeDefinition @'
-#nullable enable
+using System;
+using System.Runtime.InteropServices;
+
+namespace AtriumVerify
+{
+    public static class NativeHost
+    {
+        private const int JobObjectExtendedLimitInformation = 9;
+        private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+        private const uint WmClose = 0x0010;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IO_COUNTERS
+        {
+            public ulong ReadOperationCount;
+            public ulong WriteOperationCount;
+            public ulong OtherOperationCount;
+            public ulong ReadTransferCount;
+            public ulong WriteTransferCount;
+            public ulong OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+        {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        {
+            public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+            public IO_COUNTERS IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(
+            IntPtr hJob, int infoClass, ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION info, uint length);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam);
+
+        public static IntPtr CreateKillOnCloseJob()
+        {
+            IntPtr job = CreateJobObject(IntPtr.Zero, null);
+            if (job == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("CreateJobObject failed: " + Marshal.GetLastWin32Error());
+            }
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+            info.BasicLimitInformation.LimitFlags = JobObjectLimitKillOnJobClose;
+            uint size = (uint)Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+            if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref info, size))
+            {
+                int err = Marshal.GetLastWin32Error();
+                CloseHandle(job);
+                throw new InvalidOperationException("SetInformationJobObject failed: " + err);
+            }
+            return job;
+        }
+
+        public static void AssignProcess(IntPtr job, IntPtr process)
+        {
+            if (job != IntPtr.Zero && process != IntPtr.Zero)
+            {
+                AssignProcessToJobObject(job, process);
+            }
+        }
+
+        public static void CloseJob(IntPtr job)
+        {
+            if (job != IntPtr.Zero)
+            {
+                CloseHandle(job);
+            }
+        }
+
+        public static bool PostClose(IntPtr hwnd)
+        {
+            return PostMessage(hwnd, WmClose, IntPtr.Zero, IntPtr.Zero);
+        }
+    }
+}
+'@
+        }
+        $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+        if (!(Test-Path -LiteralPath $csc -PathType Leaf)) { throw "C# compiler not found: $csc" }
+        $probeSource = Join-Path $temp 'UiaProbe.cs'
+        $probeExe = Join-Path $temp 'UiaProbe.exe'
+        $probeCode = @'
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace AtriumVerify
 {
-    public static class UiaSmoke
+    internal static class UiaProbe
     {
         private const int TreeScopeDescendants = 4;
         private const int TogglePatternId = 10015;
@@ -141,13 +267,11 @@ namespace AtriumVerify
         private const int AutomationIdPropId = 30011;
         private const int IsInvokeAvailablePropId = 30031;
         private const int IsToggleAvailablePropId = 30041;
-        private const uint WmClose = 0x0010;
 
         private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lparam);
         [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc proc, IntPtr lparam);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetProp(IntPtr hwnd, string name);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
-        [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam);
 
         [ComImport, Guid("352ffba8-0973-437c-a61f-f64cafd81df9"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         private interface IUIAutomationCondition { }
@@ -163,11 +287,11 @@ namespace AtriumVerify
         {
             void _0(); void _1();
             [return: MarshalAs(UnmanagedType.Interface)]
-            IUIAutomationElement? FindFirst(int scope, IUIAutomationCondition condition);
+            IUIAutomationElement FindFirst(int scope, IUIAutomationCondition condition);
             void _3(); void _4(); void _5(); void _6(); void _7(); void _8(); void _9(); void _10();
             void _11(); void _12();
             [return: MarshalAs(UnmanagedType.IUnknown)]
-            object? GetCurrentPattern(int patternId);
+            object GetCurrentPattern(int patternId);
             void _14(); void _15(); void _16(); void _17(); void _18(); void _19(); void _20();
             void _21(); void _22(); void _23(); void _24();
             int CurrentIsEnabled { get; }
@@ -178,7 +302,7 @@ namespace AtriumVerify
         {
             void _0(); void _1(); void _2();
             [return: MarshalAs(UnmanagedType.Interface)]
-            IUIAutomationElement? ElementFromHandle(IntPtr hwnd);
+            IUIAutomationElement ElementFromHandle(IntPtr hwnd);
             void _4(); void _5(); void _6(); void _7(); void _8(); void _9(); void _10();
             void _11(); void _12(); void _13(); void _14(); void _15(); void _16(); void _17(); void _18(); void _19();
             [return: MarshalAs(UnmanagedType.Interface)]
@@ -188,13 +312,24 @@ namespace AtriumVerify
             IUIAutomationCondition CreateAndCondition(IUIAutomationCondition c1, IUIAutomationCondition c2);
         }
 
-        public static IntPtr FindWindowByProp(int pid, string propName)
+        private static IUIAutomationElement FindById(IUIAutomation uia, IntPtr hwnd, string id, int patternPropId)
+        {
+            IUIAutomationElement root = uia.ElementFromHandle(hwnd);
+            if (root == null) return null;
+            IUIAutomationCondition c1 = uia.CreatePropertyCondition(AutomationIdPropId, id);
+            IUIAutomationCondition c2 = uia.CreatePropertyCondition(patternPropId, true);
+            IUIAutomationCondition and = uia.CreateAndCondition(c1, c2);
+            return root.FindFirst(TreeScopeDescendants, and);
+        }
+
+        private static IntPtr FindWindowByProp(int pid, string propName)
         {
             IntPtr found = IntPtr.Zero;
-            EnumWindows((hwnd, lparam) =>
+            EnumWindows(delegate(IntPtr hwnd, IntPtr lparam)
             {
                 if (GetProp(hwnd, propName) == IntPtr.Zero) return true;
-                _ = GetWindowThreadProcessId(hwnd, out uint wpid);
+                uint wpid;
+                GetWindowThreadProcessId(hwnd, out wpid);
                 if (wpid != (uint)pid) return true;
                 found = hwnd;
                 return false;
@@ -202,99 +337,205 @@ namespace AtriumVerify
             return found;
         }
 
-        public static bool PostClose(IntPtr hwnd) => PostMessage(hwnd, WmClose, IntPtr.Zero, IntPtr.Zero);
-
-        private static T RunMta<T>(Func<IUIAutomation, T> work, T onComError)
+        [MTAThread]
+        private static int Main(string[] args)
         {
-            T result = onComError;
-            Exception? error = null;
-            var t = new Thread(() =>
+            for (int i = 0; i < args.Length; i++)
             {
-                IUIAutomation? uia = null;
-                try
+                if (string.Equals(args[i], "--hang", StringComparison.Ordinal))
                 {
-                    var clsid = new Guid("E22AD333-B25F-460C-83D0-0581107395C9");
-                    uia = (IUIAutomation)Activator.CreateInstance(Type.GetTypeFromCLSID(clsid)!)!;
-                    result = work(uia);
+                    Thread.Sleep(Timeout.Infinite);
+                    return 2;
                 }
-                catch (COMException) { result = onComError; }
-                catch (Exception ex) { error = ex; }
-                finally { if (uia != null && Marshal.IsComObject(uia)) Marshal.ReleaseComObject(uia); }
-            });
-            t.SetApartmentState(ApartmentState.MTA);
-            t.Start();
-            t.Join();
-            if (error != null) throw new AggregateException(error);
-            return result;
+            }
+            if (args.Length < 1) return 1;
+            string cmd = args[0];
+            if (string.Equals(cmd, "find-window", StringComparison.Ordinal) && args.Length >= 3)
+            {
+                int pid = int.Parse(args[1]);
+                string prop = args[2];
+                for (;;)
+                {
+                    IntPtr w = FindWindowByProp(pid, prop);
+                    if (w != IntPtr.Zero)
+                    {
+                        Console.WriteLine(w.ToInt64().ToString());
+                        return 0;
+                    }
+                    Thread.Sleep(100);
+                }
+            }
+            Guid clsid = new Guid("E22AD333-B25F-460C-83D0-0581107395C9");
+            IUIAutomation uia = (IUIAutomation)Activator.CreateInstance(Type.GetTypeFromCLSID(clsid));
+            try
+            {
+                if (string.Equals(cmd, "wait-toggle", StringComparison.Ordinal) && args.Length >= 4)
+                {
+                    IntPtr hwnd = new IntPtr(long.Parse(args[1]));
+                    string id = args[2];
+                    int expected = int.Parse(args[3]);
+                    for (;;)
+                    {
+                        try
+                        {
+                            IUIAutomationElement el = FindById(uia, hwnd, id, IsToggleAvailablePropId);
+                            IUIAutomationTogglePattern pat = el == null ? null : el.GetCurrentPattern(TogglePatternId) as IUIAutomationTogglePattern;
+                            if (pat != null && pat.CurrentToggleState == expected) return 0;
+                        }
+                        catch (COMException) { }
+                        Thread.Sleep(100);
+                    }
+                }
+                if (string.Equals(cmd, "toggle", StringComparison.Ordinal) && args.Length >= 3)
+                {
+                    IntPtr hwnd = new IntPtr(long.Parse(args[1]));
+                    string id = args[2];
+                    for (;;)
+                    {
+                        try
+                        {
+                            IUIAutomationElement el = FindById(uia, hwnd, id, IsToggleAvailablePropId);
+                            IUIAutomationTogglePattern pat = el == null ? null : el.GetCurrentPattern(TogglePatternId) as IUIAutomationTogglePattern;
+                            if (pat != null) { pat.Toggle(); return 0; }
+                        }
+                        catch (COMException) { }
+                        Thread.Sleep(100);
+                    }
+                }
+                if (string.Equals(cmd, "wait-toggle-enabled", StringComparison.Ordinal) && args.Length >= 5)
+                {
+                    IntPtr hwnd = new IntPtr(long.Parse(args[1]));
+                    string toggleId = args[2];
+                    int expected = int.Parse(args[3]);
+                    string invokeId = args[4];
+                    for (;;)
+                    {
+                        try
+                        {
+                            IUIAutomationElement tel = FindById(uia, hwnd, toggleId, IsToggleAvailablePropId);
+                            IUIAutomationTogglePattern tpat = tel == null ? null : tel.GetCurrentPattern(TogglePatternId) as IUIAutomationTogglePattern;
+                            IUIAutomationElement iel = FindById(uia, hwnd, invokeId, IsInvokeAvailablePropId);
+                            if (tpat != null && tpat.CurrentToggleState == expected && iel != null && iel.CurrentIsEnabled != 0) return 0;
+                        }
+                        catch (COMException) { }
+                        Thread.Sleep(100);
+                    }
+                }
+                if (string.Equals(cmd, "invoke", StringComparison.Ordinal) && args.Length >= 3)
+                {
+                    IntPtr hwnd = new IntPtr(long.Parse(args[1]));
+                    string id = args[2];
+                    for (;;)
+                    {
+                        try
+                        {
+                            IUIAutomationElement el = FindById(uia, hwnd, id, IsInvokeAvailablePropId);
+                            IUIAutomationInvokePattern pat = el == null ? null : el.GetCurrentPattern(InvokePatternId) as IUIAutomationInvokePattern;
+                            if (pat != null) { pat.Invoke(); return 0; }
+                        }
+                        catch (COMException) { }
+                        Thread.Sleep(100);
+                    }
+                }
+                if (string.Equals(cmd, "wait-disabled", StringComparison.Ordinal) && args.Length >= 3)
+                {
+                    IntPtr hwnd = new IntPtr(long.Parse(args[1]));
+                    string id = args[2];
+                    for (;;)
+                    {
+                        try
+                        {
+                            IUIAutomationElement el = FindById(uia, hwnd, id, IsInvokeAvailablePropId);
+                            if (el != null && el.CurrentIsEnabled == 0) return 0;
+                        }
+                        catch (COMException) { }
+                        Thread.Sleep(100);
+                    }
+                }
+                return 1;
+            }
+            finally
+            {
+                if (uia != null && Marshal.IsComObject(uia)) Marshal.ReleaseComObject(uia);
+            }
         }
-
-        private static IUIAutomationElement? FindById(IUIAutomation uia, IntPtr hwnd, string id, int patternPropId)
-        {
-            var root = uia.ElementFromHandle(hwnd);
-            if (root == null) return null;
-            var c1 = uia.CreatePropertyCondition(AutomationIdPropId, id);
-            var c2 = uia.CreatePropertyCondition(patternPropId, true);
-            var and = uia.CreateAndCondition(c1, c2);
-            return root.FindFirst(TreeScopeDescendants, and);
-        }
-
-        public static int GetToggleState(IntPtr hwnd, string id) => RunMta(uia =>
-        {
-            var el = FindById(uia, hwnd, id, IsToggleAvailablePropId);
-            if (el == null) return -1;
-            var pat = el.GetCurrentPattern(TogglePatternId) as IUIAutomationTogglePattern;
-            return pat == null ? -1 : pat.CurrentToggleState;
-        }, -1);
-
-        public static bool Toggle(IntPtr hwnd, string id) => RunMta(uia =>
-        {
-            var el = FindById(uia, hwnd, id, IsToggleAvailablePropId);
-            var pat = el?.GetCurrentPattern(TogglePatternId) as IUIAutomationTogglePattern;
-            if (pat == null) return false;
-            pat.Toggle();
-            return true;
-        }, false);
-
-        public static bool IsInvokeEnabled(IntPtr hwnd, string id) => RunMta(uia =>
-        {
-            var el = FindById(uia, hwnd, id, IsInvokeAvailablePropId);
-            return el != null && el.CurrentIsEnabled != 0;
-        }, false);
-
-        public static bool Invoke(IntPtr hwnd, string id) => RunMta(uia =>
-        {
-            var el = FindById(uia, hwnd, id, IsInvokeAvailablePropId);
-            var pat = el?.GetCurrentPattern(InvokePatternId) as IUIAutomationInvokePattern;
-            if (pat == null) return false;
-            pat.Invoke();
-            return true;
-        }, false);
     }
 }
 '@
+        [IO.File]::WriteAllText($probeSource, $probeCode, (New-Object Text.UTF8Encoding $false))
+        $cscOut = & $csc /nologo /optimize+ /target:exe /reference:System.dll "/out:$probeExe" $probeSource 2>&1
+        if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $probeExe -PathType Leaf)) {
+            throw "Failed to compile UiaProbe.exe (exit $LASTEXITCODE): $($cscOut -join "`n")"
         }
-        $appDataDir = Join-Path $env:LOCALAPPDATA 'Atrium'
-        $settingsPath = Join-Path $appDataDir 'settings.json'
-        $hadSettings = Test-Path -LiteralPath $settingsPath -PathType Leaf
-        $savedSettingsBytes = if ($hadSettings) { [IO.File]::ReadAllBytes($settingsPath) } else { $null }
-        if ($hadSettings) { Remove-Item -LiteralPath $settingsPath -Force }
-        $logPath = Join-Path $appDataDir 'logs\core.log'
-        $initialLogLen = if (Test-Path -LiteralPath $logPath -PathType Leaf) { (Get-Item -LiteralPath $logPath).Length } else { 0L }
-        $settingsLogPath = Join-Path $appDataDir 'logs\settings.log'
-        $initialSettingsLogLen = if (Test-Path -LiteralPath $settingsLogPath -PathType Leaf) { (Get-Item -LiteralPath $settingsLogPath).Length } else { 0L }
-        $core = Join-Path $pkg 'Atrium.exe'
-        $settingsExe = Join-Path $pkg 'Settings\Atrium.Settings.exe'
+        $smokeDataDir = [IO.Path]::GetFullPath((Join-Path $temp 'data'))
+        New-Item -ItemType Directory -Path $smokeDataDir -Force | Out-Null
+        $smokeSettingsPath = [IO.Path]::GetFullPath((Join-Path $smokeDataDir 'settings.json'))
+        $logPath = Join-Path $smokeDataDir 'logs\core.log'
+        $settingsLogPath = Join-Path $smokeDataDir 'logs\settings.log'
+        $core = Join-Path $pkgFull 'Atrium.exe'
+        $settingsExe = Join-Path $pkgFull 'Settings\Atrium.Settings.exe'
         $eventName = 'Local\Atrium.Update.Core.' + [Guid]::NewGuid().ToString('N')
         $ready = New-Object System.Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $eventName)
+        $beforeSaveHandle = $null
+        if ($BeforeSaveResumeEvent) {
+            $beforeSaveHandle = New-Object System.Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $BeforeSaveResumeEvent)
+        }
+        $job = [IntPtr]::Zero
+        $job = [AtriumVerify.NativeHost]::CreateKillOnCloseJob()
         $proc = $null
-        $settingsProcs = [System.Collections.Generic.List[Diagnostics.Process]]::new()
-        $settingsWaitHandles = [System.Collections.Generic.List[System.Threading.EventWaitHandle]]::new()
+        $settingsProcs = New-Object 'System.Collections.Generic.List[Diagnostics.Process]'
+        $settingsWaitHandles = New-Object 'System.Collections.Generic.List[System.Threading.EventWaitHandle]'
+        function Add-JobProcess([IntPtr]$jobHandle, [Diagnostics.Process]$p) {
+            try {
+                if ($p -and !$p.HasExited) { [AtriumVerify.NativeHost]::AssignProcess($jobHandle, $p.Handle) }
+            } catch [InvalidOperationException] { }
+        }
+        function Invoke-UiaStep([string]$StepName, [string]$ControlId, [IntPtr]$Hwnd, [string[]]$ProbeArgs) {
+            $outPath = Join-Path $temp ($StepName + '.stdout.txt')
+            $errPath = Join-Path $temp ($StepName + '.stderr.txt')
+            if (Test-Path -LiteralPath $outPath) { Remove-Item -LiteralPath $outPath -Force }
+            if (Test-Path -LiteralPath $errPath) { Remove-Item -LiteralPath $errPath -Force }
+            $allArgs = @($ProbeArgs)
+            if ($HangUiaStep -and [string]::Equals($HangUiaStep, $StepName, [StringComparison]::OrdinalIgnoreCase)) {
+                $allArgs += '--hang'
+            }
+            $argLine = ($allArgs | ForEach-Object { Format-ProcessArg $_ }) -join ' '
+            $stepSw = [Diagnostics.Stopwatch]::StartNew()
+            $probe = Start-Process -FilePath $probeExe -ArgumentList $argLine `
+                -RedirectStandardOutput $outPath -RedirectStandardError $errPath -WindowStyle Hidden -PassThru
+            try {
+                Add-JobProcess $job $probe
+                if (!$probe.WaitForExit($UiaTimeoutMs)) {
+                    $stepSw.Stop()
+                    try { $probe.Kill() } catch { }
+                    [void]$probe.WaitForExit(3000)
+                    $hwndHex = '0x{0:X}' -f $Hwnd.ToInt64()
+                    $elapsedMs = $stepSw.ElapsedMilliseconds
+                    throw "UIA step '$StepName' timed out after ${UiaTimeoutMs}ms (elapsed=${elapsedMs}ms, control=$ControlId, hwnd=$hwndHex)."
+                }
+                if ($probe.ExitCode -ne 0) {
+                    $errRaw = if (Test-Path -LiteralPath $errPath) { Get-Content -LiteralPath $errPath -Raw } else { '' }
+                    $errText = if ($errRaw) { $errRaw.Trim() } else { '' }
+                    $hwndHex = '0x{0:X}' -f $Hwnd.ToInt64()
+                    throw "UIA step '$StepName' failed (exit=$($probe.ExitCode), control=$ControlId, hwnd=$hwndHex): $errText"
+                }
+                if (Test-Path -LiteralPath $outPath) {
+                    $outRaw = Get-Content -LiteralPath $outPath -Raw
+                    if ($outRaw) { return $outRaw.Trim() }
+                }
+                return ''
+            } finally {
+                $probe.Dispose()
+            }
+        }
         try {
-            $proc = Start-Process -FilePath $core -ArgumentList "--development --ready-event $eventName" `
-                -WorkingDirectory $temp -WindowStyle Hidden -PassThru
+            $coreArgs = "--development --data-dir $(Format-ProcessArg $smokeDataDir) --ready-event $eventName"
+            if ($PipeName) { $coreArgs += " --pipe-name $(Format-ProcessArg $PipeName)" }
+            $proc = Start-Process -FilePath $core -ArgumentList $coreArgs -WorkingDirectory $temp -WindowStyle Hidden -PassThru
+            Add-JobProcess $job $proc
             if (!$ready.WaitOne(15000) -or $proc.HasExited) { throw 'Atrium.exe failed smoke startup.' }
-            $pipeName = "Atrium.Core.$([Diagnostics.Process]::GetCurrentProcess().SessionId)"
-            $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipeName, [System.IO.Pipes.PipeDirection]::InOut)
+            $effectivePipe = if ($PipeName) { $PipeName } else { "Atrium.Core.$([Diagnostics.Process]::GetCurrentProcess().SessionId)" }
+            $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', $effectivePipe, [System.IO.Pipes.PipeDirection]::InOut)
             try {
                 $pipe.Connect(5000)
                 $pipe.ReadMode = [System.IO.Pipes.PipeTransmissionMode]::Message
@@ -302,6 +543,14 @@ namespace AtriumVerify
                 if ($state.op -ne 'state' -or [int]$state.protocol -ne 1 -or
                     [string]::IsNullOrWhiteSpace([string]$state.instanceId) -or [int64]$state.revision -lt 1) {
                     throw "Unexpected get reply: $($state | ConvertTo-Json -Compress)"
+                }
+                $reportedPath = [string]$state.path
+                if ([string]::IsNullOrWhiteSpace($reportedPath)) {
+                    throw 'Core pipe get reply did not report settings path.'
+                }
+                $normReported = [IO.Path]::GetFullPath($reportedPath)
+                if (![string]::Equals($normReported, $smokeSettingsPath, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Core settings path isolation check failed: expected '$smokeSettingsPath', got '$normReported'."
                 }
                 $savedHeight = [double]$state.saved.height
                 $previewHeight = if ($savedHeight -eq 72) { 64 } else { 72 }
@@ -316,7 +565,7 @@ namespace AtriumVerify
                 $pipe.Dispose()
             }
             Start-Sleep -Milliseconds 300
-            $pipe2 = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipeName, [System.IO.Pipes.PipeDirection]::InOut)
+            $pipe2 = New-Object System.IO.Pipes.NamedPipeClientStream('.', $effectivePipe, [System.IO.Pipes.PipeDirection]::InOut)
             try {
                 $pipe2.Connect(5000)
                 $pipe2.ReadMode = [System.IO.Pipes.PipeTransmissionMode]::Message
@@ -355,43 +604,46 @@ namespace AtriumVerify
             $sEvent1 = 'Local\Atrium.Update.Settings.' + [Guid]::NewGuid().ToString('N')
             $sReady1 = New-Object System.Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $sEvent1)
             $settingsWaitHandles.Add($sReady1)
-            $sArgs1 = "--development --page clock --require-core-ready --ready-event $sEvent1"
+            $sArgs1 = "--development --data-dir $(Format-ProcessArg $smokeDataDir) --page clock --require-core-ready --ready-event $sEvent1"
+            if ($PipeName) { $sArgs1 += " --pipe-name $(Format-ProcessArg $PipeName)" }
             $sProc1 = Start-Process -FilePath $settingsExe -ArgumentList $sArgs1 -WorkingDirectory $temp -PassThru
             $settingsProcs.Add($sProc1)
+            Add-JobProcess $job $sProc1
             if (!$sReady1.WaitOne(20000) -or $sProc1.HasExited) { throw 'Atrium.Settings.exe failed first smoke startup.' }
-            $hwnd1 = [IntPtr]::Zero
-            Wait-Until 10000 {
-                $script:hwndTmp = [AtriumVerify.UiaSmoke]::FindWindowByProp($sProc1.Id, 'Atrium.Settings.Window')
-                $script:hwndTmp -ne [IntPtr]::Zero
-            } 'Atrium.Settings.exe window handle not found on first launch.'
-            $hwnd1 = $script:hwndTmp
-            Wait-Until 10000 {
-                ([AtriumVerify.UiaSmoke]::GetToggleState($hwnd1, 'ClockSecondsSwitch')) -eq 0
-            } 'ClockSecondsSwitch did not report initial Off (0) state via UIA.'
-            Wait-Until 10000 {
-                [AtriumVerify.UiaSmoke]::Toggle($hwnd1, 'ClockSecondsSwitch')
-            } 'Failed to toggle ClockSecondsSwitch via UIA.'
-            Wait-Until 10000 {
-                ([AtriumVerify.UiaSmoke]::GetToggleState($hwnd1, 'ClockSecondsSwitch')) -eq 1 -and
-                [AtriumVerify.UiaSmoke]::IsInvokeEnabled($hwnd1, 'SaveButton')
-            } 'ClockSecondsSwitch did not become On (1) with enabled SaveButton.'
-            Wait-Until 10000 {
-                [AtriumVerify.UiaSmoke]::Invoke($hwnd1, 'SaveButton')
-            } 'Failed to invoke SaveButton via UIA.'
-            Wait-Until 10000 {
-                if (!(Test-Path -LiteralPath $settingsPath -PathType Leaf)) { return $false }
+            $hwnd1Text = Invoke-UiaStep 'first-find-window' 'Atrium.Settings.Window' ([IntPtr]::Zero) `
+                @('find-window', "$($sProc1.Id)", 'Atrium.Settings.Window')
+            $hwnd1 = [IntPtr]([int64]$hwnd1Text)
+            [void](Invoke-UiaStep 'first-wait-toggle' 'ClockSecondsSwitch' $hwnd1 @('wait-toggle', "$($hwnd1.ToInt64())", 'ClockSecondsSwitch', '0'))
+            [void](Invoke-UiaStep 'first-toggle' 'ClockSecondsSwitch' $hwnd1 @('toggle', "$($hwnd1.ToInt64())", 'ClockSecondsSwitch'))
+            [void](Invoke-UiaStep 'first-wait-toggle-enabled' 'ClockSecondsSwitch,SaveButton' $hwnd1 `
+                @('wait-toggle-enabled', "$($hwnd1.ToInt64())", 'ClockSecondsSwitch', '1', 'SaveButton'))
+            if ($BeforeSaveMarkerPath) {
+                $markerDir = Split-Path -Parent $BeforeSaveMarkerPath
+                if ($markerDir -and !(Test-Path -LiteralPath $markerDir -PathType Container)) {
+                    New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
+                }
+                $markerTmp = $BeforeSaveMarkerPath + '.tmp'
+                [IO.File]::WriteAllText($markerTmp, "$PID`n$temp", (New-Object Text.UTF8Encoding $false))
+                if (Test-Path -LiteralPath $BeforeSaveMarkerPath) { Remove-Item -LiteralPath $BeforeSaveMarkerPath -Force }
+                [IO.File]::Move($markerTmp, $BeforeSaveMarkerPath)
+            }
+            if ($beforeSaveHandle) { [void]$beforeSaveHandle.WaitOne() }
+            [void](Invoke-UiaStep 'first-invoke' 'SaveButton' $hwnd1 @('invoke', "$($hwnd1.ToInt64())", 'SaveButton'))
+            Wait-Until $UiaTimeoutMs {
+                if (!(Test-Path -LiteralPath $smokeSettingsPath -PathType Leaf)) { return $false }
                 try {
-                    $disk = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                    return ($disk.showClockSeconds -eq $true) -and ![AtriumVerify.UiaSmoke]::IsInvokeEnabled($hwnd1, 'SaveButton')
+                    $disk = Get-Content -LiteralPath $smokeSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    return ($disk.showClockSeconds -eq $true)
                 } catch {
                     return $false
                 }
-            } 'Saved settings.json missing showClockSeconds=true or SaveButton remained enabled.'
-            if (![AtriumVerify.UiaSmoke]::PostClose($hwnd1)) { throw 'PostMessage(WM_CLOSE) failed on first Settings window.' }
+            } "Saved settings.json missing showClockSeconds=true: $smokeSettingsPath"
+            [void](Invoke-UiaStep 'first-wait-disabled' 'SaveButton' $hwnd1 @('wait-disabled', "$($hwnd1.ToInt64())", 'SaveButton'))
+            if (![AtriumVerify.NativeHost]::PostClose($hwnd1)) { throw 'PostMessage(WM_CLOSE) failed on first Settings window.' }
             if (!$sProc1.WaitForExit(15000) -or $sProc1.ExitCode -ne 0) {
                 throw "First Atrium.Settings.exe did not exit cleanly (exited=$($sProc1.HasExited), exitCode=$($sProc1.ExitCode))."
             }
-            $pipe3 = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipeName, [System.IO.Pipes.PipeDirection]::InOut)
+            $pipe3 = New-Object System.IO.Pipes.NamedPipeClientStream('.', $effectivePipe, [System.IO.Pipes.PipeDirection]::InOut)
             try {
                 $pipe3.Connect(5000)
                 $pipe3.ReadMode = [System.IO.Pipes.PipeTransmissionMode]::Message
@@ -405,25 +657,25 @@ namespace AtriumVerify
             $sEvent2 = 'Local\Atrium.Update.Settings.' + [Guid]::NewGuid().ToString('N')
             $sReady2 = New-Object System.Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $sEvent2)
             $settingsWaitHandles.Add($sReady2)
-            $sArgs2 = "--development --page clock --require-core-ready --ready-event $sEvent2"
+            $sArgs2 = "--development --data-dir $(Format-ProcessArg $smokeDataDir) --page clock --require-core-ready --ready-event $sEvent2"
+            if ($PipeName) { $sArgs2 += " --pipe-name $(Format-ProcessArg $PipeName)" }
             $sProc2 = Start-Process -FilePath $settingsExe -ArgumentList $sArgs2 -WorkingDirectory $temp -PassThru
             $settingsProcs.Add($sProc2)
+            Add-JobProcess $job $sProc2
             if (!$sReady2.WaitOne(20000) -or $sProc2.HasExited) { throw 'Atrium.Settings.exe failed second smoke startup.' }
-            $hwnd2 = [IntPtr]::Zero
-            Wait-Until 10000 {
-                $script:hwndTmp2 = [AtriumVerify.UiaSmoke]::FindWindowByProp($sProc2.Id, 'Atrium.Settings.Window')
-                $script:hwndTmp2 -ne [IntPtr]::Zero
-            } 'Atrium.Settings.exe window handle not found on second launch.'
-            $hwnd2 = $script:hwndTmp2
-            Wait-Until 10000 {
-                ([AtriumVerify.UiaSmoke]::GetToggleState($hwnd2, 'ClockSecondsSwitch')) -eq 1
-            } 'ClockSecondsSwitch did not persist On (1) state on second launch.'
-            if (![AtriumVerify.UiaSmoke]::PostClose($hwnd2)) { throw 'PostMessage(WM_CLOSE) failed on second Settings window.' }
+            $hwnd2Text = Invoke-UiaStep 'second-find-window' 'Atrium.Settings.Window' ([IntPtr]::Zero) `
+                @('find-window', "$($sProc2.Id)", 'Atrium.Settings.Window')
+            $hwnd2 = [IntPtr]([int64]$hwnd2Text)
+            [void](Invoke-UiaStep 'second-wait-toggle' 'ClockSecondsSwitch' $hwnd2 @('wait-toggle', "$($hwnd2.ToInt64())", 'ClockSecondsSwitch', '1'))
+            if (![AtriumVerify.NativeHost]::PostClose($hwnd2)) { throw 'PostMessage(WM_CLOSE) failed on second Settings window.' }
             if (!$sProc2.WaitForExit(15000) -or $sProc2.ExitCode -ne 0) {
                 throw "Second Atrium.Settings.exe did not exit cleanly (exited=$($sProc2.HasExited), exitCode=$($sProc2.ExitCode))."
             }
-            $exit = Start-Process -FilePath $core -ArgumentList '--exit' -WorkingDirectory $temp -WindowStyle Hidden -PassThru
+            $exitArgs = '--exit'
+            if ($PipeName) { $exitArgs += " --pipe-name $(Format-ProcessArg $PipeName)" }
+            $exit = Start-Process -FilePath $core -ArgumentList $exitArgs -WorkingDirectory $temp -WindowStyle Hidden -PassThru
             try {
+                Add-JobProcess $job $exit
                 $exitDone = $exit.WaitForExit(15000)
                 $exitCode = if ($exitDone) { $exit.ExitCode } else { 'timeout' }
                 if (!$exitDone -or $exitCode -ne 0 -or !$proc.WaitForExit(15000)) {
@@ -433,18 +685,19 @@ namespace AtriumVerify
                 $exit.Dispose()
             }
             if (!(Test-Path -LiteralPath $logPath -PathType Leaf)) { throw "Missing core.log: $logPath" }
-            $logDelta = Read-LogDelta $logPath $initialLogLen
-            if ($logDelta -notmatch 'core: starting' -or $logDelta -notmatch 'core: exited') {
-                throw "core.log missing expected startup/exit lines.`nDelta:`n$logDelta"
+            $logText = Read-LogText $logPath
+            if ($logText -notmatch 'core: starting' -or $logText -notmatch 'core: exited') {
+                throw "core.log missing expected startup/exit lines.`nLog:`n$logText"
             }
-            if ($logDelta -match 'render thread stuck') {
-                throw "core.log reported render thread stuck.`nDelta:`n$logDelta"
+            if ($logText -match 'render thread stuck') {
+                throw "core.log reported render thread stuck.`nLog:`n$logText"
             }
         } catch {
-            $coreDelta = Read-LogDelta $logPath $initialLogLen
-            $settingsDelta = Read-LogDelta $settingsLogPath $initialSettingsLogLen
-            throw "$($_.Exception.Message)`ncore.log delta:`n$coreDelta`nsettings.log delta:`n$settingsDelta"
+            $coreText = Read-LogText $logPath
+            $settingsText = Read-LogText $settingsLogPath
+            throw "$($_.Exception.Message)`ncore.log:`n$coreText`nsettings.log:`n$settingsText"
         } finally {
+            if ($job -ne [IntPtr]::Zero) { [AtriumVerify.NativeHost]::CloseJob($job) }
             foreach ($sp in $settingsProcs) {
                 if (!$sp.HasExited) {
                     Stop-Process -Id $sp.Id -Force -ErrorAction SilentlyContinue
@@ -458,14 +711,24 @@ namespace AtriumVerify
                 [void]$proc.WaitForExit(3000)
             }
             if ($proc) { $proc.Dispose() }
+            $pkgPrefix = $pkgFull + '\'
+            foreach ($orphan in @(Get-Process -ErrorAction SilentlyContinue)) {
+                try {
+                    if ($orphan.Path -and $orphan.Path.StartsWith($pkgPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                        Stop-Process -Id $orphan.Id -Force -ErrorAction SilentlyContinue
+                        [void]$orphan.WaitForExit(3000)
+                    }
+                } catch { }
+            }
+            if ($beforeSaveHandle) { $beforeSaveHandle.Dispose() }
             $ready.Dispose()
-            if ($hadSettings) {
-                if (!(Test-Path -LiteralPath $appDataDir -PathType Container)) {
-                    New-Item -ItemType Directory -Path $appDataDir -Force | Out-Null
+            if ($EvidenceDirectory) {
+                New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
+                foreach ($evLog in @($logPath, $settingsLogPath)) {
+                    if (Test-Path -LiteralPath $evLog -PathType Leaf) {
+                        Copy-Item -LiteralPath $evLog -Destination (Join-Path $EvidenceDirectory ([IO.Path]::GetFileName($evLog))) -Force
+                    }
                 }
-                [IO.File]::WriteAllBytes($settingsPath, $savedSettingsBytes)
-            } elseif (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
-                Remove-Item -LiteralPath $settingsPath -Force -ErrorAction SilentlyContinue
             }
         }
     }

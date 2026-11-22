@@ -37,10 +37,11 @@ public partial class App : Application
     {
         try
         {
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "logs");
+            string dir = Path.Combine(CoreClient.DataDirectory, "logs");
             Directory.CreateDirectory(dir);
             File.AppendAllText(Path.Combine(dir, "settings.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e}\n");
         }
+        catch (ArgumentException) { }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }

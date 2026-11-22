@@ -675,7 +675,7 @@ void EnsureGuard()
     wchar_t exe[MAX_PATH * 2];
     if (!GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe))))
         return;
-    std::wstring command = L"\"" + std::wstring(exe) + L"\" --guard " + std::to_wstring(GetCurrentProcessId());
+    std::wstring command = L"\"" + std::wstring(exe) + L"\" --guard " + std::to_wstring(GetCurrentProcessId()) + DataDirectoryArgs();
     STARTUPINFOW si{sizeof(si)};
     PROCESS_INFORMATION pi{};
     if (!CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {

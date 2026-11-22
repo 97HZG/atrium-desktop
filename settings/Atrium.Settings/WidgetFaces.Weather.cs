@@ -17,8 +17,7 @@ internal static partial class WidgetFaces
     private sealed record WeatherDay(string Label, int Code, double Lo, double Hi);
     private sealed record WeatherData(string City, double Temp, double Hi, double Lo, int Code, bool Day, WeatherHour[] Hours, WeatherDay[] Days);
 
-    private static string WeatherPath =>
-        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "weather.json");
+    private static string WeatherPath => System.IO.Path.Combine(CoreClient.DataDirectory, "weather.json");
 
     public static long WeatherStamp()
     {

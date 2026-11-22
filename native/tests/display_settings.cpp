@@ -251,6 +251,31 @@ void CheckFullscreenCoverage()
             "edge reveal supports negative display coordinates without spilling onto neighbours");
 }
 
+void CheckDataDirArgument()
+{
+    std::wstring dir;
+    bool specified = true;
+    Require(ParseDataDirArgument({L"Atrium.exe", L"--development"}, dir, specified) && !specified && dir.empty(), "missing --data-dir leaves specified false");
+    Require(ParseDataDirArgument({L"Atrium.exe", L"--data-dir", L"C:/temp/foo/../atrium-data/"}, dir, specified) && specified &&
+                dir == L"C:\\temp\\atrium-data",
+            "valid drive-rooted --data-dir normalizes");
+    Require(ParseDataDirArgument({L"Atrium.exe", L"--data-dir", L"\\\\server\\share\\atrium\\"}, dir, specified) && specified &&
+                dir == L"\\\\server\\share\\atrium",
+            "valid UNC --data-dir normalizes");
+    for (const auto& bad : std::vector<std::vector<std::wstring>>{
+             {L"Atrium.exe", L"--data-dir"},
+             {L"Atrium.exe", L"--data-dir", L""},
+             {L"Atrium.exe", L"--data-dir", L"relative\\data"},
+             {L"Atrium.exe", L"--data-dir", L"\\drive_relative"},
+             {L"Atrium.exe", L"--data-dir", L"C:drive_relative"},
+             {L"Atrium.exe", L"--data-dir", L"\\\\server"},
+             {L"Atrium.exe", L"--data-dir", L"\\\\server\\"},
+             {L"Atrium.exe", L"--data-dir", L"--development"},
+         }) {
+        Require(!ParseDataDirArgument(bad, dir, specified) && specified && dir.empty(), "invalid --data-dir is rejected");
+    }
+}
+
 void CheckNotificationLayout()
 {
     const RECT work{0, 0, 1920, 1040};
@@ -368,6 +393,7 @@ int main(int argc, char** argv)
         }
         CheckSettings();
         CheckSettingsNormalization();
+        CheckDataDirArgument();
         CheckDisplays();
         CheckTaskDistribution();
         CheckFullscreenCoverage();

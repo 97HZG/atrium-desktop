@@ -19,6 +19,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string_view>
 #include <tuple>
@@ -200,7 +201,91 @@ std::wstring FormatSystemError(DWORD code)
     return reason;
 }
 
+struct DataDirState {
+    bool initialized = false;
+    std::wstring dir;
+    bool overridden = false;
+};
+
+std::mutex g_dataDirMutex;
+DataDirState g_dataDirState;
+
+DataDirState ResolveDataDirState()
+{
+    std::lock_guard g(g_dataDirMutex);
+    if (g_dataDirState.initialized)
+        return g_dataDirState;
+    DataDirState state;
+    if (IsDevelopmentBuild()) {
+        int count = 0;
+        auto* argv = CommandLineToArgvW(GetCommandLineW(), &count);
+        std::vector<std::wstring> args(argv, argv + (argv ? count : 0));
+        LocalFree(static_cast<HLOCAL>(argv));
+        std::wstring custom;
+        bool specified = false;
+        if (!ParseDataDirArgument(args, custom, specified)) {
+            WriteDebugMessage(L"atrium: invalid --data-dir argument; expected a fully qualified absolute path\n");
+            ExitProcess(2);
+        }
+        if (specified) {
+            state.dir = std::move(custom);
+            state.overridden = true;
+        }
+    }
+    if (state.dir.empty()) {
+        PWSTR base = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base)) && base)
+            state.dir = std::wstring(base) + L"\\Atrium";
+        CoTaskMemFree(base);
+    }
+    if (!state.dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(state.dir, ec);
+    }
+    state.initialized = true;
+    g_dataDirState = state;
+    return g_dataDirState;
+}
+
 } // namespace
+
+bool ParseDataDirArgument(const std::vector<std::wstring>& args, std::wstring& outDir, bool& specified)
+{
+    outDir.clear();
+    specified = false;
+    auto fail = [&] {
+        outDir.clear();
+        return false;
+    };
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] != L"--data-dir")
+            continue;
+        specified = true;
+        if (i + 1 >= args.size() || args[i + 1].empty())
+            return fail();
+        const std::filesystem::path rawPath(args[++i]);
+        if (!rawPath.is_absolute())
+            return fail();
+        const std::wstring rootName = rawPath.root_name().wstring();
+        if (rootName.starts_with(L"\\\\") && rootName != L"\\\\?" && rootName != L"\\\\." && !rawPath.has_relative_path())
+            return fail();
+        const std::filesystem::path normalPath = rawPath.lexically_normal();
+        std::wstring normalized = normalPath.wstring();
+        const std::wstring rootPath = normalPath.root_path().wstring();
+        while (normalized.size() > rootPath.size() && (normalized.back() == L'\\' || normalized.back() == L'/'))
+            normalized.pop_back();
+        outDir = std::move(normalized);
+    }
+    return true;
+}
+
+std::wstring DataDirectory() { return ResolveDataDirState().dir; }
+
+std::wstring DataDirectoryArgs()
+{
+    const DataDirState state = ResolveDataDirState();
+    return state.overridden ? L" --development --data-dir \"" + state.dir + L"\"" : std::wstring{};
+}
 
 void Settings::Clamp()
 {
@@ -514,16 +599,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     return true;
 }
 
-std::wstring SettingsPath()
-{
-    PWSTR base = nullptr;
-    std::wstring dir;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base)))
-        dir = std::wstring(base) + L"\\Atrium";
-    CoTaskMemFree(base);
-    CreateDirectoryW(dir.c_str(), nullptr);
-    return dir + L"\\settings.json";
-}
+std::wstring SettingsPath() { return DataDirectory() + L"\\settings.json"; }
 
 std::wstring ReadTextFile(const std::wstring& path)
 {

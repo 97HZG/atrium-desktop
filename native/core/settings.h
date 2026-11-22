@@ -130,6 +130,11 @@ struct Settings {
 
 enum class SettingsFileState { Missing, Valid, Corrupt, FutureVersion };
 
+// %LOCALAPPDATA%\Atrium (or --data-dir in development builds)
+bool ParseDataDirArgument(const std::vector<std::wstring>& args, std::wstring& outDir, bool& specified);
+std::wstring DataDirectory();
+std::wstring DataDirectoryArgs();
+void WriteDebugMessage(const wchar_t* message);
 // %LOCALAPPDATA%\Atrium\settings.json
 std::wstring SettingsPath();
 // UTF-8 text files (a BOM is skipped); the write replaces the file at once.

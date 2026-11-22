@@ -5,6 +5,7 @@
 
 #include "shell/shell_verbs.h"
 #include "log.h"
+#include "settings.h"
 #include "win32_path.h"
 
 #include <propsys.h>
@@ -251,13 +252,8 @@ const PROPERTYKEY kTitle = {{0xF29F85E0, 0x4FF9, 0x1068, {0xAB, 0x91, 0x08, 0x00
 
 std::wstring CacheFolder()
 {
-    PWSTR base = nullptr;
-    std::wstring folder;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base)) && base) {
-        folder = std::wstring(base) + L"\\Atrium\\cache\\jumplist";
-        CoTaskMemFree(base);
-    }
-    return folder;
+    const std::wstring dir = DataDirectory();
+    return dir.empty() ? std::wstring{} : dir + L"\\cache\\jumplist";
 }
 
 void PruneLinkCache(const std::wstring& folder, const std::wstring& keepName)

@@ -115,6 +115,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./tools/tests/uninstall.tests.ps1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./tools/tests/verify-package.tests.ps1 -CandidateZipPath $zips[0].FullName -RequireRealPackage
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify packaged portable zip
         shell: pwsh
         run: ./tools/verify-package.ps1 -SmokeStart

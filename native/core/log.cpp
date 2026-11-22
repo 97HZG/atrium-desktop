@@ -1,7 +1,8 @@
 #include "log.h"
 
+#include "settings.h"
+
 #include <windows.h>
-#include <shlobj.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -19,13 +20,7 @@ namespace {
 
 std::wstring LogPath()
 {
-    PWSTR base = nullptr;
-    std::wstring dir;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base)))
-        dir = std::wstring(base) + L"\\Atrium";
-    CoTaskMemFree(base);
-    CreateDirectoryW(dir.c_str(), nullptr);
-    dir += L"\\logs";
+    std::wstring dir = DataDirectory() + L"\\logs";
     CreateDirectoryW(dir.c_str(), nullptr);
     return dir + L"\\core.log";
 }
@@ -176,6 +171,8 @@ void Log(const wchar_t* format, ...)
         return;
     Writer::Get().Add(line);
 }
+
+void WriteDebugMessage(const wchar_t* message) { OutputDebugStringW(message); }
 
 void ShutdownLog()
 {
