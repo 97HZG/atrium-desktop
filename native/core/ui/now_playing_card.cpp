@@ -3,6 +3,7 @@
 #include "bar_edge.h"
 #include "clock.h"
 #include "localization.h"
+#include "render/corner_profile.h"
 
 #include <windowsx.h>
 
@@ -51,17 +52,16 @@ std::wstring Clock(int64_t us)
     return text;
 }
 
-// Rounds a premultiplied picture's corners: each pixel keeps the share of it inside the rounded
-// square (`radius` a share of the side).
+// Rounds a premultiplied picture's corners with the G3 continuous corner every panel has
+// (corner_profile.h): each pixel keeps the share of it inside the outline (`radius` a share of the side).
 IconImage RoundCorners(const IconImage& src, float radius)
 {
     IconImage out = src;
-    const float w = float(src.width), h = float(src.height), r = radius * std::min(w, h);
+    const float w = float(src.width), h = float(src.height);
+    const CornerProfile profile = CornerFor(w, h, radius * std::min(w, h));
     for (int y = 0; y < src.height; ++y)
         for (int x = 0; x < src.width; ++x) {
-            const float px = float(x) + 0.5f, py = float(y) + 0.5f;
-            const float dx = std::max({r - px, 0.f, px - (w - r)}), dy = std::max({r - py, 0.f, py - (h - r)});
-            const float cover = std::clamp(r + 0.5f - std::sqrt(dx * dx + dy * dy), 0.f, 1.f);
+            const float cover = CornerCoverage(float(x) + 0.5f, float(y) + 0.5f, w, h, profile);
             if (cover >= 1)
                 continue;
             uint8_t* p = &out.bgra[(size_t(y) * size_t(src.width) + size_t(x)) * 4];

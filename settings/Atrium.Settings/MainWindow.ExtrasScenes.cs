@@ -37,6 +37,7 @@ public sealed partial class MainWindow
 
         public NowPlayingScene(MainWindow m, Border stage, Canvas root) : base(m, stage, root)
         {
+            ContinuousCorners.SetEnabled(_art, true); // G3, as the card rounds the art
             _art.Background = new LinearGradientBrush
             {
                 StartPoint = new Point(0, 0),
