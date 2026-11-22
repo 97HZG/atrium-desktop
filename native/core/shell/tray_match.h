@@ -56,6 +56,7 @@ struct HostedEntry {
     std::wstring productName;
     uint64_t uid = 0;
     bool hasUid = false;
+    uint32_t pid = 0;
 };
 struct ExplorerEntry {
     std::wstring recordId;

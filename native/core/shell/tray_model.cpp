@@ -1241,8 +1241,8 @@ std::vector<TrayIcon> TrayModel::Icons() const
         auto [desc, prod] = ExeVersionNames(h.exe, names, &newNames);
         if (desc.empty() && !h.exe.empty() && !tray::IsShellExplorerExe(h.exe))
             desc = prod.empty() ? PathFindFileNameW(h.exe.c_str()) : prod;
-        hostEntries.push_back(
-            {h.key, h.exe, tray::RepairMojibakeTip(h.tip), std::move(desc), std::move(prod), h.uid, h.uid != 0 || h.key.starts_with(L"hwnd:")});
+        hostEntries.push_back({h.key, h.exe, tray::RepairMojibakeTip(h.tip), std::move(desc), std::move(prod), h.uid, h.uid != 0 || h.key.starts_with(L"hwnd:"),
+                               uint32_t(h.pid)});
     }
     std::vector<tray::ExplorerEntry> expEntries;
     expEntries.reserve(explorer.size());

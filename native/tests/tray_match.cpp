@@ -78,7 +78,7 @@ void TestOrderAndDedup()
           "single empty button attaches single unmatched record instead of gray disc");
 
     std::vector<HostedEntry> hosted{
-        {L"hwnd:1:1", L"c:\\vpn\\vpn.exe", L"VPN - Connected", L"VPN Client", L"VPN App", 1, true},
+        {L"hwnd:1:1", L"c:\\vpn\\vpn.exe", L"VPN - Connected", L"VPN Client", L"VPN App", 1, true, 10},
         {L"hwnd:2:2", L"", L"NVIDIA Settings", L"", L"", 2, true},
         {L"hwnd:3:3", L"c:\\app\\workbuddy.exe", L"", L"WorkBuddy", L"Tencent WorkBuddy", 3, true},
     };
@@ -98,6 +98,83 @@ void TestOrderAndDedup()
     Check(merged.hostedFallback[2] == 4, "empty-exe explorer paired against hosted fallbackTip");
     Check(merged.extraExplorer.size() == 2 && merged.extraExplorer[0] == 2 && merged.extraExplorer[1] == 7,
           "suppresses duplicate VPN uid, ghost empty tip, productName gray disc, and keeps distinct unpaired GUID and unrelated app");
+}
+void TestAttachRemainingAndMultiInstance()
+{
+    auto r1 = R(L"DupApp", kNone);
+    r1.id = L"r1";
+    r1.identity = L"uid:10:1:0";
+    r1.bounds = {10, 10, 30, 30};
+    auto r2 = R(L"DupApp", kNone);
+    r2.id = L"r2";
+    r2.identity = L"uid:20:2:0";
+    r2.bounds = {40, 40, 60, 60};
+
+    auto res = Match({{L"DupApp", false}}, {r1, r2});
+    Check(res.items.size() == 3 && res.items[0].button == 0 && res.items[0].record == kNone && res.items[1].method == Method::Record &&
+              res.items[2].method == Method::Record,
+          "AttachRemaining refuses to match when two unused live records tie on one button");
+
+    res = Match({{L"Geom", false, r1.bounds}, {L"DupApp", false}, {L"DupApp", true}}, {r1, r2});
+    Check(res.items.size() == 3 && res.items[0].record == 0 && res.items[0].method == Method::Geometry && res.items[1].record == 1 &&
+              res.items[1].method == Method::Name && res.items[2].record == kNone,
+          "AttachRemaining matches remaining record once tying peer is already used");
+
+    auto rTop = r1;
+    rTop.promoted = true;
+    res = Match({{L"DupApp", true}, {L"Other", false}}, {rTop, r2});
+    Check(res.items[0].record == 0 && res.items[0].method == Method::Name, "AttachRemaining matches unique record in same promoted partition");
+
+    const std::wstring multiExe = L"c:\\app\\multi.exe";
+    std::vector<HostedEntry> hostedHwnd{
+        {L"hwnd:0000000000001000:0", multiExe, L"", L"", L"", 0, true, 100},
+        {L"hwnd:0000000000002000:0", multiExe, L"", L"", L"", 0, true, 200},
+    };
+    std::vector<ExplorerEntry> explorerHwnd{
+        {L"uid:200:8192:0", multiExe, L"Instance B", true},
+        {L"uid:100:4096:0", multiExe, L"Instance A", true},
+    };
+    const auto mergedHwnd = MergeHostedIcons(hostedHwnd, explorerHwnd);
+    Check(mergedHwnd.hostedFallback[0] == 1 && mergedHwnd.hostedFallback[1] == 0 && mergedHwnd.extraExplorer.empty(),
+          "MergeHostedIcons pairs same-exe uID=0 instances by exact (hwnd, uid) in Tier 0");
+
+    std::vector<HostedEntry> hostedTip{
+        {L"hwnd:100:0", multiExe, L"Alpha Profile", L"", L"", 0, true, 100},
+        {L"hwnd:200:0", multiExe, L"Beta Profile", L"", L"", 0, true, 200},
+    };
+    std::vector<ExplorerEntry> explorerTip{
+        {L"uid:200:999:0", multiExe, L"Beta Profile", true},
+        {L"uid:100:888:0", multiExe, L"Alpha Profile", true},
+    };
+    const auto mergedTip = MergeHostedIcons(hostedTip, explorerTip);
+    Check(mergedTip.hostedFallback[0] == 1 && mergedTip.hostedFallback[1] == 0 && mergedTip.extraExplorer.empty(),
+          "MergeHostedIcons defers colliding bare uid to Tier 2 tooltip match");
+
+    std::vector<HostedEntry> hostedPartial{
+        {L"hwnd:1000:0", multiExe, L"Other Tip", L"", L"", 0, true, 100},
+        {L"hwnd:200:0", multiExe, L"Remaining", L"", L"", 0, true, 200},
+    };
+    std::vector<ExplorerEntry> explorerPartial{
+        {L"uid:200:999:0", multiExe, L"Different Tip", true},
+        {L"uid:100:4096:0", multiExe, L"Alpha", true},
+    };
+    const auto mergedPartial = MergeHostedIcons(hostedPartial, explorerPartial);
+    Check(mergedPartial.hostedFallback[0] == 1 && mergedPartial.hostedFallback[1] == 0,
+          "MergeHostedIcons allows Tier 1 bare uid once prior tiers leave a unique unpaired uid");
+
+    const std::wstring clientExe = L"c:\\app\\client.exe";
+    std::vector<HostedEntry> hostedPid{
+        {L"hwnd:1000:1", clientExe, L"Client A", L"", L"", 1, true, 100},
+    };
+    std::vector<ExplorerEntry> explorerPid{
+        {L"uid:100:4096:1", clientExe, L"Client A", true},
+        {L"uid:100:4096:2", clientExe, L"Client A Extra", true},
+        {L"uid:200:8192:1", clientExe, L"Client B", true},
+        {L"", clientExe, L"Legacy Ghost", true},
+    };
+    const auto mergedPid = MergeHostedIcons(hostedPid, explorerPid);
+    Check(mergedPid.hostedFallback[0] == 0 && mergedPid.extraExplorer.size() == 1 && mergedPid.extraExplorer[0] == 2,
+          "MergeHostedIcons preserves distinct-PID uid icon of same exe while suppressing same-PID and pid=0 duplicates");
 }
 int main()
 {
@@ -159,6 +236,7 @@ int main()
         Check(Title(L" \r\n Steam \r\n status") == L"Steam", "tooltip first line");
         TestMojibakeAndKnownShell();
         TestOrderAndDedup();
+        TestAttachRemainingAndMultiInstance();
         std::cout << "tray matching: all scenarios passed\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

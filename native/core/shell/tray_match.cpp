@@ -330,8 +330,14 @@ void AttachRemaining(const std::vector<Button>& buttons, const std::vector<Recor
             else if (score == best)
                 tied = true;
         }
-        if (hit != kNone && !tied)
-            AssignMatch(out, used, hit, r, Method::Name);
+        if (hit != kNone && !tied) {
+            const bool contested = std::ranges::any_of(live, [&](size_t otherR) {
+                return otherR != r && !used[otherR] && records[otherR].promoted == records[r].promoted &&
+                       Score(buttons[hit].tip, records[otherR].names, records[otherR].firstTitle) >= best;
+            });
+            if (!contested)
+                AssignMatch(out, used, hit, r, Method::Name);
+        }
     }
     for (bool promoted : {true, false}) {
         size_t ub = kNone, ur = kNone, nb = 0, nr = 0;
@@ -348,12 +354,73 @@ void AttachRemaining(const std::vector<Button>& buttons, const std::vector<Recor
         if (!used[r])
             out.items.push_back({kNone, r, kNone, Method::Record});
 }
-uint64_t UidOf(const std::wstring& id)
+bool ParseUnsigned(std::wstring_view s, int base, uint64_t& out)
+{
+    if (s.empty())
+        return false;
+    if (base == 16 && (s.starts_with(L"0x") || s.starts_with(L"0X"))) {
+        s.remove_prefix(2);
+        if (s.empty())
+            return false;
+    }
+    uint64_t v = 0;
+    for (wchar_t c : s) {
+        unsigned d = 16;
+        if (c >= L'0' && c <= L'9')
+            d = unsigned(c - L'0');
+        else if (base == 16 && c >= L'a' && c <= L'f')
+            d = unsigned(c - L'a' + 10);
+        else if (base == 16 && c >= L'A' && c <= L'F')
+            d = unsigned(c - L'A' + 10);
+        else
+            return false;
+        if (d >= unsigned(base) || v > (~0ull - d) / unsigned(base))
+            return false;
+        v = v * unsigned(base) + d;
+    }
+    out = v;
+    return true;
+}
+bool ParseExplorerUidKey(std::wstring_view recordId, uint32_t& pidOut, uint64_t& hwndOut, uint64_t& uidOut)
+{
+    if (!recordId.starts_with(L"uid:"))
+        return false;
+    const std::wstring_view rest = recordId.substr(4);
+    const size_t c1 = rest.find(L':');
+    const size_t c2 = c1 == std::wstring_view::npos ? std::wstring_view::npos : rest.find(L':', c1 + 1);
+    if (c1 == std::wstring_view::npos || c2 == std::wstring_view::npos || rest.find(L':', c2 + 1) != std::wstring_view::npos)
+        return false;
+    uint64_t pid = 0, hwnd = 0, uid = 0;
+    if (!ParseUnsigned(rest.substr(0, c1), 10, pid) || pid > UINT32_MAX || !ParseUnsigned(rest.substr(c1 + 1, c2 - c1 - 1), 10, hwnd) ||
+        !ParseUnsigned(rest.substr(c2 + 1), 10, uid))
+        return false;
+    pidOut = uint32_t(pid);
+    hwndOut = hwnd;
+    uidOut = uid;
+    return true;
+}
+bool ParseHostHwndKey(std::wstring_view hostKey, uint64_t& hwndOut, uint64_t& uidOut)
+{
+    if (!hostKey.starts_with(L"hwnd:"))
+        return false;
+    const std::wstring_view rest = hostKey.substr(5);
+    const size_t colon = rest.find(L':');
+    if (colon == std::wstring_view::npos || rest.find(L':', colon + 1) != std::wstring_view::npos)
+        return false;
+    uint64_t hwnd = 0, uid = 0;
+    if (!ParseUnsigned(rest.substr(0, colon), 16, hwnd) || !ParseUnsigned(rest.substr(colon + 1), 10, uid))
+        return false;
+    hwndOut = hwnd;
+    uidOut = uid;
+    return true;
+}
+uint64_t UidOf(std::wstring_view id)
 {
     const size_t colon = id.rfind(L':');
-    if (colon == std::wstring::npos || (!id.starts_with(L"uid:") && !id.starts_with(L"hwnd:")))
+    uint64_t uid = 0;
+    if (colon == std::wstring_view::npos || (!id.starts_with(L"uid:") && !id.starts_with(L"hwnd:")) || !ParseUnsigned(id.substr(colon + 1), 10, uid))
         return ~0ull;
-    return wcstoull(&id[colon + 1], nullptr, 10);
+    return uid;
 }
 std::wstring ExeStem(const std::wstring& exe)
 {
@@ -373,13 +440,35 @@ bool TipMatches(const std::wstring& expTip, const std::wstring& hostTip)
         return false;
     return ek == hk || DelimitedPrefix(et, hk) || DelimitedPrefix(ht, ek);
 }
-bool HostedMatchesTier(const HostedEntry& h, const ExplorerEntry& e, int tier)
+bool UniqueUnpairedUid(const std::vector<HostedEntry>& hosted, const std::vector<ExplorerEntry>& explorer, const std::vector<size_t>& hostedFallback,
+                       const std::vector<bool>& usedExp, size_t hi)
+{
+    const auto& h = hosted[hi];
+    if (h.exe.empty() || !h.hasUid)
+        return false;
+    size_t hostedCount = 0;
+    for (size_t i = 0; i < hosted.size(); ++i)
+        if (hostedFallback[i] == kNone && hosted[i].exe == h.exe && hosted[i].hasUid && hosted[i].uid == h.uid)
+            ++hostedCount;
+    size_t expCount = 0;
+    for (size_t i = 0; i < explorer.size(); ++i)
+        if (!usedExp[i] && explorer[i].exe == h.exe && UidOf(explorer[i].recordId) == h.uid)
+            ++expCount;
+    return hostedCount == 1 && expCount == 1;
+}
+bool HostedMatchesTier(const HostedEntry& h, const ExplorerEntry& e, int tier, bool uniqueUid)
 {
     const bool sameExe = !h.exe.empty() && e.exe == h.exe;
     const bool compatExe = e.exe.empty() || h.exe.empty() || e.exe == h.exe;
     switch (tier) {
-    case 0: return sameExe && !e.recordId.empty() && e.recordId == h.key;
-    case 1: return sameExe && h.hasUid && UidOf(e.recordId) == h.uid;
+    case 0: {
+        uint32_t ePid = 0;
+        uint64_t eHwnd = 0, eUid = 0, hHwnd = 0, hUid = 0;
+        const bool hwndUidMatch = compatExe && ParseExplorerUidKey(e.recordId, ePid, eHwnd, eUid) && ParseHostHwndKey(h.key, hHwnd, hUid) && eHwnd != 0 &&
+                                  hHwnd != 0 && eHwnd == hHwnd && eUid == hUid;
+        return (sameExe && !e.recordId.empty() && e.recordId == h.key) || hwndUidMatch;
+    }
+    case 1: return sameExe && h.hasUid && uniqueUid && UidOf(e.recordId) == h.uid;
     case 2: return sameExe && !Key(Title(h.tip)).empty() && Key(Title(h.tip)) == Key(Title(e.tip));
     case 3: {
         const auto ek = Key(Title(e.tip));
@@ -389,6 +478,24 @@ bool HostedMatchesTier(const HostedEntry& h, const ExplorerEntry& e, int tier)
     case 5: return sameExe;
     default: return false;
     }
+}
+size_t FallbackHostedMatch(const HostedEntry& h, const std::vector<ExplorerEntry>& explorer)
+{
+    if (h.exe.empty())
+        return kNone;
+    size_t match = kNone;
+    for (size_t ei = 0; ei < explorer.size(); ++ei) {
+        if (explorer[ei].exe != h.exe)
+            continue;
+        uint32_t expPid = 0;
+        uint64_t expHwnd = 0, expUid = 0;
+        if (ParseExplorerUidKey(explorer[ei].recordId, expPid, expHwnd, expUid) && expPid != 0 && h.pid != 0 && expPid != h.pid)
+            continue;
+        if (h.hasUid && UidOf(explorer[ei].recordId) == h.uid)
+            return ei;
+        match = match == kNone ? ei : kNone - 1;
+    }
+    return match < explorer.size() ? match : kNone;
 }
 bool HostedClaimsUnknown(const std::vector<HostedEntry>& hosted, const ExplorerEntry& exp)
 {
@@ -405,8 +512,13 @@ bool HostedSuppressesDuplicateExe(const std::vector<HostedEntry>& hosted, const 
 {
     if (exp.exe.empty() || std::ranges::none_of(hosted, [&](const HostedEntry& h) { return !h.exe.empty() && h.exe == exp.exe; }))
         return false;
-    if (!exp.recordId.starts_with(L"guid:"))
-        return true;
+    if (!exp.recordId.starts_with(L"guid:")) {
+        uint32_t expPid = 0;
+        uint64_t expHwnd = 0, expUid = 0;
+        if (!ParseExplorerUidKey(exp.recordId, expPid, expHwnd, expUid) || expPid == 0)
+            return true;
+        return std::ranges::any_of(hosted, [&](const HostedEntry& h) { return !h.exe.empty() && h.exe == exp.exe && h.pid == expPid; });
+    }
     for (size_t hi = 0; hi < hosted.size(); ++hi) {
         if (hosted[hi].key == exp.recordId)
             return true;
@@ -473,26 +585,19 @@ MergedTrayView MergeHostedIcons(const std::vector<HostedEntry>& hosted, const st
     view.hostedFallback.assign(hosted.size(), kNone);
     std::vector<bool> usedExp(explorer.size(), false);
     for (int tier = 0; tier < 6; ++tier)
-        for (size_t hi = 0; hi < hosted.size(); ++hi)
-            for (size_t ei = 0; ei < explorer.size(); ++ei)
-                if (view.hostedFallback[hi] == kNone && !usedExp[ei] && HostedMatchesTier(hosted[hi], explorer[ei], tier))
-                    view.hostedFallback[hi] = ei, usedExp[ei] = true;
-    for (size_t hi = 0; hi < hosted.size(); ++hi) {
-        if (view.hostedFallback[hi] != kNone || hosted[hi].exe.empty())
-            continue;
-        size_t match = kNone;
-        for (size_t ei = 0; ei < explorer.size(); ++ei) {
-            if (explorer[ei].exe != hosted[hi].exe)
+        for (size_t hi = 0; hi < hosted.size(); ++hi) {
+            if (view.hostedFallback[hi] != kNone)
                 continue;
-            if (hosted[hi].hasUid && UidOf(explorer[ei].recordId) == hosted[hi].uid) {
-                match = ei;
-                break;
-            }
-            match = match == kNone ? ei : kNone - 1;
+            const bool uniqueUid = tier != 1 || UniqueUnpairedUid(hosted, explorer, view.hostedFallback, usedExp, hi);
+            for (size_t ei = 0; ei < explorer.size(); ++ei)
+                if (!usedExp[ei] && HostedMatchesTier(hosted[hi], explorer[ei], tier, uniqueUid)) {
+                    view.hostedFallback[hi] = ei, usedExp[ei] = true;
+                    break;
+                }
         }
-        if (match < explorer.size())
-            view.hostedFallback[hi] = match;
-    }
+    for (size_t hi = 0; hi < hosted.size(); ++hi)
+        if (view.hostedFallback[hi] == kNone)
+            view.hostedFallback[hi] = FallbackHostedMatch(hosted[hi], explorer);
     for (size_t ei = 0; ei < explorer.size(); ++ei) {
         if (usedExp[ei])
             continue;
