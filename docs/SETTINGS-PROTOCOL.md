@@ -53,6 +53,7 @@
 | `showNowPlaying` | bool | | true | 任务栏正在播放媒体入口（仅在存在媒体会话时出现） |
 | `nowPlayingShowPaused` | bool | | true | 媒体会话暂停时是否在任务栏保留正在播放入口 |
 | `nowPlayingMotion` | string | `off` / `subtle` / `normal` / `vivid` | `normal` | 正在播放入口五根竖杠的波形动效幅度 |
+| `nowPlayingRhythm` | string | `live` / `loop` | `live` | 五根竖杠跟随播放器的实际音量律动，或播放固定的律动动画 |
 | `nowPlayingAppMode` | string | `all` / `allow` / `block` | `all` | 正在播放媒体会话的应用过滤模式：全部、仅允许列表、排除列表 |
 | `nowPlayingApps` | string[] | 最多 64 项 | `[]` | 正在播放过滤列表（AUMID 或可执行文件名），每项去除首尾空白并丢弃空项 |
 | `nowPlayingScrollVolume` | bool | | true | 在正在播放入口上滚动滚轮调节对应播放器音量 |

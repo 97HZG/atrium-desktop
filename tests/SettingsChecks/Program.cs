@@ -169,7 +169,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
 {
     var extrasDefault = new BarSettings();
     Require(extrasDefault.ShowLaunchpad && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
-            extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingAppMode == "all" &&
+            extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingRhythm == "live" && extrasDefault.NowPlayingAppMode == "all" &&
             extrasDefault.NowPlayingApps.Count == 0 && extrasDefault.NowPlayingScrollVolume &&
             !extrasDefault.ShowFolderStacks && extrasDefault.FolderStackLayout == "fan" &&
             extrasDefault.FolderStackMax == 8 && extrasDefault.FolderStacks.Count == 0,
@@ -180,6 +180,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
         ShowNowPlaying = false,
         NowPlayingShowPaused = false,
         NowPlayingMotion = "vivid",
+        NowPlayingRhythm = "loop",
         NowPlayingAppMode = "block",
         NowPlayingApps = ["spotify.exe"],
         NowPlayingScrollVolume = false,
@@ -193,7 +194,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
     foreach (var edit in new Action<BarSettings>[]
     {
         s => s.ShowLaunchpad = false, s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
-        s => s.NowPlayingMotion = "subtle", s => s.NowPlayingAppMode = "allow",
+        s => s.NowPlayingMotion = "subtle", s => s.NowPlayingRhythm = "loop", s => s.NowPlayingAppMode = "allow",
         s => s.NowPlayingApps = ["a.exe"], s => s.NowPlayingScrollVolume = false,
         s => s.ShowFolderStacks = true, s => s.FolderStackLayout = "column",
         s => s.FolderStackMax = 10, s => s.FolderStacks = [@"D:\Work"],

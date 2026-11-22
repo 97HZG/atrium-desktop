@@ -16,9 +16,10 @@ public sealed partial class MainWindow
 
     private sealed class NowPlayingScene : ModuleScene
     {
-        private const double CW = 440, CH = 184, Pad = 22, Art = 72, ArtR = 16, TextX = Pad + Art + 16, BarsW = 28, BarsY = Pad + Art / 2;
-        private const double TrackY = 116, TrackH = 5, TimeW = 46, TrackL = Pad + TimeW + 8, TrackR = CW - Pad - TimeW - 8;
-        private const double ControlsY = 152, ControlStep = 70, MinRadius = 34;
+        // ui/now_playing_card.cpp's numbers: the panels' type (body 13.5, caption 11), padding 14.
+        private const double CW = 360, Pad = 14, Body = 13.5, Caption = 11, Art = 52, ArtR = 12, TextX = Pad + Art + 12, BarsW = 22, BarsY = Pad + Art / 2;
+        private const double TrackY = Pad + Art + 16, TrackH = 4, TimeW = 38, TrackL = Pad + TimeW + 6, TrackR = CW - Pad - TimeW - 6;
+        private const double ControlsY = TrackY + 34, ControlStep = 58, ControlR = 16, PlayR = 20, CH = ControlsY + PlayR + Pad, MinRadius = 34;
         private static readonly double[] Shape = [0.58, 0.86, 1.0, 0.80, 0.52];
         private static readonly double[] Rate = [0.92, 1.27, 1.71, 1.13, 0.81];
         private readonly PanelInk _ink = new();
@@ -26,8 +27,11 @@ public sealed partial class MainWindow
         private readonly TextBlock _title, _artist, _elapsed, _left, _heart, _lyrics;
         private readonly Border[] _bars = new Border[5];
         private readonly Border _track, _done;
-        private readonly TextBlock[] _controls;
+        // The controls as the card draws them: pause as two bars, previous and next as two triangles.
+        private readonly Border[] _pause = new Border[2];
+        private readonly Microsoft.UI.Xaml.Shapes.Path _previous, _next;
         private readonly double _start = Environment.TickCount64;
+        private int _shownSecond = -1;
 
         private sealed record Frame(double Left, double Top);
 
@@ -43,25 +47,37 @@ public sealed partial class MainWindow
                     new GradientStop { Color = Color.FromArgb(255, 0x6A, 0x5A, 0xF0), Offset = 1 },
                 },
             };
-            _title = Words(17, _ink.Text, true);
+            _title = Words(Body, _ink.Text, true);
             _title.Text = "Midnight City";
-            _artist = Words(13.5, _ink.Sub);
+            _artist = Words(Body, _ink.Sub);
             _artist.Text = "M83";
-            _elapsed = Words(11.5, _ink.Sub);
-            _left = Words(11.5, _ink.Sub, false, TextAlignment.Right);
+            _elapsed = Words(Caption, _ink.Sub);
+            _left = Words(Caption, _ink.Sub, false, TextAlignment.Right);
             var tint = new SolidColorBrush(Color.FromArgb(255, 0xD0, 0x6C, 0xE0)); // the art's colour
             for (int i = 0; i < _bars.Length; i++) _bars[i] = Plate(tint, BarsW / 18);
             _track = Plate(_ink.Track, TrackH / 2);
             _done = Plate(_ink.Text, TrackH / 2);
-            _controls = [Symbol("", 21, _ink.Text), Symbol("", 27, _ink.Text), Symbol("", 21, _ink.Text)];
+            for (int i = 0; i < _pause.Length; i++) _pause[i] = Plate(_ink.Text, 1.8);
+            _previous = Triangles("M9.5,-6 L1,0 L9.5,6 Z M0,-6 L-8.5,0 L0,6 Z");
+            _next = Triangles("M-9.5,-6 L-1,0 L-9.5,6 Z M0,-6 L8.5,0 L0,6 Z");
             // Either side of the controls: the heart and the lyrics (NetEase and QQ Music take them).
-            _heart = Symbol("\uEB51", 18, _ink.Text);
-            _lyrics = Words(15, _ink.Text, true, TextAlignment.Center);
+            _heart = Symbol("\uEB51", 16, _ink.Text);
+            _lyrics = Words(16.5, _ink.Text, true, TextAlignment.Center);
             _lyrics.Text = Loc.T("Lyrics", "button");
-            foreach (var e in new UIElement[] { _art, _title, _artist, _track, _done, _elapsed, _left, _heart, _lyrics }) Marks.Children.Add(e);
+            foreach (var e in new UIElement[] { _art, _title, _artist, _track, _done, _elapsed, _left, _heart, _lyrics, _previous, _next }) Marks.Children.Add(e);
             foreach (var e in _bars) Marks.Children.Add(e);
-            foreach (var e in _controls) Marks.Children.Add(e);
+            foreach (var e in _pause) Marks.Children.Add(e);
         }
+
+        private Microsoft.UI.Xaml.Shapes.Path Triangles(string markup) => new()
+        {
+            IsHitTestVisible = false,
+            Data = (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), markup),
+            Fill = _ink.Text,
+            Stroke = _ink.Text,
+            StrokeThickness = 1.5,
+            StrokeLineJoin = PenLineJoin.Round,
+        };
 
         protected override bool IsOpen => M.CurrentSettings.ShowNowPlaying;
         protected override Size PopupSize => new(CW, CH);
@@ -83,11 +99,10 @@ public sealed partial class MainWindow
             var f = (Frame)state;
             PlaceMarks(f.Left, f.Top);
             Put(_art, Pad, Pad, Art, Art);
-            double right = CW - Pad - BarsW - 10;
-            double mid = Pad + Art / 2;
-            Box(_title, TextX, mid - 23, right - TextX, 24);
-            Box(_artist, TextX, mid + 2, right - TextX, 20);
-            // The bars, as the entry moves them: each on its own rhythm inside a loud song's level.
+            double right = CW - Pad - BarsW - 10, mid = Pad + Art / 2;
+            Box(_title, TextX, mid - 19, right - TextX, 19);
+            Box(_artist, TextX, mid + 1, right - TextX, 19);
+            // The bars: each on its own rhythm inside a loud song's level.
             double t = (Now - _start) / 1000, bw = BarsW / 9, gap = (BarsW - 5 * bw) / 4;
             bool moving = M.CurrentSettings.NowPlayingMotion != "off";
             double reach = M.CurrentSettings.NowPlayingMotion switch { "subtle" => 0.55, "vivid" => 1.0, _ => 0.9 };
@@ -98,19 +113,28 @@ public sealed partial class MainWindow
                 double hh = Math.Max(bw, BarsW * hgt);
                 Put(_bars[i], CW - Pad - BarsW + i * (bw + gap), BarsY - hh / 2, bw, hh);
             }
-            // The progress: a four-minute song, a quarter in, going on.
+            // The progress: a four-minute song, a quarter in, going on; the times change once a second.
             double length = 244, pos = (61 + t) % length, done = pos / length;
             Put(_track, TrackL, TrackY - TrackH / 2, TrackR - TrackL, TrackH);
             Put(_done, TrackL, TrackY - TrackH / 2, Math.Max(TrackH, (TrackR - TrackL) * done), TrackH);
-            _elapsed.Text = $"{(int)pos / 60}:{(int)pos % 60:00}";
-            _left.Text = $"-{(int)(length - pos) / 60}:{(int)(length - pos) % 60:00}";
-            // The times either side of the bar.
-            Box(_elapsed, Pad, TrackY - 9, TrackL - 8 - Pad, 18);
-            Box(_left, TrackR + 8, TrackY - 9, CW - Pad - (TrackR + 8), 18);
-            for (int i = 0; i < 3; i++) Box(_controls[i], CW / 2 + (i - 1) * ControlStep - 24, ControlsY - 24, 48, 48);
-            Box(_heart, CW / 2 - 2 * ControlStep - 21, ControlsY - 21, 42, 42);
-            Box(_lyrics, CW / 2 + 2 * ControlStep - 21, ControlsY - 21, 42, 42);
-            return true; // it plays on
+            if ((int)pos != _shownSecond)
+            {
+                _shownSecond = (int)pos;
+                _elapsed.Text = $"{(int)pos / 60}:{(int)pos % 60:00}";
+                _left.Text = $"-{(int)(length - pos) / 60}:{(int)(length - pos) % 60:00}";
+                Box(_elapsed, Pad, TrackY - 8, TrackL - 6 - Pad, 16);
+                Box(_left, TrackR + 6, TrackY - 8, CW - Pad - (TrackR + 6), 16);
+            }
+            double cx = CW / 2;
+            Put(_pause[0], cx - 7.5, ControlsY - 8.5, 5, 17);
+            Put(_pause[1], cx + 2.5, ControlsY - 8.5, 5, 17);
+            Canvas.SetLeft(_previous, cx - ControlStep);
+            Canvas.SetTop(_previous, ControlsY);
+            Canvas.SetLeft(_next, cx + ControlStep);
+            Canvas.SetTop(_next, ControlsY);
+            Box(_heart, cx - 2 * ControlStep - ControlR, ControlsY - ControlR, 2 * ControlR, 2 * ControlR);
+            Box(_lyrics, cx + 2 * ControlStep - ControlR, ControlsY - ControlR, 2 * ControlR, 2 * ControlR);
+            return moving; // it plays on while the bars move
         }
     }
 
@@ -182,6 +206,17 @@ public sealed partial class MainWindow
             return ([.. tiles], new Frame(ax, foot, 0, 0, true, names, widths));
         }
 
+        // Turned about its centre; the transform kept from frame to frame.
+        private static void Turned(UIElement e, double degrees)
+        {
+            if (e.RenderTransform is not RotateTransform turn)
+            {
+                e.RenderTransformOrigin = new Point(0.5, 0.5);
+                e.RenderTransform = turn = new RotateTransform();
+            }
+            turn.Angle = degrees;
+        }
+
         protected override bool Arrange(object state, double dt)
         {
             var f = (Frame)state;
@@ -235,16 +270,14 @@ public sealed partial class MainWindow
                 double x = f.Left + (cx - f.Left) * e, y = f.Top + (cy - f.Top) * e, k = 0.35 + 0.65 * Math.Min(e, 1);
                 _items[i].Icon.FontSize = Icon * 0.78 * S * k;
                 Box(_items[i].Icon, x - Icon / 2 * S, y - Icon / 2 * S, Icon * S, Icon * S);
-                _items[i].Icon.RenderTransformOrigin = new Point(0.5, 0.5);
-                _items[i].Icon.RenderTransform = new RotateTransform { Angle = Turn(rise) * 180 / Math.PI * Math.Min(1, e) };
+                Turned(_items[i].Icon, Turn(rise) * 180 / Math.PI * Math.Min(1, e));
                 double lw = f.LabelW[i] * S, turn = Turn(rise), reach = Icon / 2 * S + LabelGap * S + lw / 2;
                 double lcx = cx - Math.Cos(turn) * reach, lcy = cy - Math.Sin(turn) * reach;
                 double lx = f.Left + (lcx - lw / 2 - f.Left) * e, ly = f.Top + (lcy - f.Top) * e;
                 _items[i].Name.FontSize = 13 * S;
                 _items[i].Name.TextAlignment = TextAlignment.Center;
                 Box(_items[i].Name, lx, ly - LabelH / 2 * S, lw, LabelH * S);
-                _items[i].Name.RenderTransformOrigin = new Point(0.5, 0.5);
-                _items[i].Name.RenderTransform = new RotateTransform { Angle = turn * 180 / Math.PI * Math.Min(1, e) };
+                Turned(_items[i].Name, turn * 180 / Math.PI * Math.Min(1, e));
                 _items[i].Icon.Opacity = Math.Clamp(e * 3, 0, 1);
                 _items[i].Name.Opacity = Math.Clamp((e - 0.3) / 0.7, 0, 1);
             }

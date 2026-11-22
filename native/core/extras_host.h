@@ -62,7 +62,7 @@ private:
     FolderStackPopup stacks_;
     std::unique_ptr<MediaSessionWatcher> media_;
     MediaSnapshot last_;
-    bool musicOn_ = false, musicShown_ = false, scrollVolume_ = true, stacksOn_ = false, launchpadOn_ = false;
+    bool musicOn_ = false, musicShown_ = false, stacksOn_ = false, launchpadOn_ = false;
 };
 
 } // namespace atrium

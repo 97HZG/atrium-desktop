@@ -62,6 +62,7 @@ using TimelineChangedHandler = Wf::ITypedEventHandler<Wmc::GlobalSystemMediaTran
 constexpr DWORD kAsyncTimeoutMs = 2000;
 constexpr DWORD kSampleIntervalMs = 33;
 constexpr DWORD kDebounceMs = 30;
+constexpr double kRefreshMs = 500; // the sessions read again while only the level is sampled
 constexpr size_t kMaxArtworkBytes = 16 * 1024 * 1024;
 constexpr int kArtworkSizePx = 128;
 
@@ -662,6 +663,8 @@ private:
             Log(L"media: RoInitialize failed");
             return;
         }
+        bool woke = true;
+        double refreshedMs = 0;
         while (!stop_.load(std::memory_order_acquire)) {
             if (!EnsureManager()) {
                 WaitForSingleObject(stopEvent_.handle, 5000);
@@ -672,10 +675,15 @@ private:
                 std::lock_guard lock(mutex_);
                 hasCommands = !queue_.empty() || filterDirty_;
             }
-            if (!hasCommands && hasPosted_ && WaitForSingleObject(stopEvent_.handle, kDebounceMs) == WAIT_OBJECT_0)
+            // News (an event, a command) is gathered for a moment, then read; while sampling, the sessions
+            // are read again only every kRefreshMs (the level is sampled every round).
+            if (woke && !hasCommands && hasPosted_ && WaitForSingleObject(stopEvent_.handle, kDebounceMs) == WAIT_OBJECT_0)
                 break;
-
-            RefreshAndPost();
+            const double nowMs = ClockMs();
+            if (woke || hasCommands || nowMs - refreshedMs >= kRefreshMs) {
+                RefreshAndPost();
+                refreshedMs = nowMs;
+            }
             if (stop_.load(std::memory_order_acquire))
                 break;
 
@@ -686,7 +694,7 @@ private:
                 if (onPeak_)
                     onPeak_(peak, wantSample);
             }
-            WaitForSingleObject(wake_.handle, wantSample ? kSampleIntervalMs : INFINITE);
+            woke = WaitForSingleObject(wake_.handle, wantSample ? kSampleIntervalMs : INFINITE) == WAIT_OBJECT_0;
         }
         for (auto& ts : sessions_)
             UnsubscribeSession(*ts);

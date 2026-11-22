@@ -157,6 +157,7 @@ void ReadExtrasSettingsJson(const json::JsonObject& o, Settings& s)
     flag(L"showNowPlaying", s.showNowPlaying);
     flag(L"nowPlayingShowPaused", s.nowPlayingShowPaused);
     str(L"nowPlayingMotion", s.nowPlayingMotion);
+    str(L"nowPlayingRhythm", s.nowPlayingRhythm);
     str(L"nowPlayingAppMode", s.nowPlayingAppMode);
     ReadStringArrayJson(o, L"nowPlayingApps", s.nowPlayingApps);
     flag(L"nowPlayingScrollVolume", s.nowPlayingScrollVolume);
@@ -240,6 +241,8 @@ void Settings::Clamp()
         widgetMaterial = L"glass";
     if (nowPlayingMotion != L"off" && nowPlayingMotion != L"subtle" && nowPlayingMotion != L"vivid")
         nowPlayingMotion = L"normal";
+    if (nowPlayingRhythm != L"loop")
+        nowPlayingRhythm = L"live";
     if (nowPlayingAppMode != L"allow" && nowPlayingAppMode != L"block")
         nowPlayingAppMode = L"all";
     if (folderStackLayout != L"column")
@@ -305,6 +308,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"showNowPlaying", json::JsonValue::CreateBooleanValue(showNowPlaying));
     o.SetNamedValue(L"nowPlayingShowPaused", json::JsonValue::CreateBooleanValue(nowPlayingShowPaused));
     o.SetNamedValue(L"nowPlayingMotion", json::JsonValue::CreateStringValue(nowPlayingMotion));
+    o.SetNamedValue(L"nowPlayingRhythm", json::JsonValue::CreateStringValue(nowPlayingRhythm));
     o.SetNamedValue(L"nowPlayingAppMode", json::JsonValue::CreateStringValue(nowPlayingAppMode));
     strArr(L"nowPlayingApps", nowPlayingApps);
     o.SetNamedValue(L"nowPlayingScrollVolume", json::JsonValue::CreateBooleanValue(nowPlayingScrollVolume));

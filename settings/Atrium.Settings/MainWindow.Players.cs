@@ -1,0 +1,104 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+
+namespace Atrium.Settings;
+
+// The players the now-playing card knows (native/core/shell/media_players.h), under its preview as the
+// notification sources are under theirs: icon, name and a switch, what the card does with each in the
+// row's tooltip. A player switched off is left off the bar: its ids go into nowPlayingApps, blocked
+// (nowPlayingAppMode block); with every one on, all players show.
+public sealed partial class MainWindow
+{
+    private static readonly (string Title, string Note, string[] Programs, string Icon, string[] Ids)[] KnownPlayers =
+    [
+        ("NetEase Cloud Music",
+            "Its progress is read from the player itself. The heart and the lyrics use its shortcuts (Ctrl+Alt+L, Ctrl+Alt+D). It takes no position from other apps.",
+            ["cloudmusic.exe"], "", ["cloudmusic.exe"]),
+        ("QQ Music", "Progress and seeking. The heart and the lyrics use its shortcuts (Ctrl+Alt+V, Ctrl+Alt+W).",
+            ["QQMusic.exe"], "", ["QQMusic.exe", "Tencent.QQMusic"]),
+        ("Spotify", "Progress and seeking.", ["Spotify.exe"], "", ["Spotify.exe", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!"]),
+        ("Apple Music", "Progress, and the artist and the album apart.", ["AppleMusic.exe"], @"shell:AppsFolder\AppleInc.AppleMusicWin_nzyj5cx40ttqa!App",
+            ["AppleMusic.exe", "AppleInc.AppleMusicWin_nzyj5cx40ttqa!"]),
+    ];
+
+    private readonly List<(SourceVm Vm, ToggleSwitch Switch)> _players = [];
+
+    private StackPanel BuildPlayers()
+    {
+        var res = Application.Current.Resources;
+        var rows = new StackPanel { Padding = new Thickness(0, 4, 0, 4) };
+        foreach (var (name, note, programs, icon, ids) in KnownPlayers)
+        {
+            var vm = new SourceVm(this, name, note, "\uE8D6", programs, s => PlayerShown(s, ids), (s, on) => ShowPlayer(s, ids, on)) { IconSource = icon };
+            var sw = new ToggleSwitch { Style = (Style)res["SwitchStyle"], IsOn = vm.IsOn, VerticalAlignment = VerticalAlignment.Center };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(sw, vm.Title);
+            sw.Toggled += (_, _) => { if (!_loading) vm.IsOn = sw.IsOn; };
+            _players.Add((vm, sw));
+            rows.Children.Add(PlayerRow(vm, sw));
+            _ = LoadRowIconAsync(vm);
+        }
+        var title = new TextBlock { Text = Loc.T("Players"), Style = (Style)res["SectionStyle"], Margin = new Thickness(4, 0, 0, 10) };
+        return new StackPanel { Margin = new Thickness(0, 14, 0, 0), Children = { title, new Border { Style = (Style)res["GroupStyle"], Child = rows } } };
+    }
+
+    // A row as the sources' (MainWindow.xaml, SourcesList): the icon (a glyph until it is found), the name, the switch.
+    private static Grid PlayerRow(SourceVm vm, ToggleSwitch sw)
+    {
+        var row = new Grid { Padding = new Thickness(14, 8, 14, 8), ColumnSpacing = 14, MinHeight = 60, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        ToolTipService.SetToolTip(row, vm.Note);
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var glyph = new FontIcon { Glyph = vm.Glyph, FontSize = 20, Foreground = (Brush)Application.Current.Resources["InkSecondaryBrush"] };
+        var image = new Image { Width = 36, Height = 36 };
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(AppRowVm.Icon)) return;
+            image.Source = vm.Icon;
+            glyph.Visibility = vm.FallbackVisibility;
+        };
+        var icon = new Grid { Width = 40, Height = 40, VerticalAlignment = VerticalAlignment.Center, Children = { glyph, image } };
+        var name = new TextBlock
+        {
+            Text = vm.Title,
+            Style = (Style)Application.Current.Resources["RowTitleStyle"],
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
+        };
+        Grid.SetColumn(name, 1);
+        Grid.SetColumn(sw, 2);
+        row.Children.Add(icon);
+        row.Children.Add(name);
+        row.Children.Add(sw);
+        return row;
+    }
+
+    private void RefreshPlayers()
+    {
+        foreach (var (vm, sw) in _players) sw.IsOn = vm.IsOn;
+    }
+
+    private static bool Listed(BarSettings s, string[] ids) => s.NowPlayingApps.Any(a => ids.Contains(a, StringComparer.OrdinalIgnoreCase));
+
+    private static bool PlayerShown(BarSettings s, string[] ids) => s.NowPlayingAppMode switch
+    {
+        "block" => !Listed(s, ids),
+        "allow" => Listed(s, ids),
+        _ => true,
+    };
+
+    // The player on or off the bar; the list kept as players switched off (an earlier "only these" list
+    // becomes the players not on it).
+    private static void ShowPlayer(BarSettings s, string[] ids, bool on)
+    {
+        var off = KnownPlayers.Where(p => !PlayerShown(s, p.Ids)).SelectMany(p => p.Ids).ToList();
+        if (s.NowPlayingAppMode == "block")
+            off.AddRange(s.NowPlayingApps.Where(a => !KnownPlayers.Any(p => p.Ids.Contains(a, StringComparer.OrdinalIgnoreCase))));
+        off.RemoveAll(a => ids.Contains(a, StringComparer.OrdinalIgnoreCase));
+        if (!on) off.AddRange(ids);
+        s.NowPlayingApps = [.. off.Distinct(StringComparer.OrdinalIgnoreCase).Take(64)];
+        s.NowPlayingAppMode = s.NowPlayingApps.Count == 0 ? "all" : "block";
+    }
+}

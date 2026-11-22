@@ -91,12 +91,13 @@ ExtrasHost::~ExtrasHost()
 void ExtrasHost::Apply(const Settings& s, float radius)
 {
     feed_->intensity.store(Intensity(s.nowPlayingMotion));
-    scrollVolume_ = s.nowPlayingScrollVolume;
+    feed_->loop.store(s.nowPlayingRhythm == L"loop");
     musicOn_ = s.showNowPlaying;
     if (musicOn_ && !media_) {
         const std::shared_ptr<MusicFeed> feed = feed_;
         media_ = std::make_unique<MediaSessionWatcher>(host_, WM_MEDIA_STATE, [feed](float peak, bool playing) {
-            feed->peak.store(peak);
+            // A steady animation: a song's usual level, whatever the sound (each bar keeps its own pace).
+            feed->peak.store(feed->loop.load() ? 0.35f : peak);
             feed->playing.store(playing);
         });
     } else if (!musicOn_ && media_) {
@@ -125,10 +126,6 @@ void ExtrasHost::ConfigureBar(Bar& bar)
 {
     bar.SetMusic(feed_, musicShown_, MusicTip());
     bar.onExtraClick = [this, &bar](const std::wstring& key, RECT entry) { Click(bar, key, entry); };
-    bar.onMusicWheel = [this](int notches) {
-        if (media_ && scrollVolume_)
-            media_->AdjustVolume(2 * notches);
-    };
     bar.onTuckChanged = [this] { UpdateSampling(); };
 }
 

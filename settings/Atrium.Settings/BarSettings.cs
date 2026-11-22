@@ -63,6 +63,7 @@ internal sealed class BarSettings
     public bool ShowNowPlaying { get; set; } = true;
     public bool NowPlayingShowPaused { get; set; } = true;
     public string NowPlayingMotion { get; set; } = "normal"; // off | subtle | normal | vivid
+    public string NowPlayingRhythm { get; set; } = "live"; // live | loop
     public string NowPlayingAppMode { get; set; } = "all";   // all | allow | block
     public List<string> NowPlayingApps { get; set; } = [];
     public bool NowPlayingScrollVolume { get; set; } = true;
@@ -204,6 +205,7 @@ internal sealed class BarSettings
             ["showNowPlaying"] = ShowNowPlaying,
             ["nowPlayingShowPaused"] = NowPlayingShowPaused,
             ["nowPlayingMotion"] = NowPlayingMotion,
+            ["nowPlayingRhythm"] = NowPlayingRhythm,
             ["nowPlayingAppMode"] = NowPlayingAppMode,
             ["nowPlayingScrollVolume"] = NowPlayingScrollVolume,
             ["showFolderStacks"] = ShowFolderStacks,
@@ -436,6 +438,7 @@ internal sealed class BarSettings
         s.NowPlayingShowPaused = Flag("nowPlayingShowPaused", f.NowPlayingShowPaused);
         string motion = Str("nowPlayingMotion", f.NowPlayingMotion);
         s.NowPlayingMotion = motion is "off" or "subtle" or "vivid" ? motion : "normal";
+        s.NowPlayingRhythm = Str("nowPlayingRhythm", f.NowPlayingRhythm) == "loop" ? "loop" : "live";
         string appMode = Str("nowPlayingAppMode", f.NowPlayingAppMode);
         s.NowPlayingAppMode = appMode is "allow" or "block" ? appMode : "all";
         s.NowPlayingApps = ReadStringArray(o, "nowPlayingApps", f.NowPlayingApps, 64);
@@ -457,7 +460,7 @@ internal sealed class BarSettings
         StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
         ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad && ShowNowPlaying == o.ShowNowPlaying &&
-        NowPlayingShowPaused == o.NowPlayingShowPaused && NowPlayingMotion == o.NowPlayingMotion &&
+        NowPlayingShowPaused == o.NowPlayingShowPaused && NowPlayingMotion == o.NowPlayingMotion && NowPlayingRhythm == o.NowPlayingRhythm &&
         NowPlayingAppMode == o.NowPlayingAppMode && NowPlayingApps.SequenceEqual(o.NowPlayingApps, StringComparer.OrdinalIgnoreCase) &&
         NowPlayingScrollVolume == o.NowPlayingScrollVolume && ShowFolderStacks == o.ShowFolderStacks &&
         FolderStackLayout == o.FolderStackLayout && FolderStackMax == o.FolderStackMax &&

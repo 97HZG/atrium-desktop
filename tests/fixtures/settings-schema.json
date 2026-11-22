@@ -45,6 +45,7 @@
     "showNowPlaying": {"type": "bool", "default": true},
     "nowPlayingShowPaused": {"type": "bool", "default": true},
     "nowPlayingMotion": {"type": "enum", "default": "normal", "values": ["off", "subtle", "normal", "vivid"], "fallback": "normal"},
+    "nowPlayingRhythm": {"type": "enum", "default": "live", "values": ["live", "loop"], "fallback": "live"},
     "nowPlayingAppMode": {"type": "enum", "default": "all", "values": ["all", "allow", "block"], "fallback": "all"},
     "nowPlayingApps": {"type": "stringArray", "default": [], "maxCount": 64},
     "nowPlayingScrollVolume": {"type": "bool", "default": true},

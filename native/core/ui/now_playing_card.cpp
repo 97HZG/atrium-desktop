@@ -15,15 +15,18 @@ namespace atrium {
 
 namespace {
 
-// The card, DIP, long as the Dynamic Island playing music: the art with the track and the artist
-// beside it, the five bars at the far end; the progress bar between its two times; the three controls
-// with the heart to their left and the lyrics to their right.
-constexpr float kW = 440, kH = 184, kPad = 22;
-constexpr float kArt = 72, kArtRadius = 16;
-constexpr float kTextX = kPad + kArt + 16, kBarsW = 28, kBarsY = kPad + kArt / 2;
-constexpr float kTrackY = 116, kTrackH = 5, kTrackHot = 8, kTimeW = 46, kKnob = 7;
-constexpr float kTrackL = kPad + kTimeW + 8, kTrackR = kW - kPad - kTimeW - 8;
-constexpr float kControlsY = 152, kControlStep = 70, kControlR = 21, kPlayR = 26;
+// The card, DIP, long as the Dynamic Island playing music and sized from the panels' type (DESIGN
+// §1.2: body 13.5 for the track and the artist, caption 11 for the times; the panel padding 14): the
+// art with the two lines beside it, the five bars at the far end; the progress bar between its times;
+// the three controls with the heart to their left and the lyrics to their right. A little wider than
+// the control centre (340).
+constexpr float kW = 360, kPad = 14, kBody = 13.5f, kCaption = 11;
+constexpr float kArt = 52, kArtRadius = 12;
+constexpr float kTextX = kPad + kArt + 12, kBarsW = 22, kBarsY = kPad + kArt / 2;
+constexpr float kTrackY = kPad + kArt + 16, kTrackH = 4, kTrackHot = 7, kTimeW = 38, kKnob = 6;
+constexpr float kTrackL = kPad + kTimeW + 6, kTrackR = kW - kPad - kTimeW - 6;
+constexpr float kControlsY = kTrackY + 34, kControlStep = 58, kControlR = 16, kPlayR = 20;
+constexpr float kH = kControlsY + kPlayR + kPad;
 constexpr D2D1_COLOR_F kHeart{1.f, 0.216f, 0.373f, 1.f}; // a liked track's heart (#FF375F)
 constexpr double kArtFadeMs = 260;
 constexpr UINT_PTR kTickTimer = 0x4E50;
@@ -33,7 +36,7 @@ D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b,
 
 D2D1_RECT_F ArtRect() { return D2D1::RectF(kPad, kPad, kPad + kArt, kPad + kArt); }
 D2D1_RECT_F TrackRect() { return D2D1::RectF(kTrackL - 6, kTrackY - 11, kTrackR + 6, kTrackY + 11); }
-D2D1_RECT_F SessionRect() { return D2D1::RectF(kW - kPad - 46, kPad + kArt - 18, kW - kPad, kPad + kArt); }
+D2D1_RECT_F SessionRect() { return D2D1::RectF(kW - kPad - 40, kPad + kArt - 16, kW - kPad, kPad + kArt); }
 D2D1_POINT_2F ControlCentre(int i) { return D2D1::Point2F(kW / 2 + float(i) * kControlStep, kControlsY); }
 
 // "1:23", or "1:02:03" past an hour.
@@ -233,20 +236,20 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
         c.Image(L"np|art|" + std::to_wstring(artVersion_), art_, art, artIn);
     } else {
         c.Fill(art, kArtRadius, Alpha(t.hover, 1.6f));
-        c.Glyph(L"", art, 26, t.subtext); // MusicNote
+        c.Glyph(L"", art, 22, t.subtext); // MusicNote
     }
     const float right = kW - kPad - kBarsW - 10;
     const std::wstring title = media_.title.empty() ? std::wstring(Tr(L"Not playing")) : media_.title;
     // The track and the artist, centred together on the art.
     const float mid = kPad + kArt / 2;
-    c.Text(title, D2D1::RectF(kTextX, mid - 23, right, mid + 1), 17, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(media_.artist, D2D1::RectF(kTextX, mid + 2, right, mid + 22), 13.5f, t.subtext);
+    c.Text(title, D2D1::RectF(kTextX, mid - 19, right, mid), kBody, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(media_.artist, D2D1::RectF(kTextX, mid + 1, right, mid + 20), kBody, t.subtext);
     const bool several = media_.sessionCount > 1;
     if (several) {
         const D2D1_RECT_F s = SessionRect();
         const float hv = Hover(c, Part::Session, hover_ == Part::Session);
         c.Fill(s, (s.bottom - s.top) / 2, Alpha(t.hover, 0.5f + 0.5f * hv));
-        c.Text(std::to_wstring(media_.sessionIndex + 1) + L"/" + std::to_wstring(media_.sessionCount) + L" ›", s, 11, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        c.Text(std::to_wstring(media_.sessionIndex + 1) + L"/" + std::to_wstring(media_.sessionCount) + L" ›", s, kCaption, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
     // The five bars, live, in the art's colour.
     const double dt = lastBarsMs_ == 0 ? 16 : c.now - lastBarsMs_;
@@ -285,8 +288,8 @@ void NowPlayingCard::PaintProgress(Canvas& c, const Theme& t)
         c.Circle(x, kTrackY, r, tint_ ? *tint_ : t.text);
     }
     // The times either side of the bar, as the Dynamic Island has them, each flush with the card's side.
-    c.Text(Clock(pos - tl.startUs), D2D1::RectF(kPad, kTrackY - 9, kTrackL - 8, kTrackY + 9), 11.5f, t.subtext);
-    c.Text(L"-" + Clock(tl.endUs - pos), D2D1::RectF(kTrackR + 8, kTrackY - 9, kW - kPad, kTrackY + 9), 11.5f, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 2);
+    c.Text(Clock(pos - tl.startUs), D2D1::RectF(kPad, kTrackY - 8, kTrackL - 6, kTrackY + 8), kCaption, t.subtext);
+    c.Text(L"-" + Clock(tl.endUs - pos), D2D1::RectF(kTrackR + 6, kTrackY - 8, kW - kPad, kTrackY + 8), kCaption, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 2);
 }
 
 void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
@@ -307,17 +310,18 @@ void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
         c.BeginGroup(k.enabled ? 1.f : 0.35f, pressed_ == k.part ? 0.86f : 1.f, o.x, o.y);
         c.BeginInkArea(D2D1::RectF(o.x - k.r, o.y - k.r, o.x + k.r, o.y + k.r)); // one ink for the whole mark
         const D2D1_COLOR_F ink = t.text;
+        // The marks (MainWindow.ExtrasScenes.cs draws the same): pause as two bars, play as a
+        // triangle, previous and next as two triangles pointing the way the track goes.
         if (k.part == Part::Play && Playing()) {
-            c.Fill(D2D1::RectF(o.x - 9, o.y - 10, o.x - 3, o.y + 10), 2, ink);
-            c.Fill(D2D1::RectF(o.x + 3, o.y - 10, o.x + 9, o.y + 10), 2, ink);
+            c.Fill(D2D1::RectF(o.x - 7.5f, o.y - 8.5f, o.x - 2.5f, o.y + 8.5f), 1.8f, ink);
+            c.Fill(D2D1::RectF(o.x + 2.5f, o.y - 8.5f, o.x + 7.5f, o.y + 8.5f), 1.8f, ink);
         } else if (k.part == Part::Play) {
-            const std::array<D2D1_POINT_2F, 3> play{{{o.x - 5.5f, o.y - 9}, {o.x + 9.5f, o.y}, {o.x - 5.5f, o.y + 9}}};
+            const std::array<D2D1_POINT_2F, 3> play{{{o.x - 4.5f, o.y - 8}, {o.x + 8.5f, o.y}, {o.x - 4.5f, o.y + 8}}};
             c.Polygon(play, ink, 2);
         } else {
-            // Two triangles pointing the way the track goes.
             const float d = float(k.at);
-            for (float base : {-11.f, 0.f}) {
-                const std::array<D2D1_POINT_2F, 3> tri{{{o.x + d * base, o.y - 7}, {o.x + d * (base + 10), o.y}, {o.x + d * base, o.y + 7}}};
+            for (float base : {-9.5f, 0.f}) {
+                const std::array<D2D1_POINT_2F, 3> tri{{{o.x + d * base, o.y - 6}, {o.x + d * (base + 8.5f), o.y}, {o.x + d * base, o.y + 6}}};
                 c.Polygon(tri, ink, 1.5f);
             }
         }
@@ -328,17 +332,19 @@ void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
     for (const auto& [part, at, enabled] : {std::tuple{Part::Like, -2, media_.canLike}, {Part::Lyrics, 2, media_.canLyrics}}) {
         const D2D1_POINT_2F o = ControlCentre(at);
         const float hv = enabled ? Hover(c, part, hover_ == part) : 0.f;
-        if (hv > 0.001f)
-            c.Circle(o.x, o.y, kControlR - 2, Alpha(pressed_ == part ? t.press : t.hover, hv));
+        // The lyrics on: a plate behind the mark, as a pressed toggle (the mark stays in the ink).
+        const float plate = std::max(hv, part == Part::Lyrics && lyricsOn_ && enabled ? 1.f : 0.f);
+        if (plate > 0.001f)
+            c.Circle(o.x, o.y, kControlR, Alpha(pressed_ == part ? t.press : t.hover, plate));
         c.BeginGroup(enabled ? 1.f : 0.35f, pressed_ == part ? 0.86f : 1.f, o.x, o.y);
         const D2D1_RECT_F box = D2D1::RectF(o.x - kControlR, o.y - kControlR, o.x + kControlR, o.y + kControlR);
         c.BeginInkArea(box);
         if (part == Part::Like)
-            c.Glyph(liked_ ? L"\uEB52" : L"\uEB51", box, 18, liked_ ? kHeart : t.text); // HeartFill, Heart
+            c.Glyph(liked_ ? L"\uEB52" : L"\uEB51", box, 16, liked_ ? kHeart : t.text); // HeartFill, Heart
         else
         {
             const std::wstring lyrics = Tr(L"Lyrics", L"button"); // 词: one character where it reads so
-            c.Text(lyrics, box, lyrics.size() > 2 ? 12.f : 15.f, lyricsOn_ ? (tint_ ? *tint_ : t.accent) : t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+            c.Text(lyrics, box, lyrics.size() > 2 ? 11.f : 16.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         }
         c.EndInkArea();
         c.EndGroup();

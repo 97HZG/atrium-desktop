@@ -15,16 +15,14 @@ public sealed partial class MainWindow
 {
     private const int NowPlayingPage = 15, StacksPage = 16, LaunchpadPage = 17;
     private static readonly string[] MotionTags = ["off", "subtle", "normal", "vivid"];
-    private static readonly string[] AppModeTags = ["all", "allow", "block"];
     private static readonly int[] StackMaxima = [6, 8, 12, 16];
 
     private StackPanel? _npMain, _npSide, _stMain, _stSide, _lpMain, _lpSide;
     private Border? _npStage, _stStage, _lpStage;
     private Canvas? _npCanvas, _stCanvas, _lpCanvas;
     private ModuleScene? _npScene, _stScene, _lpScene;
-    private ToggleTile? _launchpadSwitch, _npSwitch, _npPausedSwitch, _npWheelSwitch, _stSwitch;
-    private SegmentTrack? _npMotion, _npMode, _stLayout, _stMax;
-    private TextBox? _npApps;
+    private ToggleTile? _launchpadSwitch, _npSwitch, _npPausedSwitch, _stSwitch;
+    private SegmentTrack? _npMotion, _npRhythm, _stLayout, _stMax;
     private StackPanel? _stList;
     private TextBlock? _stCount;
 
@@ -66,6 +64,7 @@ public sealed partial class MainWindow
         _npSide = BuildNowPlayingSide();
         _stSide = BuildStacksSide();
         _stMain.Children.Add(BuildStacksFolders());
+        _npMain.Children.Add(BuildPlayers());
         _launchpadSwitch = Toggle("Show on the taskbar", "Show Launchpad on the taskbar",
             "An entry next to the start logo opens every app, page by page, in one large window of glass, as on macOS.", (s, on) => s.ShowLaunchpad = on);
         _lpSide = Side("Launchpad", _launchpadSwitch);
@@ -126,29 +125,11 @@ public sealed partial class MainWindow
         _npSwitch = Toggle("Show on the taskbar", "Show now playing",
             "Right of the status entry, while a music or video app is playing. Its five bars move with the sound.", (s, on) => s.ShowNowPlaying = on);
         _npPausedSwitch = Toggle("Keep while paused", "Keep now playing while paused", "", (s, on) => s.NowPlayingShowPaused = on);
-        _npWheelSwitch = Toggle("Wheel changes the player's volume", "Wheel changes the player's volume",
-            "The wheel over the entry turns the playing app's own volume up or down.", (s, on) => s.NowPlayingScrollVolume = on);
         _npMotion = Segments("nowplayingmotion", [("Off", "off"), ("Subtle", "subtle"), ("Standard", "normal"), ("Vivid", "vivid")],
             tag => CurrentSettings.NowPlayingMotion = tag);
-        _npMode = Segments("nowplayingapps", [("All apps", "all"), ("Only these", "allow"), ("All but these", "block")], tag =>
-        {
-            CurrentSettings.NowPlayingAppMode = tag;
-            _npApps?.IsEnabled = tag != "all";
-        });
-        _npApps = new TextBox
-        {
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.NoWrap,
-            Height = 104,
-            PlaceholderText = Loc.T("One app a line, e.g. Spotify.exe or cloudmusic.exe"),
-        };
-        _npApps.LostFocus += (_, _) =>
-        {
-            if (_loading) return;
-            CurrentSettings.NowPlayingApps = [.. _npApps.Text.Split('\r', '\n').Select(l => l.Trim()).Where(l => l.Length > 0).Take(64)];
-            Changed();
-        };
-        return Side("Now Playing", _npSwitch, _npPausedSwitch, Row("Bars' motion", _npMotion), _npWheelSwitch, Row("Apps", _npMode), _npApps);
+        _npRhythm = Segments("nowplayingrhythm", [("Follows the music", "live"), ("Steady animation", "loop")],
+            tag => CurrentSettings.NowPlayingRhythm = tag);
+        return Side("Now Playing", _npSwitch, _npPausedSwitch, Row("Bars' rhythm", _npRhythm), Row("Bars' motion", _npMotion));
     }
 
     private StackPanel BuildStacksSide()
@@ -271,14 +252,9 @@ public sealed partial class MainWindow
         _launchpadSwitch?.IsOn = s.ShowLaunchpad;
         _npSwitch?.IsOn = s.ShowNowPlaying;
         _npPausedSwitch?.IsOn = s.NowPlayingShowPaused;
-        _npWheelSwitch?.IsOn = s.NowPlayingScrollVolume;
         Check(_npMotion, MotionTags.Contains(s.NowPlayingMotion) ? s.NowPlayingMotion : "normal");
-        Check(_npMode, AppModeTags.Contains(s.NowPlayingAppMode) ? s.NowPlayingAppMode : "all");
-        if (_npApps != null)
-        {
-            _npApps.Text = string.Join("\r", s.NowPlayingApps);
-            _npApps.IsEnabled = s.NowPlayingAppMode != "all";
-        }
+        Check(_npRhythm, s.NowPlayingRhythm == "loop" ? "loop" : "live");
+        RefreshPlayers();
         _stSwitch?.IsOn = s.ShowFolderStacks;
         Check(_stLayout, s.FolderStackLayout == "column" ? "column" : "fan");
         int max = StackMaxima.MinBy(n => Math.Abs(n - s.FolderStackMax));

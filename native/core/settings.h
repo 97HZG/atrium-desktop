@@ -63,6 +63,7 @@ struct Settings {
     bool showNowPlaying = true;      // the now-playing entry (visible while a player has a media session)
     bool nowPlayingShowPaused = true;
     std::wstring nowPlayingMotion = L"normal"; // off | subtle | normal | vivid
+    std::wstring nowPlayingRhythm = L"live";   // live: the bars follow the sound | loop: a steady animation
     std::wstring nowPlayingAppMode = L"all";   // all | allow | block
     std::vector<std::wstring> nowPlayingApps;  // AUMIDs or exe names (max 64)
     bool nowPlayingScrollVolume = true;

@@ -21,6 +21,7 @@ struct MusicFeed {
     std::atomic<float> peak{0};       // the playing app's level, linear 0..1
     std::atomic<bool> playing{false}; // the session is playing
     std::atomic<float> intensity{1};  // the motion setting: 0 still .. 1.5 vivid
+    std::atomic<bool> loop{false};    // nowPlayingRhythm loop: a steady level, the bars on their own rhythms
 };
 
 class MusicBars {

@@ -51,6 +51,7 @@ public sealed partial class MainWindow
             {
                 _icons[i] = DrawnIcon(Apps[i].Glyph, Apps[i].Top, Apps[i].Bottom);
                 _icons[i].RenderTransformOrigin = new Point(0.5, 0.5);
+                _icons[i].RenderTransform = new ScaleTransform();
                 _names[i] = Words(12.5, _ink.Text, false, TextAlignment.Center);
                 _names[i].Text = Loc.T(Apps[i].Name);
                 Marks.Children.Add(_icons[i]);
@@ -92,7 +93,8 @@ public sealed partial class MainWindow
                 double x = SideW + i % Cols * CellW, y = GridTop + i / Cols * CellH;
                 double top = y + (CellH - IconPx - 8 - 16) / 2;
                 Put(_icons[i], x + (CellW - IconPx) / 2, top, IconPx, IconPx);
-                _icons[i].RenderTransform = new ScaleTransform { ScaleX = k, ScaleY = k };
+                var scale = (ScaleTransform)_icons[i].RenderTransform;
+                scale.ScaleX = scale.ScaleY = k;
                 _icons[i].Opacity = e;
                 Box(_names[i], x + 4, top + IconPx + 8, CellW - 8, 16);
                 _names[i].Opacity = e;

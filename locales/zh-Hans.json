@@ -951,6 +951,18 @@
   "Choose one with Add folder…, or pick a common folder such as Downloads.": "点“添加文件夹…”选择一个，或者从常用文件夹里挑，比如下载。",
   "Store": "应用商店",
   "Videos": "视频",
-  "Contacts": "联系人"
+  "Contacts": "联系人",
+  "Players": "播放器",
+  "Bars' rhythm": "律动方式",
+  "Follows the music": "跟随音乐",
+  "Steady animation": "固定动画",
+  "NetEase Cloud Music": "网易云音乐",
+  "QQ Music": "QQ音乐",
+  "Spotify": "Spotify",
+  "Apple Music": "Apple Music",
+  "Its progress is read from the player itself. The heart and the lyrics use its shortcuts (Ctrl+Alt+L, Ctrl+Alt+D). It takes no position from other apps.": "进度直接从播放器读取；收藏和歌词使用它的快捷键（Ctrl+Alt+L、Ctrl+Alt+D）。它不接受其他软件调整进度。",
+  "Progress and seeking. The heart and the lyrics use its shortcuts (Ctrl+Alt+V, Ctrl+Alt+W).": "显示进度，可拖动跳转；收藏和歌词使用它的快捷键（Ctrl+Alt+V、Ctrl+Alt+W）。",
+  "Progress and seeking.": "显示进度，可拖动跳转。",
+  "Progress, and the artist and the album apart.": "显示进度，歌手和专辑分开显示。"
  }
 }
