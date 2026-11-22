@@ -954,17 +954,121 @@ finally
                 "Null base with non-empty edits on both sides must merge additions.");
         }
 
-        // 64-pin clamp after merge
+        // 64-pin overflow on merge: never silently truncate; preserve full merge and report unsaved overflow
         {
-            var s = new SettingsSession();
-            s.ApplyInitialState(new BarSettings { Pins = [] }, new BarSettings { Pins = [] }, "i1", 1);
-            var target40 = Enumerable.Range(0, 40).Select(i => Pin($"T{i}", $@"C:\t{i}.exe")).ToList();
-            var draft40 = Enumerable.Range(0, 40).Select(i => Pin($"D{i}", $@"C:\d{i}.exe")).ToList();
-            s.Draft.Pins = draft40;
-            s.ApplyConflict(new BarSettings { Pins = target40 }, 2, "i1");
-            Require(s.Draft.Pins!.Count == 64 && s.Draft.Pins[0] == target40[0] && s.Draft.Pins[40] == draft40[0] &&
-                    s.Draft.Pins[63] == draft40[23],
-                "Merged Pins exceeding 64 items must truncate cleanly to the first 64.");
+            var base63 = Enumerable.Range(1, 63).Select(i => Pin($"P{i}", $@"C:\p{i}.exe")).ToList();
+            var pinX = Pin("AppX", @"C:\x.exe");
+            var pinY = Pin("AppY", @"C:\y.exe");
+            var reorderedBase = new List<PinnedApp>(base63);
+            (reorderedBase[0], reorderedBase[1]) = (reorderedBase[1], reorderedBase[0]);
+
+            // 63 + draft X (reordered + scalar Height=84) + server Y across all 4 merge paths
+            foreach (string mode in new[] { "conflict", "external", "reconnect", "initial-pending" })
+            {
+                var s = new SettingsSession();
+                var baseSettings = new BarSettings { Height = 60, Pins = [.. base63] };
+                var serverSettings = new BarSettings { Height = 60, ShowClock = false, Pins = [.. base63, pinY] };
+                var draftPins = (List<PinnedApp>)[.. reorderedBase, pinX];
+                if (mode == "initial-pending")
+                {
+                    var pendingCurrent = new BarSettings { Height = 84, Pins = draftPins };
+                    s.ApplyInitialState(serverSettings, serverSettings, "i1", 2, baseSettings, pendingCurrent);
+                }
+                else
+                {
+                    s.ApplyInitialState(baseSettings, baseSettings, "i1", 1);
+                    s.Draft.Height = 84;
+                    s.Draft.Pins = draftPins;
+                    s.MarkEdited();
+                    if (mode == "conflict") s.ApplyConflict(serverSettings, 2, "i1");
+                    else if (mode == "external") s.ApplyExternalChange(serverSettings, 2);
+                    else s.ApplyReconnectSnapshot(serverSettings, serverSettings, "i1", 2, s.DraftVersion - 1);
+                }
+
+                Require(s.Draft.Pins!.Count == 65 && s.HasPinOverflow && s.HasUnsavedChanges && s.Draft.Height == 84 && !s.Draft.ShowClock,
+                    $"63+1+1 merge ({mode}) must keep 65 pins, set HasPinOverflow, and preserve scalar edits.");
+                Require(s.OverflowPins.SequenceEqual([pinX]),
+                    $"63+1+1 merge ({mode}) OverflowPins must identify unsaved X even when draft reordered, not server-saved Y.");
+                Require(s.Saved.Pins!.Count == 64 && s.Saved.Pins.Contains(pinY),
+                    $"63+1+1 merge ({mode}) must keep 64 server-saved pins including Y.");
+
+                // Reordering while already in overflow must keep HasPinOverflow and OverflowPins accurate
+                (s.Draft.Pins[0], s.Draft.Pins[1]) = (s.Draft.Pins[1], s.Draft.Pins[0]);
+                s.MarkEdited();
+                Require(s.HasPinOverflow && s.OverflowPins.SequenceEqual([pinX]),
+                    $"Reordering while overflowing ({mode}) must keep HasPinOverflow and OverflowPins=[X].");
+            }
+
+            // Resolution path (a): Revert() discards X and restores server's 64 pins
+            {
+                var s = new SettingsSession();
+                s.ApplyInitialState(new BarSettings { Pins = [.. base63] }, new BarSettings { Pins = [.. base63] }, "i1", 1);
+                s.Draft.Pins = [.. reorderedBase, pinX];
+                s.ApplyConflict(new BarSettings { Pins = [.. base63, pinY] }, 2, "i1");
+                Require(s.HasPinOverflow, "Precondition: 65-pin conflict must overflow.");
+                s.Revert();
+                Require(!s.HasPinOverflow && s.OverflowPins.Count == 0 && !s.HasUnsavedChanges &&
+                        s.Draft.Pins!.SequenceEqual([.. base63, pinY]),
+                    "Revert() must clear overflow and restore server's 64 pins.");
+            }
+
+            // Resolution path (b): removing 1 pin drops to 64, round-trips JSON and commits cleanly
+            {
+                var s = new SettingsSession();
+                s.ApplyInitialState(new BarSettings { Pins = [.. base63] }, new BarSettings { Pins = [.. base63] }, "i1", 1);
+                s.Draft.Pins = [.. base63, pinX];
+                s.ApplyConflict(new BarSettings { Pins = [.. base63, pinY] }, 2, "i1");
+                Require(s.Draft.Pins!.Count == 65 && s.OverflowPins.SequenceEqual([pinX]),
+                    "Precondition: non-reordered 63+1+1 merge must hold 65 pins with OverflowPins=[X].");
+                s.Draft.Pins.RemoveAt(0); // remove P1 -> P2..P63 + Y + X (64 items)
+                s.MarkEdited();
+                var expected64 = base63.Skip(1).Concat([pinY, pinX]).ToList();
+                Require(!s.HasPinOverflow && s.OverflowPins.Count == 0 && s.HasUnsavedChanges &&
+                        s.Draft.Pins.SequenceEqual(expected64),
+                    "Removing 1 pin from 65-pin merge must clear overflow and leave exact 64-pin order.");
+                var roundTrip = BarSettings.FromJson(s.Draft.ToJson(), new());
+                Require(roundTrip.Pins != null && roundTrip.Pins.SequenceEqual(expected64),
+                    "Resolved 64-pin draft must round-trip ToJson/FromJson with zero item or order loss.");
+                var committed = s.Draft.Clone();
+                s.ApplyCommitSuccess(committed, "i1", 3);
+                var savedRoundTrip = BarSettings.FromJson(s.Saved.ToJson(), new());
+                Require(!s.HasUnsavedChanges && !s.HasPinOverflow && savedRoundTrip.Pins!.SequenceEqual(expected64),
+                    "ApplyCommitSuccess after resolving overflow must clear HasUnsavedChanges and preserve all 64 pins.");
+            }
+
+            // Both sides add the same 64th pin -> 64 pins, no overflow
+            {
+                var s = new SettingsSession();
+                s.ApplyInitialState(new BarSettings { Pins = [.. base63] }, new BarSettings { Pins = [.. base63] }, "i1", 1);
+                s.Draft.Pins = [.. base63, pinX];
+                s.ApplyConflict(new BarSettings { Pins = [.. base63, pinX] }, 2, "i1");
+                Require(s.Draft.Pins!.Count == 64 && !s.HasPinOverflow && s.OverflowPins.Count == 0 && !s.HasUnsavedChanges,
+                    "Adding the identical 64th pin on both sides must converge at 64 without overflow.");
+            }
+
+            // Exact 64 pins -> no overflow
+            {
+                var s = new SettingsSession();
+                var full64 = Enumerable.Range(1, 64).Select(i => Pin($"F{i}", $@"C:\f{i}.exe")).ToList();
+                s.ApplyInitialState(new BarSettings { Pins = full64 }, new BarSettings { Pins = full64 }, "i1", 1);
+                Require(s.Draft.Pins!.Count == 64 && !s.HasPinOverflow && s.OverflowPins.Count == 0,
+                    "Exact 64 pins must not trigger HasPinOverflow.");
+            }
+
+            // target40 + draft40 -> full 80 kept, OverflowPins == [D24..D39]
+            {
+                var s = new SettingsSession();
+                s.ApplyInitialState(new BarSettings { Pins = [] }, new BarSettings { Pins = [] }, "i1", 1);
+                var target40 = Enumerable.Range(0, 40).Select(i => Pin($"T{i}", $@"C:\t{i}.exe")).ToList();
+                var draft40 = Enumerable.Range(0, 40).Select(i => Pin($"D{i}", $@"C:\d{i}.exe")).ToList();
+                s.Draft.Pins = draft40;
+                s.ApplyConflict(new BarSettings { Pins = target40 }, 2, "i1");
+                Require(s.Draft.Pins!.Count == 80 && s.HasPinOverflow && s.Draft.Pins[0] == target40[0] &&
+                        s.Draft.Pins[40] == draft40[0] && s.Draft.Pins[79] == draft40[39],
+                    "Merged Pins exceeding 64 items must keep all 80 items without silent truncation.");
+                Require(s.OverflowPins.SequenceEqual(draft40.Skip(24)),
+                    "target40 + draft40 OverflowPins must report exact excess [D24..D39].");
+            }
         }
 
         // Identical changes on both sides leave HasUnsavedChanges == false

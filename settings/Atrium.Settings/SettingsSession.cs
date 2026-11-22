@@ -6,6 +6,8 @@ namespace Atrium.Settings;
 // optimistic concurrency metadata (InstanceId / Revision), and 3-way merges.
 internal sealed class SettingsSession
 {
+    public const int MaxPins = 64;
+
     public BarSettings Saved { get; private set; } = new();
     public BarSettings Draft { get; private set; } = new();
     public string? InstanceId { get; private set; }
@@ -14,6 +16,29 @@ internal sealed class SettingsSession
     public bool Closed { get; private set; }
 
     public bool HasUnsavedChanges => !Draft.SameAs(Saved);
+    public bool HasPinOverflow => Draft.Pins is { Count: > MaxPins };
+
+    public IReadOnlyList<PinnedApp> OverflowPins
+    {
+        get
+        {
+            if (Draft.Pins is not { Count: > MaxPins } draftPins) return [];
+            int excess = draftPins.Count - MaxPins;
+            var savedKeys = new HashSet<PinKey>(PinKeyComparer.Instance);
+            if (Saved.Pins != null)
+            {
+                foreach (var pin in Saved.Pins) savedKeys.Add(KeyOf(pin));
+            }
+            var unsaved = new List<PinnedApp>();
+            foreach (var pin in draftPins)
+            {
+                if (!savedKeys.Contains(KeyOf(pin))) unsaved.Add(pin);
+            }
+            return unsaved.Count >= excess
+                ? unsaved.GetRange(unsaved.Count - excess, excess)
+                : draftPins.GetRange(MaxPins, excess);
+        }
+    }
 
     public void MarkEdited()
     {
@@ -104,6 +129,8 @@ internal sealed class SettingsSession
 
     private readonly record struct PinKey(string Path, string Aumid, string Args);
 
+    private static PinKey KeyOf(PinnedApp p) => new(p.Path, p.Aumid, p.Args);
+
     private sealed class PinKeyComparer : IEqualityComparer<PinKey>
     {
         public static readonly PinKeyComparer Instance = new();
@@ -162,14 +189,13 @@ internal sealed class SettingsSession
             merged = draftPins.Count == 0 ? [] : MergePinLists([], targetPins, draftPins);
         else
             merged = MergePinLists(basePins, targetPins, draftPins);
-        if (merged is { Count: > 64 }) merged.RemoveRange(64, merged.Count - 64);
         return merged;
     }
 
     private static List<PinnedApp> MergePinLists(List<PinnedApp> basePins, List<PinnedApp> targetPins, List<PinnedApp> draftPins) =>
         MergeThreeWayList(
             basePins, targetPins, draftPins,
-            static p => new PinKey(p.Path, p.Aumid, p.Args),
+            KeyOf,
             PinKeyComparer.Instance,
             static (b, t, d) => b == null ? d : new PinnedApp(
                 d.Name != b.Name ? d.Name : t.Name,

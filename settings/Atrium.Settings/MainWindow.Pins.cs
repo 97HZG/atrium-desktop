@@ -85,9 +85,26 @@ public sealed partial class MainWindow
 {
     private readonly ObservableCollection<PinVm> _pinVms = [];
     private readonly Dictionary<string, ImageSource?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
+    private bool _pinOverflowShown;
 
     internal static string PinTitle(PinnedApp p) =>
         p.Name.Length > 0 ? p.Name : p.Path.Length > 0 ? Path.GetFileNameWithoutExtension(p.Path) : p.Aumid;
+
+    internal void ShowPinOverflow()
+    {
+        var overflow = _session.OverflowPins;
+        int total = _session.Draft.Pins?.Count ?? _pinVms.Count;
+        const int PreviewCount = 3;
+        string names = string.Join(Loc.T(", "), overflow.Take(PreviewCount).Select(PinTitle));
+        string body = overflow.Count > PreviewCount
+            ? Loc.F(
+                "Pinned apps now total {0} / 64. Cannot save: {1} (+{2} more). Remove the extra apps to save, or click Revert to discard these additions.",
+                total, names, overflow.Count - PreviewCount)
+            : Loc.F(
+                "Pinned apps now total {0} / 64. Cannot save: {1}. Remove the extra apps to save, or click Revert to discard these additions.",
+                total, names);
+        ShowMessage(InfoBarSeverity.Warning, Loc.T("Too many pinned apps"), body);
+    }
 
     private void InitPins() => PinsList.ItemsSource = _pinVms;
 
@@ -117,7 +134,17 @@ public sealed partial class MainWindow
         bool empty = _pinVms.Count == 0;
         PinsEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         PinsList.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
-        PinCount.Text = $"{_pinVms.Count} / 64";
+        PinCount.Text = $"{_pinVms.Count} / {SettingsSession.MaxPins}";
+        if (_session.HasPinOverflow)
+        {
+            ShowPinOverflow();
+            _pinOverflowShown = true;
+        }
+        else if (_pinOverflowShown)
+        {
+            _pinOverflowShown = false;
+            Status.IsOpen = false;
+        }
     }
 
     // The collection is the order the user sees; the settings follow it.
@@ -226,7 +253,7 @@ public sealed partial class MainWindow
     {
         var file = await PickProgramAsync();
         if (file == null) return;
-        if (_pinVms.Count >= 64)
+        if (_pinVms.Count >= SettingsSession.MaxPins)
         {
             ShowMessage(InfoBarSeverity.Warning, Loc.T("Pinned apps limit reached"), Loc.T("You can pin at most 64 apps."));
             return;

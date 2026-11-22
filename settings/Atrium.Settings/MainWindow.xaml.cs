@@ -715,7 +715,7 @@ public sealed partial class MainWindow : Window, IDisposable
         ShowStatus(_client.Connected);
         LoadIntoControls();
         UpdateButtons();
-        if (_session.HasUnsavedChanges) SchedulePreview();
+        if (_session.HasUnsavedChanges && !_session.HasPinOverflow) SchedulePreview();
         if (Content is FrameworkElement { IsLoaded: true }) App.SignalStartupReady(_client.Connected && _client.StateConfirmed);
         else if (Content is FrameworkElement root) root.Loaded += (_, _) => App.SignalStartupReady(_client.Connected && _client.StateConfirmed);
         if (_reconnectTimer == null && !_updatesClosed)
@@ -734,7 +734,7 @@ public sealed partial class MainWindow : Window, IDisposable
         bool preview = _session.ApplyReconnectSnapshot(state.Saved, state.Current, state.InstanceId, state.Revision, draftBefore);
         LoadIntoControls();
         UpdateButtons();
-        if (preview) SchedulePreview();
+        if (preview && !_session.HasPinOverflow) SchedulePreview();
     }
 
     private void FinishCoreChange(bool watch = false)
@@ -921,7 +921,7 @@ public sealed partial class MainWindow : Window, IDisposable
         UpdateButtons();
         if (_page == 4) ShowWidgetMap();
         if (_page == 5) ShowStagePreview(true);
-        if (_session.HasUnsavedChanges) SchedulePreview(); // the edits made here, over the new state
+        if (_session.HasUnsavedChanges && !_session.HasPinOverflow) SchedulePreview(); // the edits made here, over the new state
     }
 
     // ---- Controls <-> settings ----
@@ -1399,7 +1399,8 @@ public sealed partial class MainWindow : Window, IDisposable
     private void UpdateButtons()
     {
         bool dirty = _session.HasUnsavedChanges;
-        SaveButton.IsEnabled = RevertButton.IsEnabled = dirty && _saveTask == null;
+        bool canEdit = dirty && _saveTask == null;
+        RevertButton.IsEnabled = canEdit; SaveButton.IsEnabled = canEdit && !_session.HasPinOverflow;
         _flashId++;
         DirtyText.Text = Loc.T("Unsaved");
         DirtyDot.Fill = new SolidColorBrush(Color.FromArgb(255, 0xFF, 0x9F, 0x0A));
@@ -1429,19 +1430,16 @@ public sealed partial class MainWindow : Window, IDisposable
     // so dragging a slider never queues up stale frames.
     private async void SchedulePreview()
     {
-        if (!_client.Connected || _updatesClosed) return;
-        if (_previewBusy)
-        {
-            _previewPending = true;
-            return;
-        }
+        if (!_client.Connected || _updatesClosed || _session.HasPinOverflow) return;
+        if (_previewBusy) { _previewPending = true; return; }
         _previewBusy = true;
         do
         {
             _previewPending = false;
+            if (_session.HasPinOverflow) break;
             await _client.PreviewAsync(CurrentSettings.Clone());
             await Task.Delay(16);
-        } while (_previewPending && !_updatesClosed);
+        } while (_previewPending && !_updatesClosed && !_session.HasPinOverflow);
         _previewBusy = false;
         if (!_updatesClosed && !_client.Connected) ShowStatus(false);
     }
@@ -1462,12 +1460,17 @@ public sealed partial class MainWindow : Window, IDisposable
         finally
         {
             if (ReferenceEquals(_saveTask, task)) _saveTask = null;
-            if (!_updatesClosed && !_session.Closed) SaveButton.IsEnabled = RevertButton.IsEnabled = _session.HasUnsavedChanges;
+            if (!_updatesClosed && !_session.Closed)
+            {
+                RevertButton.IsEnabled = _session.HasUnsavedChanges;
+                SaveButton.IsEnabled = _session.HasUnsavedChanges && !_session.HasPinOverflow;
+            }
         }
     }
 
     private async Task<bool> SaveCoreAsync()
     {
+        if (_session.HasPinOverflow) { ShowPinOverflow(); return false; }
         // What is saved is this snapshot: edits made while it is on its way stay unsaved.
         var sent = _session.Draft.Clone();
         bool languageChanged = sent.Language != _session.Saved.Language;
@@ -1478,6 +1481,7 @@ public sealed partial class MainWindow : Window, IDisposable
             _session.ApplyConflict(result.ServerSaved, result.Revision, result.InstanceId);
             LoadIntoControls();
             UpdateButtons();
+            if (_session.HasPinOverflow) { ShowPinOverflow(); ShowStatus(_client.Connected); return false; }
             if (_session.HasUnsavedChanges)
             {
                 SchedulePreview();
@@ -1487,11 +1491,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 return false;
             }
         }
-        else if (!result.Succeeded)
-        {
-            ShowMessage(InfoBarSeverity.Error, Loc.T("Could not save"), result.Error ?? "error");
-            return false;
-        }
+        else if (!result.Succeeded) { ShowMessage(InfoBarSeverity.Error, Loc.T("Could not save"), result.Error ?? "error"); return false; }
         else { _session.ApplyCommitSuccess(sent, result.InstanceId, result.Revision); }
         // The settings window's XAML is Chinese source text: re-create it in
         // the new language, carrying edits made while the save was in flight.
