@@ -164,6 +164,11 @@ static class UninstallStub
             {
                 if (_ignoreClose) return;
                 Log(_m, _tag + ":close-for-uninstall");
+                string holdEv = Get(_m, "hold_close_event");
+                if (holdEv.Length > 0)
+                {
+                    using (var ev = EventWaitHandle.OpenExisting(holdEv)) ev.WaitOne(15000);
+                }
                 _forceClose = true;
                 Close();
                 return;
@@ -179,6 +184,7 @@ static class UninstallStub
         string self = Assembly.GetExecutingAssembly().Location;
         string dir = Path.GetDirectoryName(self);
         string exe = Path.GetFileName(self);
+        if (Array.IndexOf(args, "--noop") >= 0) return 0;
         var m = ReadMode(dir);
         string tag = Get(m, "tag");
         string hostCls = Get(m, "host_class");
@@ -195,6 +201,7 @@ static class UninstallStub
         }
         if (exe.Equals("Atrium.Settings.exe", StringComparison.OrdinalIgnoreCase))
         {
+            Log(m, tag + ":settings:start");
             var f = new SimpleForm(m, tag, Get(m, "ignore_close") == "1", Get(m, "unsaved") == "1");
             f.Shown += (s, e) => Log(m, tag + ":settings:ready");
             Application.Run(f);
@@ -343,7 +350,81 @@ static class UninstallStub
         }
     } finally { Stop-CaseProcesses $cDir $tracked }
     Write-Host 'Uninstall Case 4 passed (unresponsive Settings aborted uninstall and kept B files).'
-    Write-Host 'Uninstaller regressions passed (4 cases).'
+
+    # Case 5: Uninstaller holding install mutex rejects concurrent Update.ps1 without spawning Settings, then completes cleanly
+    $cDir = Join-Path $fixtureRoot 'case5-uninstall-blocks-updater'; $inst = Join-Path $cDir 'Atrium'
+    $cache = Join-Path $cDir 'cache'; $pkg = Join-Path $cache 'package-background'
+    $log = Join-Path $cDir 'events.log'; $uErrLog = Join-Path $cDir 'uninstall.err.log'
+    $tracked = New-Object System.Collections.ArrayList
+    $releaseName = 'Local\Atrium.UninstallTest.Release.' + [Guid]::NewGuid().ToString('N')
+    $releaseEv = New-Object System.Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $releaseName)
+    try {
+        Populate-Install $inst @{ tag = 'c5'; host_class = $testHostClass; events_log = $log; unsaved = '1'; hold_close_event = $releaseName }
+        Write-TestManifest $inst '2.8.0'
+        $bKeep = Write-Utf8Bytes (Join-Path $inst 'user-keep.txt') 'keep-user'
+        New-Item -ItemType Directory -Path (Join-Path $pkg 'Settings') -Force | Out-Null
+        Copy-Item -LiteralPath $stubExe -Destination (Join-Path $pkg 'Atrium.exe') -Force
+        Copy-Item -LiteralPath $stubExe -Destination (Join-Path $pkg 'Settings\Atrium.Settings.exe') -Force
+        Write-TestManifest $pkg '2.9.0'
+        $updateCopy = Join-Path $cache 'Update.ps1'
+        Copy-Item -LiteralPath (Join-Path $project 'tools\Update.ps1') -Destination $updateCopy -Force
+        $statePath = Join-Path $cache 'ready.json'; '{}' | Set-Content -LiteralPath $statePath -Encoding UTF8
+        $resultPath = Join-Path $cache 'result.json'
+        $coreProc = Start-Process -FilePath (Join-Path $inst 'Atrium.exe') -WindowStyle Hidden -PassThru
+        $setProc = Start-Process -FilePath (Join-Path $inst 'Settings\Atrium.Settings.exe') -WindowStyle Hidden -PassThru
+        [void]$tracked.Add($coreProc); [void]$tracked.Add($setProc)
+        Wait-Log $log 'c5:core:ready'; Wait-Log $log 'c5:settings:ready'
+        $uScript = Join-Path $inst 'Uninstall.ps1'
+        $uProc = Start-Process -FilePath $ps51 -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$uScript`"",
+            '-Confirmed', '-Quiet') -RedirectStandardError $uErrLog -WindowStyle Hidden -PassThru
+        [void]$tracked.Add($uProc)
+        Wait-Log $log 'c5:close-for-uninstall'
+        $dummy = Start-Process -FilePath $stubExe -ArgumentList '--noop' -WindowStyle Hidden -PassThru
+        $dummyId = $dummy.Id; [void]$dummy.WaitForExit(5000); $dummy.Dispose()
+        $updArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$updateCopy`"", '-InstallDirectory', "`"$inst`"",
+            '-PackageDirectory', "`"$pkg`"", '-StatePath', "`"$statePath`"", '-WaitForProcessId', $dummyId,
+            '-StartCore', '1', '-StartupTimeoutSeconds', '4')
+        $updProc = Start-Process -FilePath $ps51 -ArgumentList $updArgs -WindowStyle Hidden -PassThru
+        try {
+            if (!$updProc.WaitForExit(30000)) {
+                Stop-Process -Id $updProc.Id -Force -ErrorAction SilentlyContinue; [void]$updProc.WaitForExit(2000)
+                throw 'Case 5: Update.ps1 timed out while uninstaller held mutex'
+            }
+        } finally { $updProc.Dispose() }
+        if (!(Test-Path -LiteralPath $resultPath -PathType Leaf)) { throw 'Case 5: Update.ps1 did not write result.json' }
+        $updRes = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if (!$updRes.error -or $updRes.error -notmatch '另一项更新或卸载') {
+            throw "Case 5: expected mutex conflict in result.json, got: $($updRes.error)"
+        }
+        $logText = Get-Content -LiteralPath $log -Raw
+        $settingsStarts = ([regex]::Matches($logText, 'c5:settings:start')).Count
+        if ($settingsStarts -ne 1) { throw "Case 5: expected exactly 1 Settings start, saw $settingsStarts" }
+        $settingsPath = Join-Path $inst 'Settings\Atrium.Settings.exe'
+        $runningSettings = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            try { $_.Path -and [string]::Equals($_.Path, $settingsPath, [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+        })
+        if ($runningSettings.Count -ne 1 -or $runningSettings[0].Id -ne $setProc.Id) {
+            throw "Case 5: unexpected Settings process spawned while uninstaller held mutex"
+        }
+        [void]$releaseEv.Set()
+        if (!$uProc.WaitForExit(30000)) { throw 'Case 5: Uninstall.ps1 timed out after releasing close event' }
+        if ($uProc.ExitCode -ne 0) {
+            $errText = if (Test-Path -LiteralPath $uErrLog) { Get-Content -LiteralPath $uErrLog -Raw } else { '' }
+            throw "Case 5: Uninstall.ps1 failed (exit $($uProc.ExitCode)): $errText"
+        }
+        Wait-Log $log 'c5:core:wm_close'
+        $finalStarts = ([regex]::Matches((Get-Content -LiteralPath $log -Raw), 'c5:settings:start')).Count
+        if ($finalStarts -ne 1) { throw "Case 5: Settings started after updater rejection ($finalStarts)" }
+        foreach ($gone in @('Atrium.exe', 'Settings\Atrium.Settings.exe', 'Uninstall.ps1', 'package-manifest.json')) {
+            if (Test-Path -LiteralPath (Join-Path $inst $gone)) { throw "Case 5: official file remained: $gone" }
+        }
+        Assert-SameBytes (Join-Path $inst 'user-keep.txt') $bKeep 'Case 5'
+    } finally {
+        $releaseEv.Dispose()
+        Stop-CaseProcesses $cDir $tracked
+    }
+    Write-Host 'Uninstall Case 5 passed (uninstaller holding mutex rejected updater without spawning Settings).'
+    Write-Host 'Uninstaller regressions passed (5 cases).'
 } finally {
     Stop-CaseProcesses $fixtureRoot
     if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }

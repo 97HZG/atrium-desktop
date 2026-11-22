@@ -37,6 +37,14 @@ public static class AtriumUninstallNative
 '@
 }
 
+function Get-StringSha256Prefix([string]$Text) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($Text)
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').Substring(0, 16)
+    } finally { $sha.Dispose() }
+}
+
 function Get-FileSha256([string]$Path) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
@@ -156,21 +164,40 @@ function Remove-PackageFile([string]$Path) {
     }
 }
 
+$installMutex = $null
+$installMutexAcquired = $false
+$failed = $false
 try {
     $installRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
     $coreExe = Join-Path $installRoot 'Atrium.exe'
     $settingsExe = Join-Path $installRoot 'Settings\Atrium.Settings.exe'
-    if ($installRoot -eq [IO.Path]::GetPathRoot($installRoot).TrimEnd('\') -or
-        !(Test-Path -LiteralPath $coreExe -PathType Leaf) -or
-        !(Test-Path -LiteralPath $settingsExe -PathType Leaf)) {
+    if (!$installRoot -or $installRoot -eq [IO.Path]::GetPathRoot($installRoot).TrimEnd('\')) {
         throw '请从 Atrium 安装目录运行卸载程序。'
     }
 
     if (!$Confirmed) {
+        if (!(Test-Path -LiteralPath $coreExe -PathType Leaf) -or
+            !(Test-Path -LiteralPath $settingsExe -PathType Leaf)) {
+            throw '请从 Atrium 安装目录运行卸载程序。'
+        }
         $answer = [Windows.Forms.MessageBox]::Show(
             '卸载 Atrium？个人设置和桌面小组件布局将会保留。',
             'Atrium', 'YesNo', 'Question', 'Button2')
         if ($answer -ne [Windows.Forms.DialogResult]::Yes) { exit 0 }
+    }
+
+    $installHash = Get-StringSha256Prefix ($installRoot.ToUpperInvariant())
+    $installMutex = New-Object System.Threading.Mutex($false, "Local\Atrium.Update.Install.$installHash")
+    try {
+        $installMutexAcquired = $installMutex.WaitOne(0)
+    } catch [System.Threading.AbandonedMutexException] {
+        $installMutexAcquired = $true
+    }
+    if (!$installMutexAcquired) { throw '当前安装目录正在执行更新或卸载，请等待其完成后重试。' }
+
+    if (!(Test-Path -LiteralPath $coreExe -PathType Leaf) -or
+        !(Test-Path -LiteralPath $settingsExe -PathType Leaf)) {
+        throw '请从 Atrium 安装目录运行卸载程序。'
     }
 
     # Resolve and verify ownership by path + SHA-256 before stopping running apps or deleting files.
@@ -276,10 +303,15 @@ try {
     }
 }
 catch {
+    $failed = $true
     if ($Quiet) {
         [Console]::Error.WriteLine($_.Exception.Message)
     } else {
         [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Atrium', 'OK', 'Error')
     }
-    exit 1
 }
+finally {
+    if ($installMutexAcquired) { try { $installMutex.ReleaseMutex() } catch { } }
+    if ($installMutex) { $installMutex.Dispose() }
+}
+if ($failed) { exit 1 }

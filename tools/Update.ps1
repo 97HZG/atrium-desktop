@@ -331,7 +331,7 @@ try {
     } catch [System.Threading.AbandonedMutexException] {
         $installMutexAcquired = $true
     }
-    if (!$installMutexAcquired) { throw '当前安装目录正在执行另一项更新，请等待其完成后重试。' }
+    if (!$installMutexAcquired) { throw '当前安装目录正在执行另一项更新或卸载，请等待其完成后重试。' }
     foreach ($root in @($install, $package)) {
         if (!(Test-Path -LiteralPath (Join-Path $root 'Atrium.exe')) -or
             !(Test-Path -LiteralPath (Join-Path $root 'Settings\Atrium.Settings.exe'))) { throw '找不到完整的 Atrium 程序文件。' }
@@ -524,7 +524,7 @@ try {
             try { Remove-Item -LiteralPath $temporary -Recurse -Force } catch { Write-Warning $_.Exception.Message }
         }
     }
-    if (!$confirmed -and (!$backupStarted -or $restored)) {
+    if ($installMutexAcquired -and !$confirmed -and (!$backupStarted -or $restored)) {
         $restoredCore = Join-Path $install 'Atrium.exe'; $backupCore = Join-Path $backup 'Atrium.exe'
         if ($coreStopped -and $StartCore -eq '1' -and (Test-Path -LiteralPath $restoredCore) -and !(Test-Path -LiteralPath $backupCore)) {
             try { Start-Process -FilePath $restoredCore -WorkingDirectory $workingDirectory -WindowStyle Hidden } catch { Write-Warning $_.Exception.Message }

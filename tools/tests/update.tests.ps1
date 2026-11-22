@@ -130,10 +130,11 @@ static class Stub {
             string mp = Path.Combine(rootDir, "package-manifest.json");
             if (File.Exists(mp) && File.ReadAllText(mp).Contains("\"" + v2m + "\"")) ver = "v2";
         }
-        string readyEv = "", lockP = "", lockR = ""; int sleepMs = 0;
+        string readyEv = "", waitEv = "", lockP = "", lockR = ""; int sleepMs = 0;
         bool isExit = false, isGuard = false, isResume = false, lockReadOnly = false;
         for (int i = 0; i < args.Length; i++) {
             if (args[i] == "--ready-event" && i + 1 < args.Length) readyEv = args[++i];
+            else if (args[i] == "--wait-event" && i + 1 < args.Length) waitEv = args[++i];
             else if (args[i] == "--lock" && i + 1 < args.Length) lockP = args[++i];
             else if (args[i] == "--lock-read" && i + 1 < args.Length) { lockP = args[++i]; lockReadOnly = true; }
             else if (args[i] == "--lock-ready" && i + 1 < args.Length) lockR = args[++i];
@@ -141,6 +142,7 @@ static class Stub {
             else if (args[i] == "--exit") isExit = true; else if (args[i] == "--guard") isGuard = true; else if (args[i] == "--resume-update") isResume = true;
         }
         if (sleepMs > 0) { Thread.Sleep(sleepMs); return 0; }
+        if (waitEv.Length > 0) { using (var ev = EventWaitHandle.OpenExisting(waitEv)) ev.WaitOne(30000); return 0; }
         if (lockP.Length > 0) {
             Directory.CreateDirectory(Path.GetDirectoryName(lockP));
             FileAccess acc = lockReadOnly ? FileAccess.Read : FileAccess.ReadWrite;
@@ -542,6 +544,71 @@ static class Stub {
         } finally { $procB.Dispose() }
     } finally { Stop-CaseProcesses $c.Dir $tracked.ToArray() }
     Write-Host 'Case 7 passed (manifest replace/retire, modified official conflict, rollback safety, concurrent mutex).'
+    # Case 7e: Updater holding install mutex rejects concurrent uninstaller with zero deletion, then finishes upgrade
+    $c = New-CaseLayout 'case7e-updater-blocks-uninstall'; $tracked = New-Object System.Collections.ArrayList
+    $releaseName = 'Local\Atrium.UpdateTest.Release.' + [Guid]::NewGuid().ToString('N')
+    $releaseEv = New-Object System.Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $releaseName)
+    try {
+        Populate-App $c.Install @{ version = 'v1'; v2_manifest = '2.9.0'; respect_exit = '1'; exit_signal = $c.Exit; events_log = $c.Log }
+        Populate-App $c.Package @{ version = 'v2'; respect_exit = '1'; exit_signal = "$($c.Dir)\exit-v2.sig"; events_log = $c.Log }
+        $installedUninstall = Join-Path $c.Install 'Uninstall.ps1'
+        Copy-Item -LiteralPath (Join-Path $project 'tools\Uninstall.ps1') -Destination $installedUninstall -Force
+        Copy-Item -LiteralPath (Join-Path $project 'tools\Uninstall.ps1') -Destination (Join-Path $c.Package 'Uninstall.ps1') -Force
+        $bOff = Write-Utf8Bytes (Join-Path $c.Install 'official.dat') 'v1-official'
+        [void](Write-Utf8Bytes (Join-Path $c.Package 'official.dat') 'v2-official')
+        Write-TestManifest $c.Install '2.8.0'; Write-TestManifest $c.Package '2.9.0'
+        $bUser = Write-Utf8Bytes (Join-Path $c.Install 'user-note.txt') 'keep-user-note'
+        [void]$tracked.Add((Start-Process -FilePath (Join-Path $c.Install 'Atrium.exe') -WindowStyle Hidden -PassThru))
+        Wait-Log $c.Log 'v1:Atrium\.exe:start'
+        $slowProc = Start-Process -FilePath $stubExe -ArgumentList "--wait-event $releaseName" -WindowStyle Hidden -PassThru
+        [void]$tracked.Add($slowProc)
+        $argsA = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $c.Script, '-InstallDirectory', $c.Install,
+            '-PackageDirectory', $c.Package, '-StatePath', $c.State, '-WaitForProcessId', $slowProc.Id, '-StartCore', '1',
+            '-StartupTimeoutSeconds', '4')
+        $procA = Start-Process -FilePath $ps51 -ArgumentList $argsA -WindowStyle Hidden -PassThru
+        [void]$tracked.Add($procA)
+        $until = [DateTime]::UtcNow.AddSeconds(10)
+        while (@(Get-ChildItem -LiteralPath $c.Dir -Directory -Filter 'Atrium.update-*').Count -eq 0 -and [DateTime]::UtcNow -lt $until) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (@(Get-ChildItem -LiteralPath $c.Dir -Directory -Filter 'Atrium.update-*').Count -eq 0) {
+            throw 'Case 7e: updater did not reach temp staging while holding mutex'
+        }
+        $uCmd = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; & '$($installedUninstall.Replace("'", "''"))' -Confirmed -Quiet"
+        $uPsi = New-Object System.Diagnostics.ProcessStartInfo($ps51, "-NoProfile -ExecutionPolicy Bypass -Command `"$uCmd`"")
+        $uPsi.UseShellExecute = $false; $uPsi.RedirectStandardError = $true; $uPsi.StandardErrorEncoding = [Text.Encoding]::UTF8
+        $uPsi.CreateNoWindow = $true
+        $uProc = [System.Diagnostics.Process]::Start($uPsi)
+        try {
+            $uErr = $uProc.StandardError.ReadToEnd()
+            if (!$uProc.WaitForExit(15000)) {
+                Stop-Process -Id $uProc.Id -Force -ErrorAction SilentlyContinue; [void]$uProc.WaitForExit(2000)
+                throw 'Case 7e: uninstaller timed out while updater held mutex'
+            }
+            if ($uProc.ExitCode -eq 0) { throw 'Case 7e: expected uninstaller to fail while updater held mutex' }
+            if ($uErr -notmatch '正在执行更新或卸载') { throw "Case 7e: expected mutex conflict error on stderr, got: $uErr" }
+        } finally { $uProc.Dispose() }
+        foreach ($kept in @('Atrium.exe', 'Settings\Atrium.Settings.exe', 'Uninstall.ps1', 'package-manifest.json')) {
+            if (!(Test-Path -LiteralPath (Join-Path $c.Install $kept) -PathType Leaf)) {
+                throw "Case 7e: official file deleted despite mutex rejection: $kept"
+            }
+        }
+        Assert-SameBytes (Join-Path $c.Install 'official.dat') $bOff 'Case 7e (official intact)'
+        Assert-SameBytes (Join-Path $c.Install 'user-note.txt') $bUser 'Case 7e (user intact)'
+        [void]$releaseEv.Set()
+        if (!$procA.WaitForExit(45000)) { throw 'Case 7e: updater timed out after releasing WaitForProcessId' }
+        $outA = Get-Content -LiteralPath $c.Result -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($procA.ExitCode -ne 0 -or $outA.error -ne '') { throw "Case 7e: updater failed after uninstaller rejection: $($outA.error)" }
+        $newM = Get-Content -LiteralPath (Join-Path $c.Install 'package-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($newM.version -ne '2.9.0') { throw "Case 7e: expected manifest version 2.9.0, got $($newM.version)" }
+        Assert-SameBytes (Join-Path $c.Install 'official.dat') ([Text.Encoding]::UTF8.GetBytes('v2-official')) 'Case 7e (v2)'
+        Assert-SameBytes (Join-Path $c.Install 'user-note.txt') $bUser 'Case 7e (user post-upgrade)'
+        Wait-Log $c.Log 'v2:Atrium\.exe:start'; Wait-Log $c.Log 'v2:Atrium\.Settings\.exe:start'
+    } finally {
+        $releaseEv.Dispose()
+        Stop-CaseProcesses $c.Dir $tracked.ToArray()
+    }
+    Write-Host 'Case 7e passed (updater holding mutex rejected uninstaller cleanly and finished v2 upgrade).'
     Write-Host 'Updater regressions passed (all cases).'
 } finally {
     Stop-CaseProcesses $fixtureRoot
