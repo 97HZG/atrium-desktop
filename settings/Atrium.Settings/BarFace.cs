@@ -57,6 +57,7 @@ internal sealed partial class BarFace
     {
         _badgeText.FontFamily = (FontFamily)Application.Current.Resources["TitleFont"];
         _badge.Child = _badgeText;
+        _plate.Background = _plateBrush;
         for (int i = 0; i < _logoPanes.Length; ++i)
         {
             var pane = new Rectangle { IsHitTestVisible = false, Fill = LogoBrush() };
@@ -124,9 +125,9 @@ internal sealed partial class BarFace
                 p.Data = (Geometry)XamlBindingHelper.ConvertValue(typeof(Geometry), "F1 " + markup);
             }
             double em = Math.Max(1, size * 0.64);
-            if (p.Fill is SolidColorBrush brush) brush.Color = color;
+            if (p.ReadLocalValue(Shape.FillProperty) is SolidColorBrush brush) brush.Color = color;
             else p.Fill = new SolidColorBrush(color);
-            if (p.RenderTransform is ScaleTransform scale) { scale.ScaleX = scale.ScaleY = em; }
+            if (p.ReadLocalValue(UIElement.RenderTransformProperty) is ScaleTransform scale) { scale.ScaleX = scale.ScaleY = em; }
             else { p.RenderTransform = new ScaleTransform { ScaleX = em, ScaleY = em }; }
             Canvas.SetLeft(p, x + size / 2);
             Canvas.SetTop(p, y + size / 2);
@@ -139,6 +140,7 @@ internal sealed partial class BarFace
     private static TextBlock Ime() => new()
     {
         Text = "中",
+        Foreground = new SolidColorBrush(Colors.Transparent),
         TextAlignment = TextAlignment.Center,
         IsHitTestVisible = false,
         IsTextScaleFactorEnabled = false,
@@ -230,7 +232,6 @@ internal sealed partial class BarFace
         if (plate)
         {
             _plateBrush.Color = darkInk ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(51, 255, 255, 255);
-            _plate.Background = _plateBrush;
             _plate.Width = _plate.Height = l.P * zoom;
             _plate.CornerRadius = new CornerRadius(l.PlateR * zoom);
             Canvas.SetLeft(_plate, X(l.PlateX(1)));
@@ -445,6 +446,7 @@ internal sealed partial class StatusGlyph : Canvas
     internal static TextBlock Symbol() => new()
     {
         IsHitTestVisible = false,
+        Foreground = new SolidColorBrush(Colors.Transparent),
         FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
         TextAlignment = TextAlignment.Center,
         IsTextScaleFactorEnabled = false,
@@ -457,7 +459,7 @@ internal sealed partial class StatusGlyph : Canvas
         t.Text = glyph;
         t.FontSize = Math.Max(1, size);
         t.Width = w;
-        if (t.Foreground is SolidColorBrush brush) brush.Color = color;
+        if (t.ReadLocalValue(TextBlock.ForegroundProperty) is SolidColorBrush brush) brush.Color = color;
         else t.Foreground = new SolidColorBrush(color);
         SetLeft(t, x);
         SetTop(t, y + (w - TextMetrics.Line(t)) / 2);
