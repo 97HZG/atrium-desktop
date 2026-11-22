@@ -142,11 +142,7 @@ float CornerRadius(HWND window)
     return (pref == DWMWCP_ROUNDSMALL ? 4.f : 8.f) * float(GetDpiForWindow(window)) / 96.f;
 }
 
-bool CanPrintWindow(HWND window)
-{
-    return IsWindow(window) && !IsIconic(window) && IsWindowVisible(window) && IsWindowEnabled(window) && GetWindow(window, GW_OWNER) == nullptr &&
-           !IsHungAppWindow(window);
-}
+bool CanPrintWindow(HWND window) { return IsWindow(window) && !IsIconic(window) && IsWindowVisible(window) && !IsHungAppWindow(window); }
 
 WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, int largeMax, WindowPicture* large)
 {

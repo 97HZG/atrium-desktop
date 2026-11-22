@@ -124,14 +124,6 @@ bool HasStartAllBackModule(DWORD shellPid)
     return found;
 }
 
-struct KeepFirstState {
-    const TrayHost* host = nullptr;
-    DWORD cachedShellPid = 0;
-    bool hasStartAllBack = false;
-    ULONGLONG lossWindowStart = 0;
-    int rapidLosses = 0;
-};
-
 const wchar_t* Name(DWORD message)
 {
     switch (message) {
@@ -582,23 +574,15 @@ void TrayHost::KeepFirst()
     // E_NOTIMPL: apps that show progress on their button would not start (TeraCopy #90, NanaZip #86).
     if (HANDLE band = shell ? GetPropW(shell, kTaskband) : nullptr; band != GetPropW(w, kTaskband))
         SetPropW(w, kTaskband, band);
-    thread_local KeepFirstState state;
-    if (state.host != this)
-        state = {this};
     const DWORD shellPid = shell ? PidOf(shell) : ShellPid();
-    if (shellPid != state.cachedShellPid) {
-        state.cachedShellPid = shellPid;
-        state.hasStartAllBack = HasStartAllBackModule(shellPid);
-        state.lossWindowStart = 0;
-        state.rapidLosses = 0;
-        if (yielded_.exchange(false))
-            dirty_ = true;
+    if (shellPid != yieldPolicy_.shellPid && yieldPolicy_.OnShellPid(shellPid, HasStartAllBackModule(shellPid))) {
+        yielded_ = false;
+        dirty_ = true;
     }
     HWND first = FindWindowW(L"Shell_TrayWnd", nullptr);
     if (first == w) {
-        state.lossWindowStart = 0;
-        state.rapidLosses = 0;
-        if (yielded_.exchange(false)) {
+        if (yieldPolicy_.OnFirst()) {
+            yielded_ = false;
             Log(L"tray host: in front again");
             dirty_ = true;
             SetTimer(w, kRecollectTimer, 200, nullptr); // updates went past the host meanwhile
@@ -607,37 +591,40 @@ void TrayHost::KeepFirst()
     }
     const DWORD owner = PidOf(first);
     if (first && owner != GetCurrentProcessId() && owner != shellPid) {
-        if (!yielded_.exchange(true)) {
+        if (yieldPolicy_.OnOtherProcess()) {
+            yielded_ = true;
             Log(L"tray host: another program's tray (pid %lu) is in front: left there", owner);
             dirty_ = true;
         }
         return;
     }
-    if (yielded_.load())
-        return;
     const ULONGLONG now = GetTickCount64();
-    if (state.hasStartAllBack) {
-        if (!yielded_.exchange(true)) {
-            Log(L"tray host: StartAllBack detected in explorer.exe (pid %lu); yielding", shellPid);
-            dirty_ = true;
-        }
-        return;
-    }
-    if (state.rapidLosses == 0 || now - state.lossWindowStart > 5000) {
-        state.lossWindowStart = now;
-        state.rapidLosses = 1;
-    } else {
-        ++state.rapidLosses;
-    }
-    if (state.rapidLosses >= 6) {
-        if (!yielded_.exchange(true)) {
-            Log(L"tray host: Explorer's taskbar repeatedly reclaimed first (%d times); yielding", state.rapidLosses);
+    const bool wasYielded = yielded_.load();
+    bool newlyYielded = false;
+    if (!yieldPolicy_.OnExplorerFirst(now, newlyYielded)) {
+        yielded_ = true;
+        if (newlyYielded) {
+            if (yieldPolicy_.Reason() == TrayHostYieldReason::StartAllBack)
+                Log(L"tray host: StartAllBack detected in explorer.exe (pid %lu); yielding", shellPid);
+            else
+                Log(L"tray host: Explorer's taskbar repeatedly reclaimed first (%d times); backing off 60s", yieldPolicy_.rapidLosses);
             dirty_ = true;
         }
         return;
     }
     SetWindowPos(w, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     const bool again = FindWindowW(L"Shell_TrayWnd", nullptr) == w;
+    if (again)
+        yieldPolicy_.OnFirst();
+    const bool nowYielded = yieldPolicy_.Yielded();
+    if (nowYielded != wasYielded) {
+        yielded_ = nowYielded;
+        dirty_ = true;
+        if (!nowYielded && again) {
+            Log(L"tray host: in front again");
+            SetTimer(w, kRecollectTimer, 200, nullptr);
+        }
+    }
     if (now - lostAt_ > 60000) // not on every round
         Log(L"tray host: Explorer's taskbar came first; moved back (%s)", again ? L"first again" : L"still second");
     lostAt_ = now;

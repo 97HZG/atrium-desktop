@@ -35,6 +35,95 @@
 
 namespace atrium {
 
+enum class TrayHostYieldReason { None, OtherProcess, RapidLoss, StartAllBack };
+
+struct TrayHostYieldPolicy {
+    static constexpr ULONGLONG kLossWindowMs = 5000;
+    static constexpr ULONGLONG kRapidBackoffMs = 60000;
+    static constexpr int kRapidLossLimit = 6;
+
+    DWORD shellPid = 0;
+    bool hasStartAllBack = false;
+    ULONGLONG lossWindowStart = 0;
+    ULONGLONG retryAt = 0;
+    int rapidLosses = 0;
+    TrayHostYieldReason reason = TrayHostYieldReason::None;
+
+    bool Yielded() const { return reason != TrayHostYieldReason::None; }
+    TrayHostYieldReason Reason() const { return reason; }
+
+    bool OnShellPid(DWORD pid, bool startAllBack)
+    {
+        if (pid == shellPid)
+            return false;
+        shellPid = pid;
+        hasStartAllBack = startAllBack;
+        lossWindowStart = 0;
+        retryAt = 0;
+        rapidLosses = 0;
+        const bool wasYielded = Yielded();
+        reason = TrayHostYieldReason::None;
+        return wasYielded;
+    }
+
+    bool OnFirst()
+    {
+        lossWindowStart = 0;
+        retryAt = 0;
+        rapidLosses = 0;
+        const bool wasYielded = Yielded();
+        reason = TrayHostYieldReason::None;
+        return wasYielded;
+    }
+
+    bool OnOtherProcess()
+    {
+        lossWindowStart = 0;
+        rapidLosses = 0;
+        if (reason == TrayHostYieldReason::StartAllBack)
+            return false;
+        const bool newlyYielded = (reason == TrayHostYieldReason::None);
+        reason = TrayHostYieldReason::OtherProcess;
+        return newlyYielded;
+    }
+
+    bool OnExplorerFirst(ULONGLONG now, bool& newlyYielded)
+    {
+        newlyYielded = false;
+        if (hasStartAllBack) {
+            newlyYielded = (reason == TrayHostYieldReason::None);
+            reason = TrayHostYieldReason::StartAllBack;
+            return false;
+        }
+        if (reason == TrayHostYieldReason::RapidLoss) {
+            if (now < retryAt)
+                return false;
+            reason = TrayHostYieldReason::None;
+            lossWindowStart = 0;
+            retryAt = 0;
+            rapidLosses = 0;
+        } else if (reason == TrayHostYieldReason::OtherProcess) {
+            reason = TrayHostYieldReason::None;
+            lossWindowStart = 0;
+            retryAt = 0;
+            rapidLosses = 0;
+        }
+        if (rapidLosses == 0 || now - lossWindowStart > kLossWindowMs) {
+            lossWindowStart = now;
+            rapidLosses = 1;
+        } else {
+            ++rapidLosses;
+        }
+        if (rapidLosses >= kRapidLossLimit) {
+            reason = TrayHostYieldReason::RapidLoss;
+            retryAt = now + kRapidBackoffMs;
+            newlyYielded = true;
+            return false;
+        }
+        return true;
+    }
+};
+
 struct HostIcon {
     std::wstring key;  // "guid:{...}" or "hwnd:<hwnd>:<uid>"
     HWND hwnd = nullptr;
@@ -113,6 +202,7 @@ private:
     std::wstring hoverKey_, popupKey_; // host thread: the icon under the pointer, the one asked to show its popup
     POINT hoverAt_{};
     ULONGLONG lostAt_ = 0, broadcastAt_ = 0;
+    TrayHostYieldPolicy yieldPolicy_;
     std::wstring loggedKeys_; // host thread: the list as last logged
     bool flashing_ = false;   // host thread: some icon flashed at the last look
 };
