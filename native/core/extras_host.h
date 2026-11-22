@@ -16,7 +16,9 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace atrium {
 
@@ -63,6 +65,10 @@ private:
     std::unique_ptr<MediaSessionWatcher> media_;
     MediaSnapshot last_;
     bool musicOn_ = false, musicShown_ = false, stacksOn_ = false, launchpadOn_ = false;
+    bool liveRhythm_ = false, stacksCached_ = false;
+    std::optional<bool> samplingActive_;
+    std::vector<std::wstring> lastFolderStacks_;
+    Bar* lastBar_ = nullptr;
 };
 
 } // namespace atrium

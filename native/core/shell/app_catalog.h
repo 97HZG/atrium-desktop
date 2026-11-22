@@ -9,6 +9,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -35,6 +36,8 @@ struct CatalogFolder {
     std::vector<CatalogApp> apps;
 };
 
+enum class VisibleIconsOwner { Start, Launchpad };
+
 class AppCatalog {
 public:
     // Posts `readyMsg` to `notify` when the list or an icon becomes available.
@@ -56,7 +59,7 @@ public:
     void PrefetchStartIcons(int px);
     // The apps of the start menu's own arrangement (start.json): read ahead and kept like the pins'.
     void SetStartIds(std::vector<std::wstring> ids);
-    void SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons);
+    void SetVisibleIcons(VisibleIconsOwner owner, const std::vector<std::pair<std::wstring, int>>& icons);
     // Icons read ahead behind those on screen and kept like the pins' (Launchpad's first pages).
     void PrefetchIcons(const std::vector<std::wstring>& ids, int px);
 
@@ -103,7 +106,8 @@ private:
     };
     std::map<std::pair<std::wstring, int>, CachedIcon> icons_;
     std::map<std::pair<std::wstring, int>, FailedIcon> failed_;
-    std::set<std::pair<std::wstring, int>> requested_, visibleIcons_, aheadIcons_;
+    std::set<std::pair<std::wstring, int>> requested_, aheadIcons_;
+    std::array<std::set<std::pair<std::wstring, int>>, 2> visibleIcons_;
     std::set<std::wstring> liveIds_, startIds_;
     uint64_t iconUse_ = 0;
     std::thread thread_;

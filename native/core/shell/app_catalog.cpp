@@ -300,9 +300,11 @@ bool NotAnApp(const CatalogApp& app)
     return !target.empty() && !target.ends_with(L".exe");
 }
 
-// Every shortcut in `dir` and its subfolders.
-void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, std::wstring>>& links)
+// Every shortcut in `dir` and its subfolders (bounded depth, skipping reparse loops).
+void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, std::wstring>>& links, int depth = 0)
 {
+    if (depth >= 8)
+        return;
     WIN32_FIND_DATAW fd{};
     HANDLE h = FindFirstFileExW((dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
     if (h == INVALID_HANDLE_VALUE)
@@ -312,14 +314,16 @@ void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, s
         const std::wstring name = fd.cFileName;
         if (name == L"." || name == L"..")
             continue;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-            subdirs.push_back(dir + L"\\" + name);
-        else if (name.size() > 4 && Fold(name.substr(name.size() - 4)) == L".lnk")
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (depth + 1 < 8 && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                subdirs.push_back(dir + L"\\" + name);
+        } else if (name.size() > 4 && Fold(name.substr(name.size() - 4)) == L".lnk") {
             links.emplace_back(L"desktopAppLink", dir + L"\\" + name);
+        }
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     for (const std::wstring& sub : subdirs)
-        CollectLinks(sub, links);
+        CollectLinks(sub, links, depth + 1);
 }
 
 // The All apps list's folders: each folder right under the two Start Menu\Programs folders (a
@@ -391,7 +395,8 @@ bool AppCatalog::IsLaunchable(const CatalogApp& app)
     for (const wchar_t* ext : {L".url", L".txt", L".pdf", L".chm", L".htm", L".html", L".md", L".rtf", L".doc", L".docx", L".website"})
         if (id.ends_with(ext))
             return false;
-    for (const wchar_t* word : {L"readme", L"read me", L"help", L"帮助", L"manual", L"手册", L"license", L"许可", L"website", L"官网", L"官方网站", L"release notes"})
+    for (const wchar_t* word :
+         {L"readme", L"read me", L"help", L"帮助", L"manual", L"手册", L"license", L"许可", L"website", L"官网", L"官方网站", L"release notes"})
         if (name.find(word) != std::wstring::npos)
             return false;
     return !NotAnApp(app);
@@ -523,18 +528,19 @@ void AppCatalog::PrefetchIcons(const std::vector<std::wstring>& ids, int px)
     cv_.notify_all();
 }
 
-void AppCatalog::SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons)
+void AppCatalog::SetVisibleIcons(VisibleIconsOwner owner, const std::vector<std::pair<std::wstring, int>>& icons)
 {
     std::lock_guard g(mutex_);
-    visibleIcons_.clear();
-    visibleIcons_.insert(icons.begin(), icons.end());
+    auto& slot = visibleIcons_[size_t(owner)];
+    slot.clear();
+    slot.insert(icons.begin(), icons.end());
     PruneIcons();
 }
 
 void AppCatalog::PruneIcons()
 {
     auto protectedIcon = [&](const auto& key) {
-        return visibleIcons_.contains(key) || requested_.contains(key) || aheadIcons_.contains(key) ||
+        return visibleIcons_[0].contains(key) || visibleIcons_[1].contains(key) || requested_.contains(key) || aheadIcons_.contains(key) ||
                (key.second == prefetchPx_ &&
                 (startIds_.contains(key.first) || std::any_of(startPins_.begin(), startPins_.end(), [&](const auto& app) { return app.id == key.first; })));
     };

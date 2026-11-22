@@ -57,13 +57,13 @@ bool CheckDedupe()
 bool CheckModelRemoteAndMissing()
 {
     FolderStackModel model(nullptr, 0);
-    model.SetFolders({L"\\\\nonexistent-server\\share\\docs\\", L"C:\\__atrium_missing_folder_test__\\"}, 32);
+    model.SetFolders({L"\\\\nonexistent-server\\share\\docs\\", L"\\\\NONEXISTENT-SERVER\\SHARE\\DOCS", L"C:\\__atrium_missing_folder_test__\\"}, 32);
 
     std::vector<StackFolder> snap;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < deadline) {
         snap = model.Snapshot();
-        if (snap.size() == 2)
+        if (!snap.empty())
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }

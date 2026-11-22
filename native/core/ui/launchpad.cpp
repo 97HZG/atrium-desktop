@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string_view>
 
 namespace atrium {
 
@@ -88,7 +89,7 @@ void Launchpad::Prewarm(RECT work)
         return;
     prewarmed_ = {px, apps.size()};
     std::vector<std::wstring> ids;
-    for (size_t i = 0; i < apps.size() && i < size_t(2 * grid_.perPage); ++i)
+    for (size_t i = 0; i < apps.size() && i < size_t(2) * size_t(grid_.perPage); ++i)
         ids.push_back(apps[i].id);
     catalog_.PrefetchIcons(ids, px);
 }
@@ -99,6 +100,8 @@ void Launchpad::Close(bool launched)
         return;
     closing_ = true;
     launched_ = launched;
+    if (GetCapture() == surface_.Hwnd())
+        ReleaseCapture();
     closedMs_ = ClockMs();
     lastClosed_ = GetTickCount64();
     KillTimer(surface_.Hwnd(), kCaretTimer);
@@ -111,10 +114,16 @@ void Launchpad::Finish()
     KillTimer(surface_.Hwnd(), kCloseTimer);
     closing_ = false;
     surface_.Hide(false); // the sheet has already faded
-    catalog_.SetVisibleIcons({});
+    catalog_.SetVisibleIcons(VisibleIconsOwner::Launchpad, {});
     askedIcons_.clear();
-    if (!launched_ && previous_ && IsWindow(previous_))
-        SetForegroundWindow(previous_);
+    if (!launched_ && previous_ && IsWindow(previous_)) {
+        const HWND fg = GetForegroundWindow();
+        wchar_t cls[64] = {};
+        if (fg && fg != surface_.Hwnd())
+            GetClassNameW(fg, cls, int(std::size(cls)));
+        if (!fg || fg == surface_.Hwnd() || std::wstring_view(cls) == L"AtriumBarInput")
+            SetForegroundWindow(previous_);
+    }
 }
 
 void Launchpad::Refresh()
@@ -192,10 +201,9 @@ void Launchpad::Paint(Canvas& c)
         }
     }
     const float a = OpenAmount(c.now);
-    if (a > 0 && a < 1) {
-        PublishGlass(c.now);
+    PublishGlass(c.now);
+    if (a > 0 && a < 1)
         c.Continue();
-    }
     const D2D1_RECT_F all = D2D1::RectF(0, 0, w_, h_);
     if (c.panel)
         c.Fill(all, Radius(), Alpha(t.panel, a));
@@ -216,7 +224,7 @@ void Launchpad::Paint(Canvas& c)
     c.EndGroup();
     if (visibleIcons_ != askedIcons_) {
         askedIcons_ = visibleIcons_;
-        catalog_.SetVisibleIcons(visibleIcons_); // the pages on screen first
+        catalog_.SetVisibleIcons(VisibleIconsOwner::Launchpad, visibleIcons_); // the pages on screen first
     }
 }
 

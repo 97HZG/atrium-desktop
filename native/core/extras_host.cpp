@@ -25,8 +25,8 @@ float Intensity(const std::wstring& motion)
 }
 
 // A click on an entry whose popup is open closes it; the click that just closed it (the popup lost
-// the focus to the bar) does not open it again.
-template<class Popup> bool JustClosed(const Popup& popup) { return GetTickCount64() - popup.LastClosed() < 400; }
+// the focus to the same bar) does not open it again.
+template<class Popup> bool JustClosed(const Popup& popup, bool sameBar) { return sameBar && GetTickCount64() - popup.LastClosed() < 400; }
 
 } // namespace
 
@@ -92,8 +92,10 @@ void ExtrasHost::Apply(const Settings& s, float radius)
 {
     feed_->intensity.store(Intensity(s.nowPlayingMotion));
     feed_->loop.store(s.nowPlayingRhythm == L"loop");
+    liveRhythm_ = s.nowPlayingMotion != L"off" && s.nowPlayingRhythm != L"loop";
     musicOn_ = s.showNowPlaying;
     if (musicOn_ && !media_) {
+        samplingActive_.reset();
         const std::shared_ptr<MusicFeed> feed = feed_;
         media_ = std::make_unique<MediaSessionWatcher>(host_, WM_MEDIA_STATE, [feed](float peak, bool playing) {
             // A steady animation: a song's usual level, whatever the sound (each bar keeps its own pace).
@@ -102,15 +104,20 @@ void ExtrasHost::Apply(const Settings& s, float radius)
         });
     } else if (!musicOn_ && media_) {
         media_.reset();
+        samplingActive_.reset();
         OnMedia(MediaSnapshot{}); // the entry and its card go with the setting
     }
     if (media_) {
         media_->SetFilter(s.nowPlayingShowPaused, s.nowPlayingAppMode, s.nowPlayingApps);
         UpdateSampling();
     }
+    const bool stacksChanged = !stacksCached_ || stacksOn_ != s.showFolderStacks || lastFolderStacks_ != s.folderStacks;
+    stacksCached_ = true;
     stacksOn_ = s.showFolderStacks;
+    lastFolderStacks_ = s.folderStacks;
     stacks_.SetOptions(s.folderStackLayout != L"column", size_t(s.folderStackMax));
-    stackModel_.SetFolders(stacksOn_ ? s.folderStacks : std::vector<std::wstring>{}, 96); // read once at a size every scale draws from
+    if (stacksChanged)
+        stackModel_.SetFolders(stacksOn_ ? s.folderStacks : std::vector<std::wstring>{}, 96); // read once at a size every scale draws from
     if (!stacksOn_)
         stacks_.Close();
     launchpadOn_ = s.showLaunchpad;
@@ -135,37 +142,45 @@ void ExtrasHost::UpdateSampling()
         return;
     bool seen = card_.Visible();
     forBars_([&](Bar& bar) { seen = seen || bar.Seen(); });
-    media_->SetSamplingActive(seen);
+    const bool want = liveRhythm_ && seen;
+    if (samplingActive_ == want)
+        return;
+    samplingActive_ = want;
+    media_->SetSamplingActive(want);
 }
 
 void ExtrasHost::Click(Bar& bar, const std::wstring& key, RECT entry)
 {
+    const bool sameBar = &bar == lastBar_;
     if (key == L"#launchpad") {
-        if (launchpad_.Visible()) {
+        if (sameBar && (launchpad_.Visible() || JustClosed(launchpad_, sameBar))) {
             launchpad_.Close(false);
             return;
         }
-        if (JustClosed(launchpad_))
-            return;
+        lastBar_ = &bar;
         MONITORINFO mi{sizeof(mi)};
         RECT barRect = bar.BarRect();
         GetMonitorInfoW(MonitorFromRect(&barRect, MONITOR_DEFAULTTONEAREST), &mi);
         launchpad_.Open(mi.rcWork, bar.PreviousForeground());
     } else if (key == L"#music") {
-        if (card_.Visible() || JustClosed(card_)) {
+        if (sameBar && (card_.Visible() || JustClosed(card_, sameBar))) {
             card_.Close();
+            UpdateSampling();
             return;
         }
+        lastBar_ = &bar;
         card_.Open(entry, bar.BarRect());
     } else if (key == L"#stacks") {
-        if (stacks_.Visible() || JustClosed(stacks_)) {
+        if (sameBar && (stacks_.Visible() || JustClosed(stacks_, sameBar))) {
             stacks_.Close();
             return;
         }
+        lastBar_ = &bar;
         stacks_.Open(entry, bar.BarRect());
     } else {
         return;
     }
+    UpdateSampling();
     if (onPanelsChanged)
         onPanelsChanged();
 }
@@ -186,6 +201,7 @@ void ExtrasHost::OnMedia(const MediaSnapshot& snapshot)
     if (changed)
         Log(L"now playing: entry %s", shown ? L"shown" : L"gone");
     card_.Update(snapshot);
+    UpdateSampling();
 }
 
 std::wstring ExtrasHost::MusicTip() const
@@ -216,6 +232,7 @@ void ExtrasHost::ClosePopups()
     launchpad_.Close(false);
     card_.Close();
     stacks_.Close();
+    UpdateSampling();
 }
 
 bool ExtrasHost::AnyPopupVisible() const { return launchpad_.Visible() || card_.Visible() || stacks_.Visible(); }
