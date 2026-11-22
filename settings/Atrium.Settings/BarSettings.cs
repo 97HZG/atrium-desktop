@@ -208,7 +208,7 @@ internal sealed class BarSettings
             ["nowPlayingScrollVolume"] = NowPlayingScrollVolume,
             ["showFolderStacks"] = ShowFolderStacks,
             ["folderStackLayout"] = FolderStackLayout,
-            ["folderStackMax"] = FolderStackMax,
+            ["folderStackMax"] = (double)FolderStackMax, // as the other numbers: read back as a double in memory too
             ["textColor"] = TextColor,
             ["language"] = Language,
             ["autoHide"] = AutoHide,

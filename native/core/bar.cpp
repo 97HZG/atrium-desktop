@@ -1,5 +1,6 @@
 #include "bar.h"
 #include "bar_drop.h"
+#include "bar_entries.h"
 
 #include "localization.h"
 #include "render/continuous_corners.h"
@@ -22,6 +23,7 @@
 #include <winrt/Windows.Foundation.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <cwctype>
@@ -49,10 +51,6 @@ UINT AppBarNotice()
 
 constexpr wchar_t kVisualClass[] = L"AtriumBarVisual";
 constexpr wchar_t kInputClass[] = L"AtriumBarInput";
-constexpr wchar_t kClockKey[] = L"#clock", kStartKey[] = L"#start", kNotifyKey[] = L"#notify", kTrayKey[] = L"#tray", kImeKey[] = L"#ime",
-                  kStatusKey[] = L"#status", kMoreKey[] = L"#more", kDesktopKey[] = L"#desktop";
-// Bar entries and the clock start with '#'; app keys are AUMIDs or paths.
-bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
 constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
 constexpr UINT_PTR kTooltipTimer = 1, kFileHoverTimer = 2, kGuardTimer = 3;
@@ -499,7 +497,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         GetCursorPos(&cur);
         ScreenToClient(h, &cur);
         cur = LayoutPoint(cur);
-        if ((HitTest(cur) == kStartKey || HitTest(cur) == kNotifyKey) && HIWORD(l) == WM_LBUTTONDOWN) {
+        const std::wstring hit = HitTest(cur);
+        if ((hit == kStartKey || hit == kNotifyKey || hit == kLaunchpadKey) && HIWORD(l) == WM_LBUTTONDOWN) {
             previousForeground_ = GetForegroundWindow();
             if (previousForeground_ == input_ || previousForeground_ == visual_)
                 previousForeground_ = nullptr;
@@ -649,17 +648,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         // Shift+click starts a new instance, as on the Windows taskbar.
         bool launch = m == WM_MBUTTONUP || (w & MK_SHIFT);
         if (IsEntry(key)) {
-            if (m != WM_LBUTTONUP)
-                return 0;
-            const RECT anchor = EntryRect(key);
-            if (key == kMoreKey && onOverflow)
-                onOverflow(hidden_, anchor);
-            for (auto [k, f] : {std::pair{kStartKey, &onStartClick}, {kNotifyKey, &onNotifyClick}, {kTrayKey, &onTrayClick}, {kStatusKey, &onStatusClick}})
-                if (key == k && *f)
-                    (*f)(anchor);
-            for (auto [k, f] : {std::pair{kClockKey, &onClockClick}, {kDesktopKey, &onDesktopClick}, {kImeKey, &onImeClick}})
-                if (key == k && *f)
-                    (*f)();
+            if (m == WM_LBUTTONUP)
+                ClickEntry(key);
         } else if (launch ? bool(onLaunch) : bool(onActivate)) {
             // Starting an app (or another instance) hops its icon, as in the macOS Dock.
             auto t = std::ranges::find_if(items_, [&](const TaskItem& i) { return i.key == key; });
@@ -680,13 +670,16 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             Publish();
         }
         return 0;
-    case WM_MOUSEWHEEL: { // over the status icon: the volume
+    case WM_MOUSEWHEEL: { // over the status icon: the volume; over the now-playing entry: the player's
         onInteract();
         POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
         ScreenToClient(h, &p);
-        int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
-        if (notches && HitTest(LayoutPoint(p)) == kStatusKey && onStatusWheel)
+        const int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
+        const std::wstring over = notches ? HitTest(LayoutPoint(p)) : std::wstring();
+        if (over == kStatusKey && onStatusWheel)
             onStatusWheel(notches);
+        else if (over == kMusicKey && onMusicWheel)
+            onMusicWheel(notches); // the player's own volume
         return 0;
     }
     case WM_RBUTTONUP: {
@@ -987,6 +980,8 @@ void Bar::Relayout()
     const bool showStatus = showRight && st.showStatus;
     const bool showNotifications = showRight && st.showNotifications;
     const bool showDesktop = showRight && st.showDesktop;
+    const bool showMusic = showRight && st.showNowPlaying && musicShown_;
+    const bool showStacks = showRight && st.showFolderStacks;
 
     // Metrics (px). Every icon sits centred on a square plate (press and drag
     // feedback); the plate has the same gap `v` to the top and bottom edge,
@@ -1021,7 +1016,8 @@ void Bar::Relayout()
     const int statusExtra = st.statusStyle == L"icons" ? int(std::lround(icon * 1.3f)) : 0;
     // Show Desktop: a narrow slot at the bar's right end, a thin line in it, as the system taskbar's.
     const int deskW = showDesktop ? std::max(Px(10, s), int(std::lround(icon * 0.45))) : 0;
-    const int rightCount = int(showTray) + int(showIme) + int(showStatus) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
+    const int rightPlates = int(showStacks) + int(showTray) + int(showIme) + int(showStatus) + int(showMusic) + int(showNotifications);
+    const int rightCount = rightPlates + int(clockW != 0) + int(showDesktop);
     const int groupGap = rightCount ? sepGap : 0;
     const int total = int(items_.size());
     int n = total;
@@ -1029,11 +1025,10 @@ void Bar::Relayout()
     auto padFor = [&](int p) { return (barH - p) / 2 + Px(4, s); }; // ends: plate gap plus a little air
     auto contentWidth = [&](int count, int p, int g, bool overflow) {
         int slots = count + (overflow ? 1 : 0);
-        int w = 2 * padFor(p) + p + 2 * g;               // logo and the air after it
+        int w = 2 * padFor(p) + p + 2 * g + (st.showLaunchpad ? p + g : 0); // logo (and Launchpad) and the air after it
         w += slots ? slots * p + (slots - 1) * g : 0;    // apps
         if (rightCount)
-            w += 2 * sepGap + p * (int(showTray) + int(showIme) + int(showStatus) + int(showNotifications)) + (showStatus ? statusExtra : 0) + clockW + deskW +
-                 (rightCount - 1) * g;
+            w += 2 * sepGap + p * rightPlates + (showStatus ? statusExtra : 0) + clockW + deskW + (rightCount - 1) * g;
         return std::max(w, barH * 2);
     };
     // The magnified bar stretches by up to (mag - 1) * range on top of its width.
@@ -1173,20 +1168,30 @@ void Bar::Relayout()
         cursor -= gap;
         return left;
     };
-    const int deskLeft = rightSlot(deskW, showDesktop);
-    const int bellLeft = rightSlot(plate, showNotifications);
-    const int clockLeft = rightSlot(clockW, clockW != 0), clockRight = clockLeft + clockW;
-    const int statusLeft = rightSlot(statusW, showStatus), statusRight = statusLeft + statusW;
-    const int imeLeft = rightSlot(plate, showIme);
-    const int trayLeft = rightSlot(plate, showTray);
+    // The right-hand group, from the bar's end leftwards.
+    std::array<RightEntry, 8> right{{{kDesktopKey, deskW, L"", showDesktop},
+                                     {kNotifyKey, plate, L"\uEA8F", showNotifications},
+                                     {kClockKey, clockW, L"", clockW != 0},
+                                     {kMusicKey, plate, L"", showMusic},
+                                     {kStatusKey, statusW, L"", showStatus},
+                                     {kImeKey, plate, L"", showIme},
+                                     {kTrayKey, plate, L"\uE70E", showTray},
+                                     {kStacksKey, plate, L"", showStacks}}};
+    for (auto& e : right)
+        e.left = rightSlot(e.width, e.shown);
     const int rightLeft = rightCount ? cursor + gap : insetX + barW - pad;
-    const int appsMin = startLeft + plate + 2 * gap;
+    const int launchLeft = startLeft + plate + gap; // Launchpad, one slot right of the logo
+    const int appsMin = (st.showLaunchpad ? launchLeft : startLeft) + plate + 2 * gap;
     const int slots = n + (more ? 1 : 0);
     const int appsW = slots ? slots * plate + (slots - 1) * gap : 0;
     // Apps are centred in the space between the logo and the separator (matters when autoWidth is off).
     const int appsLeft = appsMin + std::max(0, (rightLeft - 2 * groupGap - appsMin - appsW) / 2);
     scene.extras.push_back(entry(kStartKey, startLeft, L""));
-    hits_.push_back({kStartKey, RECT{insetX, hitTop, appsMin - gap / 2, hitBottom}});
+    hits_.push_back({kStartKey, RECT{insetX, hitTop, (st.showLaunchpad ? launchLeft : appsMin) - gap / 2, hitBottom}});
+    if (st.showLaunchpad) {
+        scene.extras.push_back(entry(kLaunchpadKey, launchLeft, L""));
+        hits_.push_back({kLaunchpadKey, RECT{launchLeft - gap / 2, hitTop, appsMin - gap / 2, hitBottom}});
+    }
     // Icons are rendered for their magnified size, so they stay sharp when they grow.
     const int iconPx = int(std::lround(float(icon) * mag));
     std::map<std::wstring, CachedIcon> keep;
@@ -1238,42 +1243,9 @@ void Bar::Relayout()
     plate_ = plate;
     shown_ = n;
     scene.separatorX = rightCount ? float(rightLeft - sepGap) : -1;
-    if (showTray) {
-        scene.extras.push_back(entry(kTrayKey, trayLeft, L"\uE70E"));
-        hits_.push_back({kTrayKey, RECT{trayLeft - gap / 2, hitTop, trayLeft + plate + gap / 2, hitBottom}});
-    }
-    if (showIme) {
-        scene.extras.push_back(entry(kImeKey, imeLeft, L""));
-        hits_.push_back({kImeKey, RECT{imeLeft - gap / 2, hitTop, imeLeft + plate + gap / 2, hitBottom}});
-    }
-    if (showStatus) {
-        SceneItem status = entry(kStatusKey, statusLeft, L"");
-        status.plate = D2D1::RectF(float(statusLeft), plateTop, float(statusRight), plateTop + float(plate));
-        status.icon = D2D1::RectF(float(statusLeft), iconTop, float(statusRight), iconTop + float(icon));
-        scene.extras.push_back(std::move(status));
-        hits_.push_back({kStatusKey, RECT{statusLeft - gap / 2, hitTop, statusRight + gap / 2, hitBottom}});
-    }
     scene.status = status_;
     scene.statusIcons = st.statusStyle == L"icons";
-    if (clockW) {
-        scene.clock = D2D1::RectF(float(clockLeft), plateTop, float(clockRight), plateTop + float(plate));
-        scene.timePx = timePx;
-        scene.datePx = datePx;
-        hits_.push_back({kClockKey, RECT{clockLeft - gap / 2, hitTop, clockRight + gap / 2, hitBottom}});
-    }
-    if (showNotifications) {
-        SceneItem bell = entry(kNotifyKey, bellLeft, L"\uEA8F");
-        bell.badge = unread_;
-        scene.extras.push_back(std::move(bell));
-        hits_.push_back({kNotifyKey, RECT{bellLeft - gap / 2, hitTop, showDesktop ? deskLeft - gap / 2 : insetX + barW, hitBottom}});
-    }
-    if (showDesktop) {
-        SceneItem desk = entry(kDesktopKey, deskLeft, L"");
-        desk.plate = D2D1::RectF(float(deskLeft), plateTop, float(deskLeft + deskW), plateTop + float(plate));
-        desk.icon = D2D1::RectF(float(deskLeft), iconTop, float(deskLeft + deskW), iconTop + float(icon));
-        scene.extras.push_back(std::move(desk));
-        hits_.push_back({kDesktopKey, RECT{deskLeft - gap / 2, hitTop, insetX + barW, hitBottom}}); // to the bar's very end
-    }
+    PlaceRight(scene, right, EntryMetrics{plate, gap, icon, hitTop, hitBottom, insetX + barW, plateTop, iconTop}, timePx, datePx);
     if (!scene.hoverKey.empty() && std::ranges::none_of(hits_, [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
     // The input method glyph is the foreground window's, not layout: it rides through a rebuild.
@@ -1697,69 +1669,6 @@ void Bar::SetUnread(int count)
     Relayout();
 }
 
-RECT Bar::EntryRect(const std::wstring& key) const
-{
-    const EdgeFrame frame{edge_, window_};
-    auto rect = [&](const D2D1_RECT_F& r) { return frame.ToArea(RECT{LONG(r.left), LONG(r.top), LONG(r.right), LONG(r.bottom)}); };
-    for (const auto& it : scene_.extras)
-        if (it.key == key)
-            return rect(it.plate);
-    for (const auto& it : scene_.items)
-        if (it.key == key)
-            return rect(it.plate);
-    if (key == kClockKey)
-        return rect(scene_.clock);
-    // Toasts still have an anchor when their taskbar entry is hidden.
-    const LONG h = LONG(scene_.bar.bottom - scene_.bar.top);
-    return frame.ToArea(RECT{LONG(scene_.bar.right) - h, LONG(scene_.bar.top), LONG(scene_.bar.right), LONG(scene_.bar.bottom)});
-}
-
-RECT Bar::BarRect() const
-{
-    return EdgeFrame{edge_, window_}.ToArea(RECT{LONG(scene_.bar.left), LONG(scene_.bar.top), LONG(scene_.bar.right), LONG(scene_.bar.bottom)});
-}
-
-std::wstring Bar::TooltipText(const std::wstring& key) const
-{
-    if (key == kStartKey)
-        return Tr(L"Start");
-    if (key == kNotifyKey)
-        return unread_ ? TrFormat(L"%d unread notifications", int(unread_)) : Tr(L"Notifications");
-    if (key == kTrayKey)
-        return Tr(L"Tray");
-    if (key == kImeKey)
-        return Tr(L"Input method");
-    if (key == kDesktopKey)
-        return Tr(L"Show Desktop");
-    if (key == kStatusKey) {
-        const SystemStatus& st = status_;
-        std::wstring net;
-        if (!st.connected)
-            net = Tr(L"No network");
-        else if (st.wifi)
-            net = TrFormat(L"Wi-Fi %s · signal %d%%", st.network.c_str(), st.signal);
-        else
-            net = st.network;
-        std::wstring more;
-        if (st.battery)
-            more = st.charging ? TrFormat(L"\nBattery %d%% · plugged in", st.batteryPercent) : TrFormat(L"\nBattery %d%%", st.batteryPercent);
-        if (st.audio)
-            more += st.muted ? Tr(L"\nMuted") : TrFormat(L"\nVolume %d%%", st.volume);
-        return net + more;
-    }
-    if (key == kMoreKey)
-        return TrFormat(L"%d more apps", int(hidden_.size()));
-    if (key == kClockKey) {
-        wchar_t buf[128] = {};
-        GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_LONGDATE, nullptr, nullptr, buf, 128, nullptr);
-        return buf;
-    }
-    for (const auto& t : items_)
-        if (t.key == key)
-            return t.windows.size() > 1 ? TrFormat(L"%s · %d windows", t.name.c_str(), int(t.windows.size())) : t.name;
-    return {};
-}
-
 void Bar::ShowTooltip()
 {
     const std::wstring& key = scene_.hoverKey;
@@ -1873,6 +1782,7 @@ void Bar::Publish(bool bar)
         snapshot_.displayGeneration = displayGeneration_;
         snapshot_.scale = scale_;
         snapshot_.visible = visible_ && !slidOut_;
+        snapshot_.scene.music = music_;
         snapshot_.panels.clear();
         for (const auto& [hwnd, p] : panels_)
             snapshot_.panels.push_back(p);

@@ -32,10 +32,10 @@ public sealed partial class MainWindow
         12 => _statusScene ??= new StatusScene(this),
         13 => _clockScene ??= new ClockScene(this),
         14 => _imeScene ??= new ImeScene(this),
-        _ => null,
+        _ => ExtrasScene(page),
     };
 
-    private IEnumerable<ModuleScene> Scenes() => new[] { _startScene, _trayScene, _imeScene, _statusScene, _clockScene }.OfType<ModuleScene>();
+    private IEnumerable<ModuleScene> Scenes() => WithExtras([_startScene, _trayScene, _imeScene, _statusScene, _clockScene]);
 
     // A page was opened: its scene comes in (the popup pops out of its entry), the others rest.
     private void EnterModulePage(int page)

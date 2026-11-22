@@ -133,6 +133,8 @@ public partial class App : Application
             "tray" => 11,
             "status" => 12,
             "clock" => 13,
+            "nowplaying" => 15,
+            "stacks" => 16,
             "ime" => 14,
             _ => null,
         };

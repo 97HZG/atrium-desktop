@@ -28,6 +28,7 @@
 #include <dwrite_3.h>
 #include <ole2.h>
 
+#include <array>
 #include <atomic>
 #include <functional>
 #include <map>
@@ -103,6 +104,12 @@ public:
     std::function<void(RECT anchor)> onStatusClick; // the status icon (Wi-Fi, battery: the control centre)
     std::function<void()> onImeClick;               // the input method entry: Chinese/English, or the next language
     std::function<void(int notches)> onStatusWheel; // the wheel over the status icon (volume)
+    // Launchpad (#launchpad), the now-playing entry (#music) and the folder stack (#stacks).
+    std::function<void(const std::wstring& key, RECT anchor)> onExtraClick;
+    std::function<void(int notches)> onMusicWheel; // the wheel over the now-playing entry (the player's volume)
+    // The now-playing entry, right of the status entry, while `shown` (a player has a session); its
+    // bars move with `feed`; `tip` its tooltip (the track). Every call wakes the render thread.
+    void SetMusic(std::shared_ptr<const MusicFeed> feed, bool shown, std::wstring tip);
     // The overflow entry: apps that did not fit, in bar order.
     std::function<void(const std::vector<std::wstring>& keys, RECT anchor)> onOverflow;
     // Drag and drop of an app to visible position `toIndex` (0-based, in the
@@ -168,6 +175,20 @@ private:
     void HideTooltip();
     void ShowTooltip();      // above the hovered item, after a short delay
     std::wstring TooltipText(const std::wstring& key) const;
+    void ClickEntry(const std::wstring& key);
+    // The right-hand group (Relayout): each entry from the bar's end leftwards, and the metrics they share.
+    struct RightEntry {
+        const wchar_t* key;
+        int width;
+        const wchar_t* glyph;
+        bool shown;
+        int left = 0;
+    };
+    struct EntryMetrics {
+        int plate, gap, icon, hitTop, hitBottom, barEnd;
+        float plateTop, iconTop;
+    };
+    void PlaceRight(BarScene& scene, const std::array<RightEntry, 8>& right, const EntryMetrics& m, float timePx, float datePx);
     void BeginDrag(POINT pt);
     void UpdateDrag(POINT pt);
     void EndDrag(bool commit);
@@ -230,6 +251,10 @@ private:
     int appsLeft_ = 0, pitch_ = 1, plate_ = 0, shown_ = 0;
     std::vector<std::wstring> hidden_; // apps behind the overflow entry
     int unread_ = 0;
+    // The now-playing entry (SetMusic): its level feed (under lock_, read through the snapshot), whether it shows, its tooltip.
+    std::shared_ptr<const MusicFeed> music_;
+    bool musicShown_ = false;
+    std::wstring musicTip_;
     SystemStatus status_;
     bool belowTray_ = false;   // yielded to the system taskbar the user is using
     bool trayHeldUp_ = false;  // the system taskbar is up without the user (logged once)

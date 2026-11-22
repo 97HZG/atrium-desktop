@@ -6,6 +6,8 @@
 #include "bar_edge.h"
 #include "render/capture.h"
 #include "clock.h"
+#include "desktop_helpers.h"
+#include "extras_host.h"
 #include "guard_process.h"
 #include "host_messages.h"
 #include "launch_args.h"
@@ -125,6 +127,7 @@ struct App {
     std::array<std::wstring, size_t(Messenger::Count)> messengerProgram; // the program that flashed last
     std::unique_ptr<TrayModel> tray;
     std::unique_ptr<TrayPanel> trayPanel;
+    std::unique_ptr<ExtrasHost> extras; // Launchpad, the now-playing entry, the folder stack
     std::unique_ptr<ControlCenter> control;
     std::unique_ptr<CalendarPanel> calendar;
     std::unique_ptr<DesktopWidgets> widgets;
@@ -153,7 +156,7 @@ std::wstring g_readyEvent;
 Bar& ActiveBar() { return *(g_app.activeBar ? g_app.activeBar : g_app.bar.get()); }
 Bar* WinKeyBar() { return g_app.barOn.value_or(true) ? (g_app.activeBar ? g_app.activeBar : g_app.bar.get()) : nullptr; }
 
-template<class Action> void ForBars(Action action)
+template<class Action> void ForBars(const Action& action)
 {
     action(*g_app.bar);
     for (const auto& bar : g_app.secondaryBars)
@@ -255,27 +258,6 @@ void RemoveTrayIcon()
 }
 
 // Win+<key> (or Win+Ctrl+<key>), a public system shortcut (D11).
-void SendWinShortcut(WORD key, bool ctrl = false)
-{
-    std::vector<INPUT> in;
-    auto add = [&](WORD vk, bool up) {
-        INPUT i{};
-        i.type = INPUT_KEYBOARD;
-        i.ki.wVk = vk;
-        i.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
-        in.push_back(i);
-    };
-    add(VK_LWIN, false);
-    if (ctrl)
-        add(VK_CONTROL, false);
-    add(key, false);
-    add(key, true);
-    if (ctrl)
-        add(VK_CONTROL, true);
-    add(VK_LWIN, true);
-    SendInput(UINT(in.size()), in.data(), sizeof(INPUT));
-}
-
 // UIA and popup discovery run on the tray worker, including explicit fallback.
 void OpenTray()
 {
@@ -498,21 +480,6 @@ bool MessengerOn(Messenger m)
     }
 }
 
-std::wstring ProgramOf(HWND window)
-{
-    DWORD pid = 0;
-    GetWindowThreadProcessId(window, &pid);
-    std::wstring path;
-    if (HANDLE p = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr) {
-        wchar_t buf[MAX_PATH * 2];
-        DWORD len = DWORD(std::size(buf));
-        if (QueryFullProcessImageNameW(p, 0, buf, &len))
-            path.assign(buf, len);
-        CloseHandle(p);
-    }
-    return path;
-}
-
 // A chat app flashed for a message (its window, or its tray icon began to): a plain card follows
 // unless one with the message's text does (MessengerAlerts).
 void MessengerFlashed(const std::wstring& program)
@@ -569,6 +536,7 @@ void ApplySettings(const Settings& s)
     float radius = float(std::clamp(s.cornerRadius, 8.0, std::max(8.0, s.height / 2)));
     g_app.start->SetRadius(radius);
     g_app.trayPanel->SetRadius(radius);
+    g_app.extras->Apply(s, radius);
     g_app.control->SetRadius(radius);
     g_app.control->SetBarHeight(float(s.height));
     g_app.calendar->SetRadius(radius);
@@ -662,26 +630,6 @@ void ApplySettings(const Settings& s)
 
 // Folders and project/workspace files: what the taskbar menu shows above a
 // program's documents (its places, then its recent list).
-bool IsDirectoryPath(const std::wstring& path)
-{
-    if (IsRemotePath(path))
-        return false; // an offline share would answer in tens of seconds
-    const DWORD attr = GetFileAttributesW(path.c_str());
-    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
-}
-
-bool IsWorkspaceFile(const std::wstring& path)
-{
-    const size_t dot = path.find_last_of(L'.');
-    const size_t slash = path.find_last_of(L"\\/");
-    if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash))
-        return false;
-    const wchar_t* extension = path.c_str() + dot;
-    static const wchar_t* const kProjectKinds[] = {L".code-workspace",  L".sln",      L".slnx",        L".vcxproj", L".uvprojx", L".workspace",
-                                                   L".sublime-project", L".uproject", L".xcworkspace", L".pro",     L".csproj"};
-    return std::ranges::any_of(kProjectKinds, [&](const wchar_t* kind) { return _wcsicmp(extension, kind) == 0; });
-}
-
 bool PinsEqual(const PinnedApp& a, const PinnedApp& b)
 {
     return FoldCase(a.path) == FoldCase(b.path) && FoldCase(a.aumid) == FoldCase(b.aumid) && a.args == b.args;
@@ -970,8 +918,15 @@ void Reorder(const std::wstring& key, int to)
     Log(L"bar: %s moved to %d%s", key.c_str(), to, dragged.pinned ? L"" : L" and pinned");
 }
 
+// A popup of the bar's is open: the notification cards keep clear of it.
+bool BarPopupOpen()
+{
+    return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible() || g_app.extras->AnyPopupVisible();
+}
+
 void CloseBarPopups()
 {
+    g_app.extras->ClosePopups();
     g_app.start->Close(false);
     g_app.trayPanel->Close();
     g_app.control->Close();
@@ -1004,16 +959,14 @@ void ConfigureBar(Bar& bar)
     bar.onTrayClick = ToggleTray;
     bar.onDesktopClick = [] { SendWinShortcut('D'); }; // the system's Show Desktop: a second click brings the windows back
     bar.onStatusClick = ToggleControl;
+    g_app.extras->ConfigureBar(bar);
     bar.onImeClick = [] {
         if (g_app.imeWatcher)
             g_app.imeWatcher->Toggle();
     };
     if (!g_app.imeWatch.State().Empty())
         bar.SetIme(ImeGlyph(g_app.imeWatch.State()));
-    bar.keepShown = [&bar] {
-        return g_app.activeBar == &bar && (g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible() ||
-                                           g_app.notes->CenterVisible() || g_app.menu->Visible());
-    };
+    bar.keepShown = [&bar] { return g_app.activeBar == &bar && (BarPopupOpen() || g_app.notes->CenterVisible() || g_app.menu->Visible()); };
     bar.onStatusWheel = [](int notches) {
         AdjustVolume(2 * notches);
         UpdateStatus();
@@ -1216,8 +1169,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_CATALOG:
-        if (g_app.start)
-            g_app.start->Refresh();
+        if (g_app.start) // made with the extras, before the catalog's first news
+            g_app.start->Refresh(), g_app.extras->OnCatalogChanged();
         return 0;
     case WM_VOLUME: UpdateStatus(); return 0;
     case WM_STATUS: {
@@ -1477,6 +1430,14 @@ std::thread StartLogonUpdate(bool registeredHere, const Settings& settings)
 
 } // namespace
 
+// Launchpad, the now-playing entry and the folder stack: theirs the bars' extra entries and popups.
+void MakeExtras(HINSTANCE instance)
+{
+    g_app.extras = std::make_unique<ExtrasHost>(instance, *g_app.catalog, [](const std::function<void(Bar&)>& each) { ForBars(each); });
+    g_app.extras->onPanelsChanged = [] { g_app.notes->PanelsChanged(); };
+    g_app.extras->onOpenSettings = [](const wchar_t* page) { OpenSettings(page); };
+}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
     SetLanguage(L"auto"); // before any message; the saved choice follows with LoadSettings
@@ -1633,6 +1594,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     g_app.tasks->SetOnFlash([](HWND window) { MessengerFlashed(ProgramOf(window)); });
     g_app.catalog = std::make_unique<AppCatalog>(g_app.host, WM_CATALOG);
     g_app.start = std::make_unique<StartMenu>(instance, *g_app.tasks, *g_app.catalog);
+    MakeExtras(instance);
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
     g_app.catalog->PrefetchStartIcons(StartMenu::TileIconPx(PopupScale(mi.rcWork)));
@@ -1671,7 +1633,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     g_app.notes->onActivate = RunNoticeAction;
     g_app.notes->quietIsOurs = [] { return g_app.chrome && g_app.chrome->QuietIsOurs(); };
     // New cards wait while one of Atrium's panels is open (they would overlap it).
-    g_app.notes->held = [] { return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible(); };
+    g_app.notes->held = BarPopupOpen;
     // Pointer on an app with windows: its windows, previewed above it (as the Windows taskbar).
     g_app.preview = std::make_unique<WindowPreview>(instance);
     ConfigureBar(*g_app.bar);
@@ -1747,11 +1709,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     g_app.trayPanel.reset();
     g_app.tray.reset();
     g_app.start.reset();
-    g_app.menu.reset();
-    g_app.preview.reset();
+    g_app.menu.reset(), g_app.preview.reset();
     g_app.stage.reset();
     Surface::SetGlassHost(nullptr);
-    g_app.catalog.reset();
+    g_app.extras.reset(), g_app.catalog.reset(); // the Launchpad reads the catalog
     g_app.tasks.reset();
     g_app.drainingBars.clear(), g_app.secondaryBars.clear(), g_app.bar.reset();
     g_app.chrome.reset();

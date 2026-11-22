@@ -308,9 +308,9 @@ D2D1_ELLIPSE BarPainter::RunningDot(const BarScene& scene, const SceneItem& item
 // The now-playing bars, while the bar shows them; true while they move.
 bool BarPainter::AnimateMusic(const BarScene& scene, double dt)
 {
-    if (std::ranges::none_of(scene.extras, [](const SceneItem& it) { return it.key == L"#music"; }))
+    if (!scene.music || std::ranges::none_of(scene.extras, [](const SceneItem& it) { return it.key == L"#music"; }))
         return false;
-    return music_.Step(musicPeak_, musicPlaying_, musicIntensity_, dt);
+    return music_.Step(scene.music->peak.load(), scene.music->playing.load(), scene.music->intensity.load(), dt);
 }
 
 // Auto-hide: the slide down off the screen and back up; true while it moves.

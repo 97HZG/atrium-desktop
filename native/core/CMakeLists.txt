@@ -29,6 +29,9 @@ add_custom_target(atrium_shaders DEPENDS ${shader_headers})
 add_library(atrium_core_lib STATIC
     bar.cpp
     bar_drop.cpp
+    bar_entries.cpp
+    desktop_helpers.cpp
+    extras_host.cpp
     guard_process.cpp
     near_hover.cpp
     log.cpp

@@ -85,7 +85,7 @@ public sealed partial class MainWindow : Window, IDisposable
     [
         Loc.T("Material"), Loc.T("Shape"), Loc.T("Taskbar"), Loc.T("Notifications"), Loc.T("Widgets"),
         Loc.T("Stage Manager"), Loc.T("Displays"), Loc.T("System"), Loc.T("Design language"), Loc.T("About"),
-        Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), Loc.T("Input method"), // the bar's parts, listed under it
+        Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), Loc.T("Input method"), Loc.T("Now Playing"), Loc.T("Folder Stacks"),
     ];
     private readonly CoreClient _client = new();
     private readonly SettingsSession _session = new();
@@ -189,12 +189,12 @@ public sealed partial class MainWindow : Window, IDisposable
         _mains =
         [
             MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainStage, MainDisplays, MainSystem, DesignStack, MainAbout,
-            MainStart, MainTray, MainStatus, MainClock, MainIme,
+            MainStart, MainTray, MainStatus, MainClock, MainIme, ExtrasPage(NowPlayingPage), ExtrasPage(StacksPage),
         ];
         _sides =
         [
             SideMaterial, SideShape, SideDock, SideNotify, SideWidgets, SideStage, null, null, null, null,
-            SideStart, SideTray, SideStatus, SideClock, SideIme,
+            SideStart, SideTray, SideStatus, SideClock, SideIme, ExtrasSide(NowPlayingPage), ExtrasSide(StacksPage),
         ];
         InitDisplays();
         LoupeSwitch.IsOn = true;

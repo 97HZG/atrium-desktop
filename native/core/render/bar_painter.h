@@ -57,6 +57,7 @@ struct BarScene {
     // The input method entry (#ime): the foreground window's input (中/あ/가, a/A), fading in over
     // the glyph before it since imeMs (ClockMs).
     std::wstring imeGlyph, imePrevGlyph;
+    std::shared_ptr<const MusicFeed> music; // the now-playing bars' level (Bar::SetMusic); null without the entry
     double imeMs = 0;
     float separatorX = -1;     // < 0: none
     D2D1_RECT_F clock{};       // empty: no clock
@@ -114,14 +115,6 @@ public:
     // Each running dot follows only the backdrop at its displayed position.
     bool UpdateDotInk(const BarScene& scene, const Readback& backdrop, const Settings& settings, double nowMs);
     const BarFrame& Frame() const { return frame_; }
-    // The playing app's level (0..1, linear) and state, and the motion setting (0 still .. 1.5
-    // vivid), for the now-playing bars: Animate moves them while the bar shows the entry.
-    void SetMusic(float peak, bool playing, float intensity)
-    {
-        musicPeak_ = peak;
-        musicPlaying_ = playing;
-        musicIntensity_ = intensity;
-    }
     // Draws the content. It is rendered into a cached layer and only redrawn
     // when `contentKey` changes or an animation runs; a present caused by the
     // backdrop alone just composites the cached layer.
@@ -168,8 +161,6 @@ private:
     winrt::com_ptr<ID2D1Effect> shadow_;
     BarExtrasPainter extras_;
     MusicBars music_;
-    float musicPeak_ = 0, musicIntensity_ = 1;
-    bool musicPlaying_ = false;
     struct StatusArc {
         winrt::com_ptr<ID2D1PathGeometry> path;
         float sweep = -1;

@@ -1,0 +1,236 @@
+using System.Numerics;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Windows.Foundation;
+using Windows.UI;
+
+namespace Atrium.Settings;
+
+// The previews of the newer entries' popups, laid out with the core's numbers (ui/now_playing_card.cpp,
+// ui/folder_stack_layout.h): the now-playing card with its live bars, and the folder stack fanning out of
+// its entry (or its column).
+public sealed partial class MainWindow
+{
+    // ---- The now-playing card: a track playing, its bars moving, its progress going on ----
+
+    private sealed class NowPlayingScene : ModuleScene
+    {
+        private const double CW = 360, CH = 184, Pad = 18, Art = 64, ArtR = 15, TextX = Pad + Art + 14, BarsW = 26;
+        private const double TrackY = 106, TrackH = 5, ControlsY = 156, ControlStep = 72;
+        private static readonly double[] Shape = [0.58, 0.86, 1.0, 0.80, 0.52];
+        private static readonly double[] Rate = [0.92, 1.27, 1.71, 1.13, 0.81];
+        private readonly PanelInk _ink = new();
+        private readonly Border _art = new() { CornerRadius = new CornerRadius(ArtR), IsHitTestVisible = false };
+        private readonly TextBlock _title, _artist, _app, _elapsed, _left;
+        private readonly Border[] _bars = new Border[5];
+        private readonly Border _track, _done;
+        private readonly TextBlock[] _controls;
+        private readonly double _start = Environment.TickCount64;
+
+        private sealed record Frame(double Left, double Top);
+
+        public NowPlayingScene(MainWindow m, Border stage, Canvas root) : base(m, stage, root)
+        {
+            _art.Background = new LinearGradientBrush
+            {
+                StartPoint = new Point(0, 0),
+                EndPoint = new Point(1, 1),
+                GradientStops =
+                {
+                    new GradientStop { Color = Color.FromArgb(255, 0xFF, 0x6B, 0x9A), Offset = 0 },
+                    new GradientStop { Color = Color.FromArgb(255, 0x6A, 0x5A, 0xF0), Offset = 1 },
+                },
+            };
+            _title = Words(15.5, _ink.Text, true);
+            _title.Text = "Midnight City";
+            _artist = Words(13, _ink.Sub);
+            _artist.Text = "M83";
+            _app = Words(11.5, _ink.Faint);
+            _app.Text = Loc.T("Music");
+            _elapsed = Words(11.5, _ink.Sub);
+            _left = Words(11.5, _ink.Sub, false, TextAlignment.Right);
+            var tint = new SolidColorBrush(Color.FromArgb(255, 0xD0, 0x6C, 0xE0)); // the art's colour
+            for (int i = 0; i < _bars.Length; i++) _bars[i] = Plate(tint, BarsW / 18);
+            _track = Plate(_ink.Track, TrackH / 2);
+            _done = Plate(_ink.Text, TrackH / 2);
+            _controls = [Symbol("", 20, _ink.Text), Symbol("", 26, _ink.Text), Symbol("", 20, _ink.Text)];
+            foreach (var e in new UIElement[] { _art, _title, _artist, _app, _track, _done, _elapsed, _left }) Marks.Children.Add(e);
+            foreach (var e in _bars) Marks.Children.Add(e);
+            foreach (var e in _controls) Marks.Children.Add(e);
+        }
+
+        protected override bool IsOpen => M.CurrentSettings.ShowNowPlaying;
+        protected override Size PopupSize => new(CW, CH);
+        // One slot right of the status entry, where the bar puts it.
+        protected override Vector2 Anchor => new((float)(Bar!.StatusX >= 0 ? Bar.StatusX + Bar.P * 1.6 : BarRight - 2 * Bar.P), (float)PopupBottom);
+
+        protected override (GlassTile[] Tiles, object State) Pieces()
+        {
+            double w = CW * S, h = CH * S;
+            double left = Math.Clamp(Anchor.X - w / 2, 16, Math.Max(16, W - 16 - w)), top = PopupBottom - h;
+            return (new[] { new GlassTile(left, top, w, h, Math.Min(Radius, 28) * S) }, new Frame(left, top));
+        }
+
+        protected override void Ink(int piece, bool dark) => _ink.Set(dark);
+
+        protected override bool Arrange(object state, double dt)
+        {
+            var f = (Frame)state;
+            PlaceMarks(f.Left, f.Top);
+            Put(_art, Pad, Pad, Art, Art);
+            double right = CW - Pad - BarsW - 10;
+            Box(_title, TextX, 21, right - TextX, 22);
+            Box(_artist, TextX, 44, right - TextX, 19);
+            Box(_app, TextX, 63, right - TextX, 17);
+            // The bars, as the entry moves them: each on its own rhythm inside a loud song's level.
+            double t = (Now - _start) / 1000, bw = BarsW / 9, gap = (BarsW - 5 * bw) / 4;
+            bool moving = M.CurrentSettings.NowPlayingMotion != "off";
+            double reach = M.CurrentSettings.NowPlayingMotion switch { "subtle" => 0.55, "vivid" => 1.0, _ => 0.9 };
+            for (int i = 0; i < _bars.Length; i++)
+            {
+                double a = 2 * Math.PI * Rate[i] * t, swing = 0.5 + 0.32 * Math.Sin(a) + 0.18 * Math.Sin(1.5 * a + 1.7 * i);
+                double hgt = moving ? 0.22 + 0.78 * reach * Shape[i] * (0.38 + 0.62 * swing) : 0.22 + 0.18 * Shape[i];
+                double hh = Math.Max(bw, BarsW * hgt);
+                Put(_bars[i], CW - Pad - BarsW + i * (bw + gap), 35 - hh / 2, bw, hh);
+            }
+            // The progress: a four-minute song, a quarter in, going on.
+            double length = 244, pos = (61 + t) % length, done = pos / length;
+            Put(_track, Pad, TrackY - TrackH / 2, CW - 2 * Pad, TrackH);
+            Put(_done, Pad, TrackY - TrackH / 2, Math.Max(TrackH, (CW - 2 * Pad) * done), TrackH);
+            _elapsed.Text = $"{(int)pos / 60}:{(int)pos % 60:00}";
+            _left.Text = $"-{(int)(length - pos) / 60}:{(int)(length - pos) % 60:00}";
+            Box(_elapsed, Pad, TrackY + 8, CW / 2 - Pad, 16);
+            Box(_left, CW / 2, TrackY + 8, CW / 2 - Pad, 16);
+            for (int i = 0; i < 3; i++) Box(_controls[i], CW / 2 + (i - 1) * ControlStep - 22, ControlsY - 22, 44, 44);
+            return true; // it plays on
+        }
+    }
+
+    // ---- The folder stack: the folders fan out of the entry (or list in a card) ----
+
+    private sealed class StacksScene : ModuleScene
+    {
+        // ui/folder_stack_layout.h.
+        private const double Gap = 12, Icon = 40, StepY = 50, Arc = 1000, LabelH = 28, LabelPad = 12, LabelGap = 10, Margin = 16;
+        private const double ColumnW = 264, RowH = 44, ColumnPad = 8, ColumnIcon = 26;
+        private const double OpenMs = 340, StaggerMs = 22;
+        private readonly PanelInk _ink = new();
+        private readonly List<(TextBlock Icon, TextBlock Name, Border Plate)> _items = [];
+        private double _opened = double.MaxValue;
+
+        private sealed record Frame(double Left, double Top, double W, double H, bool Fan, double[] LabelW);
+
+        public StacksScene(MainWindow m, Border stage, Canvas root) : base(m, stage, root) { }
+
+        private string[] Names()
+        {
+            var paths = M.CurrentSettings.FolderStacks;
+            string[] names = paths.Count > 0
+                ? [.. paths.Select(p => System.IO.Path.GetFileName(p.TrimEnd('\\', '/'))).Select(n => n.Length > 0 ? n : "C:")]
+                : [Loc.T("Desktop"), Loc.T("Downloads"), Loc.T("Documents"), Loc.T("Pictures"), Loc.T("Music")];
+            return [.. names.Take(Math.Clamp(M.CurrentSettings.FolderStackMax, 4, 16)).Take(7)];
+        }
+
+        private bool Fan => M.CurrentSettings.FolderStackLayout != "column";
+        protected override bool IsOpen => M.CurrentSettings.ShowFolderStacks || M.CurrentSettings.FolderStacks.Count > 0;
+        protected override Size PopupSize => Fan ? new Size(360, Gap + Icon + 6 * StepY + Margin) : new Size(ColumnW, 2 * ColumnPad + 5 * RowH);
+        // One slot left of the tray, where the bar puts it.
+        protected override Vector2 Anchor => new((float)(Bar!.TrayX >= 0 ? Bar.TrayX - Bar.P * 0.6 : BarRight - 3 * Bar.P), (float)PopupBottom);
+        protected override void Ink(int piece, bool dark) => _ink.Set(dark);
+        protected override void Entered() => _opened = double.MaxValue;
+        protected override void PoppedIn() => _opened = Now;
+        protected override void Refreshed() => _opened = Now; // another layout or other folders: it opens again
+
+        private static double Lean(double rise) => Arc - Math.Sqrt(Math.Max(0, Arc * Arc - rise * rise));
+        private static double LabelWidth(string name) => Math.Clamp(TextWidth(name, 13) + 2 * LabelPad, 56, 240);
+        private double Unfold(int i) => _opened == double.MaxValue ? 0 : Motion.EaseOutBack(Math.Clamp((Now - _opened - StaggerMs * i) / OpenMs, 0, 1), 1.25);
+
+        protected override bool Step(double dt) => Fan && _opened != double.MaxValue && Now - _opened < OpenMs + 7 * StaggerMs + 40;
+
+        protected override (GlassTile[] Tiles, object State) Pieces()
+        {
+            string[] names = Names();
+            double ax = Anchor.X, foot = PopupBottom + Gap * S;
+            if (!Fan)
+            {
+                double w = ColumnW * S, h = (2 * ColumnPad + names.Length * RowH) * S;
+                double left = Math.Clamp(ax - w / 2, 16, Math.Max(16, W - 16 - w));
+                return (new[] { new GlassTile(left, PopupBottom - h, w, h, Math.Min(Radius, 22) * S) }, new Frame(left, PopupBottom - h, w, h, false, []));
+            }
+            // The names' capsules, each its own piece of glass, flying out with their folders.
+            double[] widths = [.. names.Select(LabelWidth)];
+            var tiles = new List<GlassTile>();
+            for (int i = 0; i < names.Length; i++)
+            {
+                double e = Unfold(i), rise = Gap + Icon / 2 + i * StepY;
+                double cx = ax + Lean(rise) * S, cy = foot - rise * S;
+                double x = ax + (cx - Icon / 2 * S - LabelGap * S - widths[i] * S - ax) * e, y = foot + (cy - foot) * e;
+                if (e > 0.02) tiles.Add(new GlassTile(x, y - LabelH / 2 * S, widths[i] * S * Math.Min(1, e), LabelH * S, LabelH / 2 * S));
+            }
+            return ([.. tiles], new Frame(ax, foot, 0, 0, true, widths));
+        }
+
+        protected override bool Arrange(object state, double dt)
+        {
+            var f = (Frame)state;
+            string[] names = Names();
+            while (_items.Count < names.Length)
+            {
+                var icon = new TextBlock
+                {
+                    Text = "\U0001F4C1",
+                    FontFamily = new FontFamily("Segoe UI Emoji"),
+                    TextAlignment = TextAlignment.Center,
+                    IsHitTestVisible = false,
+                };
+                var name = Words(13, _ink.Text, false, TextAlignment.Center);
+                var plate = Plate(_ink.Hover, 10);
+                Marks.Children.Add(plate);
+                Marks.Children.Add(icon);
+                Marks.Children.Add(name);
+                _items.Add((icon, name, plate));
+            }
+            for (int i = 0; i < _items.Count; i++)
+            {
+                bool shown = i < names.Length;
+                _items[i].Icon.Visibility = _items[i].Name.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+                _items[i].Plate.Visibility = Visibility.Collapsed;
+                if (shown) _items[i].Name.Text = names[i];
+            }
+            if (!f.Fan)
+            {
+                PlaceMarks(f.Left, f.Top);
+                for (int i = 0; i < names.Length; i++)
+                {
+                    // Over a bottom bar the first folder is the lowest row.
+                    double y = ColumnPad + (names.Length - 1 - i) * RowH, e = Motion.EaseOut((Now - _opened - 14 * i) / 240);
+                    _items[i].Icon.FontSize = ColumnIcon * 0.8;
+                    Box(_items[i].Icon, ColumnPad + 10, y + 6 * (1 - Math.Clamp(e, 0, 1)), ColumnIcon, RowH);
+                    _items[i].Name.TextAlignment = TextAlignment.Left;
+                    Box(_items[i].Name, ColumnPad + 10 + ColumnIcon + 12, y + 6 * (1 - Math.Clamp(e, 0, 1)), ColumnW - 2 * ColumnPad - ColumnIcon - 34, RowH);
+                    _items[i].Icon.Opacity = _items[i].Name.Opacity = Math.Clamp(e, 0, 1);
+                }
+                return _opened != double.MaxValue && Now - _opened < 240 + 14 * names.Length;
+            }
+            PlaceMarks(0, 0, 1); // the fan is laid out in the stage's own units
+            bool moving = false;
+            for (int i = 0; i < names.Length; i++)
+            {
+                double e = Unfold(i), rise = Gap + Icon / 2 + i * StepY;
+                moving |= e < 1 || _opened == double.MaxValue;
+                double cx = f.Left + Lean(rise) * S, cy = f.Top - rise * S;
+                double x = f.Left + (cx - f.Left) * e, y = f.Top + (cy - f.Top) * e, k = 0.35 + 0.65 * Math.Min(e, 1);
+                _items[i].Icon.FontSize = Icon * 0.78 * S * k;
+                Box(_items[i].Icon, x - Icon / 2 * S, y - Icon / 2 * S, Icon * S, Icon * S);
+                double lw = f.LabelW[i] * S, lx = f.Left + (cx - Icon / 2 * S - LabelGap * S - lw - f.Left) * e;
+                _items[i].Name.FontSize = 13 * S;
+                _items[i].Name.TextAlignment = TextAlignment.Center;
+                Box(_items[i].Name, lx, y - LabelH / 2 * S, lw, LabelH * S);
+                _items[i].Icon.Opacity = Math.Clamp(e * 3, 0, 1);
+                _items[i].Name.Opacity = Math.Clamp((e - 0.3) / 0.7, 0, 1);
+            }
+            return moving && _opened != double.MaxValue;
+        }
+    }
+}
