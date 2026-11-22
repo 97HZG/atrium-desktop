@@ -16,6 +16,29 @@ void Require(bool condition, const char* message)
     }
 }
 
+void CheckEstimate()
+{
+    TimelineEstimate e;
+    MediaTimeline t;
+    e.Update(L"a", true, 180'000'000, 0, t);
+    Require(!t.Seekable(), "a track under way when first seen has no timeline");
+    e.Update(L"b", true, 200'000'000, 1000, t);
+    Require(t.Seekable() && t.endUs == 200'000'000, "a track seen to start gets the length");
+    Require(t.PositionUs(11'000) == 10'000'000, "its position counts from the change");
+    MediaTimeline paused;
+    e.Update(L"b", false, 200'000'000, 21'000, paused);
+    Require(!paused.playing && paused.PositionUs(90'000) == 20'000'000, "a pause holds the position");
+    MediaTimeline resumed;
+    e.Update(L"b", true, 200'000'000, 50'000, resumed);
+    Require(resumed.PositionUs(55'000) == 25'000'000, "playing again goes on from there");
+    MediaTimeline again;
+    e.Update(L"b", true, 200'000'000, 300'000, again);
+    Require(again.PositionUs(300'000) == 0, "past the end on the same track: played again from 0");
+    MediaTimeline unknown;
+    e.Update(L"c", true, 0, 400'000, unknown);
+    Require(!unknown.Seekable(), "no length: no timeline");
+}
+
 void CheckTimeline()
 {
     MediaTimeline tl;
@@ -108,6 +131,7 @@ void CheckPickSession()
 int main()
 {
     CheckTimeline();
+    CheckEstimate();
     CheckAppFilter();
     CheckPickSession();
     if (g_failures > 0)

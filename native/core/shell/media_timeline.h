@@ -36,6 +36,52 @@ struct MediaTimeline {
     }
 };
 
+// A timeline for a player that reports none (NetEase Cloud Music): its length from the player's own
+// files, its position counted from when the track was seen to start, through pauses. A track already
+// under way when first seen has no known position: no timeline until the next one. Worker thread.
+class TimelineEstimate {
+public:
+    // `track` names the track (its title and artist); lengthUs 0: unknown. Fills `t` when known.
+    void Update(const std::wstring& track, bool playing, int64_t lengthUs, double nowMs, MediaTimeline& t)
+    {
+        if (track != track_) {
+            fromStart_ = seen_; // a change seen happen: the new track starts at 0
+            seen_ = true;
+            track_ = track;
+            posUs_ = 0;
+            anchorMs_ = nowMs;
+            playing_ = playing;
+        } else if (playing != playing_) {
+            if (playing_)
+                posUs_ += ElapsedUs(nowMs);
+            anchorMs_ = nowMs;
+            playing_ = playing;
+        }
+        // Past its end on the same track: played again (repeat one), from the start.
+        if (lengthUs > 0 && Position(nowMs) > lengthUs + 3'000'000) {
+            posUs_ = 0;
+            anchorMs_ = nowMs;
+        }
+        if (!fromStart_ || lengthUs <= 0)
+            return;
+        t.startUs = 0;
+        t.endUs = lengthUs;
+        t.anchorPosUs = posUs_;
+        t.anchorMs = playing_ ? anchorMs_ : nowMs;
+        t.rate = 1.0;
+        t.playing = playing_;
+    }
+
+private:
+    int64_t ElapsedUs(double nowMs) const { return static_cast<int64_t>(std::llround(std::max(0.0, nowMs - anchorMs_) * 1000.0)); }
+    int64_t Position(double nowMs) const { return posUs_ + (playing_ ? ElapsedUs(nowMs) : 0); }
+
+    std::wstring track_;
+    bool seen_ = false, fromStart_ = false, playing_ = false;
+    int64_t posUs_ = 0;
+    double anchorMs_ = 0;
+};
+
 struct MediaSessionSummary {
     std::wstring id;
     std::wstring appId;

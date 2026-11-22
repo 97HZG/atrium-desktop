@@ -944,6 +944,9 @@
   "Downloads": "下载",
   "Documents": "文档",
   "Pictures": "图片",
-  "No folders yet: add one below.": "还没有文件夹：在下方添加。"
+  "No folders yet": "还没有文件夹",
+  "Common folders": "常用文件夹",
+  "{0} of 32": "{0} / 32",
+  "Choose one with Add folder…, or pick a common folder such as Downloads.": "点“添加文件夹…”选择一个，或者从常用文件夹里挑，比如下载。"
  }
 }

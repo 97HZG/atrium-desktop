@@ -185,8 +185,6 @@ void Launchpad::Release(POINT pt)
         Launch(was);
     else if (was <= -2 && was != kGlass && at == was)
         SetPage(-2 - was);
-    else if (was == kGlass && at == kGlass)
-        Close(false); // the empty glass
     surface_.Invalidate();
 }
 

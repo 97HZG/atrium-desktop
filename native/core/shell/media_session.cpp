@@ -5,6 +5,7 @@
 #include "posted.h"
 #include "shell/audio_meter.h"
 #include "shell/media_app.h"
+#include "shell/netease_tracks.h"
 #include "shell/shell_icon.h"
 #include "win32_path.h"
 
@@ -222,6 +223,7 @@ struct TrackedSession {
     std::shared_ptr<const IconImage> artwork;
     uint64_t artworkHash = 0;
     size_t artworkBytes = 0;
+    TimelineEstimate estimate; // for a player that reports no timeline
 };
 
 struct FilterConfig {
@@ -530,6 +532,10 @@ private:
             outSnap.timeline.anchorMs = anchorMs;
         }
 
+        // A player that reports no timeline: one estimated from its own queue (NetEase Cloud Music).
+        if (!outSnap.timeline.Seekable() && IsNeteasePlayer(ts.appId))
+            ts.estimate.Update(ts.title + L'\n' + ts.artist, outSnap.state == MediaPlaybackState::Playing, NeteaseTrackLengthUs(ts.title, ts.artist), nowMs,
+                               outSnap.timeline);
         outSummary = {ts.id, ts.appId, ts.title, outSnap.state, isSystemCurrent, ts.lastPlayingMs};
         return timelineUpdated;
     }

@@ -1,5 +1,5 @@
 // The bar's own entries that are drawn rather than read from an app: the start logo, the
-// Launchpad's grid, the now-playing bars and the folder stack. Each fills `r`, the entry's icon
+// Launchpad's rocket, the now-playing bars and the folder stack. Each fills `r`, the entry's icon
 // square in the window's coordinates, upright on every edge. Render thread.
 #pragma once
 
@@ -8,7 +8,6 @@
 #include <d2d1_3.h>
 #include <winrt/base.h>
 
-#include <array>
 #include <string>
 
 namespace atrium {
@@ -21,8 +20,8 @@ public:
               const MusicBars& bars);
     // The Windows logo, as four panes in Windows 11's light-to-deep blue.
     void DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity);
-    // Launchpad: nine rounded tiles, each its own colour lit from above, as the apps it opens.
-    void DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity);
+    // Launchpad: a rocket in outline, climbing to the upper right, in the bar's ink.
+    static void DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink);
     // Now playing: five round-ended bars in the bar's ink, as tall as `bars` has them.
     static void DrawMusic(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, const MusicBars& bars, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink);
     // Folder stacks: a folder drawn in outline with a second one behind it, in the bar's ink.
@@ -31,7 +30,6 @@ public:
 private:
     winrt::com_ptr<ID2D1LinearGradientBrush> logoBlue_; // the logo's panes and their lit edge
     winrt::com_ptr<ID2D1SolidColorBrush> logoSheen_;
-    std::array<winrt::com_ptr<ID2D1LinearGradientBrush>, 9> tiles_; // the Launchpad's, top to bottom each
 };
 
 } // namespace atrium

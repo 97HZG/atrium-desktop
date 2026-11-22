@@ -119,7 +119,8 @@ public sealed partial class MainWindow
         private readonly List<(TextBlock Icon, TextBlock Name, Border Plate)> _items = [];
         private double _opened = double.MaxValue;
 
-        private sealed record Frame(double Left, double Top, double W, double H, bool Fan, double[] LabelW);
+        // The names the frame was laid out for: the folders may change before it shows.
+        private sealed record Frame(double Left, double Top, double W, double H, bool Fan, string[] Names, double[] LabelW);
 
         public StacksScene(MainWindow m, Border stage, Canvas root) : base(m, stage, root) { }
 
@@ -156,7 +157,7 @@ public sealed partial class MainWindow
             {
                 double w = ColumnW * S, h = (2 * ColumnPad + names.Length * RowH) * S;
                 double left = Math.Clamp(ax - w / 2, 16, Math.Max(16, W - 16 - w));
-                return (new[] { new GlassTile(left, PopupBottom - h, w, h, Math.Min(Radius, 22) * S) }, new Frame(left, PopupBottom - h, w, h, false, []));
+                return (new[] { new GlassTile(left, PopupBottom - h, w, h, Math.Min(Radius, 22) * S) }, new Frame(left, PopupBottom - h, w, h, false, names, []));
             }
             // The names' capsules, each its own piece of glass, flying out with their folders.
             double[] widths = [.. names.Select(LabelWidth)];
@@ -168,13 +169,13 @@ public sealed partial class MainWindow
                 double x = ax + (cx - Icon / 2 * S - LabelGap * S - widths[i] * S - ax) * e, y = foot + (cy - foot) * e;
                 if (e > 0.02) tiles.Add(new GlassTile(x, y - LabelH / 2 * S, widths[i] * S * Math.Min(1, e), LabelH * S, LabelH / 2 * S));
             }
-            return ([.. tiles], new Frame(ax, foot, 0, 0, true, widths));
+            return ([.. tiles], new Frame(ax, foot, 0, 0, true, names, widths));
         }
 
         protected override bool Arrange(object state, double dt)
         {
             var f = (Frame)state;
-            string[] names = Names();
+            string[] names = f.Names;
             while (_items.Count < names.Length)
             {
                 var icon = new TextBlock

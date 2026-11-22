@@ -11,6 +11,8 @@ namespace atrium {
 namespace launchpad {
 
 constexpr double kOpenMs = 300, kCloseMs = 200;
+// The window: about three quarters of the work area, within these bounds (DIP), and 24 DIP clear of its edges.
+constexpr float kMinW = 760, kMaxW = 1120, kMinH = 540, kMaxH = 780, kMinRadius = 26, kClear = 24;
 constexpr float kSearchW = 280, kSearchH = 34, kSearchTop = 34;
 constexpr float kLabel = 12.5f, kLabelH = 18, kLabelGap = 8;
 constexpr float kDotsFromBottom = 40, kDotStep = 18, kDot = 4;
@@ -33,15 +35,19 @@ Launchpad::Launchpad(HINSTANCE instance, AppCatalog& catalog) : surface_(instanc
     surface_.onDismiss = [this] { Close(false); };
 }
 
-void Launchpad::Open(RECT monitor, HWND previous)
+void Launchpad::Open(RECT work, HWND previous)
 {
     previous_ = previous;
     apps_ = catalog_.Apps();
     query_.clear();
     shown_.clear();
-    const float s = PopupScale(monitor);
-    w_ = float(monitor.right - monitor.left) / s;
-    h_ = float(monitor.bottom - monitor.top) / s;
+    const float s = PopupScale(work);
+    const float workW = float(work.right - work.left) / s, workH = float(work.bottom - work.top) / s;
+    w_ = std::min(std::clamp(workW * 0.74f, kMinW, kMaxW), workW - 2 * kClear);
+    h_ = std::min(std::clamp(workH * 0.78f, kMinH, kMaxH), workH - 2 * kClear);
+    const LONG cx = (work.left + work.right) / 2, cy = (work.top + work.bottom) / 2;
+    const LONG halfW = std::lround(w_ * s / 2), halfH = std::lround(h_ * s / 2);
+    const RECT rect{cx - halfW, cy - halfH, cx + halfW, cy + halfH};
     grid_ = ComputeLaunchpadGrid(w_, h_);
     page_ = 0;
     pageShown_ = pageSpeed_ = 0;
@@ -51,8 +57,8 @@ void Launchpad::Open(RECT monitor, HWND previous)
     hoverAnim_.clear();
     KillTimer(surface_.Hwnd(), kCloseTimer);
     openedMs_ = lastPaint_ = ClockMs();
-    surface_.SetRadius(0);
-    surface_.Show(monitor, true, POINT{(monitor.left + monitor.right) / 2, (monitor.top + monitor.bottom) / 2}, false);
+    surface_.SetRadius(Radius());
+    surface_.Show(rect, true, POINT{cx, cy}, false);
     PublishGlass(openedMs_);
     SetTimer(surface_.Hwnd(), kCaretTimer, GetCaretBlinkTime(), nullptr);
     PlaceIme();
@@ -122,11 +128,13 @@ D2D1_RECT_F Launchpad::Cell(int slot) const
 
 D2D1_RECT_F Launchpad::SearchRect() const { return D2D1::RectF(w_ / 2 - kSearchW / 2, kSearchTop, w_ / 2 + kSearchW / 2, kSearchTop + kSearchH); }
 
-// The display-wide sheet of glass, fading with the opening and the closing.
+float Launchpad::Radius() const { return std::max(radius_, kMinRadius); }
+
+// The window's glass, fading with the opening and the closing.
 void Launchpad::PublishGlass(double now)
 {
     const float a = OpenAmount(now);
-    ShapeDip sheet{D2D1::RectF(0, 0, w_, h_), 0};
+    ShapeDip sheet{D2D1::RectF(0, 0, w_, h_), Radius()};
     sheet.fade = 1 - a;
     surface_.SetShapes({sheet}, a > 0 && a < 1);
 }
@@ -161,9 +169,9 @@ void Launchpad::Paint(Canvas& c)
     }
     const D2D1_RECT_F all = D2D1::RectF(0, 0, w_, h_);
     if (c.panel)
-        c.Fill(all, 0, Alpha(t.panel, a));
+        c.Fill(all, Radius(), Alpha(t.panel, a));
     // A faint veil over the glass, so the names read on any wallpaper.
-    c.Fill(all, 0, t.light ? D2D1::ColorF(1, 1, 1, 0.10f * a) : D2D1::ColorF(0, 0, 0, 0.22f * a));
+    c.Fill(all, Radius(), t.light ? D2D1::ColorF(1, 1, 1, 0.10f * a) : D2D1::ColorF(0, 0, 0, 0.22f * a));
     // The apps settle from a little larger as the sheet fades in, and grow away as it fades out.
     c.BeginGroup(a, 1 + (closing_ ? 0.05f : 0.08f) * (1 - a), w_ / 2, h_ / 2);
     hits_.clear();

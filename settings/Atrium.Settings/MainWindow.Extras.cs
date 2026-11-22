@@ -26,6 +26,7 @@ public sealed partial class MainWindow
     private SegmentTrack? _npMotion, _npMode, _stLayout, _stMax;
     private TextBox? _npApps;
     private StackPanel? _stList;
+    private TextBlock? _stCount;
 
     private StackPanel ExtrasPage(int page)
     {
@@ -61,13 +62,14 @@ public sealed partial class MainWindow
         CenterStack.Children.Insert(at, _npMain);
         _npSide = BuildNowPlayingSide();
         _stSide = BuildStacksSide();
+        _stMain.Children.Add(BuildStacksFolders());
         InspectorStack.Children.Add(_npSide);
         InspectorStack.Children.Add(_stSide);
         // Each page reads the settings as it shows (they may have changed elsewhere since).
         _npSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_npSide.Visibility == Visibility.Visible) LoadExtras(); });
         _stSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_stSide.Visibility == Visibility.Visible) LoadExtras(); });
         AddNavItem(NowPlayingPage, "", "Now Playing", "12");
-        AddNavItem(StacksPage, "", "Folder Stacks", "11");
+        AddNavItem(StacksPage, "", "Folder Stacks", "10"); // the bar's order: the stack sits left of the tray
         // Launchpad: a switch on the start menu's page, under its title.
         _launchpadSwitch = Toggle("Launchpad", "Show Launchpad on the taskbar",
             "An entry next to the start logo opens every app on one sheet of glass, as on macOS.", (s, on) => s.ShowLaunchpad = on);
@@ -152,18 +154,43 @@ public sealed partial class MainWindow
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
         _stMax = Segments("stackmax", [.. StackMaxima.Select(n => (n.ToString(System.Globalization.CultureInfo.CurrentCulture), n.ToString(invariant)))],
             tag => CurrentSettings.FolderStackMax = int.Parse(tag, System.Globalization.CultureInfo.InvariantCulture));
-        _stList = new StackPanel { Spacing = 2 };
-        var add = new Button { Content = Loc.T("Add folder…") };
-        add.Click += async (_, _) => await AddStackFolderAsync();
-        var quick = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        return Side("Folder Stacks", _stSwitch, Row("Opens as", _stLayout), Row("Shows at most", _stMax));
+    }
+
+    // The folders, under the picture as the taskbar's pinned apps are under theirs: a title with the
+    // count and the buttons that add, then the list in a group.
+    private StackPanel BuildStacksFolders()
+    {
+        var res = Application.Current.Resources;
+        _stList = new StackPanel { Padding = new Thickness(0, 4, 0, 4) };
+        _stCount = new TextBlock { Style = (Style)res["FootnoteStyle"], VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+        var places = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
         foreach (var (name, path) in KnownStackFolders())
         {
-            var chip = new Button { Content = Loc.T(name), Padding = new Thickness(10, 3, 10, 4) };
-            chip.Click += (_, _) => AddStackFolder(path);
-            quick.Children.Add(chip);
+            var item = new MenuFlyoutItem { Text = Loc.T(name) };
+            item.Click += (_, _) => AddStackFolder(path);
+            places.Items.Add(item);
         }
-        var folders = new StackPanel { Spacing = 8, Children = { _stList, add, quick } };
-        return Side("Folder Stacks", _stSwitch, Row("Opens as", _stLayout), Row("Shows at most", _stMax), Row("Folders", folders));
+        var common = new DropDownButton { Content = Loc.T("Common folders"), Flyout = places };
+        var add = new Button { Content = Loc.T("Add folder…"), Style = (Style)res["PrimaryButtonStyle"] };
+        add.Click += async (_, _) => await AddStackFolderAsync();
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { _stCount, common, add },
+        };
+        var title = new TextBlock
+        {
+            Text = Loc.T("Folders"),
+            Style = (Style)res["SectionStyle"],
+            Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var header = new Grid { Margin = new Thickness(0, 0, 0, 10), Children = { title, buttons } };
+        var group = new Border { Style = (Style)res["GroupStyle"], Child = _stList };
+        return new StackPanel { Margin = new Thickness(0, 16, 0, 0), Children = { header, group } };
     }
 
     private static (string Name, string Path)[] KnownStackFolders()
@@ -262,40 +289,77 @@ public sealed partial class MainWindow
         if (_stList == null) return;
         _stList.Children.Clear();
         var folders = CurrentSettings.FolderStacks;
+        _stCount?.Text = folders.Count == 0 ? "" : Loc.F("{0} of 32", folders.Count);
         if (folders.Count == 0)
         {
-            var note = new TextBlock { Text = Loc.T("No folders yet: add one below."), Style = (Style)Application.Current.Resources["RowNoteStyle"] };
-            _stList.Children.Add(note);
+            var res = Application.Current.Resources;
+            _stList.Children.Add(new StackPanel
+            {
+                Padding = new Thickness(24, 36, 24, 36),
+                Spacing = 6,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Children =
+                {
+                    new TextBlock { Text = Loc.T("No folders yet"), Style = (Style)res["TitleStyle"], HorizontalAlignment = HorizontalAlignment.Center },
+                    new TextBlock
+                    {
+                        Text = Loc.T("Choose one with Add folder…, or pick a common folder such as Downloads."),
+                        Style = (Style)res["RowNoteStyle"], TextAlignment = TextAlignment.Center, MaxWidth = 360,
+                    },
+                },
+            });
             return;
         }
         for (int i = 0; i < folders.Count; i++) _stList.Children.Add(StackRow(i, folders[i]));
     }
 
+    // A folder as a pinned app's row: its icon, its name over its path, and up, down and remove.
     private Grid StackRow(int index, string path)
     {
-        var row = new Grid { ColumnSpacing = 6, Padding = new Thickness(0, 2, 0, 2) };
+        var res = Application.Current.Resources;
+        var row = new Grid { Padding = new Thickness(14, 8, 10, 8), ColumnSpacing = 14, MinHeight = 60 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var icon = new FontIcon { Glyph = "", FontSize = 15, VerticalAlignment = VerticalAlignment.Center };
-        string name = Path.GetFileName(path.TrimEnd('\\', '/'));
-        var text = new TextBlock
+        var icon = new TextBlock
         {
-            Text = name.Length > 0 ? name : path,
+            Text = "\U0001F4C1",
+            FontFamily = new FontFamily("Segoe UI Emoji"),
+            FontSize = 28,
+            Width = 40,
+            TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        string name = Path.GetFileName(path.TrimEnd('\\', '/'));
+        var text = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Spacing = 1,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = name.Length > 0 ? name : path, Style = (Style)res["RowTitleStyle"],
+                    TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap,
+                },
+                new TextBlock
+                {
+                    Text = path, Style = (Style)res["FootnoteStyle"], TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap,
+                },
+            },
         };
         ToolTipService.SetToolTip(text, path);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
-        foreach (var (glyph, label, move) in new[] { ("", "Move up", -1), ("", "Move down", 1), ("", "Remove", 0) })
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var (glyph, label, move, size) in new[] { ("\uE70E", "Move up", -1, 13), ("\uE70D", "Move down", 1, 13), ("\uE711", "Remove", 0, 12) })
         {
             var button = new Button
             {
-                Content = new FontIcon { Glyph = glyph, FontSize = 12 },
-                Padding = new Thickness(7, 5, 7, 5),
+                Style = (Style)res["IconButtonStyle"],
+                Content = new FontIcon { Glyph = glyph, FontSize = size },
                 IsEnabled = move == 0 || (index + move >= 0 && index + move < CurrentSettings.FolderStacks.Count),
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, Loc.T(label));
+            ToolTipService.SetToolTip(button, Loc.T(label));
             button.Click += (_, _) => EditStack(index, move);
             buttons.Children.Add(button);
         }

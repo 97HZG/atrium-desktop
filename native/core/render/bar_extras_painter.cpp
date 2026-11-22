@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace atrium {
 
@@ -16,20 +17,6 @@ D2D1_RECT_F Square(D2D1_RECT_F r, float k)
     return D2D1::RectF(cx - w / 2, cy - w / 2, cx + w / 2, cy + w / 2);
 }
 
-// The Launchpad's tiles, row by row: warm across the top, Atrium's blue in the middle, cool below;
-// each from its lit top to its deeper bottom.
-constexpr std::array<std::array<UINT32, 2>, 9> kTileColours{{
-    {0xFF8A8A, 0xF03E5E},
-    {0xFFB861, 0xF76707},
-    {0xFFE066, 0xF5A700},
-    {0xD0A2FF, 0x9333EA},
-    {0x5CCBFF, 0x1A80F0},
-    {0x7BE08A, 0x2F9E44},
-    {0xFF9EC4, 0xD6336C},
-    {0x7EE3F0, 0x1098AD},
-    {0xB8D4FF, 0x5B7CFA},
-}};
-
 } // namespace
 
 bool BarExtrasPainter::Draw(const std::wstring& key, ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink, float opacity,
@@ -40,7 +27,7 @@ bool BarExtrasPainter::Draw(const std::wstring& key, ID2D1DeviceContext2* d2d, D
     if (key == L"#start")
         DrawLogo(d2d, r, opacity);
     else if (key == L"#launchpad")
-        DrawLaunchpad(d2d, r, opacity);
+        DrawLaunchpad(d2d, r, brush, faded);
     else if (key == L"#music")
         DrawMusic(d2d, r, bars, brush, faded);
     else if (key == L"#stacks")
@@ -79,27 +66,49 @@ void BarExtrasPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float o
     }
 }
 
-void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity)
+void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)
 {
-    const D2D1_RECT_F box = Square(r, 0.78f);
-    const float w = box.right - box.left, gap = w * 0.10f, tile = (w - 2 * gap) / 3;
-    for (size_t i = 0; i < tiles_.size(); ++i) {
-        auto& brush = tiles_[i];
-        if (!brush) {
-            const D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(kTileColours[i][0])}, {1.f, D2D1::ColorF(kTileColours[i][1])}};
-            winrt::com_ptr<ID2D1GradientStopCollection> coll;
-            if (FAILED(d2d->CreateGradientStopCollection(stops, 2, coll.put())) ||
-                FAILED(d2d->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties({}, {}), coll.get(), brush.put())))
-                return;
-        }
-        const size_t row = i / 3, col = i % 3;
-        const float x = box.left + float(col) * (tile + gap), y = box.top + float(row) * (tile + gap);
-        brush->SetStartPoint(D2D1::Point2F(x, y));
-        brush->SetEndPoint(D2D1::Point2F(x, y + tile));
-        brush->SetOpacity(opacity);
-        // Squircle tiles, as app icons are: the corner a third of the side.
-        FillContinuousRect(d2d, D2D1::RectF(x, y, x + tile, y + tile), tile * 0.32f, brush.get());
+    winrt::com_ptr<ID2D1Factory> factory;
+    d2d->GetFactory(factory.put());
+    const D2D1_RECT_F box = Square(r, 0.86f);
+    const float s = box.right - box.left, stroke = std::max(1.f, s * 0.07f);
+    auto at = [&](float u, float v) { return D2D1::Point2F(box.left + u * s, box.top + v * s); };
+    // Upright in a unit square, then turned 45 degrees: the body, a fin either side, three trails.
+    winrt::com_ptr<ID2D1PathGeometry> rocket;
+    winrt::com_ptr<ID2D1GeometrySink> sink;
+    if (FAILED(factory->CreatePathGeometry(rocket.put())) || FAILED(rocket->Open(sink.put())))
+        return;
+    sink->BeginFigure(at(0.5f, 0.08f), D2D1_FIGURE_BEGIN_HOLLOW);
+    sink->AddBezier(D2D1::BezierSegment(at(0.63f, 0.19f), at(0.68f, 0.36f), at(0.65f, 0.66f)));
+    sink->AddLine(at(0.35f, 0.66f));
+    sink->AddBezier(D2D1::BezierSegment(at(0.32f, 0.36f), at(0.37f, 0.19f), at(0.5f, 0.08f)));
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    for (const float side : {-1.f, 1.f}) {
+        sink->BeginFigure(at(0.5f + side * 0.155f, 0.47f), D2D1_FIGURE_BEGIN_HOLLOW);
+        sink->AddLine(at(0.5f + side * 0.27f, 0.60f));
+        sink->AddLine(at(0.5f + side * 0.27f, 0.74f));
+        sink->AddLine(at(0.5f + side * 0.15f, 0.66f));
+        sink->EndFigure(D2D1_FIGURE_END_OPEN);
     }
+    for (const auto [u, v] : {std::pair{0.43f, 0.80f}, {0.5f, 0.88f}, {0.57f, 0.80f}}) {
+        sink->BeginFigure(at(u, 0.75f), D2D1_FIGURE_BEGIN_HOLLOW);
+        sink->AddLine(at(u, v));
+        sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    }
+    if (FAILED(sink->Close()))
+        return;
+    winrt::com_ptr<ID2D1StrokeStyle> round;
+    const auto props = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND);
+    if (FAILED(factory->CreateStrokeStyle(props, nullptr, 0, round.put())))
+        return;
+    D2D1_MATRIX_3X2_F previous;
+    d2d->GetTransform(&previous);
+    d2d->SetTransform(D2D1::Matrix3x2F::Rotation(45, at(0.5f, 0.5f)) * previous);
+    brush->SetColor(ink);
+    d2d->DrawGeometry(rocket.get(), brush, stroke, round.get());
+    const D2D1_POINT_2F window = at(0.5f, 0.35f);
+    d2d->FillEllipse(D2D1::Ellipse(window, s * 0.065f, s * 0.065f), brush); // the porthole
+    d2d->SetTransform(previous);
 }
 
 void BarExtrasPainter::DrawMusic(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, const MusicBars& bars, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)

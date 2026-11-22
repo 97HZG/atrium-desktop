@@ -115,6 +115,7 @@ void ExtrasHost::Apply(const Settings& s, float radius)
     if (!s.showLaunchpad)
         launchpad_.Close(false);
     card_.SetRadius(radius);
+    launchpad_.SetRadius(radius);
     stacks_.SetRadius(radius);
 }
 
@@ -150,7 +151,7 @@ void ExtrasHost::Click(Bar& bar, const std::wstring& key, RECT entry)
         MONITORINFO mi{sizeof(mi)};
         RECT barRect = bar.BarRect();
         GetMonitorInfoW(MonitorFromRect(&barRect, MONITOR_DEFAULTTONEAREST), &mi);
-        launchpad_.Open(mi.rcMonitor, bar.PreviousForeground());
+        launchpad_.Open(mi.rcWork, bar.PreviousForeground());
     } else if (key == L"#music") {
         if (card_.Visible() || JustClosed(card_)) {
             card_.Close();

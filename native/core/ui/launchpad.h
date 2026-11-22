@@ -1,9 +1,9 @@
-// Launchpad, as on macOS: every app on one display-wide sheet of the bar's glass, in pages of a
-// grid (launchpad_model.h) with the page dots below and a search field above. It opens from its
+// Launchpad, as on macOS: every app on one large window of the bar's glass in the middle of the
+// display, in pages of a grid (launchpad_model.h) with the page dots below and a search field above. It opens from its
 // entry next to the start logo: the glass fades in and the apps settle from a little larger, and it
 // leaves the same way. Typing searches (by name or initials, as the start menu does); the wheel, a
 // drag or the arrows turn the pages with a spring; a click launches, a click on the empty glass or
-// Esc closes (Esc clears a search first).
+// Esc closes (Esc clears a search first), and so does a click outside it.
 #pragma once
 
 #include "motion.h"
@@ -24,9 +24,10 @@ class Launchpad {
 public:
     Launchpad(HINSTANCE instance, AppCatalog& catalog);
 
-    // monitor: the display to cover (screen px); previous: the window to give the focus back to when
-    // closed without launching.
-    void Open(RECT monitor, HWND previous);
+    // work: the display's work area (screen px), the window centred in it; previous: the window to
+    // give the focus back to when closed without launching.
+    void Open(RECT work, HWND previous);
+    void SetRadius(float dip) { radius_ = dip; }
     void Close(bool launched);
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
@@ -52,6 +53,7 @@ private:
     D2D1_RECT_F Cell(int slot) const; // a slot of a page, its page at x 0
     D2D1_RECT_F SearchRect() const;
     float OpenAmount(double now) const; // 0 hidden .. 1 open, through the opening and the closing
+    float Radius() const;
 
     // Input (launchpad_input.cpp).
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
@@ -76,7 +78,8 @@ private:
     std::vector<CatalogApp> apps_, shown_;
     std::wstring query_;
     LaunchpadGrid grid_;
-    float w_ = 0, h_ = 0; // the display, DIP
+    float w_ = 0, h_ = 0; // the window, DIP
+    float radius_ = 24;   // the bar's popups' corner
     int page_ = 0;
     float pageShown_ = 0, pageSpeed_ = 0; // the page on screen (fractional while it glides), pages/s
     int sel_ = -1, hover_ = -1, pressed_ = -1;

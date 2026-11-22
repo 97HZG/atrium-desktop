@@ -281,13 +281,11 @@ void NowPlayingCard::PaintProgress(Canvas& c, const Theme& t)
 {
     const MediaTimeline& tl = media_.timeline;
     const float hv = Hover(c, Part::Track, hover_ == Part::Track || dragging_);
+    if (!tl.Seekable())
+        return; // no length known (a stream, or a player that tells none): no track at all
     const float th = kTrackH + (kTrackHot - kTrackH) * hv;
     const D2D1_RECT_F track = D2D1::RectF(kPad, kTrackY - th / 2, kW - kPad, kTrackY + th / 2);
     c.Fill(track, th / 2, Alpha(t.text, 0.16f));
-    if (!tl.Seekable()) {
-        c.Text(Tr(L"Live", L"media"), D2D1::RectF(kPad, kTrackY + 8, kW - kPad, kTrackY + 24), 11.5f, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
-        return;
-    }
     const int64_t pos = ShownPositionUs(c.now), length = tl.endUs - tl.startUs;
     const float done = std::clamp(float(double(pos - tl.startUs) / double(length)), 0.f, 1.f);
     if (done > 0)
