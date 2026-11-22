@@ -339,6 +339,7 @@ bool NeteaseMemory::Read(double lengthSec, bool playing, double nowMs, double& p
         const DWORD prevPid = attachedPid_;
         Detach();
         avoidPid_ = prevPid;
+        retryMs_ = nowMs + kRetryMs;
         return false;
     }
     if (lengthSec > 0 && std::abs(len - lengthSec) > 0.5) {

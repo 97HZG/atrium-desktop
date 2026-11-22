@@ -73,6 +73,7 @@ ExtrasHost::ExtrasHost(HINSTANCE instance, AppCatalog& catalog, ForEachBar forBa
         if (media_)
             media_->Command(command, positionUs);
     };
+    card_.onClose = [this] { UpdateSampling(); };
     stacks_.onManageFolders = [this] {
         if (onOpenSettings)
             onOpenSettings(L"stacks");
@@ -229,6 +230,7 @@ void ExtrasHost::PrewarmLaunchpad()
 
 void ExtrasHost::ClosePopups()
 {
+    lastBar_ = nullptr;
     launchpad_.Close(false);
     card_.Close();
     stacks_.Close();

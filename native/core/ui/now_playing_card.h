@@ -41,6 +41,7 @@ public:
         surface_.SetRadius(radius_);
     }
     std::function<void(MediaCommand, int64_t positionUs)> onCommand;
+    std::function<void()> onClose;
 
 private:
     static constexpr float kMinRadius = 34;
@@ -83,6 +84,7 @@ private:
     // Dragging along the progress bar; after the release the bar holds the asked position until the
     // session's timeline catches up.
     bool dragging_ = false;
+    bool closing_ = false;
     float dragFraction_ = 0;
     std::optional<int64_t> seekTo_;
     double seekAt_ = 0;

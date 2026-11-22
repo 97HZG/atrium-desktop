@@ -128,7 +128,7 @@ void NowPlayingCard::Open(RECT entry, RECT bar)
     entry_ = entry;
     bar_ = bar;
     hover_ = pressed_ = Part::None;
-    dragging_ = false;
+    dragging_ = closing_ = false;
     hoverAnim_.clear();
     Place(true);
     SetTimer(surface_.Hwnd(), kTickTimer, kTickMs, nullptr);
@@ -136,14 +136,20 @@ void NowPlayingCard::Open(RECT entry, RECT bar)
 
 void NowPlayingCard::Close()
 {
+    if (closing_)
+        return;
     if (const HWND h = surface_.Hwnd())
         KillTimer(h, kTickTimer);
     ReleaseDrag(true);
     hover_ = Part::None;
     if (!surface_.Visible())
         return;
+    closing_ = true;
     surface_.Hide();
     lastClosed_ = GetTickCount64();
+    if (onClose)
+        onClose();
+    closing_ = false;
 }
 
 // kPopupGapDip off the bar's glass: over a horizontal bar its right side lines up with the bar's,
