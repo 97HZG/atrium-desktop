@@ -135,3 +135,11 @@ add_executable(settings_server_tests settings_server.cpp)
 target_link_libraries(settings_server_tests PRIVATE atrium_core_lib)
 add_test(NAME settings_server COMMAND settings_server_tests)
 set_tests_properties(settings_server PROPERTIES TIMEOUT 20)
+
+add_executable(launchpad_model_tests launchpad_model.cpp)
+target_link_libraries(launchpad_model_tests PRIVATE atrium_core_lib)
+add_test(NAME launchpad_model COMMAND launchpad_model_tests)
+
+add_executable(media_model_tests media_model.cpp)
+target_link_libraries(media_model_tests PRIVATE atrium_core_lib)
+add_test(NAME media_model COMMAND media_model_tests)

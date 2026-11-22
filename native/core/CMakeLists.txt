@@ -49,6 +49,7 @@ add_library(atrium_core_lib STATIC
     shell/radios.cpp
     shell/lunar.cpp
     shell/audio_devices.cpp
+    shell/audio_meter.cpp
     shell/projection.cpp
     shell/displays.cpp
     shell/tray_host.cpp
