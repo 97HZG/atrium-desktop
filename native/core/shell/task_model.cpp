@@ -9,6 +9,7 @@
 #include "shell/app_processes.h"
 #include "shell/messengers.h"
 #include "shell/shell_icon.h"
+#include "shell/task_rules.h"
 
 #include "log.h"
 
@@ -61,28 +62,11 @@ struct ComScope {
     }
 };
 
-std::wstring Lower(std::wstring s)
-{
-    if (!s.empty())
-        CharLowerBuffW(s.data(), static_cast<DWORD>(s.size()));
-    return s;
-}
-
 std::wstring HwndKey(HWND h)
 {
     wchar_t buf[40];
     swprintf_s(buf, L"hwnd:%llx", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h)));
     return buf;
-}
-
-std::wstring FileStem(const std::wstring& path)
-{
-    size_t slash = path.find_last_of(L"\\/");
-    std::wstring name = slash == std::wstring::npos ? path : path.substr(slash + 1);
-    size_t dot = name.find_last_of(L'.');
-    if (dot != std::wstring::npos && dot > 0)
-        name.resize(dot);
-    return name;
 }
 
 std::wstring AppsFolderPath(const std::wstring& aumid) { return L"shell:AppsFolder\\" + aumid; }
@@ -262,14 +246,6 @@ std::wstring HostedUwpAumid(HWND frame, DWORD framePid)
     return ctx.aumid;
 }
 
-// A browser's web app (an installed site in its own window, Chrome's and Edge's): its own app,
-// not the browser, though the browser's program runs it.
-bool IsWebApp(const std::wstring& aumid, const std::wstring& command)
-{
-    std::wstring id = Lower(aumid), c = Lower(command);
-    return id.find(L"_crx_") != std::wstring::npos || c.find(L"--app-id=") != std::wstring::npos || c.find(L"--app=") != std::wstring::npos;
-}
-
 // The program that started this process, where it verifiably is the app's launcher (#52, Baidu
 // Netdisk: BaiduNetdisk.exe starts module\BrowserEngine\BaiduNetdiskUnite.exe, whose window is the
 // app's): the same session, started before it, in a folder above its program, which is named after
@@ -336,6 +312,8 @@ WinInfo ComputeInfo(HWND h, DWORD pid, const wchar_t* cls)
             wi.exePath = ImagePath(proc.get());
             if (wi.aumid.empty())
                 wi.aumid = PackagedAumid(proc.get());
+            if (wi.aumid.empty() && wcscmp(cls, L"CabinetWClass") == 0 && Lower(PathFindFileNameW(wi.exePath.c_str())) == L"explorer.exe")
+                wi.aumid = L"Microsoft.Windows.Explorer";
         }
     }
     if (proc) {
@@ -358,15 +336,11 @@ WinInfo ComputeInfo(HWND h, DWORD pid, const wchar_t* cls)
 // The Windows taskbar's rules for what gets a button.
 bool IsAppWindow(HWND h, DWORD& pid, wchar_t* cls, int clsCap, std::wstring& title)
 {
-    if (!IsWindowVisible(h))
+    RECT rc{};
+    if (!IsWindowVisible(h) || !GetWindowRect(h, &rc))
         return false;
-    LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-    bool appWindow = (ex & WS_EX_APPWINDOW) != 0;
-    if ((ex & WS_EX_TOOLWINDOW) && !appWindow)
-        return false;
-    if (GetWindow(h, GW_OWNER) && !appWindow)
-        return false;
-    if ((ex & WS_EX_NOACTIVATE) && !appWindow)
+    if (!IsTaskbarWindowCandidate(GetWindowLongPtrW(h, GWL_STYLE), GetWindowLongPtrW(h, GWL_EXSTYLE), GetWindow(h, GW_OWNER) != nullptr, IsIconic(h) != FALSE,
+                                  rc.right - rc.left, rc.bottom - rc.top))
         return false;
     DWORD cloaked = 0;
     if (SUCCEEDED(DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
@@ -457,20 +431,26 @@ std::wstring ShellDisplayName(const std::wstring& parsingName)
     return result;
 }
 
-// The window's own icon. WM_GETICON goes through SendMessageTimeout so a hung
-// window costs at most 100 ms; the HICON belongs to the app, never destroyed.
-bool WindowIcon(HWND h, int size, IconImage& out)
+// The window's own icon via WM_GETICON only (no GCLP_HICON class fallback).
+// SendMessageTimeout bounds hung windows to 100 ms; the HICON belongs to the app.
+bool WindowDirectIcon(HWND h, int size, IconImage& out)
 {
     if (!IsWindow(h) || IsHungAppWindow(h))
         return false;
     const WPARAM order[] = {size > 24 ? WPARAM(ICON_BIG) : WPARAM(ICON_SMALL), WPARAM(ICON_SMALL2), WPARAM(ICON_BIG), WPARAM(ICON_SMALL)};
     for (WPARAM type : order) {
         DWORD_PTR result = 0;
-        if (!SendMessageTimeoutW(h, WM_GETICON, type, 0, SMTO_ABORTIFHUNG, kWindowIconTimeoutMs, &result) || !result)
-            continue;
-        if (HIconToImage(reinterpret_cast<HICON>(result), out))
+        if (SendMessageTimeoutW(h, WM_GETICON, type, 0, SMTO_ABORTIFHUNG, kWindowIconTimeoutMs, &result) && result &&
+            HIconToImage(reinterpret_cast<HICON>(result), out))
             return true;
     }
+    return false;
+}
+
+bool WindowIcon(HWND h, int size, IconImage& out)
+{
+    if (WindowDirectIcon(h, size, out))
+        return true;
     for (int index : {GCLP_HICON, GCLP_HICONSM}) {
         HICON icon = reinterpret_cast<HICON>(GetClassLongPtrW(h, index));
         if (icon && HIconToImage(icon, out))
@@ -508,7 +488,14 @@ Pin ResolvePin(const PinnedApp& app)
     p.specific = IsWebApp(aumid, args) || Lower(args).find(L"--profile-directory") != std::wstring::npos;
     p.exe = AppExecutable(target);
     p.aumid = aumid;
-    p.multipleWindows = AllowsMultipleWindows(PinnedApp{app.name, p.exe, {}, aumid});
+    if (Lower(aumid) == L"microsoft.windows.explorer" && p.exe.empty()) {
+        wchar_t winDir[MAX_PATH] = {};
+        if (GetWindowsDirectoryW(winDir, ARRAYSIZE(winDir))) {
+            p.exe = std::wstring(winDir) + (winDir[wcslen(winDir) - 1] == L'\\' ? L"explorer.exe" : L"\\explorer.exe");
+            target = p.exe;
+        }
+    }
+    p.multipleWindows = AllowsMultipleWindows(PinnedApp{app.name, p.exe, {}, aumid, app.multipleWindows});
     p.target = Lower(target);
     if (!aumid.empty()) {
         p.key = Lower(aumid);
@@ -545,7 +532,13 @@ struct Meta {
     std::wstring aumid, pinPath, exePath;
     std::vector<HWND> hwnds;
     std::vector<AppProcessIdentity> processTargets; // retained for pinned apps closed to the tray
-    std::wstring Signature() const { return aumid + L"|" + pinPath + L"|" + exePath; }
+    std::wstring Signature() const
+    {
+        std::wstring sig = aumid + L"|" + pinPath + L"|" + exePath;
+        if (pinPath.empty() && !hwnds.empty())
+            sig += L"|" + std::to_wstring(reinterpret_cast<uintptr_t>(hwnds.front()));
+        return sig;
+    }
 };
 
 struct IconKey {
@@ -1224,33 +1217,40 @@ struct TaskModel::Impl {
 
     void RunIconJob(const Job& job)
     {
-        std::vector<std::wstring> sources;
-        auto add = [&](std::wstring s) {
-            if (!s.empty() && std::ranges::find(sources, s) == sources.end())
-                sources.push_back(std::move(s));
+        auto tryWindowIcons = [&](IconImage& out) {
+            for (HWND hwnd : job.hwnds) {
+                IconImage raw;
+                if (WindowIcon(hwnd, job.size, raw)) {
+                    out = FitToSquare(raw, job.size);
+                    return true;
+                }
+            }
+            return false;
         };
-        add(job.pinPath); // a pin's shortcut carries the icon the user sees in Windows
-        if (!job.aumid.empty())
-            add(AppsFolderPath(job.aumid));
-        // An exe without an icon of its own (a single-file app that sets its window's at run time)
-        // shows Windows' generic one: its windows' icon comes first then (#83).
-        const bool exeIcon = ExtractIconExW(job.exePath.c_str(), -1, nullptr, nullptr, 0) > 0;
-        if (exeIcon)
-            add(job.exePath);
-
+        const bool exeIcon = !job.exePath.empty() && ExtractIconExW(job.exePath.c_str(), -1, nullptr, nullptr, 0) > 0;
         IconImage img;
         LARGE_INTEGER t0, t1, f;
         QueryPerformanceCounter(&t0);
         bool ok = LoadAtriumIcon(job.exePath, job.size, img);
-        for (size_t i = 0; !ok && i < sources.size(); ++i)
-            ok = LoadShellImage(sources[i], job.size, img);
-        for (size_t i = 0; !ok && i < job.hwnds.size(); ++i) {
-            IconImage raw;
-            if (WindowIcon(job.hwnds[i], job.size, raw)) {
-                img = FitToSquare(raw, job.size);
+        if (!ok && !job.pinPath.empty())
+            ok = LoadShellImage(job.pinPath, job.size, img);
+        if (!ok && !job.aumid.empty())
+            ok = LoadShellImage(AppsFolderPath(job.aumid), job.size, img);
+        if (!ok && !job.aumid.empty())
+            ok = tryWindowIcons(img);
+        if (!ok && exeIcon) {
+            IconImage exeImg, winImg;
+            if (LoadShellImage(job.exePath, job.size, exeImg)) {
                 ok = true;
+                if (!job.hwnds.empty() && job.pinPath.empty() && WindowDirectIcon(job.hwnds[0], job.size, winImg) && winImg.width >= 24 &&
+                    winImg.height >= 24 && ImagesVisuallyDifferent(winImg, exeImg))
+                    img = FitToSquare(winImg, job.size);
+                else
+                    img = std::move(exeImg);
             }
         }
+        if (!ok && job.aumid.empty())
+            ok = tryWindowIcons(img);
         if (!ok && !exeIcon && !job.exePath.empty())
             ok = LoadShellImage(job.exePath, job.size, img);
         QueryPerformanceCounter(&t1);
@@ -1387,7 +1387,7 @@ struct TaskModel::Impl {
                     return;
                 }
             auto m = meta.find(key);
-            if (m != meta.end() && openExisting && openExisting(m->second.exePath)) {
+            if (m != meta.end() && openExisting && Lower(PathFindFileNameW(m->second.exePath.c_str())) != L"explorer.exe" && openExisting(m->second.exePath)) {
                 // Its tray icon was clicked (an app running in the background). Most open their
                 // window then; one that does not within a moment is started as its pin starts it
                 // (a single-instance app then shows its window) instead of the click doing nothing (#15).
@@ -1503,7 +1503,7 @@ struct TaskModel::Impl {
         const TaskItem* t = Find(key);
         auto windows = t ? t->windows : std::vector<HWND>{};
         std::erase_if(windows, [](HWND h) { return !IsWindowVisible(h); });
-        if (monitor)
+        if (monitor && (!t || t->multipleWindows))
             std::erase_if(windows, [&](HWND h) { return MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) != monitor; });
         if (windows.empty()) {
             Launch(key);

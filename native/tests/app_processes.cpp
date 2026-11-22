@@ -1,4 +1,6 @@
 #include "shell/app_processes.h"
+#include "shell/task_model.h"
+#include "shell/task_rules.h"
 
 #include <windows.h>
 #include <shlobj.h>
@@ -184,6 +186,68 @@ void CheckTermination(const fs::path& self)
     Require(TerminateAppProcesses({&selfTarget, 1}), "current process is protected");
     Require(WaitForSingleObject(fixture.children[4].get(), 0) == WAIT_TIMEOUT, "current process descendants stay alive when it is skipped");
 }
+
+IconImage MakeBadge(int size, uint8_t r, uint8_t g, uint8_t b, bool splitPattern = false)
+{
+    IconImage img;
+    img.width = img.height = size;
+    img.bgra.assign(static_cast<size_t>(size) * static_cast<size_t>(size) * 4, 0);
+    const int pad = size / 8;
+    for (int y = pad; y < size - pad; ++y) {
+        for (int x = pad; x < size - pad; ++x) {
+            const size_t off = (static_cast<size_t>(y) * static_cast<size_t>(size) + static_cast<size_t>(x)) * 4;
+            const bool rightHalf = splitPattern && x >= size / 2;
+            img.bgra[off + 0] = rightHalf ? r : b;
+            img.bgra[off + 1] = g;
+            img.bgra[off + 2] = rightHalf ? b : r;
+            img.bgra[off + 3] = 255;
+        }
+    }
+    return img;
+}
+
+void CheckTaskRules()
+{
+    Require(IsTaskbarWindowCandidate(WS_OVERLAPPEDWINDOW, 0, false, false, 1200, 800), "normal overlapped window is accepted");
+    Require(IsTaskbarWindowCandidate(WS_OVERLAPPEDWINDOW, 0, false, true, 0, 0), "iconic window with zero rect is accepted");
+    Require(IsTaskbarWindowCandidate(WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX, 0, false, false, 1280, 720),
+            "frameless Chrome/Electron window with WS_SYSMENU|WS_MINIMIZEBOX is accepted");
+    Require(IsTaskbarWindowCandidate(WS_POPUP, WS_EX_TOPMOST, false, false, 800, 600), "large frameless WS_POPUP window is accepted");
+    Require(!IsTaskbarWindowCandidate(WS_POPUP, WS_EX_TOPMOST, false, false, 200, 60), "small floating horizontal WS_POPUP widget is rejected");
+    Require(!IsTaskbarWindowCandidate(WS_POPUP, WS_EX_TOPMOST, false, false, 64, 64), "small floating 64x64 WS_POPUP widget is rejected");
+    Require(!IsTaskbarWindowCandidate(WS_POPUP, WS_EX_NOACTIVATE, false, false, 120, 240), "small floating vertical WS_POPUP widget is rejected");
+    Require(!IsTaskbarWindowCandidate(WS_OVERLAPPEDWINDOW, WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_APPWINDOW, false, false, 1920, 1080),
+            "click-through layered overlay is rejected");
+    Require(!IsTaskbarWindowCandidate(WS_OVERLAPPEDWINDOW, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_APPWINDOW, false, false, 1200, 800),
+            "WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE is rejected even with WS_EX_APPWINDOW");
+    Require(!IsTaskbarWindowCandidate(WS_OVERLAPPEDWINDOW, 0, false, false, 0, 0), "zero-size non-iconic window is rejected");
+    Require(!IsTaskbarWindowCandidate(WS_OVERLAPPEDWINDOW, 0, true, false, 800, 600), "owned window without WS_EX_APPWINDOW is rejected");
+    Require(IsTaskbarWindowCandidate(WS_OVERLAPPEDWINDOW, WS_EX_APPWINDOW, true, false, 800, 600), "owned window with WS_EX_APPWINDOW is accepted");
+
+    Require(AllowsMultipleWindows(PinnedApp{L"Explorer", L"C:\\Windows\\explorer.exe", {}, L"Microsoft.Windows.Explorer", std::nullopt}),
+            "Explorer defaults to multiple windows when unspecified");
+    Require(!AllowsMultipleWindows(PinnedApp{L"Explorer", L"C:\\Windows\\explorer.exe", {}, L"Microsoft.Windows.Explorer", false}),
+            "explicit multipleWindows=false overrides Explorer default");
+    Require(!AllowsMultipleWindows(PinnedApp{L"Explorer", {}, {}, L"Microsoft.Windows.Explorer", false}),
+            "explicit multipleWindows=false overrides Explorer AUMID default");
+    Require(AllowsMultipleWindows(PinnedApp{L"Chrome", L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", {}, {}, std::nullopt}),
+            "browsers default to multiple windows when unspecified");
+    Require(!AllowsMultipleWindows(PinnedApp{L"Notes", L"C:\\Apps\\notes.exe", {}, {}, std::nullopt}),
+            "other desktop apps default to single-window activation");
+    Require(AllowsMultipleWindows(PinnedApp{L"Notes", L"C:\\Apps\\notes.exe", {}, {}, true}),
+            "explicit multipleWindows=true enables new windows for other apps");
+
+    const IconImage badge32 = MakeBadge(32, 220, 40, 40);
+    const IconImage badge64 = MakeBadge(64, 220, 40, 40);
+    const IconImage blue64 = MakeBadge(64, 40, 40, 220);
+    const IconImage split64 = MakeBadge(64, 220, 40, 40, true);
+    const IconImage empty;
+    Require(!ImagesVisuallyDifferent(badge32, badge64), "identical badge at 32x32 and 64x64 compares equal");
+    Require(ImagesVisuallyDifferent(badge32, blue64), "red vs blue badges compare different");
+    Require(ImagesVisuallyDifferent(badge64, split64), "distinct badge patterns compare different");
+    Require(!ImagesVisuallyDifferent(empty, empty), "two empty images compare safe and equal");
+    Require(ImagesVisuallyDifferent(empty, badge32), "empty vs valid image is safe");
+}
 } // namespace
 
 int wmain(int argc, wchar_t** argv)
@@ -206,7 +270,8 @@ int wmain(int argc, wchar_t** argv)
         Require(GetModuleFileNameW(nullptr, self, ARRAYSIZE(self)) != 0, "read test executable path");
         CheckSharedFolders();
         CheckTermination(self);
-        std::cout << "PASS: application termination, background helpers and process isolation\n";
+        CheckTaskRules();
+        std::cout << "PASS: application termination, taskbar rules, and process isolation\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

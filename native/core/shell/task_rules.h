@@ -1,0 +1,108 @@
+// Pure taskbar window filtering and icon visual comparison rules.
+#pragma once
+
+#include "icon_image.h"
+
+#include <windows.h>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace atrium {
+
+inline std::wstring Lower(std::wstring s)
+{
+    if (!s.empty())
+        CharLowerBuffW(s.data(), static_cast<DWORD>(s.size()));
+    return s;
+}
+
+inline std::wstring FileStem(const std::wstring& path)
+{
+    const size_t slash = path.find_last_of(L"\\/");
+    std::wstring name = slash == std::wstring::npos ? path : path.substr(slash + 1);
+    const size_t dot = name.find_last_of(L'.');
+    if (dot != std::wstring::npos && dot > 0)
+        name.resize(dot);
+    return name;
+}
+
+// A browser's web app (an installed site in its own window) is its own app, not the browser.
+inline bool IsWebApp(const std::wstring& aumid, const std::wstring& command)
+{
+    const std::wstring id = Lower(aumid), cmd = Lower(command);
+    return id.find(L"_crx_") != std::wstring::npos || cmd.find(L"--app-id=") != std::wstring::npos || cmd.find(L"--app=") != std::wstring::npos;
+}
+
+inline bool IsTaskbarWindowCandidate(LONG_PTR style, LONG_PTR exStyle, bool hasOwner, bool iconic, LONG width, LONG height)
+{
+    if ((exStyle & WS_EX_TRANSPARENT) && (exStyle & WS_EX_LAYERED))
+        return false;
+    if ((exStyle & WS_EX_TOOLWINDOW) && (exStyle & WS_EX_NOACTIVATE))
+        return false;
+    const bool appWindow = (exStyle & WS_EX_APPWINDOW) != 0;
+    if (!appWindow && ((exStyle & WS_EX_TOOLWINDOW) != 0 || hasOwner || (exStyle & WS_EX_NOACTIVATE) != 0))
+        return false;
+    if (!iconic && (width <= 0 || height <= 0))
+        return false;
+    // Floating desktop mini-widgets (e.g. Thunder accelerator ball) have WS_POPUP without frame chrome.
+    const bool popupOnly = (style & WS_POPUP) != 0 && (style & (WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) == 0;
+    const bool floatingEx = (exStyle & (WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) != 0;
+    const bool miniRect = (width <= 280 && height <= 160) || (width <= 160 && height <= 280);
+    return iconic || !popupOnly || !floatingEx || !miniRect;
+}
+
+inline bool IsValidIconImage(const IconImage& img)
+{
+    return img.width > 0 && img.height > 0 && img.bgra.size() >= static_cast<size_t>(img.width) * static_cast<size_t>(img.height) * 4;
+}
+
+inline std::array<double, 4> SampleIconCell(const IconImage& img, int gx, int gy, int grid)
+{
+    const int x0 = static_cast<int>((static_cast<int64_t>(gx) * img.width) / grid);
+    const int x1 = std::min(img.width, std::max(x0 + 1, static_cast<int>((static_cast<int64_t>(gx + 1) * img.width) / grid)));
+    const int y0 = static_cast<int>((static_cast<int64_t>(gy) * img.height) / grid);
+    const int y1 = std::min(img.height, std::max(y0 + 1, static_cast<int>((static_cast<int64_t>(gy + 1) * img.height) / grid)));
+    std::array<double, 4> sum{};
+    int count = 0;
+    for (int y = y0; y < y1; ++y) {
+        const size_t row = static_cast<size_t>(y) * static_cast<size_t>(img.width);
+        for (int x = x0; x < x1; ++x) {
+            const size_t off = (row + static_cast<size_t>(x)) * 4;
+            for (size_t c = 0; c < 4; ++c)
+                sum[c] += static_cast<double>(img.bgra[off + c]);
+            ++count;
+        }
+    }
+    const double scale = count > 0 ? 1.0 / (255.0 * static_cast<double>(count)) : 0.0;
+    for (double& v : sum)
+        v *= scale;
+    return sum;
+}
+
+inline bool ImagesVisuallyDifferent(const IconImage& a, const IconImage& b)
+{
+    const bool validA = IsValidIconImage(a);
+    const bool validB = IsValidIconImage(b);
+    if (!validA || !validB)
+        return validA != validB;
+    constexpr int kGrid = 16;
+    constexpr double kThreshold = 0.045;
+    double diffSum = 0.0;
+    for (int gy = 0; gy < kGrid; ++gy) {
+        for (int gx = 0; gx < kGrid; ++gx) {
+            const auto ca = SampleIconCell(a, gx, gy, kGrid);
+            const auto cb = SampleIconCell(b, gx, gy, kGrid);
+            for (size_t c = 0; c < 4; ++c)
+                diffSum += std::abs(ca[c] - cb[c]);
+        }
+    }
+    const double avgDiff = diffSum / static_cast<double>(kGrid * kGrid * 4);
+    return avgDiff > kThreshold;
+}
+
+} // namespace atrium
