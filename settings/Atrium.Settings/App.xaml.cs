@@ -135,6 +135,7 @@ public partial class App : Application
             "clock" => 13,
             "nowplaying" => 15,
             "stacks" => 16,
+            "launchpad" => 17,
             "ime" => 14,
             _ => null,
         };

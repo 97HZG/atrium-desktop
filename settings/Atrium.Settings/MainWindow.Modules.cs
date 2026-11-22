@@ -571,6 +571,7 @@ public sealed partial class MainWindow
             image.Height = h;
             Canvas.SetLeft(image, t.X + t.W / 2 - w / 2);
             Canvas.SetTop(image, t.Y + t.H / 2 - h / 2);
+            image.RenderTransform = t.Angle == 0 ? null : new RotateTransform { Angle = t.Angle, CenterX = w / 2, CenterY = h / 2 };
         }
 
         private void LayoutBar(BarGeometry bar)

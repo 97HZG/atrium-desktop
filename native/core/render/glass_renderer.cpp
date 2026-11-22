@@ -497,6 +497,10 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
         float l = p.shapeL, t = p.shapeT - p.waveHeight, r = p.shapeR, b = p.shapeB;
         if (p.tailHeight > 0)
             b += p.tailHeight;
+        if (p.rotate != 0) { // turned: the circle round it
+            const float cx = (l + r) / 2, cy = (t + b) / 2, half = std::hypot(r - l, b - t) / 2;
+            l = cx - half, t = cy - half, r = cx + half, b = cy + half;
+        }
         for (int i = 0; i < int(p.partCount) && i < kMaxGlassParts; ++i) {
             l = std::min(l, p.parts[i][0]);
             t = std::min(t, p.parts[i][1]);

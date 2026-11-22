@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <utility>
 
 namespace atrium {
 
@@ -68,47 +67,23 @@ void BarExtrasPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float o
 
 void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)
 {
-    winrt::com_ptr<ID2D1Factory> factory;
-    d2d->GetFactory(factory.put());
-    const D2D1_RECT_F box = Square(r, 0.86f);
-    const float s = box.right - box.left, stroke = std::max(1.f, s * 0.07f);
-    auto at = [&](float u, float v) { return D2D1::Point2F(box.left + u * s, box.top + v * s); };
-    // Upright in a unit square, then turned 45 degrees: the body, a fin either side, three trails.
-    winrt::com_ptr<ID2D1PathGeometry> rocket;
-    winrt::com_ptr<ID2D1GeometrySink> sink;
-    if (FAILED(factory->CreatePathGeometry(rocket.put())) || FAILED(rocket->Open(sink.put())))
-        return;
-    sink->BeginFigure(at(0.5f, 0.08f), D2D1_FIGURE_BEGIN_HOLLOW);
-    sink->AddBezier(D2D1::BezierSegment(at(0.63f, 0.19f), at(0.68f, 0.36f), at(0.65f, 0.66f)));
-    sink->AddLine(at(0.35f, 0.66f));
-    sink->AddBezier(D2D1::BezierSegment(at(0.32f, 0.36f), at(0.37f, 0.19f), at(0.5f, 0.08f)));
-    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-    for (const float side : {-1.f, 1.f}) {
-        sink->BeginFigure(at(0.5f + side * 0.155f, 0.47f), D2D1_FIGURE_BEGIN_HOLLOW);
-        sink->AddLine(at(0.5f + side * 0.27f, 0.60f));
-        sink->AddLine(at(0.5f + side * 0.27f, 0.74f));
-        sink->AddLine(at(0.5f + side * 0.15f, 0.66f));
-        sink->EndFigure(D2D1_FIGURE_END_OPEN);
-    }
-    for (const auto [u, v] : {std::pair{0.43f, 0.80f}, {0.5f, 0.88f}, {0.57f, 0.80f}}) {
-        sink->BeginFigure(at(u, 0.75f), D2D1_FIGURE_BEGIN_HOLLOW);
-        sink->AddLine(at(u, v));
-        sink->EndFigure(D2D1_FIGURE_END_OPEN);
-    }
-    if (FAILED(sink->Close()))
-        return;
-    winrt::com_ptr<ID2D1StrokeStyle> round;
-    const auto props = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND);
-    if (FAILED(factory->CreateStrokeStyle(props, nullptr, 0, round.put())))
-        return;
-    D2D1_MATRIX_3X2_F previous;
-    d2d->GetTransform(&previous);
-    d2d->SetTransform(D2D1::Matrix3x2F::Rotation(45, at(0.5f, 0.5f)) * previous);
+    const D2D1_RECT_F box = Square(r, 0.80f);
+    const float s = box.right - box.left, stroke = std::max(1.f, s * 0.075f);
+    const float tile = s * 0.33f, gap = s * 0.12f, left = box.left + s * 0.11f, top = box.top + s * 0.02f;
     brush->SetColor(ink);
-    d2d->DrawGeometry(rocket.get(), brush, stroke, round.get());
-    const D2D1_POINT_2F window = at(0.5f, 0.35f);
-    d2d->FillEllipse(D2D1::Ellipse(window, s * 0.065f, s * 0.065f), brush); // the porthole
-    d2d->SetTransform(previous);
+    for (int i = 0; i < 4; ++i) {
+        const float x = left + float(i % 2) * (tile + gap), y = top + float(i / 2) * (tile + gap);
+        const D2D1_RECT_F t = D2D1::RectF(x + stroke / 2, y + stroke / 2, x + tile - stroke / 2, y + tile - stroke / 2);
+        d2d->DrawRoundedRectangle(D2D1::RoundedRect(t, tile * 0.3f, tile * 0.3f), brush, stroke);
+    }
+    // The pages: three dots, the middle one lit.
+    const float cx = (box.left + box.right) / 2, cy = box.top + s * 0.93f, dot = std::max(0.75f, s * 0.045f);
+    for (int i = -1; i <= 1; ++i) {
+        D2D1_COLOR_F c = ink;
+        c.a *= i == 0 ? 1.f : 0.45f;
+        brush->SetColor(c);
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx + float(i) * s * 0.15f, cy), dot, dot), brush);
+    }
 }
 
 void BarExtrasPainter::DrawMusic(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, const MusicBars& bars, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)

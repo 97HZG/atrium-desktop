@@ -13,6 +13,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <functional>
 #include <map>
 #include <memory>
@@ -33,14 +34,16 @@ public:
     void Update(const MediaSnapshot& snapshot);
     // The playing app's level and the motion setting, as the bar's entry reads them.
     void SetFeed(std::shared_ptr<const MusicFeed> feed) { feed_ = std::move(feed); }
+    // The bar's popup corner, made rounder (the Dynamic Island's): at least kMinRadius.
     void SetRadius(float dip)
     {
-        radius_ = dip;
-        surface_.SetRadius(dip);
+        radius_ = std::max(dip, kMinRadius);
+        surface_.SetRadius(radius_);
     }
     std::function<void(MediaCommand, int64_t positionUs)> onCommand;
 
 private:
+    static constexpr float kMinRadius = 34;
     enum class Part { None, Track, Previous, Play, Next, Session, Art };
 
     void Place(bool show);

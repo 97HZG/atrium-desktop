@@ -20,7 +20,8 @@ namespace atrium {
 
 struct StackItemPlace {
     D2D1_RECT_F icon{};  // content DIP
-    D2D1_RECT_F label{}; // the name's capsule (fan), or the row (column)
+    D2D1_RECT_F label{}; // the name's capsule (fan), or the row (column); in the fan before its tilt
+    float tilt = 0;      // fan: radians, clockwise about the capsule's centre, along the arc's radius
 };
 
 struct StackPlacement {
@@ -40,6 +41,7 @@ constexpr float kStackLabelPadX = 12;
 constexpr float kStackLabelMinW = 56, kStackLabelMaxW = 240;
 constexpr float kStackLabelGap = 10;     // between a capsule and its icon
 constexpr float kStackMargin = 16;       // around the fan inside the window: room for the hover lift
+constexpr float kStackTilt = 0.6f;       // of the arc's own turn: how far the names lean with it
 constexpr float kStackColumnW = 264, kStackRowH = 44, kStackColumnPad = 8, kStackColumnIcon = 26;
 
 inline float StackLabelWidth(float textW) { return std::clamp(textW + 2 * kStackLabelPadX, kStackLabelMinW, kStackLabelMaxW); }
@@ -104,15 +106,23 @@ inline StackPlacement FanPlacement(RECT bar, RECT entry, RECT work, float scale,
         kStackFanIcon / 2 + StackLean(kStackGap + kStackFanIcon / 2 + float(n) * kStackFanStep) + kStackMargin + (p.labelsRight ? kStackLabelGap + widest : 0);
     const float side = (float(work.right) - ex) / scale < reach ? -1.f : 1.f;
     float minX = -kStackFanIcon / 2, maxX = kStackFanIcon / 2, top = 0;
-    std::vector<D2D1_POINT_2F> centres;
+    std::vector<D2D1_POINT_2F> centres, labels;
+    std::vector<float> turns;
     for (size_t i = 0; i < n; ++i) {
         const float rise = kStackGap + kStackFanIcon / 2 + float(i) * kStackFanStep;
         const D2D1_POINT_2F c = D2D1::Point2F(side * StackLean(rise), rise);
         const float lw = StackLabelWidth(labelW[i]);
-        minX = std::min(minX, p.labelsRight ? c.x - kStackFanIcon / 2 : c.x - kStackFanIcon / 2 - kStackLabelGap - lw);
-        maxX = std::max(maxX, p.labelsRight ? c.x + kStackFanIcon / 2 + kStackLabelGap + lw : c.x + kStackFanIcon / 2);
-        top = std::max(top, rise + kStackFanIcon / 2);
+        // The name lies along the arc's radius through its folder, leaning a little less than the arc turns.
+        const float turn = kStackTilt * std::asin(std::min(1.f, rise / kStackFanRadius)), cs = std::cos(turn), sn = std::sin(turn);
+        const float out = (p.labelsRight ? 1.f : -1.f), along = kStackFanIcon / 2 + kStackLabelGap + lw / 2;
+        const D2D1_POINT_2F l = D2D1::Point2F(c.x + out * cs * along, c.y - out * side * sn * along);
+        const float hx = lw / 2 * cs + kStackLabelH / 2 * sn, hy = lw / 2 * sn + kStackLabelH / 2 * cs;
+        minX = std::min({minX, c.x - kStackFanIcon / 2, l.x - hx});
+        maxX = std::max({maxX, c.x + kStackFanIcon / 2, l.x + hx});
+        top = std::max({top, rise + kStackFanIcon / 2, l.y + hy});
         centres.push_back(c);
+        labels.push_back(l);
+        turns.push_back(turn);
     }
     // The window: the fan with a margin, its foot kStackGap off the glass; content y grows away from
     // the bar's far side as on screen.
@@ -130,12 +140,13 @@ inline StackPlacement FanPlacement(RECT bar, RECT entry, RECT work, float scale,
     const float ey = float(entry.top + entry.bottom) / 2;
     p.origin = D2D1::Point2F(-leftDip + shift, (ey - y0) / scale);
     for (size_t i = 0; i < n; ++i) {
-        const D2D1_POINT_2F c = toContent(centres[i].x, centres[i].y);
+        const D2D1_POINT_2F c = toContent(centres[i].x, centres[i].y), l = toContent(labels[i].x, labels[i].y);
         const float lw = StackLabelWidth(labelW[i]), h = kStackFanIcon / 2;
         StackItemPlace item;
         item.icon = D2D1::RectF(c.x - h, c.y - h, c.x + h, c.y + h);
-        const float lx = p.labelsRight ? c.x + h + kStackLabelGap : c.x - h - kStackLabelGap - lw;
-        item.label = D2D1::RectF(lx, c.y - kStackLabelH / 2, lx + lw, c.y + kStackLabelH / 2);
+        item.label = D2D1::RectF(l.x - lw / 2, l.y - kStackLabelH / 2, l.x + lw / 2, l.y + kStackLabelH / 2);
+        // Over a bottom bar the arc turns clockwise as it leans right; mirrored by the lean and the edge.
+        item.tilt = side * (down ? -1.f : 1.f) * turns[i];
         p.items.push_back(item);
     }
     return p;

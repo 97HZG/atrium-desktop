@@ -170,6 +170,7 @@ void PanelParams(const Settings& s, float scale, const GlassPanel& p, std::vecto
         g.shapeB = sh.bottom;
         g.radius = std::min(sh.radius, std::min(sh.right - sh.left, sh.bottom - sh.top) / 2);
         g.fade = sh.fade;
+        g.rotate = sh.rotate;
         g.partCount = float(std::min<size_t>(sh.parts.size(), kMaxGlassParts));
         g.melt = sh.melt;
         g.partMix = sh.partMix;

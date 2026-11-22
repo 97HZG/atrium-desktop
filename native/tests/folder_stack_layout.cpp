@@ -1,5 +1,6 @@
 #include "ui/folder_stack_layout.h"
 
+#include <cmath>
 #include <iostream>
 #include <vector>
 
@@ -34,8 +35,12 @@ void CheckFan(const StackPlacement& p, float scale, const char* what)
         Require(!Overlap(it.icon, it.label), "a name never covers its icon");
         if (i > 0)
             Require(!Overlap(it.label, p.items[i - 1].label) && !Overlap(it.icon, p.items[i - 1].icon), "neighbours never overlap");
-        const float cy = (it.icon.top + it.icon.bottom) / 2, ly = (it.label.top + it.label.bottom) / 2;
-        Require(cy == ly, "a name sits level with its icon");
+        // The name lies on the line through its icon at its tilt (the arc's radius), leaning more up the arc.
+        const float cx = (it.icon.left + it.icon.right) / 2, cy = (it.icon.top + it.icon.bottom) / 2;
+        const float lx = (it.label.left + it.label.right) / 2, ly = (it.label.top + it.label.bottom) / 2;
+        Require(std::abs((cy - ly) * std::cos(it.tilt) - (cx - lx) * std::sin(it.tilt)) < 0.5f, "a name lies along its folder's radius");
+        if (i > 0)
+            Require(std::abs(it.tilt) > std::abs(p.items[i - 1].tilt), "the names lean more up the arc");
     }
 }
 

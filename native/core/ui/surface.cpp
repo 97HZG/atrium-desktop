@@ -357,7 +357,7 @@ void Surface::SetShapes(const std::vector<ShapeDip>& shapes, bool animating)
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
         auto sameRect = [](const auto& x, const auto& y) { return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom; };
         auto samePart = [&](const ShapeDip::Part& x, const ShapeDip::Part& y) { return sameRect(x.rect, y.rect) && std::equal(x.radii, x.radii + 4, y.radii); };
-        return a.radius == b.radius && a.fade == b.fade && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix && a.tailX == b.tailX &&
+        return a.radius == b.radius && a.fade == b.fade && a.rotate == b.rotate && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix && a.tailX == b.tailX &&
                a.tailHalfWidth == b.tailHalfWidth && a.tailHeight == b.tailHeight && a.tailInset == b.tailInset && a.parts.size() == b.parts.size() &&
                std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
     };
@@ -394,6 +394,7 @@ void Surface::PublishPanel()
                                px(part.rect.right),
                                px(part.rect.bottom),
                                {part.radii[0] * scale_, part.radii[1] * scale_, part.radii[2] * scale_, part.radii[3] * scale_}});
+        g.rotate = s.rotate;
         g.melt = s.melt * scale_;
         g.partMix = s.partMix;
         g.tailX = px(s.tailX);

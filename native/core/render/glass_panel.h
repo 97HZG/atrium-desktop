@@ -17,6 +17,7 @@ struct GlassShape {
     float left = 0, top = 0, right = 0, bottom = 0;
     float radius = 0;
     float fade = 0; // 0 = as is, 1 = gone
+    float rotate = 0; // radians, clockwise about its centre
     // Instead of one rectangle: up to kMaxGlassParts rounded rectangles that
     // melt into one (a smooth union `melt` px wide), each with its own corner
     // radii. A page's pieces of glass becoming one while it changes.

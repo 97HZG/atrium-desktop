@@ -19,7 +19,7 @@ cbuffer GlassParams : register(b0)
     float Inset;       // shadow room around the shape (sets the shadow's softness)
     float BlurMix;     // 0 = sharp backdrop, 1 = fully blurred
     float Fade;        // 0 = the glass as is, 1 = gone (a piece of glass fading out)
-    float Pad0;
+    float Rotate;      // radians, clockwise about the shape's centre (a tilted capsule)
     float4 Shape;       // the glass shape in window px: left, top, right, bottom
     float4 Ripple;      // press ripple: centre x, y (window px), ring radius, strength (0 = none)
     float4 PartRect[6]; // melting parts (PartCount > 0): rectangles in window px, left, top, right, bottom
@@ -155,6 +155,11 @@ float2 toArea(float2 p)
 float ShapeDistance(float2 px, bool edge, bool basic)
 {
     px = fromArea(px);
+    if (Rotate != 0) {
+        float2 o = (Shape.xy + Shape.zw) * 0.5, q = px - o;
+        float c = cos(Rotate), s = sin(Rotate);
+        px = o + float2(q.x * c + q.y * s, q.y * c - q.x * s);
+    }
     // A C3 bump stretches the glass upwards while keeping its bottom fixed.
     if (!basic && Wave.z > 0) {
         float x = (px.x - Wave.x) / max(Wave.y, 1);
@@ -304,6 +309,8 @@ float4 PSBasic(VSOut i) : SV_Target
     // Keep the original arithmetic near the rim. The specialized distance
     // path can round a sampled channel by one 8-bit level at the boundary.
     float2 px = fromArea(i.uv * Size);
+    if (Rotate != 0)
+        return PSImpl(i, false);
     float boundary = min(min(px.x - Shape.x, Shape.z - px.x), min(px.y - Shape.y, Shape.w - px.y));
     if (boundary <= max(Edge, 2))
         return PSImpl(i, false);

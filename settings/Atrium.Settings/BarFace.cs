@@ -104,7 +104,7 @@ internal sealed partial class BarFace
         PlaceIme(_ime, _imePath, glyph, x, y, size, StatusGlyph.Fade(ink, fade));
     }
 
-    // Known letters come from Noto Sans CJK SC Light outlines (em units centred on the ink); any other
+    // Known letters come from Noto Sans CJK SC Regular outlines (em units centred on the ink); any other
     // falls back to TextFont centred in the square.
     private static void PlaceIme(TextBlock t, Path p, string glyph, double x, double y, double size, Color color)
     {
@@ -122,7 +122,7 @@ internal sealed partial class BarFace
                 p.Tag = glyph;
                 p.Data = (Geometry)XamlBindingHelper.ConvertValue(typeof(Geometry), "F1 " + markup);
             }
-            double em = Math.Max(1, size * 0.74);
+            double em = Math.Max(1, size * 0.64);
             p.Fill = new SolidColorBrush(color);
             p.RenderTransform = new ScaleTransform { ScaleX = em, ScaleY = em };
             Canvas.SetLeft(p, x + size / 2);
@@ -130,7 +130,7 @@ internal sealed partial class BarFace
             return;
         }
         p.Visibility = Visibility.Collapsed;
-        StatusGlyph.Place(t, glyph, x, y, size, size * 0.74, color);
+        StatusGlyph.Place(t, glyph, x, y, size, size * 0.64, color);
     }
 
     private static TextBlock Ime() => new()

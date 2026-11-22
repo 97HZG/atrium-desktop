@@ -25,7 +25,7 @@
 | 用途 | 字体 | 说明 |
 | --- | --- | --- |
 | 界面文字（中英文） | **MiSans**（小米），三个字重 | 中英文同一套设计，字距与基线天然统一；随软件附带（`Settings\Fonts`），只由 Atrium 私有加载，不安装到系统（D40） |
-| 输入法字符 | **Noto Sans CJK SC Light**（内置轮廓） | `中`、`あ`、`가`、`A`、`a` 由源码内嵌的矢量轮廓绘制，不随附字体文件；© Google / Adobe，依据 SIL Open Font License 1.1（<https://scripts.sil.org/OFL>，保留版权与许可声明，不得单独出售）；其余字符以 MiSans Medium 绘制 |
+| 输入法字符 | **Noto Sans CJK SC Regular**（内置轮廓） | `中`、`あ`、`가`、`A`、`a` 由源码内嵌的矢量轮廓绘制，不随附字体文件；© Google / Adobe，依据 SIL Open Font License 1.1（<https://scripts.sil.org/OFL>，保留版权与许可声明，不得单独出售）；其余字符以 MiSans Medium 绘制 |
 | 回退 | Segoe UI Variable Text + 系统中文字体 | 字体文件缺失时自动使用；MiSans 没有的字（生僻字、emoji）由系统字体补上 |
 | 符号 | Segoe Fluent Icons | 只用字体自带的符号；源码中写作 `L"\uE706"` 这样的转义 |
 | 系统状态图形 | 自绘几何（`wifi_glyph`、状态圆环；“系统图标”样式的喇叭与电池） | 没有合适字形时按 iOS 的形状自绘，不用位图 |

@@ -151,6 +151,7 @@ void FolderStackPopup::PublishFanGlass(double now)
         moving = moving || shown < 1 || (closing_ && opacity > 0) || std::abs(e - 1) > 0.001f;
         ShapeDip glass{Moved(item.label, dx, dy), (item.label.bottom - item.label.top) / 2};
         glass.fade = 1 - shown;
+        glass.rotate = item.tilt * std::min(e, 1.f); // levels out on the way in
         shapes.push_back(glass);
     }
     surface_.SetShapes(shapes, moving);
@@ -210,7 +211,7 @@ void FolderStackPopup::PaintFan(Canvas& c)
         float shown = closing_ ? opacity : std::clamp(float((c.now - openedMs_ - kStaggerMs * double(i) - kLabelDelayMs) / kLabelMs), 0.f, 1.f);
         shown = motion::EaseOut(shown);
         moving = moving || shown < 1;
-        c.BeginGroup(shown, 1, Centre(pill).x, Centre(pill).y);
+        c.BeginGroup(shown, 1, Centre(pill).x, Centre(pill).y, 0, 0, item.tilt * std::min(e, 1.f));
         if (c.panel)
             c.Fill(pill, radius, t.panel);
         if (hv > 0.001f)
@@ -274,7 +275,11 @@ int FolderStackPopup::HitAt(POINT pt) const
         return In(ManageButton(place_, s), x, y) ? kManage : -1;
     for (size_t i = 0; i < place_.items.size(); ++i) {
         const auto& item = place_.items[i];
-        if (In(item.label, x, y) || In(item.icon, x, y))
+        // The capsule is tilted: the point turned back about its centre.
+        const D2D1_POINT_2F o = Centre(item.label);
+        const float cs = std::cos(item.tilt), sn = std::sin(item.tilt);
+        const float lx = o.x + (x - o.x) * cs + (y - o.y) * sn, ly = o.y - (x - o.x) * sn + (y - o.y) * cs;
+        if (In(item.label, lx, ly) || In(item.icon, x, y))
             return int(i);
     }
     return -1;

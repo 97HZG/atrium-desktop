@@ -5,9 +5,9 @@ read from an OFL font, flipped to screen coordinates (y down), centred on their 
 ems, so a letter drawn at the entry's text size matches what the font would draw. Run once when the
 letters or the font change; the outputs are checked in:
 
-    python3 tools/generate-ime-glyphs.py --font NotoSansCJKsc-Light.otf
+    python3 tools/generate-ime-glyphs.py --font NotoSansCJKsc-Regular.otf
 
-Needs fontTools. Font: Noto Sans CJK SC Light (SIL Open Font License 1.1).
+Needs fontTools. Font: Noto Sans CJK SC Regular (SIL Open Font License 1.1).
 """
 
 import argparse
@@ -179,7 +179,7 @@ def write_cs(letters, source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--font', required=True, help='Noto Sans CJK SC Light (OTF)')
+    parser.add_argument('--font', required=True, help='Noto Sans CJK SC Regular (OTF)')
     args = parser.parse_args()
     letters, family, version = read(args.font)
     source = f'{family} {version.split(";")[0]}'

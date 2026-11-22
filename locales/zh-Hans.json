@@ -920,7 +920,7 @@
   "Folder Stacks": "文件夹堆栈",
   "Launchpad": "启动台",
   "Show Launchpad on the taskbar": "在任务栏显示启动台",
-  "An entry next to the start logo opens every app on one sheet of glass, as on macOS.": "开始按钮右侧的入口：像 macOS 一样，在一整张玻璃上展开所有应用。",
+  "An entry next to the start logo opens every app, page by page, in one large window of glass, as on macOS.": "开始按钮右边的入口：在一个大的玻璃窗口里按页列出所有应用，和 macOS 一样。",
   "Show now playing": "显示正在播放",
   "Right of the status entry, while a music or video app is playing. Its five bars move with the sound.": "在状态栏右侧，音乐或视频应用播放时出现，五条律动线随声音跳动。",
   "Keep while paused": "暂停时保留",
@@ -947,6 +947,9 @@
   "No folders yet": "还没有文件夹",
   "Common folders": "常用文件夹",
   "{0} of 32": "{0} / 32",
-  "Choose one with Add folder…, or pick a common folder such as Downloads.": "点“添加文件夹…”选择一个，或者从常用文件夹里挑，比如下载。"
+  "Choose one with Add folder…, or pick a common folder such as Downloads.": "点“添加文件夹…”选择一个，或者从常用文件夹里挑，比如下载。",
+  "Store": "应用商店",
+  "Videos": "视频",
+  "Contacts": "联系人"
  }
 }

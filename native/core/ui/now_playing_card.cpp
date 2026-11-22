@@ -14,13 +14,14 @@ namespace atrium {
 
 namespace {
 
-// The card, DIP. The art and the lines beside it; the progress bar with the times under it; the
-// three controls.
-constexpr float kW = 360, kH = 184, kPad = 18;
-constexpr float kArt = 64, kArtRadius = 15;
-constexpr float kTextX = kPad + kArt + 14, kBarsW = 26;
-constexpr float kTrackY = 106, kTrackH = 5, kTrackHot = 8;
-constexpr float kControlsY = 156, kControlStep = 72, kControlR = 21, kPlayR = 25;
+// The card, DIP, long and low as the Dynamic Island playing music: the art and the lines beside
+// it, the five bars at the far end; the progress bar between its two times; the three controls.
+constexpr float kW = 400, kH = 152, kPad = 20;
+constexpr float kArt = 52, kArtRadius = 13;
+constexpr float kTextX = kPad + kArt + 13, kBarsW = 24, kBarsY = 36;
+constexpr float kTrackY = 93, kTrackH = 5, kTrackHot = 8, kTimeW = 42;
+constexpr float kTrackL = kPad + kTimeW + 6, kTrackR = kW - kPad - kTimeW - 6;
+constexpr float kControlsY = 125, kControlStep = 62, kControlR = 18, kPlayR = 22;
 constexpr double kArtFadeMs = 260;
 constexpr UINT_PTR kTickTimer = 0x4E50;
 constexpr UINT kTickMs = 250; // the progress bar's pace while nothing else animates
@@ -28,8 +29,8 @@ constexpr UINT kTickMs = 250; // the progress bar's pace while nothing else anim
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 
 D2D1_RECT_F ArtRect() { return D2D1::RectF(kPad, kPad, kPad + kArt, kPad + kArt); }
-D2D1_RECT_F TrackRect() { return D2D1::RectF(kPad, kTrackY - 12, kW - kPad, kTrackY + 12); }
-D2D1_RECT_F SessionRect() { return D2D1::RectF(kW - kPad - 46, 62, kW - kPad, 80); }
+D2D1_RECT_F TrackRect() { return D2D1::RectF(kTrackL - 6, kTrackY - 11, kTrackR + 6, kTrackY + 11); }
+D2D1_RECT_F SessionRect() { return D2D1::RectF(kW - kPad - 44, 55, kW - kPad, 71); }
 D2D1_POINT_2F ControlCentre(int i) { return D2D1::Point2F(kW / 2 + float(i) * kControlStep, kControlsY); }
 
 // "1:23", or "1:02:03" past an hour.
@@ -205,7 +206,7 @@ int64_t NowPlayingCard::ShownPositionUs(double now) const
     return t.PositionUs(now);
 }
 
-float NowPlayingCard::TrackFraction(float x) const { return std::clamp((x - kPad) / (kW - 2 * kPad), 0.f, 1.f); }
+float NowPlayingCard::TrackFraction(float x) const { return std::clamp((x - kTrackL) / (kTrackR - kTrackL), 0.f, 1.f); }
 
 void NowPlayingCard::Send(MediaCommand command, int64_t positionUs)
 {
@@ -253,10 +254,10 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
     }
     const float right = kW - kPad - kBarsW - 10;
     const std::wstring title = media_.title.empty() ? std::wstring(Tr(L"Not playing")) : media_.title;
-    c.Text(title, D2D1::RectF(kTextX, 21, right, 43), 15.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(media_.artist, D2D1::RectF(kTextX, 44, right, 63), 13, t.subtext);
     const bool several = media_.sessionCount > 1;
-    c.Text(media_.appName, D2D1::RectF(kTextX, 63, several ? SessionRect().left - 6 : right, 80), 11.5f, t.faint);
+    c.Text(title, D2D1::RectF(kTextX, 18, right, 38), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(media_.artist, D2D1::RectF(kTextX, 38, several ? SessionRect().left - 6 : right, 55), 12.5f, t.subtext);
+    c.Text(media_.appName, D2D1::RectF(kTextX, 55, several ? SessionRect().left - 6 : right, 71), 11, t.faint);
     if (several) {
         const D2D1_RECT_F s = SessionRect();
         const float hv = Hover(c, Part::Session, hover_ == Part::Session);
@@ -269,7 +270,7 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
     const float peak = feed_ ? feed_->peak.load() : 0.f, intensity = feed_ ? feed_->intensity.load() : 1.f;
     if (bars_.Step(peak, Playing(), intensity, dt))
         c.Continue();
-    const float bw = kBarsW / 9, gap = (kBarsW - 5 * bw) / 4, cy = 35;
+    const float bw = kBarsW / 9, gap = (kBarsW - 5 * bw) / 4, cy = kBarsY;
     const D2D1_COLOR_F ink = tint_ ? *tint_ : t.text;
     for (size_t i = 0; i < MusicBars::kCount; ++i) {
         const float x = kW - kPad - kBarsW + float(i) * (bw + gap), h = std::max(bw, kBarsW * bars_.Height(i));
@@ -284,15 +285,17 @@ void NowPlayingCard::PaintProgress(Canvas& c, const Theme& t)
     if (!tl.Seekable())
         return; // no length known (a stream, or a player that tells none): no track at all
     const float th = kTrackH + (kTrackHot - kTrackH) * hv;
-    const D2D1_RECT_F track = D2D1::RectF(kPad, kTrackY - th / 2, kW - kPad, kTrackY + th / 2);
+    const D2D1_RECT_F track = D2D1::RectF(kTrackL, kTrackY - th / 2, kTrackR, kTrackY + th / 2);
     c.Fill(track, th / 2, Alpha(t.text, 0.16f));
     const int64_t pos = ShownPositionUs(c.now), length = tl.endUs - tl.startUs;
     const float done = std::clamp(float(double(pos - tl.startUs) / double(length)), 0.f, 1.f);
     if (done > 0)
         c.Fill(D2D1::RectF(track.left, track.top, std::max(track.left + th, track.left + (track.right - track.left) * done), track.bottom), th / 2,
                tint_ && hv > 0.5f ? *tint_ : t.text);
-    c.Text(Clock(pos - tl.startUs), D2D1::RectF(kPad, kTrackY + 8, kW / 2, kTrackY + 24), 11.5f, t.subtext);
-    c.Text(L"-" + Clock(tl.endUs - pos), D2D1::RectF(kW / 2, kTrackY + 8, kW - kPad, kTrackY + 24), 11.5f, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 2);
+    // The times either side of the bar, as the Dynamic Island has them: the elapsed one right-aligned
+    // against its start, the one left against its end.
+    c.Text(Clock(pos - tl.startUs), D2D1::RectF(kPad - 4, kTrackY - 9, kTrackL - 8, kTrackY + 9), 11, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 2);
+    c.Text(L"-" + Clock(tl.endUs - pos), D2D1::RectF(kTrackR + 8, kTrackY - 9, kW - kPad + 4, kTrackY + 9), 11, t.subtext);
 }
 
 void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)

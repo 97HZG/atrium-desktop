@@ -51,6 +51,7 @@ struct ShapeDip {
     D2D1_RECT_F rect;
     float radius;
     float fade = 0; // 0 = as is, 1 = gone
+    float rotate = 0; // radians, clockwise about its centre
     // Melting parts instead of one rectangle (GlassShape::parts), DIP; rect is their bounds.
     struct Part {
         D2D1_RECT_F rect;
@@ -93,8 +94,9 @@ public:
     // The amount of dark ink (0..1) the glass under `r` takes now, region by region as Text does.
     float DarkAt(D2D1_RECT_F r) const;
     void Callout(D2D1_RECT_F body, float radius, float tipX, float halfWidth, float tailHeight, float tailInset, D2D1_COLOR_F color);
-    // Draws what follows faded and scaled around (cx, cy), moved by (dx, dy); DIP. Groups nest.
-    void BeginGroup(float opacity, float k, float cx, float cy, float dx = 0, float dy = 0);
+    // Draws what follows faded, scaled and turned (clockwise, radians) around (cx, cy), moved by
+    // (dx, dy); DIP. Groups nest.
+    void BeginGroup(float opacity, float k, float cx, float cy, float dx = 0, float dy = 0, float turn = 0);
     void EndGroup();
 
     D2D1_RECT_F Px(D2D1_RECT_F r) const;

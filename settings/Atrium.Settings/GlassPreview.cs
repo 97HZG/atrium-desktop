@@ -95,7 +95,8 @@ internal readonly record struct GlassSpec(
 }
 
 // One preview tile in stage DIP; the optional last tile is the bar below the widgets.
-internal readonly record struct GlassTile(double X, double Y, double W, double H, double Radius);
+// Angle: degrees, clockwise about its centre (a tilted capsule); the picture is turned, not rendered turned.
+internal readonly record struct GlassTile(double X, double Y, double W, double H, double Radius, double Angle = 0);
 internal sealed record GlassOverlay(int Width, int Height, byte[] Pixels, float Luma);
 
 internal static class GlassRenderer

@@ -8,6 +8,7 @@
 #include <winrt/Windows.Foundation.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string_view>
 #include <vector>
 
@@ -123,6 +124,37 @@ int64_t NeteaseTrackLengthUs(const std::wstring& title, const std::wstring& arti
             byName = t.lengthUs;
     }
     return byName;
+}
+
+void NeteaseTimeline::Fill(const std::wstring& title, const std::wstring& artist, bool playing, double nowMs, MediaTimeline& t)
+{
+    const std::wstring track = title + L'\n' + artist;
+    const bool changed = track != track_ || playing != playing_;
+    // The queue may be written a moment after the track starts: asked again while it has no length.
+    if (track != track_ || (lengthUs_ == 0 && nowMs - lookedUpMs_ > 2000)) {
+        lengthUs_ = NeteaseTrackLengthUs(title, artist);
+        lookedUpMs_ = nowMs;
+    }
+    track_ = track;
+    playing_ = playing;
+    if (changed || nowMs - readMs_ >= 500) {
+        readMs_ = nowMs;
+        double pos = 0, len = 0;
+        fromMemory_ = memory_.Read(double(lengthUs_) / 1e6, playing, nowMs, pos, len);
+        if (fromMemory_) {
+            MediaTimeline m;
+            m.endUs = int64_t(std::llround(len * 1e6));
+            m.anchorPosUs = int64_t(std::llround(pos * 1e6));
+            m.anchorMs = nowMs;
+            m.playing = playing;
+            if (changed || last_.endUs != m.endUs || std::llabs(last_.PositionUs(nowMs) - m.anchorPosUs) > 250'000)
+                last_ = m;
+        }
+    }
+    if (fromMemory_)
+        t = last_;
+    else
+        estimate_.Update(track, playing, lengthUs_, nowMs, t);
 }
 
 } // namespace atrium

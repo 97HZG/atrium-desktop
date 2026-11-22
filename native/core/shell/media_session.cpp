@@ -223,7 +223,7 @@ struct TrackedSession {
     std::shared_ptr<const IconImage> artwork;
     uint64_t artworkHash = 0;
     size_t artworkBytes = 0;
-    TimelineEstimate estimate; // for a player that reports no timeline
+    NeteaseTimeline netease; // NetEase Cloud Music's, which it does not report
 };
 
 struct FilterConfig {
@@ -532,10 +532,9 @@ private:
             outSnap.timeline.anchorMs = anchorMs;
         }
 
-        // A player that reports no timeline: one estimated from its own queue (NetEase Cloud Music).
+        // NetEase Cloud Music reports no timeline: its own (netease_tracks.h).
         if (!outSnap.timeline.Seekable() && IsNeteasePlayer(ts.appId))
-            ts.estimate.Update(ts.title + L'\n' + ts.artist, outSnap.state == MediaPlaybackState::Playing, NeteaseTrackLengthUs(ts.title, ts.artist), nowMs,
-                               outSnap.timeline);
+            ts.netease.Fill(ts.title, ts.artist, outSnap.state == MediaPlaybackState::Playing, nowMs, outSnap.timeline);
         outSummary = {ts.id, ts.appId, ts.title, outSnap.state, isSystemCurrent, ts.lastPlayingMs};
         return timelineUpdated;
     }

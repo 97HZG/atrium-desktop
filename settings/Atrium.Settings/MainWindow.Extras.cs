@@ -7,21 +7,21 @@ using Windows.UI;
 
 namespace Atrium.Settings;
 
-// The pages of the bar's newer entries: the now-playing entry (page 15) and the folder stack (page 16),
-// and Launchpad's switch on the start menu's page. Each page is built here when the window first asks
+// The pages of the bar's newer entries: the now-playing entry (page 15), the folder stack (page 16)
+// and Launchpad (page 17). Each page is built here when the window first asks
 // for it (ExtrasPage, ExtrasSide), its navigation item with it; its controls read the settings each
 // time the page shows. The previews are module scenes: the card, and the stack as it opens.
 public sealed partial class MainWindow
 {
-    private const int NowPlayingPage = 15, StacksPage = 16;
+    private const int NowPlayingPage = 15, StacksPage = 16, LaunchpadPage = 17;
     private static readonly string[] MotionTags = ["off", "subtle", "normal", "vivid"];
     private static readonly string[] AppModeTags = ["all", "allow", "block"];
     private static readonly int[] StackMaxima = [6, 8, 12, 16];
 
-    private StackPanel? _npMain, _npSide, _stMain, _stSide;
-    private Border? _npStage, _stStage;
-    private Canvas? _npCanvas, _stCanvas;
-    private ModuleScene? _npScene, _stScene;
+    private StackPanel? _npMain, _npSide, _stMain, _stSide, _lpMain, _lpSide;
+    private Border? _npStage, _stStage, _lpStage;
+    private Canvas? _npCanvas, _stCanvas, _lpCanvas;
+    private ModuleScene? _npScene, _stScene, _lpScene;
     private ToggleTile? _launchpadSwitch, _npSwitch, _npPausedSwitch, _npWheelSwitch, _stSwitch;
     private SegmentTrack? _npMotion, _npMode, _stLayout, _stMax;
     private TextBox? _npApps;
@@ -31,24 +31,25 @@ public sealed partial class MainWindow
     private StackPanel ExtrasPage(int page)
     {
         BuildExtras();
-        return page == NowPlayingPage ? _npMain! : _stMain!;
+        return page switch { NowPlayingPage => _npMain!, StacksPage => _stMain!, _ => _lpMain! };
     }
 
     private StackPanel ExtrasSide(int page)
     {
         BuildExtras();
-        return page == NowPlayingPage ? _npSide! : _stSide!;
+        return page switch { NowPlayingPage => _npSide!, StacksPage => _stSide!, _ => _lpSide! };
     }
 
     private ModuleScene? ExtrasScene(int page) => page switch
     {
         NowPlayingPage => _npScene ??= new NowPlayingScene(this, _npStage!, _npCanvas!),
         StacksPage => _stScene ??= new StacksScene(this, _stStage!, _stCanvas!),
+        LaunchpadPage => _lpScene ??= new LaunchpadScene(this, _lpStage!, _lpCanvas!),
         _ => null,
     };
 
     // The bar pages' scenes and these pages' (Scenes in MainWindow.Modules.cs).
-    private IEnumerable<ModuleScene> WithExtras(ModuleScene?[] scenes) => scenes.Append(_npScene).Append(_stScene).OfType<ModuleScene>();
+    private IEnumerable<ModuleScene> WithExtras(ModuleScene?[] scenes) => scenes.Append(_npScene).Append(_stScene).Append(_lpScene).OfType<ModuleScene>();
 
     // ---- Building ----
 
@@ -57,24 +58,28 @@ public sealed partial class MainWindow
         if (_npMain != null) return;
         (_npMain, _npStage, _npCanvas) = StagePage();
         (_stMain, _stStage, _stCanvas) = StagePage();
+        (_lpMain, _lpStage, _lpCanvas) = StagePage();
         int at = CenterStack.Children.IndexOf(MainIme) + 1;
+        CenterStack.Children.Insert(at, _lpMain);
         CenterStack.Children.Insert(at, _stMain);
         CenterStack.Children.Insert(at, _npMain);
         _npSide = BuildNowPlayingSide();
         _stSide = BuildStacksSide();
         _stMain.Children.Add(BuildStacksFolders());
+        _launchpadSwitch = Toggle("Show on the taskbar", "Show Launchpad on the taskbar",
+            "An entry next to the start logo opens every app, page by page, in one large window of glass, as on macOS.", (s, on) => s.ShowLaunchpad = on);
+        _lpSide = Side("Launchpad", _launchpadSwitch);
         InspectorStack.Children.Add(_npSide);
         InspectorStack.Children.Add(_stSide);
+        InspectorStack.Children.Add(_lpSide);
         // Each page reads the settings as it shows (they may have changed elsewhere since).
         _npSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_npSide.Visibility == Visibility.Visible) LoadExtras(); });
         _stSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_stSide.Visibility == Visibility.Visible) LoadExtras(); });
         AddNavItem(NowPlayingPage, "", "Now Playing", "12");
         AddNavItem(StacksPage, "", "Folder Stacks", "10"); // the bar's order: the stack sits left of the tray
-        // Launchpad: a switch on the start menu's page, under its title.
-        _launchpadSwitch = Toggle("Launchpad", "Show Launchpad on the taskbar",
-            "An entry next to the start logo opens every app on one sheet of glass, as on macOS.", (s, on) => s.ShowLaunchpad = on);
-        if (SideStart.Children.FirstOrDefault() is StackPanel start) start.Children.Insert(1, _launchpadSwitch);
-        SideStart.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (SideStart.Visibility == Visibility.Visible) LoadExtras(); });
+        _lpSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_lpSide.Visibility == Visibility.Visible) LoadExtras(); });
+        // The bar's order, left to right: the start menu, Launchpad, the stack, then the tray's side.
+        AddNavItem(LaunchpadPage, "\uE71D", "Launchpad", "10");
     }
 
     // A page's picture: a stage the size of the other bar pages', its scene drawn on the canvas.

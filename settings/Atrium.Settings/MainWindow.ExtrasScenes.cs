@@ -16,8 +16,9 @@ public sealed partial class MainWindow
 
     private sealed class NowPlayingScene : ModuleScene
     {
-        private const double CW = 360, CH = 184, Pad = 18, Art = 64, ArtR = 15, TextX = Pad + Art + 14, BarsW = 26;
-        private const double TrackY = 106, TrackH = 5, ControlsY = 156, ControlStep = 72;
+        private const double CW = 400, CH = 152, Pad = 20, Art = 52, ArtR = 13, TextX = Pad + Art + 13, BarsW = 24, BarsY = 36;
+        private const double TrackY = 93, TrackH = 5, TimeW = 42, TrackL = Pad + TimeW + 6, TrackR = CW - Pad - TimeW - 6;
+        private const double ControlsY = 125, ControlStep = 62, MinRadius = 34;
         private static readonly double[] Shape = [0.58, 0.86, 1.0, 0.80, 0.52];
         private static readonly double[] Rate = [0.92, 1.27, 1.71, 1.13, 0.81];
         private readonly PanelInk _ink = new();
@@ -42,19 +43,19 @@ public sealed partial class MainWindow
                     new GradientStop { Color = Color.FromArgb(255, 0x6A, 0x5A, 0xF0), Offset = 1 },
                 },
             };
-            _title = Words(15.5, _ink.Text, true);
+            _title = Words(15, _ink.Text, true);
             _title.Text = "Midnight City";
-            _artist = Words(13, _ink.Sub);
+            _artist = Words(12.5, _ink.Sub);
             _artist.Text = "M83";
-            _app = Words(11.5, _ink.Faint);
+            _app = Words(11, _ink.Faint);
             _app.Text = Loc.T("Music");
-            _elapsed = Words(11.5, _ink.Sub);
-            _left = Words(11.5, _ink.Sub, false, TextAlignment.Right);
+            _elapsed = Words(11, _ink.Sub, false, TextAlignment.Right);
+            _left = Words(11, _ink.Sub);
             var tint = new SolidColorBrush(Color.FromArgb(255, 0xD0, 0x6C, 0xE0)); // the art's colour
             for (int i = 0; i < _bars.Length; i++) _bars[i] = Plate(tint, BarsW / 18);
             _track = Plate(_ink.Track, TrackH / 2);
             _done = Plate(_ink.Text, TrackH / 2);
-            _controls = [Symbol("", 20, _ink.Text), Symbol("", 26, _ink.Text), Symbol("", 20, _ink.Text)];
+            _controls = [Symbol("", 18, _ink.Text), Symbol("", 23, _ink.Text), Symbol("", 18, _ink.Text)];
             foreach (var e in new UIElement[] { _art, _title, _artist, _app, _track, _done, _elapsed, _left }) Marks.Children.Add(e);
             foreach (var e in _bars) Marks.Children.Add(e);
             foreach (var e in _controls) Marks.Children.Add(e);
@@ -69,7 +70,7 @@ public sealed partial class MainWindow
         {
             double w = CW * S, h = CH * S;
             double left = Math.Clamp(Anchor.X - w / 2, 16, Math.Max(16, W - 16 - w)), top = PopupBottom - h;
-            return (new[] { new GlassTile(left, top, w, h, Math.Min(Radius, 28) * S) }, new Frame(left, top));
+            return (new[] { new GlassTile(left, top, w, h, Math.Min(Math.Max(Radius, MinRadius), CH / 2) * S) }, new Frame(left, top));
         }
 
         protected override void Ink(int piece, bool dark) => _ink.Set(dark);
@@ -80,9 +81,9 @@ public sealed partial class MainWindow
             PlaceMarks(f.Left, f.Top);
             Put(_art, Pad, Pad, Art, Art);
             double right = CW - Pad - BarsW - 10;
-            Box(_title, TextX, 21, right - TextX, 22);
-            Box(_artist, TextX, 44, right - TextX, 19);
-            Box(_app, TextX, 63, right - TextX, 17);
+            Box(_title, TextX, 18, right - TextX, 20);
+            Box(_artist, TextX, 38, right - TextX, 17);
+            Box(_app, TextX, 55, right - TextX, 16);
             // The bars, as the entry moves them: each on its own rhythm inside a loud song's level.
             double t = (Now - _start) / 1000, bw = BarsW / 9, gap = (BarsW - 5 * bw) / 4;
             bool moving = M.CurrentSettings.NowPlayingMotion != "off";
@@ -92,17 +93,18 @@ public sealed partial class MainWindow
                 double a = 2 * Math.PI * Rate[i] * t, swing = 0.5 + 0.32 * Math.Sin(a) + 0.18 * Math.Sin(1.5 * a + 1.7 * i);
                 double hgt = moving ? 0.22 + 0.78 * reach * Shape[i] * (0.38 + 0.62 * swing) : 0.22 + 0.18 * Shape[i];
                 double hh = Math.Max(bw, BarsW * hgt);
-                Put(_bars[i], CW - Pad - BarsW + i * (bw + gap), 35 - hh / 2, bw, hh);
+                Put(_bars[i], CW - Pad - BarsW + i * (bw + gap), BarsY - hh / 2, bw, hh);
             }
             // The progress: a four-minute song, a quarter in, going on.
             double length = 244, pos = (61 + t) % length, done = pos / length;
-            Put(_track, Pad, TrackY - TrackH / 2, CW - 2 * Pad, TrackH);
-            Put(_done, Pad, TrackY - TrackH / 2, Math.Max(TrackH, (CW - 2 * Pad) * done), TrackH);
+            Put(_track, TrackL, TrackY - TrackH / 2, TrackR - TrackL, TrackH);
+            Put(_done, TrackL, TrackY - TrackH / 2, Math.Max(TrackH, (TrackR - TrackL) * done), TrackH);
             _elapsed.Text = $"{(int)pos / 60}:{(int)pos % 60:00}";
             _left.Text = $"-{(int)(length - pos) / 60}:{(int)(length - pos) % 60:00}";
-            Box(_elapsed, Pad, TrackY + 8, CW / 2 - Pad, 16);
-            Box(_left, CW / 2, TrackY + 8, CW / 2 - Pad, 16);
-            for (int i = 0; i < 3; i++) Box(_controls[i], CW / 2 + (i - 1) * ControlStep - 22, ControlsY - 22, 44, 44);
+            // The times either side of the bar.
+            Box(_elapsed, Pad - 4, TrackY - 9, TrackL - 8 - (Pad - 4), 18);
+            Box(_left, TrackR + 8, TrackY - 9, CW - Pad + 4 - (TrackR + 8), 18);
+            for (int i = 0; i < 3; i++) Box(_controls[i], CW / 2 + (i - 1) * ControlStep - 20, ControlsY - 20, 40, 40);
             return true; // it plays on
         }
     }
@@ -114,7 +116,7 @@ public sealed partial class MainWindow
         // ui/folder_stack_layout.h.
         private const double Gap = 12, Icon = 40, StepY = 50, Arc = 1000, LabelH = 28, LabelPad = 12, LabelGap = 10, Margin = 16;
         private const double ColumnW = 264, RowH = 44, ColumnPad = 8, ColumnIcon = 26;
-        private const double OpenMs = 340, StaggerMs = 22;
+        private const double OpenMs = 340, StaggerMs = 22, Tilt = 0.6;
         private readonly PanelInk _ink = new();
         private readonly List<(TextBlock Icon, TextBlock Name, Border Plate)> _items = [];
         private double _opened = double.MaxValue;
@@ -144,6 +146,8 @@ public sealed partial class MainWindow
         protected override void Refreshed() => _opened = Now; // another layout or other folders: it opens again
 
         private static double Lean(double rise) => Arc - Math.Sqrt(Math.Max(0, Arc * Arc - rise * rise));
+        // kStackTilt: the name along the arc's radius, leaning a little less than the arc turns (radians).
+        private static double Turn(double rise) => Tilt * Math.Asin(Math.Min(1, rise / Arc));
         private static double LabelWidth(string name) => Math.Clamp(TextWidth(name, 13) + 2 * LabelPad, 56, 240);
         private double Unfold(int i) => _opened == double.MaxValue ? 0 : Motion.EaseOutBack(Math.Clamp((Now - _opened - StaggerMs * i) / OpenMs, 0, 1), 1.25);
 
@@ -164,10 +168,11 @@ public sealed partial class MainWindow
             var tiles = new List<GlassTile>();
             for (int i = 0; i < names.Length; i++)
             {
-                double e = Unfold(i), rise = Gap + Icon / 2 + i * StepY;
-                double cx = ax + Lean(rise) * S, cy = foot - rise * S;
-                double x = ax + (cx - Icon / 2 * S - LabelGap * S - widths[i] * S - ax) * e, y = foot + (cy - foot) * e;
-                if (e > 0.02) tiles.Add(new GlassTile(x, y - LabelH / 2 * S, widths[i] * S * Math.Min(1, e), LabelH * S, LabelH / 2 * S));
+                double e = Unfold(i), rise = Gap + Icon / 2 + i * StepY, turn = Turn(rise), reach = (Icon / 2 + LabelGap + widths[i] / 2) * S;
+                double lx = ax + Lean(rise) * S - Math.Cos(turn) * reach, ly = foot - rise * S - Math.Sin(turn) * reach;
+                double x = ax + (lx - widths[i] * S / 2 - ax) * e, y = foot + (ly - foot) * e;
+                if (e > 0.02)
+                    tiles.Add(new GlassTile(x, y - LabelH / 2 * S, widths[i] * S * Math.Min(1, e), LabelH * S, LabelH / 2 * S, turn * 180 / Math.PI * Math.Min(1, e)));
             }
             return ([.. tiles], new Frame(ax, foot, 0, 0, true, names, widths));
         }
@@ -202,6 +207,7 @@ public sealed partial class MainWindow
             if (!f.Fan)
             {
                 PlaceMarks(f.Left, f.Top);
+                foreach (var item in _items) item.Name.RenderTransform = null;
                 for (int i = 0; i < names.Length; i++)
                 {
                     // Over a bottom bar the first folder is the lowest row.
@@ -224,10 +230,14 @@ public sealed partial class MainWindow
                 double x = f.Left + (cx - f.Left) * e, y = f.Top + (cy - f.Top) * e, k = 0.35 + 0.65 * Math.Min(e, 1);
                 _items[i].Icon.FontSize = Icon * 0.78 * S * k;
                 Box(_items[i].Icon, x - Icon / 2 * S, y - Icon / 2 * S, Icon * S, Icon * S);
-                double lw = f.LabelW[i] * S, lx = f.Left + (cx - Icon / 2 * S - LabelGap * S - lw - f.Left) * e;
+                double lw = f.LabelW[i] * S, turn = Turn(rise), reach = Icon / 2 * S + LabelGap * S + lw / 2;
+                double lcx = cx - Math.Cos(turn) * reach, lcy = cy - Math.Sin(turn) * reach;
+                double lx = f.Left + (lcx - lw / 2 - f.Left) * e, ly = f.Top + (lcy - f.Top) * e;
                 _items[i].Name.FontSize = 13 * S;
                 _items[i].Name.TextAlignment = TextAlignment.Center;
-                Box(_items[i].Name, lx, y - LabelH / 2 * S, lw, LabelH * S);
+                Box(_items[i].Name, lx, ly - LabelH / 2 * S, lw, LabelH * S);
+                _items[i].Name.RenderTransformOrigin = new Point(0.5, 0.5);
+                _items[i].Name.RenderTransform = new RotateTransform { Angle = turn * 180 / Math.PI * Math.Min(1, e) };
                 _items[i].Icon.Opacity = Math.Clamp(e * 3, 0, 1);
                 _items[i].Name.Opacity = Math.Clamp((e - 0.3) / 0.7, 0, 1);
             }

@@ -8,7 +8,7 @@ using Path = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace Atrium.Settings;
 
-// The three extra entries as BarExtrasPainter draws them: Launchpad's rocket, the now-playing
+// The three extra entries as BarExtrasPainter draws them: Launchpad's page of apps, the now-playing
 // entry's five bars (held mid-swing, as if a song played) and the folder stack's two folders.
 internal sealed partial class BarFace
 {
@@ -20,23 +20,32 @@ internal sealed partial class BarFace
         "F0 M0,0.41 L0,0.93 Q0,1 0.07,1 L0.79,1 Q0.86,1 0.86,0.93 L0.86,0.49 Q0.86,0.42 0.79,0.42 L0.43,0.42 L0.34,0.26 L0.07,0.26 Q0,0.26 0,0.33 Z";
     private const string BackFolder = "F0 M0.30,0.12 L0.93,0.12 Q1,0.12 1,0.19 L1,0.84";
 
-    // DrawLaunchpad, upright in a unit square before its 45 degree turn: the body, the fins, three trails.
-    private const string Rocket =
-        "F0 M0.5,0.08 C0.63,0.19 0.68,0.36 0.65,0.66 L0.35,0.66 C0.32,0.36 0.37,0.19 0.5,0.08 Z " +
-        "M0.345,0.47 L0.23,0.60 L0.23,0.74 L0.35,0.66 M0.655,0.47 L0.77,0.60 L0.77,0.74 L0.65,0.66 " +
-        "M0.43,0.75 L0.43,0.80 M0.5,0.75 L0.5,0.88 M0.57,0.75 L0.57,0.80";
-
     private readonly Canvas _launchpad = new() { IsHitTestVisible = false, Width = 1, Height = 1 }, _music = new() { IsHitTestVisible = false };
     private readonly Rectangle[] _bars = new Rectangle[5];
-    private readonly Path _folder = Folder(FrontFolder), _folderBack = Folder(BackFolder), _rocket = Folder(Rocket);
-    private readonly Ellipse _porthole = new() { IsHitTestVisible = false, Width = 0.13, Height = 0.13 };
+    private readonly Path _folder = Folder(FrontFolder), _folderBack = Folder(BackFolder);
+    private readonly Rectangle[] _apps = [new(), new(), new(), new()];
+    private readonly Ellipse[] _pages = [new(), new(), new()];
 
     private void AddExtras(Canvas canvas)
     {
-        Canvas.SetLeft(_porthole, 0.5 - 0.065);
-        Canvas.SetTop(_porthole, 0.35 - 0.065);
-        _launchpad.Children.Add(_rocket);
-        _launchpad.Children.Add(_porthole);
+        // DrawLaunchpad in a unit square: four squares of 0.33 with gaps of 0.12, three dots below.
+        for (int i = 0; i < _apps.Length; i++)
+        {
+            _apps[i].IsHitTestVisible = false;
+            _apps[i].Width = _apps[i].Height = 0.33;
+            _apps[i].RadiusX = _apps[i].RadiusY = 0.1;
+            Canvas.SetLeft(_apps[i], 0.11 + i % 2 * 0.45);
+            Canvas.SetTop(_apps[i], 0.02 + i / 2 * 0.45);
+            _launchpad.Children.Add(_apps[i]);
+        }
+        for (int i = 0; i < _pages.Length; i++)
+        {
+            _pages[i].IsHitTestVisible = false;
+            _pages[i].Width = _pages[i].Height = 0.09;
+            Canvas.SetLeft(_pages[i], 0.5 + (i - 1) * 0.15 - 0.045);
+            Canvas.SetTop(_pages[i], 0.93 - 0.045);
+            _launchpad.Children.Add(_pages[i]);
+        }
         for (int i = 0; i < _bars.Length; i++)
         {
             _bars[i] = new Rectangle { IsHitTestVisible = false };
@@ -51,15 +60,18 @@ internal sealed partial class BarFace
         _launchpad.Visibility = l.LaunchX < 0 ? Visibility.Collapsed : Visibility.Visible;
         if (l.LaunchX >= 0)
         {
-            // 86 % of the icon square, a stroke of 7 % of it, turned to climb to the upper right.
+            // 80 % of the icon square, a stroke of 7.5 % of it; the middle page dot lit.
             var (x, y, size) = item(l.LaunchX);
-            double s = size * 0.86;
-            _rocket.Stroke = _porthole.Fill = new SolidColorBrush(ink);
-            _rocket.StrokeThickness = Math.Max(1, s * 0.07) / s;
-            _launchpad.RenderTransform = new TransformGroup
+            double s = size * 0.80;
+            var brush = new SolidColorBrush(ink);
+            foreach (var a in _apps)
             {
-                Children = { new RotateTransform { Angle = 45, CenterX = 0.5, CenterY = 0.5 }, new ScaleTransform { ScaleX = s, ScaleY = s } },
-            };
+                a.Stroke = brush;
+                a.StrokeThickness = Math.Max(1, s * 0.075) / s;
+            }
+            for (int i = 0; i < _pages.Length; i++)
+                _pages[i].Fill = i == 1 ? brush : new SolidColorBrush(Color.FromArgb((byte)(ink.A * 0.45), ink.R, ink.G, ink.B));
+            _launchpad.RenderTransform = new ScaleTransform { ScaleX = s, ScaleY = s };
             Canvas.SetLeft(_launchpad, x + (size - s) / 2);
             Canvas.SetTop(_launchpad, y + (size - s) / 2);
         }

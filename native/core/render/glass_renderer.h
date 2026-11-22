@@ -25,7 +25,7 @@ struct GlassParams {
     float refract, dispersion, blurLod, tintMix;
     float tintR, tintG, tintB, tintA;
     float highlight, shadow, lightX, lightY;
-    float inset, blurMix, fade, pad0; // fade: 0 = as is, 1 = gone
+    float inset, blurMix, fade, rotate; // fade: 0 = as is, 1 = gone; rotate: radians, clockwise about the shape's centre
     // The shape in window px; all zero: the window minus `inset` on every side.
     float shapeL, shapeT, shapeR, shapeB;
     // Press ripple: centre (window px), ring radius, strength; strength 0 = none.
