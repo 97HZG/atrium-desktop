@@ -313,14 +313,23 @@ namespace AtriumVerify
             IUIAutomationCondition CreateAndCondition(IUIAutomationCondition c1, IUIAutomationCondition c2);
         }
 
-        private static IUIAutomationElement FindById(IUIAutomation uia, IntPtr hwnd, string id, int patternPropId)
+        private static bool TryFindById(IUIAutomation uia, IntPtr hwnd, string id, int patternPropId, out IUIAutomationElement el)
         {
+            el = null;
             IUIAutomationElement root = uia.ElementFromHandle(hwnd);
-            if (root == null) return null;
+            if (root == null) return false;
             IUIAutomationCondition c1 = uia.CreatePropertyCondition(AutomationIdPropId, id);
             IUIAutomationCondition c2 = uia.CreatePropertyCondition(patternPropId, true);
             IUIAutomationCondition and = uia.CreateAndCondition(c1, c2);
-            return root.FindFirst(TreeScopeDescendants, and);
+            el = root.FindFirst(TreeScopeDescendants, and);
+            return true;
+        }
+
+        private static IUIAutomationElement FindById(IUIAutomation uia, IntPtr hwnd, string id, int patternPropId)
+        {
+            IUIAutomationElement el;
+            TryFindById(uia, hwnd, id, patternPropId, out el);
+            return el;
         }
 
         private static IntPtr FindWindowByProp(int pid, string propName)
@@ -446,8 +455,9 @@ namespace AtriumVerify
                     {
                         try
                         {
-                            IUIAutomationElement el = FindById(uia, hwnd, id, IsInvokeAvailablePropId);
-                            if (el != null && el.CurrentIsEnabled == 0) return 0;
+                            IUIAutomationElement el;
+                            if (TryFindById(uia, hwnd, id, IsInvokeAvailablePropId, out el) &&
+                                (el == null || el.CurrentIsEnabled == 0)) return 0;
                         }
                         catch (COMException) { }
                         Thread.Sleep(100);

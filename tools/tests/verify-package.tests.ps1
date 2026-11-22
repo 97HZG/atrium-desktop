@@ -565,8 +565,14 @@ internal static class StubSettings
         btn.Name = "SaveButton";
         btn.Text = "Save";
         btn.Enabled = false;
+        btn.Visible = false;
         btn.Location = new Point(20, 60);
-        chk.CheckedChanged += delegate { btn.Enabled = (chk.Checked != initialSec); };
+        chk.CheckedChanged += delegate
+        {
+            bool dirty = (chk.Checked != initialSec);
+            btn.Visible = dirty;
+            btn.Enabled = dirty;
+        };
         btn.Click += delegate
         {
             JavaScriptSerializer js = new JavaScriptSerializer();
@@ -581,6 +587,7 @@ internal static class StubSettings
                 initialSec = chk.Checked;
                 revision = Convert.ToInt64(rep["revision"]);
                 btn.Enabled = false;
+                btn.Visible = false;
             }
         };
         form.Controls.Add(chk);
