@@ -48,7 +48,6 @@
     "nowPlayingRhythm": {"type": "enum", "default": "live", "values": ["live", "loop"], "fallback": "live"},
     "nowPlayingAppMode": {"type": "enum", "default": "all", "values": ["all", "allow", "block"], "fallback": "all"},
     "nowPlayingApps": {"type": "stringArray", "default": [], "maxCount": 64},
-    "nowPlayingScrollVolume": {"type": "bool", "default": true},
     "showFolderStacks": {"type": "bool", "default": false},
     "folderStackLayout": {"type": "enum", "default": "fan", "values": ["fan", "column"], "fallback": "fan"},
     "folderStackMax": {"type": "number", "default": 8, "min": 4, "max": 16},

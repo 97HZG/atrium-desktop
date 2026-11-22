@@ -157,7 +157,7 @@ internal sealed class SettingsSession
         foreach (var kv in draftJson) keys.Add(kv.Key);
         foreach (string key in keys)
         {
-            if (key is "pins" or "stageExcluded") continue;
+            if (key is "pins" or "stageExcluded" or "nowPlayingApps" or "folderStacks") continue;
             baseJson.TryGetPropertyValue(key, out var baseVal);
             draftJson.TryGetPropertyValue(key, out var draftVal);
             bool draftChanged = !JsonNode.DeepEquals(draftVal, baseVal);
@@ -167,7 +167,9 @@ internal sealed class SettingsSession
         }
         var result = BarSettings.FromJson(merged, new());
         result.Pins = MergePins(baseSaved.Pins, targetSaved.Pins, draft.Pins);
-        result.StageExcluded = MergeStageExcluded(baseSaved.StageExcluded, targetSaved.StageExcluded, draft.StageExcluded);
+        result.StageExcluded = MergeStringList(baseSaved.StageExcluded, targetSaved.StageExcluded, draft.StageExcluded, TrimAsciiKey);
+        result.NowPlayingApps = MergeStringList(baseSaved.NowPlayingApps, targetSaved.NowPlayingApps, draft.NowPlayingApps, TrimAsciiKey, 64);
+        result.FolderStacks = MergeStringList(baseSaved.FolderStacks, targetSaved.FolderStacks, draft.FolderStacks, NormalizeFolderKey, 32);
         return result;
     }
 
@@ -204,15 +206,41 @@ internal sealed class SettingsSession
                 d.Aumid != b.Aumid ? d.Aumid : t.Aumid,
                 d.MultipleWindows != b.MultipleWindows ? d.MultipleWindows : t.MultipleWindows));
 
-    private static List<string> MergeStageExcluded(List<string> baseList, List<string> targetList, List<string> draftList)
+    private static string TrimAsciiKey(string s) => s.AsSpan().Trim(AsciiWs).ToString();
+
+    private static bool IsFolderRootSlash(ReadOnlySpan<char> path)
     {
-        if (draftList.SequenceEqual(baseList, StringComparer.Ordinal)) return [.. targetList];
-        if (targetList.SequenceEqual(baseList, StringComparer.Ordinal)) return [.. draftList];
-        return MergeThreeWayList(
+        if (path.Length == 1) return path[0] is '\\' or '/';
+        if (path.Length == 2) return path[0] == '\\' && path[1] == '\\';
+        if (path.Length == 3) return char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] is '\\' or '/';
+        if (path.Length == 7 && (path.StartsWith(@"\\?\") || path.StartsWith(@"\\.\")))
+            return char.IsAsciiLetter(path[4]) && path[5] == ':' && path[6] is '\\' or '/';
+        return false;
+    }
+
+    private static string NormalizeFolderKey(string s)
+    {
+        var span = s.AsSpan().Trim(AsciiWs);
+        while (span.Length > 0 && span[^1] is '\\' or '/' && !IsFolderRootSlash(span))
+            span = span[..^1];
+        return span.ToString().Replace('/', '\\');
+    }
+
+    private static List<string> MergeStringList(
+        List<string> baseList, List<string> targetList, List<string> draftList, Func<string, string> keyOf, int maxCount = int.MaxValue)
+    {
+        if (draftList.SequenceEqual(baseList, StringComparer.Ordinal))
+            return targetList.Count <= maxCount ? [.. targetList] : [.. targetList.Take(maxCount)];
+        if (targetList.SequenceEqual(baseList, StringComparer.Ordinal))
+            return draftList.Count <= maxCount ? [.. draftList] : [.. draftList.Take(maxCount)];
+        var merged = MergeThreeWayList(
             baseList, targetList, draftList,
-            static s => s.AsSpan().Trim(AsciiWs).ToString(),
+            keyOf,
             StringComparer.OrdinalIgnoreCase,
             static (b, t, d) => b == null || d != b ? d : t);
+        if (merged.Count > maxCount)
+            merged.RemoveRange(maxCount, merged.Count - maxCount);
+        return merged;
     }
 
     private static List<T> MergeThreeWayList<T, TKey>(

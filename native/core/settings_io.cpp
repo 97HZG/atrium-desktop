@@ -18,9 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <mutex>
-#include <sstream>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -30,6 +28,48 @@ namespace json = winrt::Windows::Data::Json;
 namespace atrium {
 
 namespace {
+
+struct ScopedReadHandle {
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    explicit ScopedReadHandle(const std::wstring& path)
+        : handle(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                             nullptr))
+    {
+    }
+    ScopedReadHandle(const ScopedReadHandle&) = delete;
+    ScopedReadHandle& operator=(const ScopedReadHandle&) = delete;
+    ~ScopedReadHandle()
+    {
+        if (handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+    }
+    explicit operator bool() const { return handle != INVALID_HANDLE_VALUE; }
+};
+
+bool ReadSharedFileBytes(const std::wstring& path, std::string& bytes, DWORD* errorOut = nullptr)
+{
+    bytes.clear();
+    const ScopedReadHandle file(path);
+    if (!file) {
+        if (errorOut)
+            *errorOut = GetLastError();
+        return false;
+    }
+    std::array<char, 8192> buf{};
+    for (;;) {
+        DWORD read = 0;
+        if (!ReadFile(file.handle, buf.data(), DWORD(buf.size()), &read, nullptr)) {
+            if (errorOut)
+                *errorOut = GetLastError();
+            bytes.clear();
+            return false;
+        }
+        if (read == 0)
+            break;
+        bytes.append(buf.data(), read);
+    }
+    return true;
+}
 
 bool ReadRawFile(const std::wstring& path, std::string& bytes, bool& exists)
 {
@@ -43,13 +83,14 @@ bool ReadRawFile(const std::wstring& path, std::string& bytes, bool& exists)
     exists = true;
     if ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
         return false;
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
-        return false;
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    bytes = ss.str();
-    return true;
+    DWORD err = ERROR_SUCCESS;
+    if (ReadSharedFileBytes(path, bytes, &err))
+        return true;
+    if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
+        exists = false;
+        return true;
+    }
+    return false;
 }
 
 std::wstring Utf8ToWideText(std::string bytes)
@@ -163,18 +204,19 @@ bool FilesHaveSameBytes(const std::filesystem::path& a, const std::filesystem::p
     const auto sizeB = std::filesystem::file_size(b, ec);
     if (ec || sizeA != sizeB)
         return false;
-    std::ifstream fa(a, std::ios::binary), fb(b, std::ios::binary);
+    const ScopedReadHandle fa(a.wstring()), fb(b.wstring());
     if (!fa || !fb)
         return false;
     std::array<char, 4096> bufA{}, bufB{};
-    while (fa && fb) {
-        fa.read(bufA.data(), std::streamsize(bufA.size()));
-        fb.read(bufB.data(), std::streamsize(bufB.size()));
-        const auto nA = fa.gcount(), nB = fb.gcount();
+    for (;;) {
+        DWORD nA = 0, nB = 0;
+        if (!ReadFile(fa.handle, bufA.data(), DWORD(bufA.size()), &nA, nullptr) || !ReadFile(fb.handle, bufB.data(), DWORD(bufB.size()), &nB, nullptr))
+            return false;
         if (nA != nB || std::memcmp(bufA.data(), bufB.data(), size_t(nA)) != 0)
             return false;
+        if (nA == 0)
+            return true;
     }
-    return fa.eof() && fb.eof();
 }
 
 void PruneCorruptBackups(const std::filesystem::path& dir, const std::wstring& stem, const std::wstring& ext, int maxBackups)
@@ -296,12 +338,10 @@ std::wstring SettingsPath() { return DataDirectory() + L"\\settings.json"; }
 
 std::wstring ReadTextFile(const std::wstring& path)
 {
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
+    std::string bytes;
+    if (!ReadSharedFileBytes(path, bytes))
         return {};
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return Utf8ToWideText(ss.str());
+    return Utf8ToWideText(std::move(bytes));
 }
 
 bool WriteTextFile(const std::wstring& path, const std::wstring& text)

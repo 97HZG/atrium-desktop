@@ -25,15 +25,21 @@ internal sealed partial class BarFace
     private readonly Path _folder = Folder(FrontFolder), _folderBack = Folder(BackFolder);
     private readonly Rectangle[] _apps = [new(), new(), new(), new()];
     private readonly Ellipse[] _pages = [new(), new(), new()];
+    private readonly SolidColorBrush _extrasInkBrush = new(), _extrasDimInkBrush = new(), _folderBrush = new(), _folderBackBrush = new();
+    private readonly ScaleTransform _launchpadScale = new(), _folderScale = new(), _folderBackScale = new();
 
     private void AddExtras(Canvas canvas)
     {
+        _launchpad.RenderTransform = _launchpadScale;
+        _folder.RenderTransform = _folderScale;
+        _folderBack.RenderTransform = _folderBackScale;
         // DrawLaunchpad in a unit square: four squares of 0.30 with gaps of 0.10, three dots below.
         for (int i = 0; i < _apps.Length; i++)
         {
             _apps[i].IsHitTestVisible = false;
             _apps[i].Width = _apps[i].Height = 0.30;
             _apps[i].RadiusX = _apps[i].RadiusY = 0.09;
+            _apps[i].Stroke = _extrasInkBrush;
             Canvas.SetLeft(_apps[i], 0.15 + i % 2 * 0.40);
             Canvas.SetTop(_apps[i], i / 2 * 0.40);
             _launchpad.Children.Add(_apps[i]);
@@ -42,38 +48,42 @@ internal sealed partial class BarFace
         {
             _pages[i].IsHitTestVisible = false;
             _pages[i].Width = _pages[i].Height = 0.144;
+            _pages[i].Fill = i == 1 ? _extrasInkBrush : _extrasDimInkBrush;
             Canvas.SetLeft(_pages[i], 0.5 + (i - 1) * 0.21 - 0.072);
             Canvas.SetTop(_pages[i], 0.91 - 0.072);
             _launchpad.Children.Add(_pages[i]);
         }
         for (int i = 0; i < _bars.Length; i++)
         {
-            _bars[i] = new Rectangle { IsHitTestVisible = false };
+            _bars[i] = new Rectangle { IsHitTestVisible = false, Fill = _extrasInkBrush };
             _music.Children.Add(_bars[i]);
         }
+        _folder.Stroke = _folderBrush;
+        _folderBack.Stroke = _folderBackBrush;
         foreach (var e in new UIElement[] { _launchpad, _music, _folderBack, _folder })
             canvas.Children.Add(e);
     }
 
     private void LayoutExtras(MainWindow.BarGeometry l, Func<double, (double X, double Y, double Size)> item, Color ink)
     {
-        _launchpad.Visibility = l.LaunchX < 0 ? Visibility.Collapsed : Visibility.Visible;
+        _extrasInkBrush.Color = ink;
+        _extrasDimInkBrush.Color = Color.FromArgb((byte)(ink.A * 0.45), ink.R, ink.G, ink.B);
+
+        _launchpad.Visibility = Visibility.Collapsed;
         if (l.LaunchX >= 0)
         {
             // 86 % of the icon square, a stroke of 7.5 % of it; the middle page dot lit.
             var (x, y, size) = item(l.LaunchX);
             double s = size * 0.86;
-            var brush = new SolidColorBrush(ink);
-            foreach (var a in _apps)
+            if (s > 0)
             {
-                a.Stroke = brush;
-                a.StrokeThickness = Math.Max(1, s * 0.075) / s;
+                _launchpad.Visibility = Visibility.Visible;
+                double thickness = Math.Max(1, s * 0.075) / s;
+                foreach (var a in _apps) a.StrokeThickness = thickness;
+                _launchpadScale.ScaleX = _launchpadScale.ScaleY = s;
+                Canvas.SetLeft(_launchpad, x + (size - s) / 2);
+                Canvas.SetTop(_launchpad, y + (size - s) / 2);
             }
-            for (int i = 0; i < _pages.Length; i++)
-                _pages[i].Fill = i == 1 ? brush : new SolidColorBrush(Color.FromArgb((byte)(ink.A * 0.45), ink.R, ink.G, ink.B));
-            _launchpad.RenderTransform = new ScaleTransform { ScaleX = s, ScaleY = s };
-            Canvas.SetLeft(_launchpad, x + (size - s) / 2);
-            Canvas.SetTop(_launchpad, y + (size - s) / 2);
         }
 
         _music.Visibility = l.MusicX < 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -82,7 +92,6 @@ internal sealed partial class BarFace
             var (x, y, size) = item(l.MusicX);
             double side = size * 0.80, bar = side * 0.11, gap = side * 0.0925;
             double left = x + size / 2 - (5 * bar + 4 * gap) / 2, cy = y + size / 2;
-            var brush = new SolidColorBrush(ink);
             for (int i = 0; i < _bars.Length; i++)
             {
                 double h = Math.Max(bar, side * (0.22 + 0.78 * 0.6 * BarShape[i]));
@@ -90,26 +99,30 @@ internal sealed partial class BarFace
                 b.Width = bar;
                 b.Height = h;
                 b.RadiusX = b.RadiusY = bar / 2;
-                b.Fill = brush;
                 Canvas.SetLeft(b, left + i * (bar + gap));
                 Canvas.SetTop(b, cy - h / 2);
             }
         }
 
-        bool stacks = l.StacksX >= 0;
-        _folder.Visibility = _folderBack.Visibility = stacks ? Visibility.Visible : Visibility.Collapsed;
-        if (stacks)
+        _folder.Visibility = _folderBack.Visibility = Visibility.Collapsed;
+        if (l.StacksX >= 0)
         {
             // 74 % of the icon square, a stroke of 7.5 % of it; the folder behind at 55 % ink.
             var (x, y, size) = item(l.StacksX);
             double s = size * 0.74;
-            foreach (var (p, alpha) in new[] { (_folder, 1.0), (_folderBack, 0.55) })
+            if (s > 0)
             {
-                p.Stroke = new SolidColorBrush(Color.FromArgb((byte)(ink.A * alpha), ink.R, ink.G, ink.B));
-                p.StrokeThickness = Math.Max(1, s * 0.075) / s;
-                p.RenderTransform = new ScaleTransform { ScaleX = s, ScaleY = s };
-                Canvas.SetLeft(p, x + (size - s) / 2);
-                Canvas.SetTop(p, y + (size - s) / 2);
+                _folder.Visibility = _folderBack.Visibility = Visibility.Visible;
+                _folderBrush.Color = ink;
+                _folderBackBrush.Color = Color.FromArgb((byte)(ink.A * 0.55), ink.R, ink.G, ink.B);
+                double thickness = Math.Max(1, s * 0.075) / s;
+                foreach (var (p, scale) in new[] { (_folder, _folderScale), (_folderBack, _folderBackScale) })
+                {
+                    p.StrokeThickness = thickness;
+                    scale.ScaleX = scale.ScaleY = s;
+                    Canvas.SetLeft(p, x + (size - s) / 2);
+                    Canvas.SetTop(p, y + (size - s) / 2);
+                }
             }
         }
     }

@@ -170,7 +170,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
     var extrasDefault = new BarSettings();
     Require(extrasDefault.ShowLaunchpad && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
             extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingRhythm == "live" && extrasDefault.NowPlayingAppMode == "all" &&
-            extrasDefault.NowPlayingApps.Count == 0 && extrasDefault.NowPlayingScrollVolume &&
+            extrasDefault.NowPlayingApps.Count == 0 &&
             !extrasDefault.ShowFolderStacks && extrasDefault.FolderStackLayout == "fan" &&
             extrasDefault.FolderStackMax == 8 && extrasDefault.FolderStacks.Count == 0,
         "Extras settings must have expected defaults.");
@@ -183,7 +183,6 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
         NowPlayingRhythm = "loop",
         NowPlayingAppMode = "block",
         NowPlayingApps = ["spotify.exe"],
-        NowPlayingScrollVolume = false,
         ShowFolderStacks = true,
         FolderStackLayout = "column",
         FolderStackMax = 12,
@@ -195,7 +194,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
     {
         s => s.ShowLaunchpad = false, s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
         s => s.NowPlayingMotion = "subtle", s => s.NowPlayingRhythm = "loop", s => s.NowPlayingAppMode = "allow",
-        s => s.NowPlayingApps = ["a.exe"], s => s.NowPlayingScrollVolume = false,
+        s => s.NowPlayingApps = ["a.exe"],
         s => s.ShowFolderStacks = true, s => s.FolderStackLayout = "column",
         s => s.FolderStackMax = 10, s => s.FolderStacks = [@"D:\Work"],
     })
@@ -1150,6 +1149,66 @@ finally
             se2.ApplyExternalChange(new BarSettings { StageExcluded = ["snippingtool.exe", "screenclippinghost.exe", "obs64.exe"] }, 2);
             Require(se2.Draft.StageExcluded.SequenceEqual(["screenclippinghost.exe", "obs64.exe"]),
                 "StageExcluded 3-way merge must drop locally removed item while keeping remote addition.");
+        }
+
+        // NowPlayingApps 3-way merge (max 64, ASCII trim + OrdinalIgnoreCase, concurrent scalar doesn't clobber)
+        {
+            var np = new SettingsSession();
+            np.ApplyInitialState(
+                new BarSettings { Height = 60, NowPlayingApps = ["spotify.exe", "qqmusic.exe"] },
+                new BarSettings { Height = 60, NowPlayingApps = ["spotify.exe", "qqmusic.exe"] },
+                "i1", 1);
+            np.Draft.NowPlayingApps = [" qqmusic.exe ", "cloudmusic.exe"];
+            np.ApplyConflict(new BarSettings { Height = 72, NowPlayingApps = ["SPOTIFY.EXE", "qqmusic.exe", "applemusic.exe"] }, 2, "i1");
+            Require(np.Draft.Height == 72 && np.Draft.NowPlayingApps.SequenceEqual([" qqmusic.exe ", "applemusic.exe", "cloudmusic.exe"]),
+                "NowPlayingApps 3-way merge must keep local removal/add alongside remote scalar and list addition.");
+
+            var npReorder = new SettingsSession();
+            npReorder.ApplyInitialState(
+                new BarSettings { NowPlayingApps = ["a.exe", "b.exe"] },
+                new BarSettings { NowPlayingApps = ["a.exe", "b.exe"] },
+                "i1", 1);
+            npReorder.Draft.NowPlayingApps = ["b.exe", "a.exe"];
+            npReorder.ApplyExternalChange(new BarSettings { NowPlayingApps = ["A.EXE", "b.exe", "c.exe"] }, 2);
+            Require(npReorder.Draft.NowPlayingApps.SequenceEqual(["b.exe", "A.EXE", "c.exe"]),
+                "NowPlayingApps 3-way merge must preserve local reorder, target edit, and tail addition.");
+
+            var npCap = new SettingsSession();
+            var npBase = Enumerable.Range(0, 60).Select(i => $"app{i}.exe").ToList();
+            npCap.ApplyInitialState(new BarSettings { NowPlayingApps = [.. npBase] }, new BarSettings { NowPlayingApps = [.. npBase] }, "i1", 1);
+            npCap.Draft.NowPlayingApps = [.. npBase, .. Enumerable.Range(60, 4).Select(i => $"app{i}.exe")];
+            npCap.ApplyExternalChange(new BarSettings { NowPlayingApps = [.. npBase, "r1.exe", "r2.exe", "r3.exe"] }, 2);
+            Require(npCap.Draft.NowPlayingApps.Count == 64, "NowPlayingApps 3-way merge must cap at 64 items.");
+        }
+
+        // FolderStacks 3-way merge (max 32, slash-trimmed + drive root preserved + case-insensitive)
+        {
+            var fs = new SettingsSession();
+            fs.ApplyInitialState(
+                new BarSettings { FolderStacks = [@"C:\", @"D:\Work"] },
+                new BarSettings { FolderStacks = [@"C:\", @"D:\Work"] },
+                "i1", 1);
+            fs.Draft.FolderStacks = [@"D:\Work\", @"C:\", @"E:\Media\"];
+            fs.ApplyConflict(new BarSettings { FolderStacks = [@"c:\", @"d:/work/", @"F:\Docs"] }, 2, "i1");
+            Require(fs.Draft.FolderStacks.SequenceEqual([@"D:\Work\", @"c:\", @"E:\Media\", @"F:\Docs"]),
+                "FolderStacks 3-way merge must match slash-trimmed paths, preserve drive roots, and keep local reorder + additions.");
+
+            var fsDrop = new SettingsSession();
+            fsDrop.ApplyInitialState(
+                new BarSettings { FolderStacks = [@"C:\", @"D:\Work"] },
+                new BarSettings { FolderStacks = [@"C:\", @"D:\Work"] },
+                "i1", 1);
+            fsDrop.Draft.FolderStacks = [@"C:\"];
+            fsDrop.ApplyExternalChange(new BarSettings { FolderStacks = [@"C:\", @"D:\Work\", @"E:\Temp"] }, 2);
+            Require(fsDrop.Draft.FolderStacks.SequenceEqual([@"C:\", @"E:\Temp"]),
+                "FolderStacks 3-way merge must drop locally removed folder even when remote normalized its trailing slash.");
+
+            var fsCap = new SettingsSession();
+            var fsBase = Enumerable.Range(0, 30).Select(i => $@"D:\Dir{i}").ToList();
+            fsCap.ApplyInitialState(new BarSettings { FolderStacks = [.. fsBase] }, new BarSettings { FolderStacks = [.. fsBase] }, "i1", 1);
+            fsCap.Draft.FolderStacks = [.. fsBase, @"D:\Local1", @"D:\Local2"];
+            fsCap.ApplyExternalChange(new BarSettings { FolderStacks = [.. fsBase, @"D:\Remote1", @"D:\Remote2", @"D:\Remote3"] }, 2);
+            Require(fsCap.Draft.FolderStacks.Count == 32, "FolderStacks 3-way merge must cap at 32 items.");
         }
 
         // 8. ReleaseInstaller.ReadPreparedRecovering: corrupt ready.json, missing files, and escaping path auto-clean and return null

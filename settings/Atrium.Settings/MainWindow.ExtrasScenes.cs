@@ -63,9 +63,16 @@ public sealed partial class MainWindow
             _next = Triangles("M-9.5,-6 L-1,0 L-9.5,6 Z M0,-6 L8.5,0 L0,6 Z");
             // Either side of the controls: the heart and the lyrics (NetEase and QQ Music take them).
             _heart = Symbol("\uEB51", 16, _ink.Text);
-            _lyrics = Words(16.5, _ink.Text, true, TextAlignment.Center);
-            _lyrics.Text = Loc.T("Lyrics", "button");
-            foreach (var e in new UIElement[] { _art, _title, _artist, _track, _done, _elapsed, _left, _heart, _lyrics, _previous, _next }) Marks.Children.Add(e);
+            string lyrics = Loc.T("Lyrics", "button");
+            _lyrics = Words(lyrics.Length > 2 ? 11 : 16.5, _ink.Text, true, TextAlignment.Center);
+            _lyrics.Text = lyrics;
+            foreach (var e in new UIElement[]
+            {
+                _art, _title, _artist, _track, _done, _elapsed, _left, _heart, _lyrics, _previous, _next,
+            })
+            {
+                Marks.Children.Add(e);
+            }
             foreach (var e in _bars) Marks.Children.Add(e);
             foreach (var e in _pause) Marks.Children.Add(e);
         }
@@ -160,7 +167,12 @@ public sealed partial class MainWindow
         {
             var paths = M.CurrentSettings.FolderStacks;
             string[] names = paths.Count > 0
-                ? [.. paths.Select(p => System.IO.Path.GetFileName(p.TrimEnd('\\', '/'))).Select(n => n.Length > 0 ? n : "C:")]
+                ? [.. paths.Select(p =>
+                {
+                    string trimmed = p.TrimEnd('\\', '/');
+                    string n = System.IO.Path.GetFileName(trimmed);
+                    return n.Length > 0 ? n : (trimmed.Length > 0 ? trimmed : p);
+                })]
                 : [Loc.T("Desktop"), Loc.T("Downloads"), Loc.T("Documents"), Loc.T("Pictures"), Loc.T("Music")];
             return [.. names.Take(Math.Clamp(M.CurrentSettings.FolderStackMax, 4, 16)).Take(7)];
         }
@@ -173,7 +185,7 @@ public sealed partial class MainWindow
         protected override void Ink(int piece, bool dark) => _ink.Set(dark);
         protected override void Entered() => _opened = double.MaxValue;
         protected override void PoppedIn() => _opened = Now;
-        protected override void Refreshed() => _opened = Now; // another layout or other folders: it opens again
+        protected override void Refreshed() => _opened = Environment.TickCount64; // another layout or other folders: it opens again
 
         private static double Lean(double rise) => Arc - Math.Sqrt(Math.Max(0, Arc * Arc - rise * rise));
         // kStackTilt: the name along the arc's radius, leaning a little less than the arc turns (radians).
@@ -191,7 +203,8 @@ public sealed partial class MainWindow
             {
                 double w = ColumnW * S, h = (2 * ColumnPad + names.Length * RowH) * S;
                 double left = Math.Clamp(ax - w / 2, 16, Math.Max(16, W - 16 - w));
-                return (new[] { new GlassTile(left, PopupBottom - h, w, h, Math.Min(Radius, 22) * S) }, new Frame(left, PopupBottom - h, w, h, false, names, []));
+                return (new[] { new GlassTile(left, PopupBottom - h, w, h, Math.Min(Radius, 22) * S) },
+                    new Frame(left, PopupBottom - h, w, h, false, names, []));
             }
             // The names' capsules, each its own piece of glass, flying out with their folders.
             double[] widths = [.. names.Select(LabelWidth)];
@@ -202,7 +215,11 @@ public sealed partial class MainWindow
                 double lx = ax + Lean(rise) * S - Math.Cos(turn) * reach, ly = foot - rise * S - Math.Sin(turn) * reach;
                 double x = ax + (lx - widths[i] * S / 2 - ax) * e, y = foot + (ly - foot) * e;
                 if (e > 0.02)
-                    tiles.Add(new GlassTile(x, y - LabelH / 2 * S, widths[i] * S * Math.Min(1, e), LabelH * S, LabelH / 2 * S, turn * 180 / Math.PI * Math.Min(1, e)));
+                {
+                    tiles.Add(new GlassTile(
+                        x, y - LabelH / 2 * S, widths[i] * S * Math.Min(1, e), LabelH * S,
+                        LabelH / 2 * S, turn * 180 / Math.PI * Math.Min(1, e)));
+                }
             }
             return ([.. tiles], new Frame(ax, foot, 0, 0, true, names, widths));
         }

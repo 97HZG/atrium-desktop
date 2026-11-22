@@ -25,6 +25,7 @@ public sealed partial class MainWindow
     private SegmentTrack? _npMotion, _npRhythm, _stLayout, _stMax;
     private StackPanel? _stList;
     private TextBlock? _stCount;
+    private bool _pickingStackFolder;
 
     private StackPanel ExtrasPage(int page)
     {
@@ -110,12 +111,13 @@ public sealed partial class MainWindow
     // Beside the bar's other parts in the navigation, after the item tagged `after`.
     private void AddNavItem(int page, string glyph, string text, string after)
     {
+        string localized = Loc.T(text);
         var item = new ListViewItem
         {
             Tag = page.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            Content = new NavLabel { Glyph = glyph, Text = text, Sub = true },
+            Content = new NavLabel { Glyph = glyph, Text = localized, Sub = true },
         };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, text);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, localized);
         int index = Nav.Items.IndexOf(Nav.Items.OfType<ListViewItem>().FirstOrDefault(i => i.Tag as string == after));
         Nav.Items.Insert(index < 0 ? Nav.Items.Count : index + 1, item);
     }
@@ -153,6 +155,7 @@ public sealed partial class MainWindow
         var places = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
         foreach (var (name, path) in KnownStackFolders())
         {
+            if (path.Length == 0) continue;
             var item = new MenuFlyoutItem { Text = Loc.T(name) };
             item.Click += (_, _) => AddStackFolder(path);
             places.Items.Add(item);
@@ -185,7 +188,7 @@ public sealed partial class MainWindow
         return
         [
             ("Desktop", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)),
-            ("Downloads", Path.Combine(home, "Downloads")),
+            ("Downloads", home.Length > 0 ? Path.Combine(home, "Downloads") : ""),
             ("Documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)),
             ("Pictures", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)),
             ("Music", Environment.GetFolderPath(Environment.SpecialFolder.MyMusic)),
@@ -363,12 +366,27 @@ public sealed partial class MainWindow
         Changed();
     }
 
+    private static string NormalizeStackFolder(string path)
+    {
+        string trimmed = path.Trim();
+        if (trimmed.Length == 0) return "";
+        string? root = Path.GetPathRoot(trimmed);
+        if (root != null)
+        {
+            while (trimmed.Length > root.Length && (trimmed[^1] == '\\' || trimmed[^1] == '/'))
+                trimmed = trimmed[..^1];
+        }
+        return trimmed;
+    }
+
     private void AddStackFolder(string path)
     {
+        string normalized = NormalizeStackFolder(path);
+        if (normalized.Length == 0 || !Path.IsPathFullyQualified(normalized)) return;
         var folders = CurrentSettings.FolderStacks;
-        bool known = folders.Any(f => string.Equals(f.TrimEnd('\\'), path.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
-        if (path.Length == 0 || folders.Count >= 32 || known) return;
-        folders.Add(path);
+        bool known = folders.Any(f => string.Equals(NormalizeStackFolder(f), normalized, StringComparison.OrdinalIgnoreCase));
+        if (folders.Count >= 32 || known) return;
+        folders.Add(normalized);
         if (!CurrentSettings.ShowFolderStacks)
         {
             CurrentSettings.ShowFolderStacks = true; // a folder added is a stack wanted
@@ -380,17 +398,27 @@ public sealed partial class MainWindow
 
     private async Task AddStackFolderAsync()
     {
-        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        picker.FileTypeFilter.Add("*");
+        if (_pickingStackFolder || _updatesClosed) return;
+        _pickingStackFolder = true;
         try
         {
-            if (await picker.PickSingleFolderAsync() is { } folder) AddStackFolder(folder.Path);
+            var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            picker.FileTypeFilter.Add("*");
+            if (await picker.PickSingleFolderAsync() is { } folder && !_updatesClosed)
+                AddStackFolder(folder.Path);
         }
         catch (COMException)
         {
-            ShowMessage(InfoBarSeverity.Warning, Loc.T("The file picker is unavailable"),
-                Loc.T("Windows does not show it to apps run as administrator. Open the settings without administrator rights."));
+            if (!_updatesClosed)
+            {
+                ShowMessage(InfoBarSeverity.Warning, Loc.T("The file picker is unavailable"),
+                    Loc.T("Windows does not show it to apps run as administrator. Open the settings without administrator rights."));
+            }
+        }
+        finally
+        {
+            _pickingStackFolder = false;
         }
     }
 }

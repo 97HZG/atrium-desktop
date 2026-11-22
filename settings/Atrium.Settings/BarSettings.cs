@@ -66,7 +66,6 @@ internal sealed class BarSettings
     public string NowPlayingRhythm { get; set; } = "live"; // live | loop
     public string NowPlayingAppMode { get; set; } = "all";   // all | allow | block
     public List<string> NowPlayingApps { get; set; } = [];
-    public bool NowPlayingScrollVolume { get; set; } = true;
     public bool ShowFolderStacks { get; set; }
     public string FolderStackLayout { get; set; } = "fan";   // fan | column
     public int FolderStackMax { get; set; } = 8;
@@ -207,7 +206,6 @@ internal sealed class BarSettings
             ["nowPlayingMotion"] = NowPlayingMotion,
             ["nowPlayingRhythm"] = NowPlayingRhythm,
             ["nowPlayingAppMode"] = NowPlayingAppMode,
-            ["nowPlayingScrollVolume"] = NowPlayingScrollVolume,
             ["showFolderStacks"] = ShowFolderStacks,
             ["folderStackLayout"] = FolderStackLayout,
             ["folderStackMax"] = (double)FolderStackMax, // as the other numbers: read back as a double in memory too
@@ -429,6 +427,38 @@ internal sealed class BarSettings
         return result;
     }
 
+    private static bool IsFolderRootSlash(ReadOnlySpan<char> path)
+    {
+        if (path.Length == 1) return path[0] is '\\' or '/';
+        if (path.Length == 2) return path[0] == '\\' && path[1] == '\\';
+        if (path.Length == 3) return char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] is '\\' or '/';
+        if (path.Length == 7 && (path.StartsWith(@"\\?\") || path.StartsWith(@"\\.\")))
+            return char.IsAsciiLetter(path[4]) && path[5] == ':' && path[6] is '\\' or '/';
+        return false;
+    }
+
+    private static List<string> ReadFolderStacks(JsonObject? o, List<string>? fallback, int maxCount = 32)
+    {
+        var raw = ReadStringArray(o, "folderStacks", fallback);
+        var result = new List<string>(Math.Min(raw.Count, maxCount));
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string item in raw)
+        {
+            var span = item.AsSpan();
+            while (span.Length > 0 && span[^1] is '\\' or '/' && !IsFolderRootSlash(span))
+                span = span[..^1];
+            if (span.Length == 0) continue;
+            string norm = span.ToString();
+            string key = norm.Replace('/', '\\');
+            if (seen.Add(key))
+            {
+                result.Add(norm);
+                if (result.Count >= maxCount) break;
+            }
+        }
+        return result;
+    }
+
     private static void ReadExtrasJson(JsonObject? o, BarSettings s, BarSettings f)
     {
         bool Flag(string k, bool d) => o?[k] is JsonValue v && v.TryGetValue(out bool b) ? b : d;
@@ -442,13 +472,12 @@ internal sealed class BarSettings
         string appMode = Str("nowPlayingAppMode", f.NowPlayingAppMode);
         s.NowPlayingAppMode = appMode is "allow" or "block" ? appMode : "all";
         s.NowPlayingApps = ReadStringArray(o, "nowPlayingApps", f.NowPlayingApps, 64);
-        s.NowPlayingScrollVolume = Flag("nowPlayingScrollVolume", f.NowPlayingScrollVolume);
         s.ShowFolderStacks = Flag("showFolderStacks", f.ShowFolderStacks);
         string stackLayout = Str("folderStackLayout", f.FolderStackLayout);
         s.FolderStackLayout = stackLayout == "column" ? "column" : "fan";
         double rawMax = o?["folderStackMax"] is JsonValue mv && mv.TryGetValue(out double mx) && double.IsFinite(mx) ? mx : f.FolderStackMax;
         s.FolderStackMax = (int)Math.Round(Math.Clamp(rawMax, 4, 16), MidpointRounding.AwayFromZero);
-        s.FolderStacks = ReadStringArray(o, "folderStacks", f.FolderStacks, 32);
+        s.FolderStacks = ReadFolderStacks(o, f.FolderStacks, 32);
     }
 
     public bool SameAs(BarSettings o) =>
@@ -462,7 +491,7 @@ internal sealed class BarSettings
         ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad && ShowNowPlaying == o.ShowNowPlaying &&
         NowPlayingShowPaused == o.NowPlayingShowPaused && NowPlayingMotion == o.NowPlayingMotion && NowPlayingRhythm == o.NowPlayingRhythm &&
         NowPlayingAppMode == o.NowPlayingAppMode && NowPlayingApps.SequenceEqual(o.NowPlayingApps, StringComparer.OrdinalIgnoreCase) &&
-        NowPlayingScrollVolume == o.NowPlayingScrollVolume && ShowFolderStacks == o.ShowFolderStacks &&
+        ShowFolderStacks == o.ShowFolderStacks &&
         FolderStackLayout == o.FolderStackLayout && FolderStackMax == o.FolderStackMax &&
         FolderStacks.SequenceEqual(o.FolderStacks, StringComparer.OrdinalIgnoreCase) &&
         TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&

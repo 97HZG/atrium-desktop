@@ -152,12 +152,12 @@ void CheckExtrasSettings()
 {
     Settings defaults, parsed;
     Require(defaults.showLaunchpad && defaults.showNowPlaying && defaults.nowPlayingShowPaused && defaults.nowPlayingMotion == L"normal" &&
-                defaults.nowPlayingAppMode == L"all" && defaults.nowPlayingApps.empty() && defaults.nowPlayingScrollVolume && !defaults.showFolderStacks &&
-                defaults.folderStackLayout == L"fan" && defaults.folderStackMax == 8 && defaults.folderStacks.empty(),
+                defaults.nowPlayingAppMode == L"all" && defaults.nowPlayingApps.empty() && !defaults.showFolderStacks && defaults.folderStackLayout == L"fan" &&
+                defaults.folderStackMax == 8 && defaults.folderStacks.empty(),
             "extras settings have expected defaults");
     Require(Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.showLaunchpad && parsed.showNowPlaying && parsed.nowPlayingShowPaused &&
-                parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.nowPlayingApps.empty() && parsed.nowPlayingScrollVolume &&
-                !parsed.showFolderStacks && parsed.folderStackLayout == L"fan" && parsed.folderStackMax == 8 && parsed.folderStacks.empty(),
+                parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.nowPlayingApps.empty() && !parsed.showFolderStacks &&
+                parsed.folderStackLayout == L"fan" && parsed.folderStackMax == 8 && parsed.folderStacks.empty(),
             "old settings receive extras defaults");
 
     Settings custom;
@@ -167,15 +167,13 @@ void CheckExtrasSettings()
     custom.nowPlayingMotion = L"vivid";
     custom.nowPlayingAppMode = L"allow";
     custom.nowPlayingApps = {L"spotify.exe", L"Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"};
-    custom.nowPlayingScrollVolume = false;
     custom.showFolderStacks = true;
     custom.folderStackLayout = L"column";
     custom.folderStackMax = 12;
     custom.folderStacks = {L"C:\\Users\\Demo\\Desktop", L"D:\\Projects"};
     Require(Settings::FromJson(custom.ToJson(), Settings{}, parsed) && !parsed.showLaunchpad && !parsed.showNowPlaying && !parsed.nowPlayingShowPaused &&
                 parsed.nowPlayingMotion == L"vivid" && parsed.nowPlayingAppMode == L"allow" && parsed.nowPlayingApps == custom.nowPlayingApps &&
-                !parsed.nowPlayingScrollVolume && parsed.showFolderStacks && parsed.folderStackLayout == L"column" && parsed.folderStackMax == 12 &&
-                parsed.folderStacks == custom.folderStacks,
+                parsed.showFolderStacks && parsed.folderStackLayout == L"column" && parsed.folderStackMax == 12 && parsed.folderStacks == custom.folderStacks,
             "extras settings survive round trip");
 
     Require(Settings::FromJson(LR"({"nowPlayingMotion":"bad","nowPlayingAppMode":"bad","folderStackLayout":"bad"})", custom, parsed) &&
@@ -201,6 +199,12 @@ void CheckExtrasSettings()
             "nowPlayingApps trims, drops empty, and caps at 64");
     Require(many.folderStacks.size() == 32 && many.folderStacks.front() == L"\u3000C:\\Keep\u00A0" && many.folderStacks.back() == L"D:\\Dir30",
             "folderStacks trims ASCII whitespace only, drops empty, and caps at 32");
+
+    Settings deduped;
+    deduped.folderStacks = {L"C:\\", L"c:\\\\", L" D:\\Work\\ ", L"d:/work", L"\\\\server\\share\\"};
+    deduped.Clamp();
+    Require(deduped.folderStacks == std::vector<std::wstring>{L"C:\\", L"D:\\Work", L"\\\\server\\share"},
+            "folderStacks strips non-root trailing slashes and deduplicates case-insensitively");
 }
 
 void CheckDisplays()

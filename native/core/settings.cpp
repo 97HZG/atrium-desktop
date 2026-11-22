@@ -1,6 +1,7 @@
 #include "settings.h"
 
 #include "localization_format.h"
+#include "win32_path.h"
 
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
@@ -10,7 +11,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cwctype>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace json = winrt::Windows::Data::Json;
@@ -160,7 +163,6 @@ void ReadExtrasSettingsJson(const json::JsonObject& o, Settings& s)
     str(L"nowPlayingRhythm", s.nowPlayingRhythm);
     str(L"nowPlayingAppMode", s.nowPlayingAppMode);
     ReadStringArrayJson(o, L"nowPlayingApps", s.nowPlayingApps);
-    flag(L"nowPlayingScrollVolume", s.nowPlayingScrollVolume);
     flag(L"showFolderStacks", s.showFolderStacks);
     str(L"folderStackLayout", s.folderStackLayout);
     if (o.HasKey(L"folderStackMax") && o.GetNamedValue(L"folderStackMax").ValueType() == json::JsonValueType::Number) {
@@ -185,6 +187,50 @@ void NormalizeStringList(std::vector<std::wstring>& list, size_t maxCount = SIZE
     std::erase_if(list, [](const std::wstring& entry) { return entry.empty(); });
     if (list.size() > maxCount)
         list.resize(maxCount);
+}
+
+bool IsFolderSlash(wchar_t ch) { return ch == L'\\' || ch == L'/'; }
+
+bool IsFolderRootSlash(const std::wstring& path)
+{
+    if (path.size() == 1)
+        return IsFolderSlash(path[0]);
+    if (path.size() == 2)
+        return path[0] == L'\\' && path[1] == L'\\';
+    if (path.size() == 3)
+        return std::iswalpha(static_cast<wint_t>(path[0])) != 0 && path[1] == L':' && IsFolderSlash(path[2]);
+    if (path.size() == 7 && (path.starts_with(L"\\\\?\\") || path.starts_with(L"\\\\.\\")))
+        return std::iswalpha(static_cast<wint_t>(path[4])) != 0 && path[5] == L':' && IsFolderSlash(path[6]);
+    return false;
+}
+
+std::wstring FolderDedupeKey(std::wstring path)
+{
+    for (wchar_t& ch : path) {
+        if (ch == L'/')
+            ch = L'\\';
+    }
+    return FoldCase(path);
+}
+
+void NormalizeFolderStacks(std::vector<std::wstring>& list, size_t maxCount)
+{
+    NormalizeStringList(list);
+    std::vector<std::wstring> deduped;
+    deduped.reserve(std::min(list.size(), maxCount));
+    std::unordered_set<std::wstring> seen;
+    for (auto& entry : list) {
+        while (!entry.empty() && IsFolderSlash(entry.back()) && !IsFolderRootSlash(entry))
+            entry.pop_back();
+        if (entry.empty())
+            continue;
+        if (seen.insert(FolderDedupeKey(entry)).second) {
+            deduped.push_back(std::move(entry));
+            if (deduped.size() >= maxCount)
+                break;
+        }
+    }
+    list = std::move(deduped);
 }
 
 } // namespace
@@ -250,7 +296,7 @@ void Settings::Clamp()
     folderStackMax = std::clamp(folderStackMax, 4, 16);
     NormalizeStringList(stageExcluded);
     NormalizeStringList(nowPlayingApps, 64);
-    NormalizeStringList(folderStacks, 32);
+    NormalizeFolderStacks(folderStacks, 32);
     if (pins && pins->size() > 64)
         pins->resize(64);
     if (preset != L"liquid" && preset != L"frosted")
@@ -311,7 +357,6 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"nowPlayingRhythm", json::JsonValue::CreateStringValue(nowPlayingRhythm));
     o.SetNamedValue(L"nowPlayingAppMode", json::JsonValue::CreateStringValue(nowPlayingAppMode));
     strArr(L"nowPlayingApps", nowPlayingApps);
-    o.SetNamedValue(L"nowPlayingScrollVolume", json::JsonValue::CreateBooleanValue(nowPlayingScrollVolume));
     o.SetNamedValue(L"showFolderStacks", json::JsonValue::CreateBooleanValue(showFolderStacks));
     o.SetNamedValue(L"folderStackLayout", json::JsonValue::CreateStringValue(folderStackLayout));
     num(L"folderStackMax", folderStackMax);
