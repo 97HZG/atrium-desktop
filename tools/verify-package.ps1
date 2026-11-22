@@ -25,7 +25,8 @@ $expectedVersion = $Matches[1]
 $temp = Join-Path ([IO.Path]::GetFullPath([IO.Path]::GetTempPath())) ('Atrium-verify-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp | Out-Null
 try {
-    Expand-Archive -LiteralPath $ZipPath -DestinationPath $temp -Force
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $temp)
     $pkg = Join-Path $temp 'Atrium'; if (!(Test-Path -LiteralPath $pkg -PathType Container)) { $pkg = $temp }
     $required = @('Atrium.exe', 'Settings\Atrium.Settings.exe', 'Settings\Atrium.Settings.dll',
         'Settings\Update.ps1', 'Uninstall.ps1', 'LICENSE', 'locales\manifest.json', 'package-manifest.json')

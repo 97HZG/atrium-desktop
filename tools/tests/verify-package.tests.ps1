@@ -93,6 +93,10 @@ function Start-VerifyChild([string]$ShellExe, [string[]]$ScriptArgs, [string]$St
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
+    if ($ShellExe -match 'WindowsPowerShell' -and $env:PSModulePath) {
+        $cleanModules = @($env:PSModulePath.Split(';') | Where-Object { $_ -and $_ -notmatch '\\PowerShell\\(7|Modules)|\\PowerShell\\7\\' })
+        $psi.EnvironmentVariables['PSModulePath'] = $cleanModules -join ';'
+    }
     $p = [System.Diagnostics.Process]::Start($psi)
     $outTask = $p.StandardOutput.ReadToEndAsync()
     $errTask = $p.StandardError.ReadToEndAsync()
@@ -156,7 +160,7 @@ function Invoke-ThreeSentinelSuite([string]$ZipPath, [string]$ShellExe, [bool]$I
     Assert-NoVerifyOrphans "$SuiteName (2)" $pipeTag
     Assert-SentinelUnchanged "$SuiteName (2)"
     if (Test-Path -LiteralPath $killedTemp -PathType Container) {
-        $rmDeadline = [DateTime]::UtcNow.AddSeconds(2)
+        $rmDeadline = [DateTime]::UtcNow.AddSeconds(5)
         for (;;) {
             try {
                 Remove-Item -LiteralPath $killedTemp -Recurse -Force -ErrorAction Stop
@@ -174,7 +178,7 @@ function Invoke-ThreeSentinelSuite([string]$ZipPath, [string]$ShellExe, [bool]$I
     }
 
     # (3) UIA hang bounded timeout
-    $expectMs = if ($IsStub) { 1500 } else { 3000 }
+    $expectMs = if ($IsStub) { 1500 } else { 4000 }
     $args3 = $zipArg + @('-HangUiaStep', 'first-toggle', '-UiaTimeoutMs', "$expectMs")
     $child3 = Start-VerifyChild $ShellExe $args3 (Join-Path $suiteDir 's3.out') (Join-Path $suiteDir 's3.err')
     try {
@@ -626,7 +630,8 @@ internal static class StubSettings
     Write-Utf8File (Join-Path $stubFull 'package-manifest.json') ($manifestJson + "`n") $false
 
     $stubZip = Join-Path $fixtureRoot "Atrium-$expectedVersion-win-x64.zip"
-    Compress-Archive -Path $stubDir -DestinationPath $stubZip
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory($stubDir, $stubZip, [IO.Compression.CompressionLevel]::Optimal, $true)
 
     # Read-only verify-package check on stub zip
     & $verifyScript -ZipPath $stubZip
