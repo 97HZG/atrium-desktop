@@ -1,8 +1,8 @@
 // The now-playing card, opened from the bar's now-playing entry: a card of the bar's glass in the
-// spirit of the Dynamic Island's player. The album art with rounded corners; the title, artist and
-// app; the five bars, live, in the art's colour; a progress bar that follows the track and can be
-// dragged to seek; previous, play/pause and next. The art's colours, spread soft across the card,
-// tint the glass faintly. Commands leave through onCommand, the state comes back through Update;
+// spirit of the Dynamic Island's player, its glass the bar's own (nothing laid over it). The album art
+// with rounded corners; the title and artist; the five bars, live, in the art's colour; a progress bar
+// between its times that follows the track and, where the player allows, is dragged by its knob to
+// seek; previous, play/pause and next. Commands leave through onCommand, the state comes back through Update;
 // a press shows its result at once and the session's answer confirms it.
 #pragma once
 
@@ -58,7 +58,7 @@ private:
     int64_t ShownPositionUs(double now) const;
     float TrackFraction(float x) const; // a point along the progress bar, 0..1
     float Hover(Canvas& c, Part part, bool on);
-    void TakeArtwork(); // the rounded art, its colour and its wash, once per picture
+    void TakeArtwork(); // the rounded art and its colour, once per picture
 
     Surface surface_;
     MediaSnapshot media_;
@@ -67,9 +67,8 @@ private:
     std::shared_ptr<const MusicFeed> feed_;
     MusicBars bars_;
     double lastBarsMs_ = 0;
-    // The art as drawn: corners rounded; its colour (the bars, the progress); its colours spread
-    // over a few pixels, stretched across the card as the wash.
-    IconImage art_, wash_;
+    // The art as drawn: corners rounded; its colour (the bars, the progress).
+    IconImage art_;
     uint64_t artVersion_ = 0;
     std::optional<D2D1_COLOR_F> tint_;
     double artMs_ = 0; // a new picture fades in from then

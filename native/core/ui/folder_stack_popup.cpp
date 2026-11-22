@@ -220,9 +220,13 @@ void FolderStackPopup::PaintFan(Canvas& c)
         c.Text(folders_[i].name, D2D1::RectF(pill.left + pad, pill.top, pill.right - pad, pill.bottom), kLabelFont, folders_[i].missing ? t.subtext : t.text,
                DWRITE_FONT_WEIGHT_NORMAL, 1);
         c.EndGroup();
-        // The icon: out of the entry small, full size in place; a little larger under the pointer.
+        // The icon: out of the entry small, full size in place; a little larger under the pointer;
+        // tilted with its name.
         const float k = (0.35f + 0.65f * std::min(e, 1.f)) * (1 + 0.12f * hv) * (pressed_ == int(i) ? 0.94f : 1.f);
-        PaintIcon(c, i, Around(D2D1::Point2F(target.x + dx, target.y + dy), kStackFanIcon / 2 * k), opacity);
+        const D2D1_POINT_2F at = D2D1::Point2F(target.x + dx, target.y + dy);
+        c.BeginGroup(1, 1, at.x, at.y, 0, 0, item.tilt * std::min(e, 1.f));
+        PaintIcon(c, i, Around(at, kStackFanIcon / 2 * k), opacity);
+        c.EndGroup();
     }
     if (moving)
         c.Continue();
