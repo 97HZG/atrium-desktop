@@ -53,10 +53,12 @@ void Bar::SetMusic(std::shared_ptr<const MusicFeed> feed, bool shown, std::wstri
         std::lock_guard g(lock_);
         music_ = std::move(feed);
     }
-    if (relayout)
+    if (relayout) {
         Relayout(); // the entry comes or goes
-    else
+    } else {
         Publish(false); // the render thread takes up the bars (playing) or lets them settle
+        UpdateTooltips();
+    }
 }
 
 std::wstring Bar::TooltipText(const std::wstring& key) const

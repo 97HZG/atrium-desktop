@@ -1032,10 +1032,10 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
             return false;
         if (g_app.activeBar == bar.get())
             CloseBarPopups(), g_app.activeBar = g_app.bar.get();
-        bar->SetVisible(false);
         retired.push_back(std::move(bar));
         return true;
     });
+    std::ranges::for_each(retired, [](const auto& bar) { bar->SetVisible(false); });
     for (auto& bar : retired)
         if (!bar->StopRendering(5000)) {
             Log(L"core: secondary display renderer slow during removal; draining");

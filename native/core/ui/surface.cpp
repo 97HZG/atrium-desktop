@@ -1,226 +1,31 @@
 #include "ui/surface.h"
 
-#include "bar_edge.h"
 #include "clock.h"
 #include "render/capture.h"
 #include "render/continuous_corners.h"
 #include "log.h"
 #include "render/glass_renderer.h"
 
-#include <dwmapi.h>
-#include <shellscalingapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
-#include <condition_variable>
-#include <mutex>
-#include <thread>
 #include <vector>
 
 namespace atrium {
-
-float PopupScale(RECT bar)
-{
-    HMONITOR mon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
-    UINT dpi = 96, dpiY = 96;
-    GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi, &dpiY);
-    return float(dpi) / 96.f;
-}
-
-RECT PopupRect(RECT bar, D2D1_SIZE_F sizeDip, PopupAlign align)
-{
-    HMONITOR mon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(mon, &mi);
-    const RECT& wa = mi.rcWork;
-    float s = PopupScale(bar);
-    int w = int(std::lround(sizeDip.width * s)), h = int(std::lround(sizeDip.height * s)), gap = int(std::lround(kPopupGapDip * s));
-    const BarEdge edge = EdgeOf(bar);
-    if (Vertical(edge)) {
-        int top = int(wa.top + wa.bottom - h) / 2;
-        if (align == PopupAlign::Left)
-            top = int(bar.top);
-        else if (align == PopupAlign::Right)
-            top = int(bar.bottom) - h;
-        top = std::max(int(wa.top) + gap, std::min(top, int(wa.bottom) - gap - h));
-        int bottom = std::min(int(wa.bottom) - gap, top + h);
-        if (edge == BarEdge::Left) {
-            int left = std::max(int(wa.left) + gap, int(bar.right) + gap);
-            return RECT{left, top, std::min(int(wa.right) - gap, left + w), bottom};
-        }
-        int right = std::min(int(wa.right) - gap, int(bar.left) - gap);
-        return RECT{std::max(int(wa.left) + gap, right - w), top, right, bottom};
-    }
-    int left = align == PopupAlign::Left ? int(bar.left) : align == PopupAlign::Right ? int(bar.right) - w : int(wa.left + wa.right - w) / 2;
-    left = std::max(int(wa.left) + gap, std::min(left, int(wa.right) - gap - w));
-    int right = std::min(int(wa.right) - gap, left + w);
-    if (edge == BarEdge::Top) {
-        int top = std::max(int(wa.top) + gap, int(bar.bottom) + gap);
-        return RECT{left, top, right, std::min(int(wa.bottom) - gap, top + h)};
-    }
-    int bottom = std::min(int(wa.bottom) - gap, int(bar.top) - gap);
-    return RECT{left, std::max(int(wa.top) + gap, bottom - h), right, bottom};
-}
-
-POINT PopupAnchor(RECT bar, RECT rect)
-{
-    switch (EdgeOf(bar)) {
-    case BarEdge::Top: return {(rect.left + rect.right) / 2, rect.bottom};
-    case BarEdge::Left: return {rect.right, (rect.top + rect.bottom) / 2};
-    case BarEdge::Right: return {rect.left, (rect.top + rect.bottom) / 2};
-    default: return {(rect.left + rect.right) / 2, rect.top};
-    }
-}
-
-POINT PopupOrigin(RECT bar, RECT popup, RECT anchor)
-{
-    const BarEdge edge = EdgeOf(bar);
-    const POINT a = PopupAnchor(bar, anchor);
-    if (Vertical(edge)) {
-        const LONG y = anchor.bottom > anchor.top ? a.y : popup.top + (popup.bottom - popup.top) / 6;
-        return {edge == BarEdge::Left ? popup.left : popup.right, y};
-    }
-    const LONG x = anchor.right > anchor.left ? a.x : popup.left + (popup.right - popup.left) / 6;
-    return {x, edge == BarEdge::Top ? popup.top : popup.bottom};
-}
 
 namespace {
 
 constexpr wchar_t kClass[] = L"AtriumSurface";
 constexpr UINT_PTR kHideTimer = 0x5A01, kGlassWaitTimer = 0x5A03;
-constexpr UINT kHideMs = 140;     // the closing pop (PopVisual) lasts 130 ms
+constexpr UINT kHideMs = 140;        // the closing pop (PopVisual) lasts 130 ms
 constexpr double kGlassWaitMs = 300; // then a plain panel stands in for missing glass
-constexpr UINT WM_SURFACE_FRAME = WM_APP + 0x42;
-D2D1_COLOR_F Rgba(uint32_t rgb, float a) { return D2D1::ColorF(rgb, a); }
 
-// Frames for the popups' animations, in step with the compositor: a thread
-// waits for each composition (DwmFlush) and tells the windows that want a
-// frame. (A 10 ms timer really fires every 16-31 ms and stutters.)
-class FramePump {
-public:
-    FramePump(const FramePump&) = delete;
-    FramePump& operator=(const FramePump&) = delete;
-    static FramePump& Get()
-    {
-        static FramePump pump;
-        return pump;
-    }
-    void Want(HWND h)
-    {
-        std::lock_guard g(mutex_);
-        if (std::ranges::find(wanting_, h) == wanting_.end())
-            wanting_.push_back(h);
-        if (!thread_.joinable())
-            thread_ = std::thread([this] { Run(); });
-        cv_.notify_one();
-    }
-    void Shutdown()
-    {
-        {
-            std::lock_guard g(mutex_);
-            stop_ = true;
-            wanting_.clear();
-        }
-        cv_.notify_one();
-        if (thread_.joinable())
-            thread_.join();
-        std::lock_guard g(mutex_);
-        stop_ = false;
-    }
-
-private:
-    FramePump() = default;
-    ~FramePump() { Shutdown(); }
-    void Run()
-    {
-        std::vector<HWND> due;
-        for (;;) {
-            {
-                std::unique_lock g(mutex_);
-                cv_.wait(g, [&] { return stop_ || !wanting_.empty(); });
-                if (stop_)
-                    return;
-            }
-            const bool flushed = SUCCEEDED(DwmFlush());
-            {
-                std::unique_lock g(mutex_);
-                if ((!flushed && cv_.wait_for(g, std::chrono::milliseconds(8), [&] { return stop_; })) || stop_)
-                    return;
-                due.swap(wanting_);
-            }
-            for (HWND h : due)
-                PostMessageW(h, WM_SURFACE_FRAME, 0, 0);
-            due.clear();
-        }
-    }
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::vector<HWND> wanting_;
-    bool stop_ = false;
-    std::thread thread_;
-};
-
-uint32_t g_tint = 0xFFFFFF;
-double g_transparency = 0.95;
 GlassHost* g_host = nullptr;
 bool g_capturable = false, g_captureVisible = false;
 std::vector<Surface*> g_all;
 
 } // namespace
-
-void Theme::SetGlass(uint32_t tint, double transparency)
-{
-    g_tint = tint;
-    g_transparency = transparency;
-}
-
-Theme Theme::For(bool darkInk)
-{
-    // The bar's inks and washes (BarPainter::DrawContent).
-    Theme t;
-    t.light = darkInk;
-    PanelTone tone = PanelToneFor(g_tint, g_transparency);
-    t.panel = Rgba(tone.tint, 0.96f);
-    const uint32_t wash = darkInk ? 0x000000 : 0xFFFFFF, textRgb = darkInk ? 0x111317 : 0xFFFFFF;
-    t.border = Rgba(wash, darkInk ? 0.10f : 0.30f);
-    t.text = Rgba(textRgb, darkInk ? 0.92f : 0.96f);
-    t.subtext = Rgba(textRgb, darkInk ? 0.66f : 0.76f);
-    t.faint = Rgba(textRgb, darkInk ? 0.46f : 0.56f);
-    t.hover = Rgba(wash, darkInk ? 0.10f : 0.20f);
-    t.press = Rgba(wash, darkInk ? 0.16f : 0.28f);
-    t.divider = Rgba(wash, darkInk ? 0.12f : 0.24f);
-    t.card = Rgba(wash, darkInk ? 0.05f : 0.08f);
-    t.cardHot = Rgba(wash, darkInk ? 0.10f : 0.20f);
-    t.halo = Rgba(darkInk ? 0xFFFFFF : 0x000000, darkInk ? 0.35f : 0.32f);
-    t.accent = Rgba(0x0A84FF, 1);
-    t.accentText = Rgba(0xFFFFFF, 1);
-    return t;
-}
-
-Theme Theme::Mix(float darkInk)
-{
-    if (darkInk <= 0.001f || darkInk >= 0.999f)
-        return For(darkInk >= 0.5f);
-    Theme a = For(false), b = For(true), t = b;
-    auto mix = [&](D2D1_COLOR_F Theme::* c) {
-        const D2D1_COLOR_F &x = a.*c, &y = b.*c;
-        t.*c = D2D1::ColorF(x.r + (y.r - x.r) * darkInk, x.g + (y.g - x.g) * darkInk, x.b + (y.b - x.b) * darkInk, x.a + (y.a - x.a) * darkInk);
-    };
-    for (auto c : {&Theme::border, &Theme::text, &Theme::subtext, &Theme::faint, &Theme::hover, &Theme::press, &Theme::divider, &Theme::card, &Theme::cardHot,
-                   &Theme::halo})
-        mix(c);
-    t.light = darkInk >= 0.5f;
-    return t;
-}
-
-Theme Theme::Panel()
-{
-    Theme t = For(PanelToneFor(g_tint, g_transparency).light);
-    t.halo = D2D1::ColorF(0, 0, 0, 0); // an opaque panel needs none
-    return t;
-}
 
 // ---- Surface -----------------------------------------------------------------
 
@@ -357,9 +162,9 @@ void Surface::SetShapes(const std::vector<ShapeDip>& shapes, bool animating)
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
         auto sameRect = [](const auto& x, const auto& y) { return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom; };
         auto samePart = [&](const ShapeDip::Part& x, const ShapeDip::Part& y) { return sameRect(x.rect, y.rect) && std::equal(x.radii, x.radii + 4, y.radii); };
-        return a.radius == b.radius && a.fade == b.fade && a.rotate == b.rotate && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix && a.tailX == b.tailX &&
-               a.tailHalfWidth == b.tailHalfWidth && a.tailHeight == b.tailHeight && a.tailInset == b.tailInset && a.parts.size() == b.parts.size() &&
-               std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
+        return a.radius == b.radius && a.fade == b.fade && a.rotate == b.rotate && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix &&
+               a.tailX == b.tailX && a.tailHalfWidth == b.tailHalfWidth && a.tailHeight == b.tailHeight && a.tailInset == b.tailInset &&
+               a.parts.size() == b.parts.size() && std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
     };
     if (!animating && !shapesAnimating_ && shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
         return;
@@ -464,6 +269,30 @@ void Surface::Ripple(float x, float y)
     PublishPanel();
 }
 
+bool Surface::HandleMouse(UINT m, LPARAM& l)
+{
+    // Mouse positions in content coordinates; presses on the margin are the caller's to decide.
+    const bool mouse = (m >= WM_MOUSEFIRST && m <= WM_MBUTTONDBLCLK && m != WM_MOUSEWHEEL) || m == WM_MOUSEHWHEEL;
+    if (!mouse || m == WM_MOUSEHWHEEL)
+        return false;
+    const int inset = InsetPx();
+    int x = GET_X_LPARAM(l) - inset, y = GET_Y_LPARAM(l) - inset;
+    if (desktopLayer_) {
+        x -= window_.left - nativeWindow_.left;
+        y -= window_.top - nativeWindow_.top;
+    }
+    const bool outside = x < 0 || y < 0 || x >= rect_.right - rect_.left || y >= rect_.bottom - rect_.top;
+    if (outside && GetCapture() != hwnd_ && (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)) {
+        if (onDismiss)
+            onDismiss();
+        return true;
+    }
+    if (hiding_)
+        return true;
+    l = MAKELPARAM(x, y);
+    return false;
+}
+
 LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     auto* self = reinterpret_cast<Surface*>(GetWindowLongPtrW(h, GWLP_USERDATA));
@@ -503,25 +332,8 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_GLASS_INK: self->SetInk(w != 0, InkFor(h)); return 0;
     default: break;
     }
-    // Mouse positions in content coordinates; presses on the margin are the caller's to decide.
-    const bool mouse = (m >= WM_MOUSEFIRST && m <= WM_MBUTTONDBLCLK && m != WM_MOUSEWHEEL) || m == WM_MOUSEHWHEEL;
-    if (mouse && m != WM_MOUSEHWHEEL) {
-        int inset = self->InsetPx();
-        int x = GET_X_LPARAM(l) - inset, y = GET_Y_LPARAM(l) - inset;
-        if (self->desktopLayer_) {
-            x -= self->window_.left - self->nativeWindow_.left;
-            y -= self->window_.top - self->nativeWindow_.top;
-        }
-        bool outside = x < 0 || y < 0 || x >= self->rect_.right - self->rect_.left || y >= self->rect_.bottom - self->rect_.top;
-        if (outside && (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)) {
-            if (self->onDismiss)
-                self->onDismiss();
-            return 0;
-        }
-        if (self->hiding_)
-            return 0;
-        l = MAKELPARAM(x, y);
-    }
+    if (self->HandleMouse(m, l))
+        return 0;
     if (self->message) {
         LRESULT result = 0;
         if (self->message(m, w, l, result))
