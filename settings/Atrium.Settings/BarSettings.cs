@@ -59,6 +59,17 @@ internal sealed class BarSettings
     public bool ShowNotifications { get; set; } = true;
     public bool ShowDesktop { get; set; }              // the Show Desktop slot at the bar's right end
     public bool ShowRunning { get; set; } = true;
+    public bool ShowLaunchpad { get; set; } = true;
+    public bool ShowNowPlaying { get; set; } = true;
+    public bool NowPlayingShowPaused { get; set; } = true;
+    public string NowPlayingMotion { get; set; } = "normal"; // off | subtle | normal | vivid
+    public string NowPlayingAppMode { get; set; } = "all";   // all | allow | block
+    public List<string> NowPlayingApps { get; set; } = [];
+    public bool NowPlayingScrollVolume { get; set; } = true;
+    public bool ShowFolderStacks { get; set; }
+    public string FolderStackLayout { get; set; } = "fan";   // fan | column
+    public int FolderStackMax { get; set; } = 8;
+    public List<string> FolderStacks { get; set; } = [];
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public string Language { get; set; } = "auto"; // auto (follow Windows) | a locale tag: en, zh-Hans, ...
     public string AutoHide { get; set; } = "fullscreen"; // never | fullscreen (a maximized or full-screen app in front) | always
@@ -146,6 +157,8 @@ internal sealed class BarSettings
         var copy = (BarSettings)MemberwiseClone();
         copy.Pins = Pins == null ? null : [.. Pins];
         copy.StageExcluded = [.. StageExcluded];
+        copy.NowPlayingApps = [.. NowPlayingApps];
+        copy.FolderStacks = [.. FolderStacks];
         return copy;
     }
 
@@ -187,6 +200,15 @@ internal sealed class BarSettings
             ["showDesktop"] = ShowDesktop,
             ["autoWidth"] = AutoWidth,
             ["showRunning"] = ShowRunning,
+            ["showLaunchpad"] = ShowLaunchpad,
+            ["showNowPlaying"] = ShowNowPlaying,
+            ["nowPlayingShowPaused"] = NowPlayingShowPaused,
+            ["nowPlayingMotion"] = NowPlayingMotion,
+            ["nowPlayingAppMode"] = NowPlayingAppMode,
+            ["nowPlayingScrollVolume"] = NowPlayingScrollVolume,
+            ["showFolderStacks"] = ShowFolderStacks,
+            ["folderStackLayout"] = FolderStackLayout,
+            ["folderStackMax"] = FolderStackMax,
             ["textColor"] = TextColor,
             ["language"] = Language,
             ["autoHide"] = AutoHide,
@@ -227,10 +249,16 @@ internal sealed class BarSettings
             ["winNumbers"] = WinNumbers,
             ["startOnLogin"] = StartOnLogin,
         };
-        var excluded = new JsonArray();
-        foreach (string app in StageExcluded)
-            excluded.Add(app);
-        o["stageExcluded"] = excluded;
+        static JsonArray ToStringArray(List<string> list)
+        {
+            var array = new JsonArray();
+            foreach (string item in list)
+                array.Add(item);
+            return array;
+        }
+        o["stageExcluded"] = ToStringArray(StageExcluded);
+        o["nowPlayingApps"] = ToStringArray(NowPlayingApps);
+        o["folderStacks"] = ToStringArray(FolderStacks);
         if (StartSize.Length > 0)
             o["startSize"] = StartSize;
         if (StartIcon.Length > 0)
@@ -324,27 +352,8 @@ internal sealed class BarSettings
         s.StageOnRight = Flag("stageOnRight", f.StageOnRight);
         s.StageAutoHide = Flag("stageAutoHide", f.StageAutoHide);
         s.StageMinimize = Flag("stageMinimize", f.StageMinimize);
-        s.StageExcluded = [];
-        const string AsciiWs = " \t\r\n\v\f";
-        void AddStageExcluded(string? raw)
-        {
-            if (raw == null) return;
-            string trimmed = raw.AsSpan().Trim(AsciiWs).ToString();
-            if (trimmed.Length > 0) s.StageExcluded.Add(trimmed);
-        }
-        if (o?["stageExcluded"] is JsonArray excluded)
-        {
-            foreach (var node in excluded)
-            {
-                if (node is JsonValue value && value.TryGetValue(out string? app))
-                    AddStageExcluded(app);
-            }
-        }
-        else if (f.StageExcluded != null)
-        {
-            foreach (string app in f.StageExcluded)
-                AddStageExcluded(app);
-        }
+        s.StageExcluded = ReadStringArray(o, "stageExcluded", f.StageExcluded);
+        ReadExtrasJson(o, s, f);
         string widgetMaterial = Str("widgetMaterial", f.WidgetMaterial);
         s.WidgetMaterial = widgetMaterial is "dusk" or "color" ? widgetMaterial : "glass";
         s.HideTaskbar = Flag("hideTaskbar", f.HideTaskbar);
@@ -392,6 +401,53 @@ internal sealed class BarSettings
         return s;
     }
 
+    private static List<string> ReadStringArray(JsonObject? o, string key, List<string>? fallback, int maxCount = int.MaxValue)
+    {
+        const string AsciiWs = " \t\r\n\v\f";
+        var result = new List<string>();
+        void AddTrimmed(string? raw)
+        {
+            if (raw == null || result.Count >= maxCount) return;
+            string trimmed = raw.AsSpan().Trim(AsciiWs).ToString();
+            if (trimmed.Length > 0) result.Add(trimmed);
+        }
+        if (o?[key] is JsonArray array)
+        {
+            foreach (var node in array)
+            {
+                if (node is JsonValue value && value.TryGetValue(out string? item))
+                    AddTrimmed(item);
+            }
+        }
+        else if (fallback != null)
+        {
+            foreach (string item in fallback)
+                AddTrimmed(item);
+        }
+        return result;
+    }
+
+    private static void ReadExtrasJson(JsonObject? o, BarSettings s, BarSettings f)
+    {
+        bool Flag(string k, bool d) => o?[k] is JsonValue v && v.TryGetValue(out bool b) ? b : d;
+        string Str(string k, string d) => o?[k] is JsonValue v && v.TryGetValue(out string? t) && t != null ? t : d;
+        s.ShowLaunchpad = Flag("showLaunchpad", f.ShowLaunchpad);
+        s.ShowNowPlaying = Flag("showNowPlaying", f.ShowNowPlaying);
+        s.NowPlayingShowPaused = Flag("nowPlayingShowPaused", f.NowPlayingShowPaused);
+        string motion = Str("nowPlayingMotion", f.NowPlayingMotion);
+        s.NowPlayingMotion = motion is "off" or "subtle" or "vivid" ? motion : "normal";
+        string appMode = Str("nowPlayingAppMode", f.NowPlayingAppMode);
+        s.NowPlayingAppMode = appMode is "allow" or "block" ? appMode : "all";
+        s.NowPlayingApps = ReadStringArray(o, "nowPlayingApps", f.NowPlayingApps, 64);
+        s.NowPlayingScrollVolume = Flag("nowPlayingScrollVolume", f.NowPlayingScrollVolume);
+        s.ShowFolderStacks = Flag("showFolderStacks", f.ShowFolderStacks);
+        string stackLayout = Str("folderStackLayout", f.FolderStackLayout);
+        s.FolderStackLayout = stackLayout == "column" ? "column" : "fan";
+        double rawMax = o?["folderStackMax"] is JsonValue mv && mv.TryGetValue(out double mx) && double.IsFinite(mx) ? mx : f.FolderStackMax;
+        s.FolderStackMax = (int)Math.Round(Math.Clamp(rawMax, 4, 16), MidpointRounding.AwayFromZero);
+        s.FolderStacks = ReadStringArray(o, "folderStacks", f.FolderStacks, 32);
+    }
+
     public bool SameAs(BarSettings o) =>
         SameMaterial(o) && Preset == o.Preset && CornerRadius == o.CornerRadius && Width == o.Width && Height == o.Height &&
         Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && HoverRise == o.HoverRise && RiseNear == o.RiseNear &&
@@ -400,7 +456,13 @@ internal sealed class BarSettings
         ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus &&
         StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
-        ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
+        ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad && ShowNowPlaying == o.ShowNowPlaying &&
+        NowPlayingShowPaused == o.NowPlayingShowPaused && NowPlayingMotion == o.NowPlayingMotion &&
+        NowPlayingAppMode == o.NowPlayingAppMode && NowPlayingApps.SequenceEqual(o.NowPlayingApps, StringComparer.OrdinalIgnoreCase) &&
+        NowPlayingScrollVolume == o.NowPlayingScrollVolume && ShowFolderStacks == o.ShowFolderStacks &&
+        FolderStackLayout == o.FolderStackLayout && FolderStackMax == o.FolderStackMax &&
+        FolderStacks.SequenceEqual(o.FolderStacks, StringComparer.OrdinalIgnoreCase) &&
+        TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
         BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout &&
         NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu &&

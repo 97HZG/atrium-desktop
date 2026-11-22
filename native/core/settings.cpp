@@ -7,6 +7,7 @@
 #include <winrt/Windows.Foundation.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string_view>
@@ -17,6 +18,17 @@ namespace json = winrt::Windows::Data::Json;
 namespace atrium {
 
 namespace {
+
+void ReadStringArrayJson(const json::JsonObject& o, const wchar_t* key, std::vector<std::wstring>& target)
+{
+    if (o.HasKey(key) && o.GetNamedValue(key).ValueType() == json::JsonValueType::Array) {
+        std::vector<std::wstring> items;
+        for (const auto& v : o.GetNamedArray(key))
+            if (v.ValueType() == json::JsonValueType::String)
+                items.emplace_back(v.GetString());
+        target = std::move(items);
+    }
+}
 
 void ReadBarSettingsJson(const json::JsonObject& o, Settings& s)
 {
@@ -103,13 +115,7 @@ void ReadModuleSettingsJson(const json::JsonObject& o, Settings& s)
     flag(L"hideTaskbar", s.hideTaskbar);
     flag(L"hideBanners", s.hideBanners);
     flag(L"trayHost", s.trayHost);
-    if (o.HasKey(L"stageExcluded") && o.GetNamedValue(L"stageExcluded").ValueType() == json::JsonValueType::Array) {
-        std::vector<std::wstring> apps;
-        for (const auto& v : o.GetNamedArray(L"stageExcluded"))
-            if (v.ValueType() == json::JsonValueType::String)
-                apps.emplace_back(v.GetString());
-        s.stageExcluded = std::move(apps);
-    }
+    ReadStringArrayJson(o, L"stageExcluded", s.stageExcluded);
     flag(L"remoteVisible", s.remoteVisible);
     flag(L"winKeyStart", s.winKeyStart);
     flag(L"winNumbers", s.winNumbers);
@@ -135,6 +141,49 @@ void ReadPinsJson(const json::JsonObject& o, Settings& s)
         }
         s.pins = std::move(pins);
     }
+}
+
+void ReadExtrasSettingsJson(const json::JsonObject& o, Settings& s)
+{
+    auto flag = [&](const wchar_t* k, bool& v) {
+        if (o.HasKey(k) && o.GetNamedValue(k).ValueType() == json::JsonValueType::Boolean)
+            v = o.GetNamedBoolean(k);
+    };
+    auto str = [&](const wchar_t* k, std::wstring& v) {
+        if (o.HasKey(k) && o.GetNamedValue(k).ValueType() == json::JsonValueType::String)
+            v = std::wstring(o.GetNamedString(k));
+    };
+    flag(L"showLaunchpad", s.showLaunchpad);
+    flag(L"showNowPlaying", s.showNowPlaying);
+    flag(L"nowPlayingShowPaused", s.nowPlayingShowPaused);
+    str(L"nowPlayingMotion", s.nowPlayingMotion);
+    str(L"nowPlayingAppMode", s.nowPlayingAppMode);
+    ReadStringArrayJson(o, L"nowPlayingApps", s.nowPlayingApps);
+    flag(L"nowPlayingScrollVolume", s.nowPlayingScrollVolume);
+    flag(L"showFolderStacks", s.showFolderStacks);
+    str(L"folderStackLayout", s.folderStackLayout);
+    if (o.HasKey(L"folderStackMax") && o.GetNamedValue(L"folderStackMax").ValueType() == json::JsonValueType::Number) {
+        const double raw = o.GetNamedNumber(L"folderStackMax");
+        if (raw == raw)
+            s.folderStackMax = static_cast<int>(std::lround(std::clamp(raw, 4.0, 16.0)));
+    }
+    ReadStringArrayJson(o, L"folderStacks", s.folderStacks);
+}
+
+void NormalizeStringList(std::vector<std::wstring>& list, size_t maxCount = SIZE_MAX)
+{
+    constexpr std::wstring_view kAsciiWs = L" \t\r\n\v\f";
+    for (auto& entry : list) {
+        const size_t first = entry.find_first_not_of(kAsciiWs);
+        if (first == std::wstring::npos) {
+            entry.clear();
+            continue;
+        }
+        entry = entry.substr(first, entry.find_last_not_of(kAsciiWs) - first + 1);
+    }
+    std::erase_if(list, [](const std::wstring& entry) { return entry.empty(); });
+    if (list.size() > maxCount)
+        list.resize(maxCount);
 }
 
 } // namespace
@@ -189,16 +238,16 @@ void Settings::Clamp()
         widgetBackdrop = L"desktop";
     if (widgetMaterial != L"dusk" && widgetMaterial != L"color")
         widgetMaterial = L"glass";
-    constexpr std::wstring_view kAsciiWs = L" \t\r\n\v\f";
-    for (auto& entry : stageExcluded) {
-        const size_t first = entry.find_first_not_of(kAsciiWs);
-        if (first == std::wstring::npos) {
-            entry.clear();
-            continue;
-        }
-        entry = entry.substr(first, entry.find_last_not_of(kAsciiWs) - first + 1);
-    }
-    std::erase_if(stageExcluded, [](const std::wstring& entry) { return entry.empty(); });
+    if (nowPlayingMotion != L"off" && nowPlayingMotion != L"subtle" && nowPlayingMotion != L"vivid")
+        nowPlayingMotion = L"normal";
+    if (nowPlayingAppMode != L"allow" && nowPlayingAppMode != L"block")
+        nowPlayingAppMode = L"all";
+    if (folderStackLayout != L"column")
+        folderStackLayout = L"fan";
+    folderStackMax = std::clamp(folderStackMax, 4, 16);
+    NormalizeStringList(stageExcluded);
+    NormalizeStringList(nowPlayingApps, 64);
+    NormalizeStringList(folderStacks, 32);
     if (pins && pins->size() > 64)
         pins->resize(64);
     if (preset != L"liquid" && preset != L"frosted")
@@ -246,6 +295,23 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"showDesktop", json::JsonValue::CreateBooleanValue(showDesktop));
     o.SetNamedValue(L"autoWidth", json::JsonValue::CreateBooleanValue(autoWidth));
     o.SetNamedValue(L"showRunning", json::JsonValue::CreateBooleanValue(showRunning));
+    auto strArr = [&](const wchar_t* k, const std::vector<std::wstring>& list) {
+        json::JsonArray a;
+        for (const std::wstring& item : list)
+            a.Append(json::JsonValue::CreateStringValue(item));
+        o.SetNamedValue(k, a);
+    };
+    o.SetNamedValue(L"showLaunchpad", json::JsonValue::CreateBooleanValue(showLaunchpad));
+    o.SetNamedValue(L"showNowPlaying", json::JsonValue::CreateBooleanValue(showNowPlaying));
+    o.SetNamedValue(L"nowPlayingShowPaused", json::JsonValue::CreateBooleanValue(nowPlayingShowPaused));
+    o.SetNamedValue(L"nowPlayingMotion", json::JsonValue::CreateStringValue(nowPlayingMotion));
+    o.SetNamedValue(L"nowPlayingAppMode", json::JsonValue::CreateStringValue(nowPlayingAppMode));
+    strArr(L"nowPlayingApps", nowPlayingApps);
+    o.SetNamedValue(L"nowPlayingScrollVolume", json::JsonValue::CreateBooleanValue(nowPlayingScrollVolume));
+    o.SetNamedValue(L"showFolderStacks", json::JsonValue::CreateBooleanValue(showFolderStacks));
+    o.SetNamedValue(L"folderStackLayout", json::JsonValue::CreateStringValue(folderStackLayout));
+    num(L"folderStackMax", folderStackMax);
+    strArr(L"folderStacks", folderStacks);
     o.SetNamedValue(L"language", json::JsonValue::CreateStringValue(language));
     o.SetNamedValue(L"textColor", json::JsonValue::CreateStringValue(textColor));
     o.SetNamedValue(L"autoHide", json::JsonValue::CreateStringValue(autoHide));
@@ -281,12 +347,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"stageOnRight", json::JsonValue::CreateBooleanValue(stageOnRight));
     o.SetNamedValue(L"stageAutoHide", json::JsonValue::CreateBooleanValue(stageAutoHide));
     o.SetNamedValue(L"stageMinimize", json::JsonValue::CreateBooleanValue(stageMinimize));
-    {
-        json::JsonArray a;
-        for (const std::wstring& app : stageExcluded)
-            a.Append(json::JsonValue::CreateStringValue(app));
-        o.SetNamedValue(L"stageExcluded", a);
-    }
+    strArr(L"stageExcluded", stageExcluded);
     o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
     o.SetNamedValue(L"hideBanners", json::JsonValue::CreateBooleanValue(hideBanners));
     o.SetNamedValue(L"trayHost", json::JsonValue::CreateBooleanValue(trayHost));
@@ -319,6 +380,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     Settings s = base;
     ReadBarSettingsJson(o, s);
     ReadModuleSettingsJson(o, s);
+    ReadExtrasSettingsJson(o, s);
     auto num = [&](const wchar_t* k, double& v) {
         if (o.HasKey(k) && o.GetNamedValue(k).ValueType() == json::JsonValueType::Number)
             v = o.GetNamedNumber(k);

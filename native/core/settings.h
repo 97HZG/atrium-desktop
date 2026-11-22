@@ -59,6 +59,17 @@ struct Settings {
     bool showNotifications = true;
     bool showDesktop = false;        // the Show Desktop slot at the bar's right end
     bool showRunning = true;
+    bool showLaunchpad = true;       // the Launchpad entry next to the start logo
+    bool showNowPlaying = true;      // the now-playing entry (visible while a player has a media session)
+    bool nowPlayingShowPaused = true;
+    std::wstring nowPlayingMotion = L"normal"; // off | subtle | normal | vivid
+    std::wstring nowPlayingAppMode = L"all";   // all | allow | block
+    std::vector<std::wstring> nowPlayingApps;  // AUMIDs or exe names (max 64)
+    bool nowPlayingScrollVolume = true;
+    bool showFolderStacks = false;   // the folder stack entry left of the tray
+    std::wstring folderStackLayout = L"fan";   // fan | column
+    int folderStackMax = 8;          // 4..16
+    std::vector<std::wstring> folderStacks;    // folder paths (max 32)
     // The interface language of the bar, its popups, the widgets and the settings app.
     // auto follows Windows' UI language (Chinese -> zh, anything else -> en).
     std::wstring language = L"auto"; // auto | zh | en

@@ -148,6 +148,61 @@ void CheckSettingsNormalization()
     Require(Settings::FromJson(LR"({"tint":"#1a2B3c"})", tinted, parsed) && parsed.tint == 0x1A2B3C, "strict ASCII hex tint parses");
 }
 
+void CheckExtrasSettings()
+{
+    Settings defaults, parsed;
+    Require(defaults.showLaunchpad && defaults.showNowPlaying && defaults.nowPlayingShowPaused && defaults.nowPlayingMotion == L"normal" &&
+                defaults.nowPlayingAppMode == L"all" && defaults.nowPlayingApps.empty() && defaults.nowPlayingScrollVolume && !defaults.showFolderStacks &&
+                defaults.folderStackLayout == L"fan" && defaults.folderStackMax == 8 && defaults.folderStacks.empty(),
+            "extras settings have expected defaults");
+    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.showLaunchpad && parsed.showNowPlaying && parsed.nowPlayingShowPaused &&
+                parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.nowPlayingApps.empty() && parsed.nowPlayingScrollVolume &&
+                !parsed.showFolderStacks && parsed.folderStackLayout == L"fan" && parsed.folderStackMax == 8 && parsed.folderStacks.empty(),
+            "old settings receive extras defaults");
+
+    Settings custom;
+    custom.showLaunchpad = false;
+    custom.showNowPlaying = false;
+    custom.nowPlayingShowPaused = false;
+    custom.nowPlayingMotion = L"vivid";
+    custom.nowPlayingAppMode = L"allow";
+    custom.nowPlayingApps = {L"spotify.exe", L"Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"};
+    custom.nowPlayingScrollVolume = false;
+    custom.showFolderStacks = true;
+    custom.folderStackLayout = L"column";
+    custom.folderStackMax = 12;
+    custom.folderStacks = {L"C:\\Users\\Demo\\Desktop", L"D:\\Projects"};
+    Require(Settings::FromJson(custom.ToJson(), Settings{}, parsed) && !parsed.showLaunchpad && !parsed.showNowPlaying && !parsed.nowPlayingShowPaused &&
+                parsed.nowPlayingMotion == L"vivid" && parsed.nowPlayingAppMode == L"allow" && parsed.nowPlayingApps == custom.nowPlayingApps &&
+                !parsed.nowPlayingScrollVolume && parsed.showFolderStacks && parsed.folderStackLayout == L"column" && parsed.folderStackMax == 12 &&
+                parsed.folderStacks == custom.folderStacks,
+            "extras settings survive round trip");
+
+    Require(Settings::FromJson(LR"({"nowPlayingMotion":"bad","nowPlayingAppMode":"bad","folderStackLayout":"bad"})", custom, parsed) &&
+                parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.folderStackLayout == L"fan",
+            "invalid extras enums normalize to defaults");
+    Require(Settings::FromJson(LR"({"folderStackMax":1})", Settings{}, parsed) && parsed.folderStackMax == 4, "folderStackMax clamps lower bound");
+    Require(Settings::FromJson(LR"({"folderStackMax":99})", Settings{}, parsed) && parsed.folderStackMax == 16, "folderStackMax clamps upper bound");
+    Require(Settings::FromJson(LR"({"folderStackMax":"bad","showLaunchpad":"bad","nowPlayingApps":false,"folderStacks":123})", custom, parsed) &&
+                parsed.folderStackMax == 12 && !parsed.showLaunchpad && parsed.nowPlayingApps == custom.nowPlayingApps &&
+                parsed.folderStacks == custom.folderStacks,
+            "malformed extras keys retain fallback values");
+
+    Settings many;
+    many.nowPlayingApps.emplace_back(L"  \t\r\n ");
+    for (int i = 0; i < 66; ++i)
+        many.nowPlayingApps.emplace_back(L" app" + std::to_wstring(i) + L".exe ");
+    many.folderStacks.emplace_back(L" \t\r\n\v\f ");
+    many.folderStacks.emplace_back(L"\u3000C:\\Keep\u00A0");
+    for (int i = 0; i < 35; ++i)
+        many.folderStacks.emplace_back(L" D:\\Dir" + std::to_wstring(i) + L" ");
+    many.Clamp();
+    Require(many.nowPlayingApps.size() == 64 && many.nowPlayingApps.front() == L"app0.exe" && many.nowPlayingApps.back() == L"app63.exe",
+            "nowPlayingApps trims, drops empty, and caps at 64");
+    Require(many.folderStacks.size() == 32 && many.folderStacks.front() == L"\u3000C:\\Keep\u00A0" && many.folderStacks.back() == L"D:\\Dir30",
+            "folderStacks trims ASCII whitespace only, drops empty, and caps at 32");
+}
+
 void CheckDisplays()
 {
     HMONITOR primary = MonitorFromPoint(POINT{}, MONITOR_DEFAULTTOPRIMARY);
@@ -429,6 +484,7 @@ int main(int argc, char** argv)
         }
         CheckSettings();
         CheckSettingsNormalization();
+        CheckExtrasSettings();
         CheckDataDirArgument();
         CheckDisplays();
         CheckTaskDistribution();

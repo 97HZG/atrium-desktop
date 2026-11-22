@@ -166,6 +166,44 @@ Require(new PinnedApp("Edge", @"C:\Program Files\msedge.exe", "", "").AllowsMult
     "An .exe pin with no resolved path must fall back to its own executable name.");
 Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMultipleWindows(),
     "The Explorer AUMID must default to allowing multiple windows.");
+{
+    var extrasDefault = new BarSettings();
+    Require(extrasDefault.ShowLaunchpad && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
+            extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingAppMode == "all" &&
+            extrasDefault.NowPlayingApps.Count == 0 && extrasDefault.NowPlayingScrollVolume &&
+            !extrasDefault.ShowFolderStacks && extrasDefault.FolderStackLayout == "fan" &&
+            extrasDefault.FolderStackMax == 8 && extrasDefault.FolderStacks.Count == 0,
+        "Extras settings must have expected defaults.");
+    var extrasCustom = new BarSettings
+    {
+        ShowLaunchpad = false,
+        ShowNowPlaying = false,
+        NowPlayingShowPaused = false,
+        NowPlayingMotion = "vivid",
+        NowPlayingAppMode = "block",
+        NowPlayingApps = ["spotify.exe"],
+        NowPlayingScrollVolume = false,
+        ShowFolderStacks = true,
+        FolderStackLayout = "column",
+        FolderStackMax = 12,
+        FolderStacks = [@"C:\Users\Demo\Desktop"],
+    };
+    Require(BarSettings.FromJson(extrasCustom.ToJson(), new()).SameAs(extrasCustom),
+        "Extras settings must survive a round trip.");
+    foreach (var edit in new Action<BarSettings>[]
+    {
+        s => s.ShowLaunchpad = false, s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
+        s => s.NowPlayingMotion = "subtle", s => s.NowPlayingAppMode = "allow",
+        s => s.NowPlayingApps = ["a.exe"], s => s.NowPlayingScrollVolume = false,
+        s => s.ShowFolderStacks = true, s => s.FolderStackLayout = "column",
+        s => s.FolderStackMax = 10, s => s.FolderStacks = [@"D:\Work"],
+    })
+    {
+        var changed = extrasDefault.Clone();
+        edit(changed);
+        Require(!extrasDefault.SameAs(changed), "Every extras setting must participate in the Save/Revert dirty state.");
+    }
+}
 Console.WriteLine($"Settings round trips, validation, dirty tracking and display discovery passed ({displays.Count} connected display(s)).");
 
 string? Arg(string flag) => Array.IndexOf(args, flag) is int idx && idx >= 0 && idx + 1 < args.Length ? args[idx + 1] : null;
@@ -240,7 +278,14 @@ foreach (var (k, node) in schemaKeys)
         case "language": foreach (string l in LangSamples) Add($"val:{l}", l); Add("bool", false); break;
         case "stringArray":
             Add("empty", new JsonArray()); Add("ws", new JsonArray(" wechat.exe ", "  ", "foo_"));
-            Add("bool", false); Add("mixed", new JsonArray(123, "ok.exe")); break;
+            Add("bool", false); Add("mixed", new JsonArray(123, "ok.exe"));
+            if (s["maxCount"] is JsonValue mc && mc.TryGetValue(out int maxItems))
+            {
+                var over = new JsonArray("   ");
+                for (int idx = 0; idx < maxItems + 3; idx++) over.Add($" item{idx} ");
+                Add("overMax", over);
+            }
+            break;
         case "pins":
             Add("empty", new JsonArray());
             var over65 = new JsonArray();
@@ -334,7 +379,8 @@ static void AssertSchemaCompliance(string label, JsonObject cs, JsonObject schem
             "tint" => hasKey && val is JsonValue tv && tv.TryGetValue(out string? ts) && TintRegex().IsMatch(ts),
             "bool" => hasKey && val is JsonValue bv && bv.TryGetValue(out bool _),
             "string" or "language" => hasKey && val is JsonValue sv && sv.TryGetValue(out string? _),
-            "stringArray" => hasKey && val is JsonArray sa && sa.All(e => e is JsonValue jv && jv.TryGetValue(out string? _)),
+            "stringArray" => hasKey && val is JsonArray sa && sa.All(e => e is JsonValue jv && jv.TryGetValue(out string? _)) &&
+                (s["maxCount"] is null || sa.Count <= s["maxCount"]!.GetValue<int>()),
             "pins" => (!hasKey || val is null)
                 ? s["optional"]?.GetValue<bool>() == true
                 : val is JsonArray pa && pa.Count <= (s["maxCount"]?.GetValue<int>() ?? 64),
