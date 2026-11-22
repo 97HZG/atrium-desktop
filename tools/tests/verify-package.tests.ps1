@@ -60,27 +60,26 @@ function Assert-NoVerifyOrphans([string]$Label, [string]$PipeTag = '') {
 
 $sentinelDir = Join-Path $env:LOCALAPPDATA 'Atrium'
 $sentinelPath = Join-Path $sentinelDir 'settings.json'
-$sentinelCreatedByTest = $false
-$sentinelDirCreatedByTest = $false
-if (Test-Path -LiteralPath $sentinelPath -PathType Leaf) {
-    $sentinelHash = Get-FileSha256 $sentinelPath
-} else {
-    if (!(Test-Path -LiteralPath $sentinelDir -PathType Container)) {
-        New-Item -ItemType Directory -Path $sentinelDir -Force | Out-Null
-        $sentinelDirCreatedByTest = $true
-    }
-    $sentinelCreatedByTest = $true
-    Write-Utf8File $sentinelPath '{"height":60,"showClockSeconds":false,"sentinel":true}' $false
-    $sentinelHash = Get-FileSha256 $sentinelPath
-}
+$hadSentinel = Test-Path -LiteralPath $sentinelPath -PathType Leaf
+$sentinelHash = if ($hadSentinel) { Get-FileSha256 $sentinelPath } else { '' }
+$sentinelDirExisted = if ($hadSentinel) { $true } else { Test-Path -LiteralPath $sentinelDir -PathType Container }
 
 function Assert-SentinelUnchanged([string]$Step) {
-    if (!(Test-Path -LiteralPath $sentinelPath -PathType Leaf)) {
-        throw "Sentinel settings.json disappeared during $Step`: $sentinelPath"
-    }
-    $actual = Get-FileSha256 $sentinelPath
-    if ($actual -cne $sentinelHash) {
-        throw "Sentinel settings.json hash changed during $Step`: expected $sentinelHash, got $actual"
+    if ($hadSentinel) {
+        if (!(Test-Path -LiteralPath $sentinelPath -PathType Leaf)) {
+            throw "Sentinel settings.json disappeared during $Step`: $sentinelPath"
+        }
+        $actual = Get-FileSha256 $sentinelPath
+        if ($actual -cne $sentinelHash) {
+            throw "Sentinel settings.json hash changed during $Step`: expected $sentinelHash, got $actual"
+        }
+    } else {
+        if (Test-Path -LiteralPath $sentinelPath -PathType Leaf) {
+            throw "Absent sentinel settings.json was created during $Step`: $sentinelPath"
+        }
+        if (!$sentinelDirExisted -and (Test-Path -LiteralPath $sentinelDir)) {
+            throw "Absent sentinel directory was created during $Step`: $sentinelDir"
+        }
     }
 }
 
@@ -268,13 +267,37 @@ internal static class StubCore
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wp, IntPtr lp);
 
-    private static string GetArg(string[] args, string name)
+    private sealed class HostForm : Form
     {
-        for (int i = 0; i + 1 < args.Length; i++)
+        private readonly string _settingsExe;
+        private readonly string _settingsArgs;
+
+        public HostForm(string settingsExe, string settingsArgs)
         {
-            if (string.Equals(args[i], name, StringComparison.Ordinal)) return args[i + 1];
+            _settingsExe = settingsExe;
+            _settingsArgs = settingsArgs;
+            ShowInTaskbar = false;
+            FormBorderStyle = FormBorderStyle.FixedToolWindow;
+            Size = new System.Drawing.Size(1, 1);
+            StartPosition = FormStartPosition.Manual;
+            Location = new System.Drawing.Point(-32000, -32000);
         }
-        return "";
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            SetProp(Handle, WindowProp, new IntPtr(1));
+            SetProp(Handle, "Atrium.Core.Host", new IntPtr(1));
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x8002 && (m.LParam.ToInt64() & 0xFFFF) == 0x0400)
+            {
+                using (Process p = Process.Start(new ProcessStartInfo(_settingsExe, _settingsArgs) { UseShellExecute = false })) { }
+            }
+            base.WndProc(ref m);
+        }
     }
 
     private static bool IsFullyQualified(string p)
@@ -287,14 +310,23 @@ internal static class StubCore
     [STAThread]
     private static int Main(string[] args)
     {
-        string guard = GetArg(args, "--guard");
+        bool doExit = false;
+        string guard = "", dataDir = "", pipeArg = "", readyEventName = "";
+        for (int i = 0; i < args.Length; i++)
+        {
+            string a = args[i];
+            if (string.Equals(a, "--exit", StringComparison.Ordinal)) doExit = true;
+            else if (string.Equals(a, "--guard", StringComparison.Ordinal) && i + 1 < args.Length) guard = args[++i];
+            else if (string.Equals(a, "--data-dir", StringComparison.Ordinal) && i + 1 < args.Length) dataDir = args[++i];
+            else if (string.Equals(a, "--pipe-name", StringComparison.Ordinal) && i + 1 < args.Length) pipeArg = args[++i];
+            else if (string.Equals(a, "--ready-event", StringComparison.Ordinal) && i + 1 < args.Length) readyEventName = args[++i];
+        }
         if (guard.Length > 0)
         {
             int parentPid = int.Parse(guard);
             try { using (Process p = Process.GetProcessById(parentPid)) { p.WaitForExit(); } } catch { }
             return 0;
         }
-        bool doExit = Array.IndexOf(args, "--exit") >= 0;
         if (doExit)
         {
             string selfExe = Assembly.GetExecutingAssembly().Location;
@@ -329,7 +361,6 @@ internal static class StubCore
                 return targetProc.WaitForExit(10000) ? 0 : 1;
             }
         }
-        string dataDir = GetArg(args, "--data-dir");
         if (!IsFullyQualified(dataDir)) return 2;
         dataDir = Path.GetFullPath(dataDir);
         Directory.CreateDirectory(dataDir);
@@ -338,9 +369,7 @@ internal static class StubCore
         string logPath = Path.Combine(logDir, "core.log");
         File.AppendAllText(logPath, "core: starting" + Environment.NewLine, Encoding.UTF8);
         string settingsPath = Path.Combine(dataDir, "settings.json");
-        string pipeName = GetArg(args, "--pipe-name");
-        if (pipeName.Length == 0) pipeName = "Atrium.Core." + Process.GetCurrentProcess().SessionId;
-        string readyEventName = GetArg(args, "--ready-event");
+        string pipeName = pipeArg.Length > 0 ? pipeArg : "Atrium.Core." + Process.GetCurrentProcess().SessionId;
         string selfPath = Assembly.GetExecutingAssembly().Location;
         Process guardProc = Process.Start(new ProcessStartInfo(selfPath,
             "--guard " + Process.GetCurrentProcess().Id + " --development --data-dir \"" + dataDir + "\"")
@@ -348,13 +377,9 @@ internal static class StubCore
             UseShellExecute = false,
             CreateNoWindow = true
         });
-        Form host = new Form();
-        host.ShowInTaskbar = false;
-        host.FormBorderStyle = FormBorderStyle.FixedToolWindow;
-        host.Size = new System.Drawing.Size(1, 1);
-        host.StartPosition = FormStartPosition.Manual;
-        host.Location = new System.Drawing.Point(-32000, -32000);
-        host.Load += delegate { SetProp(host.Handle, WindowProp, new IntPtr(1)); };
+        string trayExe = Path.Combine(Path.GetDirectoryName(selfPath), "Settings\\Atrium.Settings.exe");
+        string trayArgs = "--development --data-dir \"" + dataDir + "\"" + (pipeArg.Length > 0 ? " --pipe-name \"" + pipeArg + "\"" : "");
+        HostForm host = new HostForm(trayExe, trayArgs);
         bool stopping = false;
         double savedHeight = 60;
         bool savedClockSec = false;
@@ -698,12 +723,5 @@ internal static class StubSettings
     }
     Write-Host 'verify-package tests passed.'
 } finally {
-    if ($sentinelCreatedByTest -and (Test-Path -LiteralPath $sentinelPath -PathType Leaf)) {
-        Remove-Item -LiteralPath $sentinelPath -Force -ErrorAction SilentlyContinue
-    }
-    if ($sentinelDirCreatedByTest -and (Test-Path -LiteralPath $sentinelDir -PathType Container)) {
-        $left = @(Get-ChildItem -LiteralPath $sentinelDir -Force -ErrorAction SilentlyContinue)
-        if ($left.Count -eq 0) { Remove-Item -LiteralPath $sentinelDir -Force -ErrorAction SilentlyContinue }
-    }
     if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }

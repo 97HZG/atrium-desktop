@@ -145,6 +145,7 @@ try {
             Add-Type -Language CSharp -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace AtriumVerify
 {
@@ -190,29 +191,24 @@ namespace AtriumVerify
             public UIntPtr PeakJobMemoryUsed;
         }
 
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
-
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern IntPtr CreateJobObject(IntPtr a, string n);
         [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool SetInformationJobObject(
-            IntPtr hJob, int infoClass, ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION info, uint length);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CloseHandle(IntPtr handle);
-
-        [DllImport("user32.dll")]
-        private static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam);
+        private static extern bool SetInformationJobObject(IntPtr h, int c, ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION info, uint len);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool AssignProcessToJobObject(IntPtr h, IntPtr p);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);
+        private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lparam);
+        [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc proc, IntPtr lparam);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern int GetClassNameW(IntPtr hwnd, StringBuilder buf, int maxCount);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetProp(IntPtr hwnd, string name);
+        [DllImport("user32.dll", ExactSpelling = true)]
+        private static extern bool PostMessageW(IntPtr hwnd, uint msg, UIntPtr wparam, IntPtr lparam);
 
         public static IntPtr CreateKillOnCloseJob()
         {
             IntPtr job = CreateJobObject(IntPtr.Zero, null);
-            if (job == IntPtr.Zero)
-            {
-                throw new InvalidOperationException("CreateJobObject failed: " + Marshal.GetLastWin32Error());
-            }
+            if (job == IntPtr.Zero) throw new InvalidOperationException("CreateJobObject failed: " + Marshal.GetLastWin32Error());
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
             info.BasicLimitInformation.LimitFlags = JobObjectLimitKillOnJobClose;
             uint size = (uint)Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
@@ -227,23 +223,26 @@ namespace AtriumVerify
 
         public static void AssignProcess(IntPtr job, IntPtr process)
         {
-            if (job != IntPtr.Zero && process != IntPtr.Zero)
-            {
-                AssignProcessToJobObject(job, process);
-            }
+            if (job != IntPtr.Zero && process != IntPtr.Zero) AssignProcessToJobObject(job, process);
         }
+        public static void CloseJob(IntPtr job) { if (job != IntPtr.Zero) CloseHandle(job); }
+        public static bool PostClose(IntPtr hwnd) { return PostMessageW(hwnd, WmClose, UIntPtr.Zero, IntPtr.Zero); }
+        public static bool PostTrayOpen(IntPtr hwnd) { return PostMessageW(hwnd, 0x8002, UIntPtr.Zero, new IntPtr(0x0400)); }
 
-        public static void CloseJob(IntPtr job)
+        public static IntPtr FindHostWindow(int pid)
         {
-            if (job != IntPtr.Zero)
+            IntPtr found = IntPtr.Zero;
+            EnumWindows(delegate(IntPtr hwnd, IntPtr lparam)
             {
-                CloseHandle(job);
-            }
-        }
-
-        public static bool PostClose(IntPtr hwnd)
-        {
-            return PostMessage(hwnd, WmClose, IntPtr.Zero, IntPtr.Zero);
+                uint wpid;
+                GetWindowThreadProcessId(hwnd, out wpid);
+                if (wpid != (uint)pid) return true;
+                StringBuilder sb = new StringBuilder(64);
+                GetClassNameW(hwnd, sb, sb.Capacity);
+                if (sb.ToString() == "AtriumCoreHost" || GetProp(hwnd, "Atrium.Core.Host") != IntPtr.Zero) { found = hwnd; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return found;
         }
     }
 }
@@ -478,7 +477,7 @@ namespace AtriumVerify
         if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $probeExe -PathType Leaf)) {
             throw "Failed to compile UiaProbe.exe (exit $LASTEXITCODE): $($cscOut -join "`n")"
         }
-        $smokeDataDir = [IO.Path]::GetFullPath((Join-Path $temp 'data'))
+        $smokeDataDir = [IO.Path]::GetFullPath((Join-Path $temp '--exit-case'))
         New-Item -ItemType Directory -Path $smokeDataDir -Force | Out-Null
         $smokeSettingsPath = [IO.Path]::GetFullPath((Join-Path $smokeDataDir 'settings.json'))
         $logPath = Join-Path $smokeDataDir 'logs\core.log'
@@ -681,6 +680,38 @@ namespace AtriumVerify
             if (![AtriumVerify.NativeHost]::PostClose($hwnd2)) { throw 'PostMessage(WM_CLOSE) failed on second Settings window.' }
             if (!$sProc2.WaitForExit(15000) -or $sProc2.ExitCode -ne 0) {
                 throw "Second Atrium.Settings.exe did not exit cleanly (exited=$($sProc2.HasExited), exitCode=$($sProc2.ExitCode))."
+            }
+            $seenSettings = [Collections.Generic.HashSet[int]]::new()
+            foreach ($p in @(Get-Process -Name 'Atrium.Settings' -ErrorAction SilentlyContinue)) { [void]$seenSettings.Add($p.Id) }
+            foreach ($sp in $settingsProcs) { [void]$seenSettings.Add($sp.Id) }
+            $coreHost = [AtriumVerify.NativeHost]::FindHostWindow($proc.Id)
+            if ($coreHost -eq [IntPtr]::Zero) { throw 'Core host window not found.' }
+            if (![AtriumVerify.NativeHost]::PostTrayOpen($coreHost)) { throw 'PostTrayOpen failed.' }
+            $tray = @{ Pid = 0; Cmd = '' }
+            Wait-Until 15000 {
+                foreach ($w in @(Get-CimInstance Win32_Process -Filter "Name='Atrium.Settings.exe'" -ErrorAction SilentlyContinue)) {
+                    $wpid = [int]$w.ProcessId
+                    if (!$seenSettings.Contains($wpid) -and
+                        [string]::Equals([string]$w.ExecutablePath, $settingsExe, [StringComparison]::OrdinalIgnoreCase)) {
+                        $tray.Pid = $wpid; $tray.Cmd = [string]$w.CommandLine; return $true
+                    }
+                }
+                return $false
+            } 'Atrium.Settings.exe did not launch from Core tray open.'
+            $trayProc = Get-Process -Id $tray.Pid
+            $settingsProcs.Add($trayProc)
+            Add-JobProcess $job $trayProc
+            foreach ($tok in @('--development', '--data-dir', $smokeDataDir)) {
+                if ($tray.Cmd.IndexOf($tok, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                    throw "Tray-launched Settings missing '$tok' in CommandLine: $($tray.Cmd)"
+                }
+            }
+            $hwndTrayText = Invoke-UiaStep 'tray-find-window' 'Atrium.Settings.Window' ([IntPtr]::Zero) `
+                @('find-window', "$($tray.Pid)", 'Atrium.Settings.Window')
+            $hwndTray = [IntPtr]([int64]$hwndTrayText)
+            if (![AtriumVerify.NativeHost]::PostClose($hwndTray)) { throw 'PostMessage(WM_CLOSE) failed on tray Settings window.' }
+            if (!$trayProc.WaitForExit(15000) -or $trayProc.ExitCode -ne 0) {
+                throw "Tray Atrium.Settings.exe did not exit cleanly (exited=$($trayProc.HasExited), exitCode=$($trayProc.ExitCode))."
             }
             $exitArgs = '--exit'
             if ($PipeName) { $exitArgs += " --pipe-name $(Format-ProcessArg $PipeName)" }
