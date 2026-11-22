@@ -156,6 +156,7 @@ private:
     static LRESULT CALLBACK InputProc(HWND, UINT, WPARAM, LPARAM);
     LRESULT OnInput(HWND h, UINT m, WPARAM w, LPARAM l);
     void ReadDisplays();
+    HMONITOR ResolveRelayoutMonitor(MONITORINFO& mi);
     void Bounce(const std::wstring& key);
     POINT LayoutPoint(POINT client) const;
     RECT EdgeZone() const;
@@ -270,6 +271,7 @@ private:
     std::wstring displayOverride_; // an extra taskbar in all-displays mode
     HMONITOR summonMonitor_ = nullptr;
     ULONGLONG summonAt_ = 0;
+    ULONGLONG summonGraceUntil_ = 0;
     unsigned displayGeneration_ = 0;
     float scale_ = 1;
     winrt::com_ptr<IDWriteFactory3> dwrite_; // UI-thread text measurement

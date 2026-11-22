@@ -98,6 +98,52 @@ bool Place(IWICImagingFactory* wic, const std::wstring& path, RECT target, DESKT
     return blit((tw - int(sw)) / 2, (th - int(sh)) / 2);
 }
 
+bool ExtractDesktopFrame(wgc::Direct3D11CaptureFramePool& pool, const wgd::Direct3D11::IDirect3DDevice& device, HWND desktop,
+                         winrt::Windows::Graphics::SizeInt32& size, POINT& origin, winrt::com_ptr<ID3D11Texture2D>& outTex, RECT& outDirty)
+{
+    wgc::Direct3D11CaptureFrame latest{nullptr};
+    while (auto f = pool.TryGetNextFrame()) {
+        if (latest)
+            latest.Close();
+        latest = f;
+    }
+    if (!latest)
+        return false;
+    auto cs = latest.ContentSize();
+    if (cs.Width <= 0 || cs.Height <= 0) {
+        latest.Close();
+        return false;
+    }
+    if (cs.Width != size.Width || cs.Height != size.Height) {
+        size = cs; // the desktop changed size: later frames come at the new one
+        pool.Recreate(device, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, size);
+    }
+    bool ok = false;
+    auto access = latest.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+    if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(outTex.put())))) {
+        RECT r{};
+        GetWindowRect(desktop, &r);
+        origin = POINT{r.left, r.top};
+        // Where this frame differs from the last one; all of it when Windows cannot say.
+        const RECT whole{r.left, r.top, r.left + size.Width, r.top + size.Height};
+        outDirty = whole;
+        try {
+            auto regions = latest.DirtyRegions();
+            if (regions.Size() > 0) {
+                outDirty = RECT{LONG_MAX, LONG_MAX, LONG_MIN, LONG_MIN};
+                for (const auto& d : regions)
+                    outDirty = RECT{std::min(outDirty.left, LONG(r.left + d.X)), std::min(outDirty.top, LONG(r.top + d.Y)),
+                                    std::max(outDirty.right, LONG(r.left + d.X + d.Width)), std::max(outDirty.bottom, LONG(r.top + d.Y + d.Height))};
+            }
+        } catch (const winrt::hresult_error&) {
+            outDirty = whole;
+        }
+        ok = true;
+    }
+    latest.Close();
+    return ok;
+}
+
 } // namespace
 
 DesktopBackdrop::DesktopBackdrop(const Gpu& gpu, HANDLE frameEvent) : gpu_(gpu), frameEvent_(frameEvent)
@@ -145,42 +191,11 @@ void DesktopBackdrop::Update(const std::wstring& mode)
             }
         }
         if (session_) {
-            wgc::Direct3D11CaptureFrame latest{nullptr};
-            while (auto f = pool_.TryGetNextFrame()) {
-                if (latest)
-                    latest.Close();
-                latest = f;
-            }
-            if (latest) {
-                auto cs = latest.ContentSize();
-                if (cs.Width != size_.Width || cs.Height != size_.Height) {
-                    size_ = cs; // the desktop changed size: later frames come at the new one
-                    pool_.Recreate(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, size_);
-                }
-                winrt::com_ptr<ID3D11Texture2D> tex;
-                auto access = latest.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-                if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(tex.put())))) {
-                    RECT r{};
-                    GetWindowRect(desktop_, &r);
-                    origin_ = POINT{r.left, r.top};
-                    // Where this frame differs from the last one; all of it when Windows cannot say.
-                    const RECT whole{r.left, r.top, r.left + size_.Width, r.top + size_.Height};
-                    RECT dirty = whole;
-                    try {
-                        auto regions = latest.DirtyRegions();
-                        if (regions.Size() > 0) {
-                            dirty = RECT{LONG_MAX, LONG_MAX, LONG_MIN, LONG_MIN};
-                            for (const auto& d : regions)
-                                dirty = RECT{std::min(dirty.left, LONG(r.left + d.X)), std::min(dirty.top, LONG(r.top + d.Y)),
-                                             std::max(dirty.right, LONG(r.left + d.X + d.Width)), std::max(dirty.bottom, LONG(r.top + d.Y + d.Height))};
-                        }
-                    } catch (const winrt::hresult_error&) {
-                        dirty = whole;
-                    }
-                    Store(tex.get());
-                    Changed(dirty);
-                }
-                latest.Close();
+            winrt::com_ptr<ID3D11Texture2D> tex;
+            RECT dirty{};
+            if (ExtractDesktopFrame(pool_, device_, desktop_, size_, origin_, tex, dirty)) {
+                Store(tex.get());
+                Changed(dirty);
             }
         }
     }

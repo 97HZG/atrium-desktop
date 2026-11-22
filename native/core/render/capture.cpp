@@ -121,6 +121,10 @@ ID3D11Texture2D* MonitorCapture::Acquire()
     if (!latest)
         return nullptr;
     auto cs = latest.ContentSize();
+    if (cs.Width <= 0 || cs.Height <= 0) {
+        latest.Close();
+        return nullptr;
+    }
     if (cs.Width != size_.Width || cs.Height != size_.Height) {
         // Resolution changed: later frames come at the new size.
         size_ = cs;

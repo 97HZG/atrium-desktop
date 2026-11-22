@@ -104,7 +104,7 @@ struct App {
     UINT taskbarCreated = 0;
     bool trayAdded = false;
     std::unique_ptr<Bar> bar;
-    std::vector<std::unique_ptr<Bar>> secondaryBars;
+    std::vector<std::unique_ptr<Bar>> secondaryBars, drainingBars;
     Bar* activeBar = nullptr; // the last taskbar the pointer interacted with
     SystemStatus lastStatus;
     bool capturable = false;
@@ -1184,12 +1184,10 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
         retired.push_back(std::move(bar));
         return true;
     });
-    for (const auto& bar : retired)
-        // Same bounded shutdown as the primary renderer: restore the Windows shell if a driver hangs.
-        if (!bar->StopRendering(3000)) {
-            g_app.chrome->RestoreForExit();
-            Log(L"core: secondary display renderer stuck during removal");
-            TerminateProcess(GetCurrentProcess(), 0);
+    for (auto& bar : retired)
+        if (!bar->StopRendering(5000)) {
+            Log(L"core: secondary display renderer slow during removal; draining");
+            g_app.drainingBars.push_back(std::move(bar));
         }
     retired.clear();
     if (all)
@@ -1446,6 +1444,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         if (w == kStatusTimer) {
+            std::erase_if(g_app.drainingBars, [](const auto& bar) { return bar->StopRendering(0); });
             if (!g_app.trayAdded)
                 AddTrayIcon();
             if (g_app.guard && WaitForSingleObject(g_app.guard, 0) == WAIT_OBJECT_0) {
@@ -1560,8 +1559,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             UnregisterPowerSettingNotification(g_app.brightnessNotify);
         if (g_app.usbNotify)
             UnregisterDeviceNotification(g_app.usbNotify);
-        RemoveTrayIcon();
-        PostQuitMessage(0);
+        RemoveTrayIcon(), PostQuitMessage(0);
         return 0;
     default: break;
     }
@@ -1839,6 +1837,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     g_app.preview->Close();
     bool renderingStopped = true;
     ForBars([&](Bar& bar) { renderingStopped &= bar.StopRendering(3000); });
+    std::ranges::for_each(g_app.drainingBars, [&](const auto& bar) { renderingStopped &= bar->StopRendering(3000); });
     if (!renderingStopped) {
         g_app.chrome.reset();
         Log(L"core: exited (render thread stuck)");
@@ -1866,8 +1865,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     Surface::SetGlassHost(nullptr);
     g_app.catalog.reset();
     g_app.tasks.reset();
-    g_app.secondaryBars.clear();
-    g_app.bar.reset();
+    g_app.drainingBars.clear(), g_app.secondaryBars.clear(), g_app.bar.reset();
     g_app.chrome.reset();
     if (startupThread.joinable())
         startupThread.join();

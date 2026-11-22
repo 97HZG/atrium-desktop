@@ -497,6 +497,8 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
 {
     if (hidden && exiting_)
         return;
+    if (!hidden || !g_taskbarVisibility.hidden.load())
+        reshowGuard_.Reset();
     TaskbarChromeState state{g_taskbarVisibility.hidden.load(), autoHideOurs_.load()};
     ChromeRecord bannerRecord;
     bannerRecord.quiet = quietOurs_;
@@ -553,7 +555,7 @@ void SystemChrome::Enforce()
 {
     if (exiting_)
         return;
-    if (g_taskbarVisibility.ShouldHide()) {
+    if (g_taskbarVisibility.ShouldHide() && !reshowGuard_.ShouldBackOff(GetTickCount64())) {
         // Hidden but not auto-hide, the taskbar keeps its strip of the work area and maximized
         // windows stop its height short of the bottom. Auto-hide can be lost after it was set:
         // set before Explorer's taskbar was ready at sign-in, Explorer restarted, another program.
@@ -639,10 +641,19 @@ void SystemChrome::Watch()
 
 void CALLBACK SystemChrome::OnShow(HWINEVENTHOOK, DWORD, HWND w, LONG obj, LONG, DWORD, DWORD)
 {
-    if (obj == OBJID_WINDOW && g_taskbarVisibility.ShouldHide() && w && IsTaskbar(w)) {
-        HideTaskbars();
-        Log(L"chrome: Explorer showed its taskbar; hidden again");
+    if (obj != OBJID_WINDOW || !g_taskbarVisibility.ShouldHide() || !w || !IsTaskbar(w))
+        return;
+    if (g_chrome) {
+        const ULONGLONG now = GetTickCount64();
+        if (g_chrome->reshowGuard_.ShouldBackOff(now))
+            return;
+        if (g_chrome->reshowGuard_.Record(now)) {
+            Log(L"chrome: taskbar re-shown repeatedly (possible taskbar mod conflict); backing off");
+            return;
+        }
     }
+    HideTaskbars();
+    Log(L"chrome: Explorer showed its taskbar; hidden again");
 }
 
 void SystemChrome::ScheduleRefit()

@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstring>
 #include <cwctype>
+#include <exception>
 #include <vector>
 
 namespace atrium {
@@ -63,9 +64,7 @@ constexpr UINT_PTR kPointerTimer = 5; // while covered: watch the pointer
 constexpr UINT_PTR kDisplayTimer = 6; // the shared Dock's cross-display gesture
 constexpr UINT_PTR kCoverTimer = 7;   // windows moved on this monitor: look at what covers it, once for a burst
 constexpr UINT_PTR kNearTimer = 8;    // the pointer coming down onto the bar (hoverRise)
-constexpr UINT kNearMs = 16;
-constexpr UINT kCoverMs = 50;
-constexpr UINT kPointerMs = 50;
+constexpr UINT kNearMs = 16, kCoverMs = 50, kPointerMs = 50;
 constexpr DWORD kLeaveMs = 500;       // a revealed bar goes down this long after the pointer left it
 
 std::map<HWINEVENTHOOK, Bar*> g_guards; // each display has its own stacking guard
@@ -253,6 +252,23 @@ void RegisterClasses(HINSTANCE instance)
     done = true;
 }
 
+bool AllowRaise(std::map<HWND, std::pair<int, ULONGLONG>>& raises, HWND target)
+{
+    const ULONGLONG now = GetTickCount64();
+    for (auto it = raises.begin(); it != raises.end();)
+        it = now - it->second.second > 10000 || !IsWindow(it->first) ? raises.erase(it) : std::next(it);
+    auto& count = raises.try_emplace(target, 0, now).first->second;
+    if (++count.first > 4) {
+        if (count.first == 5) {
+            wchar_t cls[64] = {};
+            GetClassNameW(target, cls, 64);
+            Log(L"bar: %s keeps covering the bar; leaving it in front", cls);
+        }
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 void RefreshCaptureExclusion() { ApplyCapturePolicies(); }
@@ -351,12 +367,7 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display)
     // A compact Dock-style label, using the same material and adaptive ink as
     // every other surface. It never takes focus or receives pointer input.
     tooltip_ = std::make_unique<Surface>(instance, L"Atrium Hover Label", false);
-    tooltip_->message = [](UINT m, WPARAM, LPARAM, LRESULT& result) {
-        if (m != WM_NCHITTEST)
-            return false;
-        result = HTTRANSPARENT;
-        return true;
-    };
+    tooltip_->message = [](UINT m, WPARAM, LPARAM, LRESULT& result) { return m == WM_NCHITTEST ? (result = HTTRANSPARENT, true) : false; };
     tooltip_->paint = [this](Canvas& c) {
         auto bounds = D2D1::RectF(0, 0, tooltipSize_.width, tooltipSize_.height);
         if (c.panel)
@@ -407,10 +418,8 @@ Bar::~Bar()
     ApplyCapturePolicies();
     DestroyWindow(input_);
     DestroyWindow(visual_);
-    CloseHandle(wake_);
-    CloseHandle(quit_);
-    CloseHandle(frame_);
-    CloseHandle(captureAck_);
+    for (HANDLE h : {wake_, quit_, frame_, captureAck_})
+        CloseHandle(h);
     if (oleReady_)
         OleUninitialize();
 }
@@ -644,11 +653,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         HideTooltip();
         if (!dragging_) {
             SetRegion(false);
-            scene_.hoverKey.clear();
-            scene_.pressedKey.clear();
-            scene_.pointerX = scene_.pointerY = -1;
-            pressed_.clear();
-            pressedLeft_ = false;
+            scene_.hoverKey.clear(), scene_.pressedKey.clear(), scene_.pointerX = scene_.pointerY = -1;
+            pressed_.clear(), pressedLeft_ = false;
             Publish();
         }
         return 0;
@@ -794,10 +800,7 @@ void Bar::EndDrag(bool commit)
         return;
     dragging_ = false;
     std::wstring key = dragKey_;
-    dragKey_.clear();
-    pressed_.clear();
-    pressedLeft_ = false;
-    scene_.pressedKey.clear();
+    dragKey_.clear(), pressed_.clear(), pressedLeft_ = false, scene_.pressedKey.clear();
     int from = -1;
     for (int i = 0; i < shown_ && i < int(items_.size()); ++i)
         if (items_[size_t(i)].key == key)
@@ -866,6 +869,7 @@ void Bar::Apply(const Settings& s)
     if (changed)
         activeDisplay_.clear();
     summonMonitor_ = nullptr;
+    summonGraceUntil_ = 0;
     WatchDisplaysIfNeeded();
     Relayout();
     UpdateCover(); // the hide mode may have changed
@@ -881,17 +885,20 @@ void Bar::WatchDisplaysIfNeeded()
         KillTimer(input_, kDisplayTimer);
 }
 
-void Bar::RefreshDisplays(bool)
+void Bar::RefreshDisplays(bool workAreaOnly)
 {
     auto before = std::exchange(displays_, {});
     auto beforeDpis = std::exchange(displayDpis_, {});
     ReadDisplays();
     WatchDisplaysIfNeeded();
-    if (beforeDpis != displayDpis_ || !std::ranges::equal(before, displays_, [](const DisplayInfo& a, const DisplayInfo& b) {
-            return a.monitor == b.monitor && a.id == b.id && EqualRect(&a.bounds, &b.bounds) && a.primary == b.primary;
-        }))
+    const bool changed = beforeDpis != displayDpis_ || !std::ranges::equal(before, displays_, [](const DisplayInfo& a, const DisplayInfo& b) {
+                             return a.monitor == b.monitor && a.id == b.id && EqualRect(&a.bounds, &b.bounds) && a.primary == b.primary;
+                         });
+    const bool monitorGone = hmonitor_ && std::ranges::none_of(displays_, [&](const DisplayInfo& d) { return d.monitor == hmonitor_; });
+    if ((changed && !workAreaOnly) || monitorGone)
         ++displayGeneration_; // HMONITOR can be reused after a mode or adapter change.
     summonMonitor_ = nullptr;
+    summonGraceUntil_ = 0;
     if (dragging_)
         EndDrag(false);
     Relayout();
@@ -910,8 +917,12 @@ void Bar::WatchDisplays()
     GetCursorPos(&point);
     HMONITOR monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONULL);
     auto target = std::ranges::find_if(displays_, [&](const DisplayInfo& d) { return d.monitor == monitor; });
+    if (monitor && target == displays_.end()) {
+        ReadDisplays();
+        target = std::ranges::find_if(displays_, [&](const DisplayInfo& d) { return d.monitor == monitor; });
+    }
     // The pointer must stay at the actual edge; screen crossings do not summon the Dock.
-    if (target == displays_.end() || monitor == hmonitor_ || !AtDisplayEdge(edge_, point, target->bounds)) {
+    if (target == displays_.end() || monitor == hmonitor_ || !AtDisplayEdge(edge_, point, target->bounds, FollowEdgeMargin(summonMonitor_ == monitor))) {
         summonMonitor_ = nullptr;
         return;
     }
@@ -926,17 +937,15 @@ void Bar::WatchDisplays()
     activeDisplay_ = target->id;
     summonMonitor_ = nullptr;
     KillTimer(input_, kSlideTimer);
-    covered_ = revealed_ = tucked_ = slidOut_ = false;
-    scene_.tucked = false;
-    HideTooltip();
-    scene_.hoverKey.clear();
-    scene_.pointerX = scene_.pointerY = -1;
+    covered_ = revealed_ = tucked_ = slidOut_ = scene_.tucked = false;
+    HideTooltip(), scene_.hoverKey.clear(), scene_.pointerX = scene_.pointerY = -1;
     SetRegion(false);
     Relayout();
     UpdateCover();
     // A summoned Dock stays visible long enough for the pointer to reach it.
     revealed_ = true;
     leftAt_ = now;
+    summonGraceUntil_ = now + 1200;
     UpdateAutoHide();
     UpdateNearWatch();
     Raise();
@@ -972,15 +981,31 @@ void Bar::SetVisible(bool visible)
     UpdateNearWatch();
 }
 
+HMONITOR Bar::ResolveRelayoutMonitor(MONITORINFO& mi)
+{
+    const std::wstring& id = !displayOverride_.empty()              ? displayOverride_ :
+                             settings_.dockDisplayMode == L"fixed"  ? settings_.dockDisplay :
+                             settings_.dockDisplayMode == L"follow" ? activeDisplay_ :
+                                                                      std::wstring();
+    auto valid = [&](HMONITOR m) {
+        mi = {sizeof(mi)};
+        return m && GetMonitorInfoW(m, &mi) && !IsRectEmpty(&mi.rcMonitor);
+    };
+    if (HMONITOR mon = ResolveDisplay(displays_, id); valid(mon))
+        return mon;
+    ReadDisplays();
+    if (HMONITOR mon = ResolveDisplay(displays_, id); valid(mon))
+        return mon;
+    HMONITOR mon = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    return valid(mon) ? mon : nullptr;
+}
+
 void Bar::Relayout()
 {
-    const std::wstring id = !displayOverride_.empty()              ? displayOverride_ :
-                            settings_.dockDisplayMode == L"fixed"  ? settings_.dockDisplay :
-                            settings_.dockDisplayMode == L"follow" ? activeDisplay_ :
-                                                                     std::wstring();
-    HMONITOR mon = ResolveDisplay(displays_, id);
     MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(mon, &mi);
+    HMONITOR mon = ResolveRelayoutMonitor(mi);
+    if (!mon)
+        return;
     const bool primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
     filterTasks_ = FilterTasksOnDisplay(settings_.taskbarApps, primary);
     items_ = TaskItemsForDisplay(allItems_, settings_.taskbarApps, primary, mon, GetAncestor(GetForegroundWindow(), GA_ROOTOWNER),
@@ -1324,15 +1349,9 @@ void Bar::Relayout()
         applied_ = win;
         appliedVisible_ = shown;
     }
-    window_ = win;
-    monitor_ = mi.rcMonitor;
-    hmonitor_ = mon;
+    window_ = win, monitor_ = mi.rcMonitor, hmonitor_ = mon;
     UpdateAppBar(mon, mi.rcMonitor, reserve);
-    scale_ = s;
-    insetX_ = insetX;
-    insetTop_ = insetTop;
-    rise_ = rise;
-    radius_ = radius;
+    scale_ = s, insetX_ = insetX, insetTop_ = insetTop, rise_ = rise, radius_ = radius;
     SetRegion(regionExtended_);
     UpdateTooltips();
     Publish();
@@ -1346,8 +1365,8 @@ void Bar::SetRegion(bool extended)
     regionExtended_ = extended;
     const int barW = int(scene_.bar.right - scene_.bar.left), barH = int(scene_.bar.bottom - scene_.bar.top);
     const int ext = extended ? rise_ : 0;
-    if (appliedRgn_[0] == barW && appliedRgn_[1] == barH && appliedRgn_[2] == radius_ && appliedRgn_[3] == insetX_ && appliedRgn_[4] == insetTop_ &&
-        appliedRgn_[5] == ext && appliedRgn_[6] == int(edge_))
+    const int rgnMetrics[7] = {barW, barH, radius_, insetX_, insetTop_, ext, int(edge_)};
+    if (std::memcmp(appliedRgn_, rgnMetrics, sizeof(rgnMetrics)) == 0)
         return;
     RECT cr{};
     GetClientRect(input_, &cr);
@@ -1364,13 +1383,7 @@ void Bar::SetRegion(bool extended)
     }
     if (!SetWindowRgn(input_, rgn, FALSE))
         DeleteObject(rgn);
-    appliedRgn_[0] = barW;
-    appliedRgn_[1] = barH;
-    appliedRgn_[2] = radius_;
-    appliedRgn_[3] = insetX_;
-    appliedRgn_[4] = insetTop_;
-    appliedRgn_[5] = ext;
-    appliedRgn_[6] = int(edge_);
+    std::memcpy(appliedRgn_, rgnMetrics, sizeof(rgnMetrics));
 }
 
 void Bar::ActivateIndex(int index)
@@ -1390,9 +1403,8 @@ void Bar::Bounce(const std::wstring& key)
     double now = ClockMs();
     bounces_[key] = now;
     for (auto& it : scene_.items)
-        if (it.key == key) {
+        if (it.key == key)
             it.bounceMs = now;
-        }
     Publish();
 }
 
@@ -1523,8 +1535,7 @@ void Bar::UpdateAutoHide()
     bool tuck = covered_ && !revealed_ && visible_;
     if (tuck == tucked_)
         return;
-    tucked_ = tuck;
-    scene_.tucked = tuck;
+    tucked_ = scene_.tucked = tuck;
     if (tuck) {
         HideTooltip();
         SetRegion(false);
@@ -1563,11 +1574,11 @@ void Bar::WatchPointer()
         }
         return;
     }
-    if (PtInRect(&zone, p) || dragging_ || (keepShown && keepShown())) {
+    const ULONGLONG now = GetTickCount64();
+    if (PtInRect(&zone, p) || dragging_ || (keepShown && keepShown()) || now < summonGraceUntil_) {
         leftAt_ = 0;
         return;
     }
-    ULONGLONG now = GetTickCount64();
     if (!leftAt_)
         leftAt_ = now;
     else if (now - leftAt_ >= kLeaveMs) {
@@ -1590,9 +1601,7 @@ void Bar::WatchNear(bool publish)
         return;
     p = LayoutPoint(p);
     const bool changed = near_.Sample(scene_, {float(p.x), float(p.y)}, settings_.nearEnter, settings_.nearLeave, available);
-    nearX_ = scene_.nearX;
-    nearRise_ = scene_.nearRise;
-    nearMagnify_ = scene_.nearMagnify;
+    nearX_ = scene_.nearX, nearRise_ = scene_.nearRise, nearMagnify_ = scene_.nearMagnify;
     if (changed && publish)
         Publish();
 }
@@ -1608,10 +1617,8 @@ void Bar::UpdateNearWatch()
         KillTimer(input_, kNearTimer);
         near_.Reset();
         if (nearX_ >= 0 || nearRise_ || nearMagnify_) {
-            nearX_ = -1;
-            nearRise_ = nearMagnify_ = false;
-            scene_.nearX = -1;
-            scene_.nearRise = scene_.nearMagnify = false;
+            nearX_ = scene_.nearX = -1;
+            nearRise_ = nearMagnify_ = scene_.nearRise = scene_.nearMagnify = false;
             Publish();
         }
     }
@@ -1687,14 +1694,18 @@ void Bar::GuardStacking(const wchar_t* why)
         return;
     }
     if (trayOver && trayAbove) {
+        const bool wasBelow = belowTray_;
+        if (wasBelow)
+            SetTimer(input_, kGuardTimer, kGuardMs, nullptr);
+        belowTray_ = false;
+        const bool wasHeld = trayHeldUp_;
+        trayHeldUp_ = true;
+        if (!AllowRaise(raises_, tray))
+            return;
         // Up without the user (an app's button flashing): the bar stays in front.
         Raise();
-        if (belowTray_)
-            SetTimer(input_, kGuardTimer, kGuardMs, nullptr);
-        if (belowTray_ || !trayHeldUp_)
+        if (wasBelow || !wasHeld)
             Log(L"bar: over the system taskbar, which an app holds up");
-        belowTray_ = false;
-        trayHeldUp_ = true;
         return;
     }
     if (belowTray_) {
@@ -1703,20 +1714,8 @@ void Bar::GuardStacking(const wchar_t* why)
     }
     belowTray_ = false;
     trayHeldUp_ = trayOver;
-    if (!cover)
+    if (!cover || !AllowRaise(raises_, cover))
         return;
-    ULONGLONG now = GetTickCount64();
-    for (auto it = raises_.begin(); it != raises_.end();)
-        it = now - it->second.second > 10000 || !IsWindow(it->first) ? raises_.erase(it) : std::next(it);
-    auto& count = raises_.try_emplace(cover, 0, now).first->second;
-    if (++count.first > 4) {
-        if (count.first == 5) {
-            wchar_t cls[64] = {};
-            GetClassNameW(cover, cls, 64);
-            Log(L"bar: %s keeps covering the bar; leaving it in front", cls);
-        }
-        return;
-    }
     Raise();
     if (cover != lastCover_) {
         wchar_t cls[64] = {};
@@ -1881,10 +1880,7 @@ void Bar::ShowTooltip()
     if (tail) {
         tooltipTailX_ = std::clamp(float(tip.x - left) / scale_, 0.f, tooltipSize_.width);
         ShapeDip label{D2D1::RectF(0, 0, tooltipSize_.width, tooltipSize_.height), radius};
-        label.tailX = tooltipTailX_;
-        label.tailHalfWidth = kTooltipTailHalfW;
-        label.tailHeight = kTooltipTailH;
-        label.tailInset = kTooltipTailInset;
+        label.tailX = tooltipTailX_, label.tailHalfWidth = kTooltipTailHalfW, label.tailHeight = kTooltipTailH, label.tailInset = kTooltipTailInset;
         tooltip_->SetShapes({label});
     } else {
         tooltip_->SetShapes({});
@@ -1972,6 +1968,8 @@ void Bar::RenderThread()
             end = RenderSession();
         } catch (const winrt::hresult_error& e) {
             Log(L"render: 0x%08X %s; rebuilding in 1 s", static_cast<unsigned>(e.code()), e.message().c_str());
+        } catch (const std::exception& e) {
+            Log(L"render: %hs; rebuilding in 1 s", e.what());
         }
         if (end == SessionEnd::Exit || (end == SessionEnd::Retry && WaitForSingleObject(quit_, 1000) != WAIT_TIMEOUT))
             break;

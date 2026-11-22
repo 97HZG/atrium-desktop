@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "shell/displays.h"
+#include "shell/system_chrome.h"
 #include "shell/task_model.h"
 #include "ui/notification_layout.h"
 #include "motion.h"
@@ -157,6 +158,7 @@ void CheckDisplays()
     Require(ResolveDisplay(displays, L"unplugged") == primary, "disconnected display falls back to system primary");
     displays.pop_back();
     Require(ResolveDisplay(displays, L"external") == primary, "unplug falls back without changing the saved ID");
+    Require(ResolveDisplay({}, L"external") == primary, "empty display list falls back to system primary");
     displays.push_back({external, L"external", {}, {}, false});
     Require(ResolveDisplay(displays, L"external") == external, "reconnection restores the selected display");
     auto actual = ConnectedDisplays();
@@ -249,6 +251,40 @@ void CheckFullscreenCoverage()
                 AtDisplayEdge(BarEdge::Right, {-1, 500}, leftScreen) && !AtDisplayEdge(BarEdge::Right, {0, 500}, leftScreen) &&
                 AtDisplayEdge(BarEdge::Top, {-1280, -200}, leftScreen),
             "edge reveal supports negative display coordinates without spilling onto neighbours");
+
+    // Follow-mode summon margins: 4px to arm, 16px hysteresis once armed.
+    Require(FollowEdgeMargin(false) == 4 && FollowEdgeMargin(true) == 16, "follow edge hysteresis margins are 4px arm and 16px hold");
+    Require(!AtDisplayEdge(BarEdge::Bottom, {960, 1077}, screen) && AtDisplayEdge(BarEdge::Bottom, {960, 1076}, screen, FollowEdgeMargin(false)) &&
+                !AtDisplayEdge(BarEdge::Bottom, {960, 1075}, screen, FollowEdgeMargin(false)),
+            "4px margin arms follow summon where 2px does not");
+    Require(AtDisplayEdge(BarEdge::Bottom, {960, 1064}, screen, FollowEdgeMargin(true)) &&
+                !AtDisplayEdge(BarEdge::Bottom, {960, 1063}, screen, FollowEdgeMargin(true)) &&
+                !AtDisplayEdge(BarEdge::Bottom, {960, 1080}, screen, FollowEdgeMargin(true)),
+            "16px hold margin tolerates pointer jitter inside the display without spilling outside");
+    Require(AtDisplayEdge(BarEdge::Top, {960, 3}, screen, 4) && !AtDisplayEdge(BarEdge::Top, {960, 4}, screen, 4) &&
+                AtDisplayEdge(BarEdge::Top, {960, 15}, screen, 16) && !AtDisplayEdge(BarEdge::Top, {960, 16}, screen, 16) &&
+                AtDisplayEdge(BarEdge::Left, {3, 540}, screen, 4) && AtDisplayEdge(BarEdge::Left, {15, 540}, screen, 16) &&
+                AtDisplayEdge(BarEdge::Right, {1916, 540}, screen, 4) && AtDisplayEdge(BarEdge::Right, {1904, 540}, screen, 16),
+            "explicit edge margins work across all four screen edges");
+}
+
+void CheckTaskbarReshowGuard()
+{
+    TaskbarReshowGuard guard;
+    Require(!guard.ShouldBackOff(1000), "fresh guard does not back off");
+    for (ULONGLONG i = 0; i < 7; ++i)
+        Require(!guard.Record(1000 + i * 200) && !guard.ShouldBackOff(1000 + i * 200), "seven rapid re-shows do not trip backoff");
+    Require(guard.Record(2900) && guard.ShouldBackOff(2900), "eighth re-show within 2000ms trips backoff");
+    Require(guard.ShouldBackOff(7899) && !guard.ShouldBackOff(7900), "backoff lasts 5000ms");
+    Require(!guard.Record(3000) && !guard.ShouldBackOff(7900), "events during backoff do not extend the 5000ms window");
+    for (ULONGLONG i = 0; i < 7; ++i)
+        Require(!guard.Record(7900 + i * 100), "guard recovers cleanly after backoff expires");
+    Require(guard.Record(8600) && guard.ShouldBackOff(8600), "eight more rapid re-shows after recovery trip backoff again");
+    guard.Reset();
+    Require(!guard.ShouldBackOff(8601), "explicit Reset clears active backoff immediately");
+    for (ULONGLONG i = 0; i < 7; ++i)
+        Require(!guard.Record(9000 + i * 350), "spread-out re-shows stay below threshold");
+    Require(!guard.Record(12000) && !guard.ShouldBackOff(12000), "evicting events older than 2000ms avoids false trip");
 }
 
 void CheckDataDirArgument()
@@ -397,6 +433,7 @@ int main(int argc, char** argv)
         CheckDisplays();
         CheckTaskDistribution();
         CheckFullscreenCoverage();
+        CheckTaskbarReshowGuard();
         CheckNotificationLayout();
         std::cout << "Display, fullscreen auto-hide, notification placement and animated reflow checks passed.\n";
     } catch (const std::exception& error) {

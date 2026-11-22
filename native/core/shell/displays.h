@@ -31,6 +31,8 @@ std::optional<bool> WindowCoverOnMonitor(HMONITOR windowMonitor, const RECT& fra
 bool IsTile(const RECT& frame, const RECT& work, int slack);
 bool TilesFill(const std::vector<RECT>& tiles, const RECT& work, int slack);
 bool AtDisplayEdge(BarEdge edge, POINT pointer, const RECT& bounds); // 2 px strip on `edge`, strictly inside this display
+bool AtDisplayEdge(BarEdge edge, POINT pointer, const RECT& bounds, LONG margin);
+constexpr LONG FollowEdgeMargin(bool armed) { return armed ? 16 : 4; }
 // The app in front on `monitor` fills the whole screen (a game, a video, F11), not just its work
 // area, or a game holds the screen exclusively: as with Windows' taskbar, the pointer at the
 // screen's edges brings nothing up over it (a full-screen game losing the top drops to the desktop).

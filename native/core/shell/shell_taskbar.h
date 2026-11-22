@@ -88,16 +88,21 @@ inline bool TryAppBarMessage(DWORD message, APPBARDATA& abd, UINT_PTR& out, UINT
         DWORD first = 0;
         GetWindowThreadProcessId(firstWnd, &first);
         struct HostAside {
-            HWND host;
-            explicit HostAside(HWND w) : host(w)
+            HWND host = nullptr;
+            explicit HostAside(HWND w)
             {
+                if (!WindowResponsive(w, 150))
+                    return;
+                host = w;
                 ++g_hostAside;
                 // Synchronous SetWindowPos ensures SHAppBarMessage sees the updated z-order immediately.
                 SetWindowPos(host, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
             }
             ~HostAside()
             {
-                SetWindowPos(host, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                if (!host)
+                    return;
+                SetWindowPos(host, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
                 --g_hostAside;
             }
             HostAside(const HostAside&) = delete;
@@ -105,6 +110,8 @@ inline bool TryAppBarMessage(DWORD message, APPBARDATA& abd, UINT_PTR& out, UINT
         };
         if (first == GetCurrentProcessId()) {
             const HostAside aside{firstWnd};
+            if (!aside.host)
+                return false;
             out = SHAppBarMessage(message, &abd);
         } else {
             out = SHAppBarMessage(message, &abd);

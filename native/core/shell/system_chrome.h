@@ -12,6 +12,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -123,6 +124,56 @@ void ApplyTaskbarHidden(bool hidden, TaskbarChromeState& state, const ChromeReco
 void ApplyBannersHidden(bool hidden, BannerChromeState& state, const ChromeRecord& taskbarRecord, const BannerChromeOps& ops);
 bool ApplyUndoLeftover(const std::wstring& statePath, const UndoLeftoverOps& ops, ChromeRecord* remainingOut = nullptr);
 
+class SystemChrome;
+
+// Rate-limits repeated taskbar re-hides (e.g. StartAllBack re-showing Shell_TrayWnd).
+struct TaskbarReshowGuard {
+    static constexpr ULONGLONG kWindowMs = 2000;
+    static constexpr ULONGLONG kBackoffMs = 5000;
+    static constexpr size_t kThreshold = 8;
+
+    bool ShouldBackOff(ULONGLONG now) const { return backedOff_ && now < backoffUntil_; }
+
+    bool Record(ULONGLONG now)
+    {
+        if (ShouldBackOff(now))
+            return false;
+        if (backedOff_)
+            Reset();
+        while (count_ > 0 && now - stamps_[head_] > kWindowMs) {
+            head_ = (head_ + 1) % kThreshold;
+            --count_;
+        }
+        stamps_[(head_ + count_) % kThreshold] = now;
+        if (count_ < kThreshold)
+            ++count_;
+        else
+            head_ = (head_ + 1) % kThreshold;
+        if (count_ >= kThreshold) {
+            backedOff_ = true;
+            backoffUntil_ = now + kBackoffMs;
+            return true;
+        }
+        return false;
+    }
+
+    void Reset()
+    {
+        stamps_.fill(0);
+        head_ = 0;
+        count_ = 0;
+        backedOff_ = false;
+        backoffUntil_ = 0;
+    }
+
+private:
+    std::array<ULONGLONG, kThreshold> stamps_{};
+    size_t head_ = 0;
+    size_t count_ = 0;
+    bool backedOff_ = false;
+    ULONGLONG backoffUntil_ = 0;
+};
+
 class SystemChrome {
 public:
     SystemChrome();
@@ -175,6 +226,7 @@ private:
     bool autoPlayBannerOurs_ = false; // Atrium turned the AutoPlay banners off; restore them
     bool autoPlayBannerReady_ = false; // AutoPlay banners are off (ours or already)
     bool exiting_ = false;
+    TaskbarReshowGuard reshowGuard_;
     HWINEVENTHOOK hook_ = nullptr;
     DWORD hookedPid_ = 0;
     std::mutex refitMutex_;
