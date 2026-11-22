@@ -536,7 +536,7 @@ struct Meta {
     {
         std::wstring sig = aumid + L"|" + pinPath + L"|" + exePath;
         if (pinPath.empty() && !hwnds.empty())
-            sig += L"|" + std::to_wstring(reinterpret_cast<uintptr_t>(hwnds.front()));
+            sig += L"|" + std::to_wstring(reinterpret_cast<uintptr_t>(*std::ranges::min_element(hwnds)));
         return sig;
     }
 };
@@ -1236,8 +1236,6 @@ struct TaskModel::Impl {
             ok = LoadShellImage(job.pinPath, job.size, img);
         if (!ok && !job.aumid.empty())
             ok = LoadShellImage(AppsFolderPath(job.aumid), job.size, img);
-        if (!ok && !job.aumid.empty())
-            ok = tryWindowIcons(img);
         if (!ok && exeIcon) {
             IconImage exeImg, winImg;
             if (LoadShellImage(job.exePath, job.size, exeImg)) {
@@ -1249,7 +1247,7 @@ struct TaskModel::Impl {
                     img = std::move(exeImg);
             }
         }
-        if (!ok && job.aumid.empty())
+        if (!ok)
             ok = tryWindowIcons(img);
         if (!ok && !exeIcon && !job.exePath.empty())
             ok = LoadShellImage(job.exePath, job.size, img);
@@ -1503,7 +1501,7 @@ struct TaskModel::Impl {
         const TaskItem* t = Find(key);
         auto windows = t ? t->windows : std::vector<HWND>{};
         std::erase_if(windows, [](HWND h) { return !IsWindowVisible(h); });
-        if (monitor && (!t || t->multipleWindows))
+        if (monitor)
             std::erase_if(windows, [&](HWND h) { return MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) != monitor; });
         if (windows.empty()) {
             Launch(key);

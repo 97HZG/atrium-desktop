@@ -943,12 +943,12 @@ void Bar::WatchDisplays()
     Relayout();
     UpdateCover();
     // A summoned Dock stays visible long enough for the pointer to reach it.
-    revealed_ = true;
-    leftAt_ = now;
-    summonGraceUntil_ = now + 1200;
+    if (!FullScreenInFront(hmonitor_)) {
+        revealed_ = true, leftAt_ = now, summonGraceUntil_ = now + 1200;
+        Raise();
+    }
     UpdateAutoHide();
     UpdateNearWatch();
-    Raise();
 }
 
 void Bar::SetItems(std::vector<TaskItem> items)

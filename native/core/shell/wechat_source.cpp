@@ -540,6 +540,7 @@ void WeChatSource::Run()
             }
         }
     }
+    held.clear();
     cells = nullptr;
     cache = nullptr;
     uia = nullptr;
