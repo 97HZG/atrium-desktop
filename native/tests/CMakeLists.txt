@@ -11,6 +11,10 @@ add_executable(bar_edge_tests bar_edge.cpp)
 target_link_libraries(bar_edge_tests PRIVATE atrium_core_lib)
 add_test(NAME bar_edge COMMAND bar_edge_tests)
 
+add_executable(capture_policy_tests capture_policy.cpp)
+target_link_libraries(capture_policy_tests PRIVATE atrium_core_lib)
+add_test(NAME capture_policy COMMAND capture_policy_tests)
+
 add_executable(near_hover_tests near_hover.cpp)
 target_link_libraries(near_hover_tests PRIVATE atrium_core_lib)
 add_test(NAME near_hover COMMAND near_hover_tests)

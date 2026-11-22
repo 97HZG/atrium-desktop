@@ -2109,18 +2109,20 @@ Bar::SessionEnd Bar::RenderSession()
     Gpu gpu = Gpu::ForMonitor(snap.hmonitor);
     const HMONITOR captureMonitor = snap.hmonitor;
     const unsigned captureGeneration = snap.displayGeneration;
+    capturePolicy_.BeginSession();
     // The backdrop: Desktop Duplication, which leaves Atrium's windows out by
     // itself (so screenshots may show them); else Windows.Graphics.Capture
     // with Atrium kept out of every capture.
     std::unique_ptr<BackdropSource> capture;
     // Remote-control mode: the wallpaper, so that the screen's capture may show Atrium.
     const bool remote = RemoteVisible();
+    const CapturePolicy::InitialSource initial = capturePolicy_.ChooseInitialSource(remote, GetTickCount64());
     // The capture came all black twice in a row, through both capture APIs: the wallpaper for a while.
-    const bool blackOut = !remote && GetTickCount64() < wallpaperUntil_;
-    if (remote || blackOut) {
+    const bool blackOut = !remote && initial == CapturePolicy::InitialSource::Wallpaper;
+    if (initial == CapturePolicy::InitialSource::Wallpaper) {
         capture = std::make_unique<WallpaperCapture>(gpu, snap.hmonitor, frame_);
         Log(remote ? L"render: remote-control mode, the glass shows the wallpaper" : L"render: the glass shows the wallpaper for now");
-    } else if (!duplicationFailed_) {
+    } else if (initial == CapturePolicy::InitialSource::Duplication) {
         HRESULT why = S_OK;
         bool elsewhere = false;
         for (int tries = 0;; ++tries) {
@@ -2135,8 +2137,7 @@ Bar::SessionEnd Bar::RenderSession()
         if (!capture && elsewhere)
             PreferPowerSavingGpu();
         if (!capture) {
-            duplicationFailed_ = true;
-            duplicationRetryAt_ = GetTickCount64() + 30000;
+            capturePolicy_.OnDuplicationUnavailable(GetTickCount64());
             Log(L"render: desktop duplication unavailable (0x%08X); Windows.Graphics.Capture, Atrium kept out of screenshots", static_cast<unsigned>(why));
         }
     }
@@ -2154,7 +2155,6 @@ Bar::SessionEnd Bar::RenderSession()
     BarPainter painter(renderer.D2D(), renderer.DWrite());
 
     unsigned drawnGeneration = 0;
-    double blackSince = -1;        // since when the capture around the bar is all black
     float backdropBrightest = 1;   // the brightest cell of the last backdrop read back
     std::wstring drawnText;
     bool darkClock = false, darkApps = false, drawnDark = false, drawnDarkIcons = false, animating = false;
@@ -2570,18 +2570,17 @@ Bar::SessionEnd Bar::RenderSession()
         // On Windows.Graphics.Capture after Desktop Duplication failed (it can after a lock or sleep):
         // Desktop Duplication again once it works, not only after a restart (#19).
         // One that came back black is not tried again on the same displays: it would start fine and be black again.
-        if (needScreen && !remote && duplicationFailed_ && !capture->KeepsOwnWindowsOut() && GetTickCount64() >= duplicationRetryAt_ &&
-            captureGeneration != blackGeneration_) {
-            duplicationRetryAt_ = GetTickCount64() + 30000;
+        const ULONGLONG tickMs = GetTickCount64();
+        if (capturePolicy_.ShouldProbeDuplication(needScreen, remote, capture->KeepsOwnWindowsOut(), captureGeneration, tickMs)) {
             HRESULT why = S_OK;
             bool elsewhere = false;
             if (DuplicationCapture::Create(gpu, snap.hmonitor, frame_, why, elsewhere)) {
-                duplicationFailed_ = false;
+                capturePolicy_.OnDuplicationRecovered();
                 Log(L"render: desktop duplication available again");
                 return SessionEnd::Switch;
             }
         }
-        if (blackOut && GetTickCount64() >= wallpaperUntil_) {
+        if (capturePolicy_.ShouldExitBlackoutWallpaper(blackOut, tickMs)) {
             Log(L"render: back to capturing the screen");
             return SessionEnd::Switch;
         }
@@ -2662,37 +2661,21 @@ Bar::SessionEnd Bar::RenderSession()
         // is all black for a while, yet the screen above the bar is not. The capture is started
         // again; black again soon after, Windows.Graphics.Capture instead (another capture path
         // entirely); black there too, the wallpaper for a while.
-        if (!remote && !blackOut && renderer.HasBackdrop()) {
-            if (backdropBrightest > 0.01f) {
-                blackSince = -1;
-                if (ClockMs() - blackRestartMs_ > 30000)
-                    blackRestarts_ = 0;
-            } else if (blackSince < 0) {
-                blackSince = ClockMs();
-            } else if (ClockMs() - blackSince > 1500) {
-                blackSince = -1;
-                if (ScreenLitAbove(snap.scene.edge, snap.window)) {
-                    blackRestartMs_ = ClockMs();
-                    if (++blackRestarts_ >= 2) {
-                        blackRestarts_ = 0;
-                        if (duplicationFailed_) {
-                            wallpaperUntil_ = GetTickCount64() + 30000;
-                            Log(L"render: the capture stays black over a lit screen; the wallpaper for thirty seconds");
-                        } else {
-                            // Desktop Duplication keeps coming back black: try Windows.Graphics.Capture
-                            // before the wallpaper, so a capture that is black for any reason cannot
-                            // hide every window behind the wallpaper for minutes.
-                            duplicationFailed_ = true;
-                            duplicationRetryAt_ = GetTickCount64() + 30000;
-                            blackGeneration_ = captureGeneration;
-                            Log(L"render: the capture stays black over a lit screen; Windows.Graphics.Capture until the displays change");
-                        }
-                    } else {
-                        Log(L"render: the capture is black over a lit screen; starting it again");
-                    }
-                    return SessionEnd::Retry;
-                }
+        if (capturePolicy_.PollBlackBackdrop(!remote && !blackOut && renderer.HasBackdrop(), backdropBrightest, GetTickCount64()) &&
+            ScreenLitAbove(snap.scene.edge, snap.window)) {
+            switch (capturePolicy_.OnBlackOverLitScreen(captureGeneration, GetTickCount64())) {
+            case CapturePolicy::BlackAction::RestartCapture: Log(L"render: the capture is black over a lit screen; starting it again"); break;
+            case CapturePolicy::BlackAction::SwitchToMonitorCapture:
+                // Desktop Duplication keeps coming back black: try Windows.Graphics.Capture
+                // before the wallpaper, so a capture that is black for any reason cannot
+                // hide every window behind the wallpaper for minutes.
+                Log(L"render: the capture stays black over a lit screen; Windows.Graphics.Capture until the displays change");
+                break;
+            case CapturePolicy::BlackAction::FallbackToWallpaper:
+                Log(L"render: the capture stays black over a lit screen; the wallpaper for thirty seconds");
+                break;
             }
+            return SessionEnd::Retry;
         }
         bool changed = !renderer.HasPresented();
         if (auto rb = renderer.Poll()) {

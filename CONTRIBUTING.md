@@ -13,6 +13,17 @@ Thanks for your interest. The most valuable contributions to Atrium right now ar
 - Report results honestly: a test is `PASS`, `FAIL` or `SKIP`. Missing hardware is a skip, not "should work".
 - Do not commit screenshots or data that show other people's windows, notifications or personal content. Use `ATRIUM_PRIVACY=1` and a synthetic backdrop for images.
 
+## Architecture at a glance
+
+- **Native core (`native/core/`)**: strictly one-way layers enforced by `tools/lint.ps1` (no include cycles):
+  - **Foundation headers** (`settings.h`, `bar_edge.h`, `clock.h`, `log.h`, `localization.h`, `win32_path.h`, etc.) — pure helpers and data contracts, free of WinRT/DirectX headers.
+  - **`render/`** (DirectX/D2D glass, backdrop capture, `CapturePolicy`) and **`shell/`** (task model, tray, displays, system status) — independent siblings; neither includes the other.
+  - **`ui/`** (popups, control center, stage manager) — builds on foundation, `render/`, and `shell/`.
+  - **Composition root** (`bar.cpp`, `main.cpp`, `settings_server.cpp`) — wires the bar window, render thread, and UI together.
+- **Settings app (`settings/Atrium.Settings/`)**: pure C# model/logic files (`BarSettings.cs`, `SettingsSession.cs`, `CoreClient.cs`, `CornerProfile.cs`, `LocalizationValidation.cs`, etc.) stay free of WinUI/UI namespaces (`lint.ps1` enforces this too).
+- **Adding or changing a setting**: update all four places together — `native/core/settings.{h,cpp}`, `settings/Atrium.Settings/BarSettings.cs`, `docs/SETTINGS-PROTOCOL.md`, and `tests/fixtures/settings-schema.json` (`SettingsChecks` cross-checks them automatically).
+- **Adding UI strings**: update every locale file in `locales/*.json` (`LocalizationChecks` and `tools/check-localization.ps1` verify completeness and format specifiers).
+
 ## Local checks
 
 Run these from the repository root before opening a pull request:

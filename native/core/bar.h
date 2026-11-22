@@ -18,6 +18,7 @@
 
 #include "near_hover.h"
 #include "render/bar_painter.h"
+#include "render/capture_policy.h"
 #include "render/glass_panel.h"
 #include "settings.h"
 #include "shell/task_model.h"
@@ -280,15 +281,7 @@ private:
     HANDLE frame_ = nullptr; // a capture frame arrived
     HANDLE captureAck_ = nullptr; // the UI thread changed the windows' capture exclusion
     std::atomic<bool> captureVisible_{false}; // Atrium's windows show in screenshots (render thread)
-    bool duplicationFailed_ = false;            // Desktop Duplication cannot run here: Windows.Graphics.Capture
-    ULONGLONG duplicationRetryAt_ = 0; // on Windows.Graphics.Capture: when to try Desktop Duplication again
-    unsigned blackGeneration_ = ~0u;   // the displayGeneration on which Desktop Duplication came black
-    // The capture coming all black while the screen is not (BlackCapture): started again; black
-    // again at once, Windows.Graphics.Capture instead; black there too, the glass shows the
-    // wallpaper until then.
-    ULONGLONG wallpaperUntil_ = 0;
-    int blackRestarts_ = 0;
-    double blackRestartMs_ = -1e9;
+    CapturePolicy capturePolicy_;
     std::thread render_;
 };
 
