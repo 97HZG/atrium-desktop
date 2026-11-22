@@ -84,6 +84,7 @@ public:
     BarEdge Edge() const { return edge_; }
     // The window that had the foreground before a click on the logo activated the bar.
     HWND PreviousForeground() const { return previousForeground_; }
+    bool Seen() const { return visible_ && !tucked_; } // on screen, not tucked away
     // Glass layers of popup windows (GlassHost).
     void SetPanel(const GlassPanel& panel) override;
     // Stops the render thread, pumping this (UI) thread's messages meanwhile, before the popups and
@@ -132,6 +133,7 @@ public:
     std::function<void()> onMonitorChanged = [] {}; // close or re-anchor the bar's popups
     std::function<void()> onInteract = [] {}; // this display owns the next popup
     std::function<void()> onItemsChanged = [] {}; // keep an open preview filtered after a window crosses displays
+    std::function<void()> onTuckChanged = [] {};  // auto-hide tucked the bar away or brought it up
 
 private:
     struct Snapshot {

@@ -906,7 +906,7 @@ void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pa
                DWRITE_FONT_WEIGHT_SEMI_BOLD, size == WidgetSize::Small ? 0 : 1);
         return;
     }
-    c.Text(Degrees(w.temp), D2D1::RectF(pad - 2, 30, fw / 2 + 40, 82), 44, text, DWRITE_FONT_WEIGHT_LIGHT);
+    c.Text(Degrees(w.temp), D2D1::RectF(pad - 2, 30, fw / 2 + 40, 82), 44, text, DWRITE_FONT_WEIGHT_NORMAL);
     const std::wstring range = TrFormat(L"H %s  L %s", Degrees(w.hi).c_str(), Degrees(w.lo).c_str());
     if (size == WidgetSize::Small) {
         WeatherIcon(c, w.code, w.day, pad + 11, fh - 62, 22, 0, ink);

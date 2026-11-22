@@ -1,6 +1,6 @@
 // The interface face (D40): MiSans, shipped with the settings app (Settings\Fonts)
-// and loaded privately (never installed). Its weights run light: Light (250)
-// draws the input method's letter, Medium (380) reads as a body text, Demibold (450) as emphasis, Semibold (520) as
+// and loaded privately (never installed). Its weights run light: Medium (380)
+// reads as a body text, Demibold (450) as emphasis, Semibold (520) as
 // titles, so callers keep asking for the usual weights and UiTextFormat maps
 // them. Digits are tabular wherever they are drawn (a clock or a level must
 // not shift as it changes). Without the files: Segoe UI Variable Text, with

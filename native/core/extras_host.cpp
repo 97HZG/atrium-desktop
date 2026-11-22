@@ -103,8 +103,10 @@ void ExtrasHost::Apply(const Settings& s, float radius)
         media_.reset();
         OnMedia(MediaSnapshot{}); // the entry and its card go with the setting
     }
-    if (media_)
+    if (media_) {
         media_->SetFilter(s.nowPlayingShowPaused, s.nowPlayingAppMode, s.nowPlayingApps);
+        UpdateSampling();
+    }
     stacksOn_ = s.showFolderStacks;
     stacks_.SetOptions(s.folderStackLayout != L"column", size_t(s.folderStackMax));
     stackModel_.SetFolders(stacksOn_ ? s.folderStacks : std::vector<std::wstring>{}, 96); // read once at a size every scale draws from
@@ -124,6 +126,16 @@ void ExtrasHost::ConfigureBar(Bar& bar)
         if (media_ && scrollVolume_)
             media_->AdjustVolume(2 * notches);
     };
+    bar.onTuckChanged = [this] { UpdateSampling(); };
+}
+
+void ExtrasHost::UpdateSampling()
+{
+    if (!media_)
+        return;
+    bool seen = card_.Visible();
+    forBars_([&](Bar& bar) { seen = seen || bar.Seen(); });
+    media_->SetSamplingActive(seen);
 }
 
 void ExtrasHost::Click(Bar& bar, const std::wstring& key, RECT entry)

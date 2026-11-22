@@ -50,6 +50,7 @@ private:
     void Click(Bar& bar, const std::wstring& key, RECT entry);
     void OnMedia(const MediaSnapshot& snapshot);
     std::wstring MusicTip() const; // the entry's tooltip: the track
+    void UpdateSampling();         // the player's level is read only while a bar shows it
 
     ForEachBar forBars_;
     HWND host_; // message-only: the media watcher's and the stack's news

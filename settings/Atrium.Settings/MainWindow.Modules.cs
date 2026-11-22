@@ -619,6 +619,9 @@ public sealed partial class MainWindow
                 ImeX = Slot(a.ImeX, b.ImeX),
                 StatusX = Slot(a.StatusX, b.StatusX),
                 BellX = Slot(a.BellX, b.BellX),
+                LaunchX = Slot(a.LaunchX, b.LaunchX),
+                MusicX = Slot(a.MusicX, b.MusicX),
+                StacksX = Slot(a.StacksX, b.StacksX),
                 StatusExtra = Mix(a.StatusExtra, b.StatusExtra),
             };
         }

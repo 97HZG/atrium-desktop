@@ -180,10 +180,9 @@
                     </Setter.Value>
                 </Setter>
             </Style>
-            <!-- ============ Type (D40): MiSans, four files, one weight each ============
-                 Light 250 draws the input method's letter, Medium 380 reads as a regular, Demibold 450 as a medium, Semibold 520 as a semibold.
+            <!-- ============ Type (D40): MiSans, three files, one weight each ============
+                 Medium 380 reads as a regular, Demibold 450 as a medium, Semibold 520 as a semibold.
                  Weights are never synthesised: a style picks the file, FontWeight stays Normal. -->
-            <FontFamily x:Key="LightFont">ms-appx:///Fonts/MiSans-Light.otf#MiSans, Segoe UI Variable Text, Microsoft YaHei UI</FontFamily>
             <FontFamily x:Key="TextFont">ms-appx:///Fonts/MiSans-Medium.otf#MiSans, Segoe UI Variable Text, Microsoft YaHei UI</FontFamily>
             <FontFamily x:Key="EmphasisFont">ms-appx:///Fonts/MiSans-Demibold.otf#MiSans, Segoe UI Variable Text, Microsoft YaHei UI</FontFamily>
             <FontFamily x:Key="TitleFont">ms-appx:///Fonts/MiSans-Semibold.otf#MiSans, Segoe UI Variable Display, Microsoft YaHei UI</FontFamily>

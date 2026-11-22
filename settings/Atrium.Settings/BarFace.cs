@@ -3,6 +3,7 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
+using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
@@ -16,7 +17,7 @@ namespace Atrium.Settings;
 // panes, the app icons growing in the magnification wave, the running dots, the separator, the
 // tray chevron, the status ring, the clock with its halo, the bell and its badge. One BarFace
 // draws the preview at 1x, another the loupe's close-up.
-internal sealed class BarFace
+internal sealed partial class BarFace
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct PowerStatus { public byte AcLine, BatteryFlag, Percent, SaverStatus; public int LifeTime, FullLifeTime; }
@@ -32,6 +33,7 @@ internal sealed class BarFace
     private readonly Rectangle _sep = new() { IsHitTestVisible = false }, _desk = new() { IsHitTestVisible = false };
     private readonly FontIcon _tray = Glyph("\uE70E"), _bell = Glyph("\uEA8F");
     private readonly TextBlock _ime = Ime(), _imePrev = Ime();
+    private readonly Path _imePath = new() { IsHitTestVisible = false }, _imePrevPath = new() { IsHitTestVisible = false };
     private readonly Border _badge = new() { IsHitTestVisible = false, Background = new SolidColorBrush(Color.FromArgb(255, 10, 133, 255)) };
     private readonly TextBlock _badgeText = new()
     {
@@ -63,6 +65,7 @@ internal sealed class BarFace
         }
         canvas.Children.Add(_plate);
         canvas.Children.Add(_logo);
+        AddExtras(canvas);
         for (int i = 0; i < maxIcons; i++)
         {
             var icon = new Image { Stretch = Stretch.Uniform, IsHitTestVisible = false };
@@ -74,7 +77,7 @@ internal sealed class BarFace
         }
         foreach (var e in new UIElement[]
         {
-            _sep, _desk, _tray, _imePrev, _ime, _status, _statusIcons, _timeHalo, _dateHalo, _time, _date, _bell, _badge,
+            _sep, _desk, _tray, _imePrev, _imePrevPath, _ime, _imePath, _status, _statusIcons, _timeHalo, _dateHalo, _time, _date, _bell, _badge,
         })
         {
             canvas.Children.Add(e);
@@ -97,18 +100,37 @@ internal sealed class BarFace
     {
         _imeState = (glyph, prev, fade);
         if (_imeAt is not var (x, y, size, ink)) return;
-        PlaceIme(_imePrev, prev, x, y, size, StatusGlyph.Fade(ink, 1 - fade));
-        PlaceIme(_ime, glyph, x, y, size, StatusGlyph.Fade(ink, fade));
+        PlaceIme(_imePrev, _imePrevPath, prev, x, y, size, StatusGlyph.Fade(ink, 1 - fade));
+        PlaceIme(_ime, _imePath, glyph, x, y, size, StatusGlyph.Fade(ink, fade));
     }
 
-    // Centred by its ink, as on the bar: the tight box runs from the cap height to the baseline,
-    // and a lowercase letter reaches only MiSans's x-height (528 against 738 in 1000).
-    private static void PlaceIme(TextBlock t, string glyph, double x, double y, double size, Color color)
+    // Known letters come from Noto Sans CJK SC Light outlines (em units centred on the ink); any other
+    // falls back to TextFont centred in the square.
+    private static void PlaceIme(TextBlock t, Path p, string glyph, double x, double y, double size, Color color)
     {
+        if (color.A < 1 || string.IsNullOrEmpty(glyph))
+        {
+            t.Visibility = p.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (ImeGlyphData.PathFor(glyph) is string markup)
+        {
+            t.Visibility = Visibility.Collapsed;
+            p.Visibility = Visibility.Visible;
+            if (!Equals(p.Tag, glyph))
+            {
+                p.Tag = glyph;
+                p.Data = (Geometry)XamlBindingHelper.ConvertValue(typeof(Geometry), "F1 " + markup);
+            }
+            double em = Math.Max(1, size * 0.74);
+            p.Fill = new SolidColorBrush(color);
+            p.RenderTransform = new ScaleTransform { ScaleX = em, ScaleY = em };
+            Canvas.SetLeft(p, x + size / 2);
+            Canvas.SetTop(p, y + size / 2);
+            return;
+        }
+        p.Visibility = Visibility.Collapsed;
         StatusGlyph.Place(t, glyph, x, y, size, size * 0.74, color);
-        t.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        double lift = glyph.Length == 1 && char.IsLower(glyph[0]) ? (0.738 - 0.528) / 2 * t.FontSize : 0;
-        Canvas.SetTop(t, y + (size - t.DesiredSize.Height) / 2 - lift);
     }
 
     private static TextBlock Ime() => new()
@@ -118,8 +140,7 @@ internal sealed class BarFace
         IsHitTestVisible = false,
         IsTextScaleFactorEnabled = false,
         TextWrapping = TextWrapping.NoWrap,
-        TextLineBounds = TextLineBounds.Tight,
-        FontFamily = (FontFamily)Application.Current.Resources["LightFont"],
+        FontFamily = (FontFamily)Application.Current.Resources["TextFont"],
     };
 
     private static FontIcon Glyph(string glyph) => new()
@@ -288,8 +309,9 @@ internal sealed class BarFace
         }
         Entry(_tray, l.TrayX);
         Entry(_bell, l.BellX);
+        LayoutExtras(l, Item, inkColor);
 
-        _ime.Visibility = _imePrev.Visibility = Visibility.Collapsed;
+        _ime.Visibility = _imePrev.Visibility = _imePath.Visibility = _imePrevPath.Visibility = Visibility.Collapsed;
         _imeAt = null;
         if (l.ImeX >= 0)
         {

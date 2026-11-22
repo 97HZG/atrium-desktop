@@ -1452,6 +1452,7 @@ void Bar::UpdateAutoHide()
     if (tuck == tucked_)
         return;
     tucked_ = scene_.tucked = tuck;
+    onTuckChanged();
     if (tuck) {
         HideTooltip();
         SetRegion(false);

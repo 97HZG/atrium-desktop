@@ -30,7 +30,8 @@ public sealed partial class MainWindow
         bool Clock, double ClockX, double ClockW, double TimePx, double DatePx, double SepX,
         double StartX, double TrayX, double ImeX, double StatusX, double BellX,
         double K, double Centre, double Range,
-        double LoupeX0, double LoupeY0, double LoupeW, double LoupeH, double StatusExtra = 0, double DeskX = -1)
+        double LoupeX0, double LoupeY0, double LoupeW, double LoupeH, double StatusExtra = 0, double DeskX = -1,
+        double LaunchX = -1, double MusicX = -1, double StacksX = -1)
     {
         public double PlateX(int i) => BaseX + (AppsLeft + i * Pitch) * S;
 
@@ -155,11 +156,12 @@ public sealed partial class MainWindow
         double clockW = s.ShowClock ? Math.Max(timePx * (s.ShowClockSeconds ? 4.8 : 2.75), datePx * 5.7) + 22 : 0;
         double deskW = s.ShowDesktop ? Math.Max(10, Math.Round(i * 0.45)) : 0; // the Show Desktop slot
         int rightCount = (s.ShowTray ? 1 : 0) + (s.ImeStatus ? 1 : 0) + (s.ShowStatus ? 1 : 0) +
-            (s.ShowNotifications ? 1 : 0) + (s.ShowClock ? 1 : 0) + (s.ShowDesktop ? 1 : 0);
+            (s.ShowNotifications ? 1 : 0) + (s.ShowClock ? 1 : 0) + (s.ShowDesktop ? 1 : 0) + (s.ShowNowPlaying ? 1 : 0) + (s.ShowFolderStacks ? 1 : 0);
         double statusExtra = s.StatusStyle == "icons" ? Math.Round(i * 1.3) : 0; // three icons: about an icon wider
         double rightW = (rightCount - (s.ShowClock ? 1 : 0) - (s.ShowDesktop ? 1 : 0)) * p +
             (s.ShowStatus ? statusExtra : 0) + clockW + deskW + Math.Max(0, rightCount - 1) * gap;
-        double Content(int n) => Math.Max(2 * h, 2 * pad + p + 2 * gap + n * p + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
+        double launch = s.ShowLaunchpad ? p + gap : 0; // Launchpad, one slot right of the logo
+        double Content(int n) => Math.Max(2 * h, 2 * pad + p + 2 * gap + launch + n * p + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
         double mag = Math.Clamp(s.Magnify, 1, 2), pitch = p + gap;
         double stretch = mag > 1.001 ? Math.Ceiling((mag - 1) * pitch * 2.3) : 0;
         double maxW = Math.Max(2 * h, Math.Min(s.Width, (viewW - 16) / scale - stretch));
@@ -177,10 +179,11 @@ public sealed partial class MainWindow
             return x;
         }
         double deskLeft = Slot(deskW, s.ShowDesktop);
-        double bellLeft = Slot(p, s.ShowNotifications), clockLeft = Slot(clockW, s.ShowClock);
+        double bellLeft = Slot(p, s.ShowNotifications), clockLeft = Slot(clockW, s.ShowClock), musicLeft = Slot(p, s.ShowNowPlaying);
         double statusLeft = Slot(p + statusExtra, s.ShowStatus), imeLeft = Slot(p, s.ImeStatus), trayLeft = Slot(p, s.ShowTray);
+        double stacksLeft = Slot(p, s.ShowFolderStacks);
         double rightLeft = rightCount > 0 ? cursor + gap : barW - pad;
-        double appsMin = pad + p + 2 * gap;
+        double appsMin = pad + p + 2 * gap + launch;
         double appsLeft = appsMin + Math.Max(0, (rightLeft - (rightCount > 0 ? 2 * sepGap : 0) - appsMin - (n * p + Math.Max(0, n - 1) * gap)) / 2);
         double reff = Math.Min(s.CornerRadius, Math.Min(h, barW) / 2);
 
@@ -208,7 +211,8 @@ public sealed partial class MainWindow
             bx + pad * scale, X(trayLeft), X(imeLeft), X(statusLeft), X(bellLeft),
             k, centre, range,
             right - (lw - 10) * scale, by - 10 * scale, lw * scale, lh * scale, statusExtra * scale,
-            deskLeft < 0 ? -1 : bx + (deskLeft + deskW / 2) * scale);
+            deskLeft < 0 ? -1 : bx + (deskLeft + deskW / 2) * scale,
+            s.ShowLaunchpad ? X(pad + p + gap) : -1, X(musicLeft), X(stacksLeft));
     }
 
     private void UpdateHero()
