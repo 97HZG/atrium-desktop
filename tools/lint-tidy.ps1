@@ -364,6 +364,8 @@ function Invoke-TidyCheck(
     $clangTidy = Llvm 'clang-tidy.exe'
     if (-not $clangTidy) { throw "lint: clang-tidy $LlvmMajor not found" }
     $tidyConfig = Join-Path $Rules '.clang-tidy'; $devFileCache = @{}
+    # One clang-tidy per processor, or ATRIUM_LINT_JOBS of them (several lints sharing a machine).
+    $throttle = if ([int]::TryParse($env:ATRIUM_LINT_JOBS, [ref]$null) -and [int]$env:ATRIUM_LINT_JOBS -gt 0) { [int]$env:ATRIUM_LINT_JOBS } else { [Environment]::ProcessorCount }
     $jobs = @(foreach ($u in $units) {
         $hdrs = if ($unitHeaders.ContainsKey($u)) { $unitHeaders[$u] } else { @() }
         $hasBranch = Test-HasDevBranch $u $hdrs $devFileCache; $devDef = [bool]$unitDevDefined[$u]
@@ -373,7 +375,7 @@ function Invoke-TidyCheck(
         }
     })
     $results = if ($jobs.Count) {
-        @($jobs | ForEach-Object -ThrottleLimit ([Environment]::ProcessorCount) -Parallel {
+        @($jobs | ForEach-Object -ThrottleLimit $throttle -Parallel {
             $job = $_; $errFile = [IO.Path]::GetTempFileName()
             try {
                 $argsList = @('-p', $using:build, "--config-file=$using:tidyConfig", '--quiet')
