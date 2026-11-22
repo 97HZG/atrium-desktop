@@ -51,9 +51,13 @@ private:
     void PaintHeader(Canvas& c, const Theme& t);
     void PaintProgress(Canvas& c, const Theme& t);
     void PaintControls(Canvas& c, const Theme& t);
+    D2D1_RECT_F BeginControl(Canvas& c, const Theme& t, Part part, int at, float r, bool enabled, float plateMin = 0.f);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
     Part HitAt(POINT pt) const;
     void Send(MediaCommand command, int64_t positionUs = 0);
+    void TogglePlayPause();
+    void ActivatePart(Part part);
+    void ReleaseDrag(bool releaseCapture);
     bool Playing() const; // as shown: a press flips it before the session answers
     int64_t ShownPositionUs(double now) const;
     float TrackFraction(float x) const; // a point along the progress bar, 0..1

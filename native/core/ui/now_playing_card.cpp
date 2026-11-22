@@ -95,6 +95,25 @@ std::optional<D2D1_COLOR_F> Tint(const IconImage& src)
     return D2D1::ColorF(std::min(1.f, float(r) / k * lift), std::min(1.f, float(g) / k * lift), std::min(1.f, float(b) / k * lift), 1.f);
 }
 
+void PaintTransportMark(Canvas& c, D2D1_POINT_2F o, bool isPlay, bool playing, int dir, D2D1_COLOR_F ink)
+{
+    // The marks (MainWindow.ExtrasScenes.cs draws the same): pause as two bars, play as a
+    // triangle, previous and next as two triangles pointing the way the track goes.
+    if (isPlay && playing) {
+        c.Fill(D2D1::RectF(o.x - 7.5f, o.y - 8.5f, o.x - 2.5f, o.y + 8.5f), 1.8f, ink);
+        c.Fill(D2D1::RectF(o.x + 2.5f, o.y - 8.5f, o.x + 7.5f, o.y + 8.5f), 1.8f, ink);
+    } else if (isPlay) {
+        const std::array<D2D1_POINT_2F, 3> play{{{o.x - 4.5f, o.y - 8}, {o.x + 8.5f, o.y}, {o.x - 4.5f, o.y + 8}}};
+        c.Polygon(play, ink, 2);
+    } else {
+        const float d = float(dir);
+        for (float base : {-9.5f, 0.f}) {
+            const std::array<D2D1_POINT_2F, 3> tri{{{o.x + d * base, o.y - 6}, {o.x + d * (base + 8.5f), o.y}, {o.x + d * base, o.y + 6}}};
+            c.Polygon(tri, ink, 1.5f);
+        }
+    }
+}
+
 } // namespace
 
 NowPlayingCard::NowPlayingCard(HINSTANCE instance) : surface_(instance, L"Atrium Now Playing", true)
@@ -119,7 +138,8 @@ void NowPlayingCard::Close()
 {
     if (const HWND h = surface_.Hwnd())
         KillTimer(h, kTickTimer);
-    dragging_ = false;
+    ReleaseDrag(true);
+    hover_ = Part::None;
     if (!surface_.Visible())
         return;
     surface_.Hide();
@@ -154,9 +174,19 @@ void NowPlayingCard::Update(const MediaSnapshot& snapshot)
 {
     const double now = ClockMs();
     // Another track: its heart and lyrics are not known to be on (the player does not tell).
-    if (snapshot.sessionId != media_.sessionId || snapshot.title != media_.title || snapshot.artist != media_.artist)
+    if (snapshot.sessionId != media_.sessionId || snapshot.title != media_.title || snapshot.artist != media_.artist) {
         liked_ = false;
+        seekTo_.reset();
+        playingShown_.reset();
+    }
+    if (snapshot.appId != media_.appId || !snapshot.canLyrics)
+        lyricsOn_ = false;
     media_ = snapshot;
+    if (!media_.timeline.Seekable() || !media_.canSeek) {
+        const Part keepPressed = pressed_ == Part::Track ? Part::None : pressed_;
+        ReleaseDrag(true);
+        pressed_ = keepPressed;
+    }
     // The session agrees with the press (or never answered): its state shows again.
     if (playingShown_ && (*playingShown_ == (media_.state == MediaPlaybackState::Playing) || now - playingAt_ > 1500))
         playingShown_.reset();
@@ -173,13 +203,14 @@ void NowPlayingCard::Update(const MediaSnapshot& snapshot)
 void NowPlayingCard::TakeArtwork()
 {
     artVersion_ = media_.artworkVersion;
-    artMs_ = ClockMs();
+    surface_.ForgetImage(L"np|art");
     const IconImage* art = media_.artwork.get();
     if (!art || art->Empty() || art->bgra.size() < size_t(art->width) * size_t(art->height) * 4) {
         art_ = IconImage{};
         tint_.reset();
         return;
     }
+    artMs_ = ClockMs();
     art_ = RoundCorners(*art, kArtRadius / kArt);
     tint_ = Tint(*art);
 }
@@ -204,6 +235,46 @@ void NowPlayingCard::Send(MediaCommand command, int64_t positionUs)
         onCommand(command, positionUs);
 }
 
+void NowPlayingCard::TogglePlayPause()
+{
+    playingShown_ = !Playing();
+    playingAt_ = ClockMs();
+    Send(MediaCommand::PlayPause);
+    surface_.Invalidate();
+}
+
+void NowPlayingCard::ReleaseDrag(bool releaseCapture)
+{
+    if (releaseCapture) {
+        if (const HWND h = surface_.Hwnd(); h && GetCapture() == h)
+            ReleaseCapture();
+    }
+    dragging_ = false;
+    pressed_ = Part::None;
+}
+
+void NowPlayingCard::ActivatePart(Part part)
+{
+    if (part == Part::Play && media_.canPlayPause) {
+        TogglePlayPause();
+    } else if (part == Part::Previous && media_.canPrevious) {
+        Send(MediaCommand::Previous);
+    } else if (part == Part::Next && media_.canNext) {
+        Send(MediaCommand::Next);
+    } else if (part == Part::Like && media_.canLike) {
+        liked_ = !liked_;
+        Send(MediaCommand::Like);
+    } else if (part == Part::Lyrics && media_.canLyrics) {
+        lyricsOn_ = !lyricsOn_;
+        Send(MediaCommand::Lyrics);
+    } else if (part == Part::Session) {
+        Send(MediaCommand::NextSession);
+    } else if (part == Part::Art) {
+        Send(MediaCommand::ActivateApp);
+        Close();
+    }
+}
+
 float NowPlayingCard::Hover(Canvas& c, Part part, bool on)
 {
     auto& f = hoverAnim_[part];
@@ -221,7 +292,7 @@ void NowPlayingCard::Paint(Canvas& c)
         c.Fill(card, radius_, t.panel);
     // The art fades in over the glass (PaintHeader).
     const float artIn = motion::EaseOut(float((c.now - artMs_) / kArtFadeMs));
-    if (artIn < 1)
+    if (!art_.Empty() && artIn < 1)
         c.Continue();
     PaintHeader(c, t);
     PaintProgress(c, t);
@@ -233,23 +304,25 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
     const float artIn = motion::EaseOut(float((c.now - artMs_) / kArtFadeMs));
     const D2D1_RECT_F art = ArtRect();
     if (!art_.Empty()) {
-        c.Image(L"np|art|" + std::to_wstring(artVersion_), art_, art, artIn);
+        c.Image(L"np|art", art_, art, artIn);
     } else {
         c.Fill(art, kArtRadius, Alpha(t.hover, 1.6f));
         c.Glyph(L"", art, 22, t.subtext); // MusicNote
     }
+    const bool several = media_.sessionCount > 1;
     const float right = kW - kPad - kBarsW - 10;
+    const float artistRight = several ? std::min(right, SessionRect().left - 6) : right;
     const std::wstring title = media_.title.empty() ? std::wstring(Tr(L"Not playing")) : media_.title;
     // The track and the artist, centred together on the art.
     const float mid = kPad + kArt / 2;
     c.Text(title, D2D1::RectF(kTextX, mid - 19, right, mid), kBody, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(media_.artist, D2D1::RectF(kTextX, mid + 1, right, mid + 20), kBody, t.subtext);
-    const bool several = media_.sessionCount > 1;
+    c.Text(media_.artist, D2D1::RectF(kTextX, mid + 1, artistRight, mid + 20), kBody, t.subtext);
     if (several) {
         const D2D1_RECT_F s = SessionRect();
         const float hv = Hover(c, Part::Session, hover_ == Part::Session);
         c.Fill(s, (s.bottom - s.top) / 2, Alpha(t.hover, 0.5f + 0.5f * hv));
-        c.Text(std::to_wstring(media_.sessionIndex + 1) + L"/" + std::to_wstring(media_.sessionCount) + L" ›", s, kCaption, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        const std::wstring badge = std::to_wstring(media_.sessionIndex + 1) + L"/" + std::to_wstring(media_.sessionCount) + L" ›";
+        c.Text(badge, s, kCaption, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
     // The five bars, live, in the art's colour.
     const double dt = lastBarsMs_ == 0 ? 16 : c.now - lastBarsMs_;
@@ -257,7 +330,7 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
     const float peak = feed_ ? feed_->peak.load() : 0.f, intensity = feed_ ? feed_->intensity.load() : 1.f;
     if (bars_.Step(peak, Playing(), intensity, dt))
         c.Continue();
-    const float bw = kBarsW / 9, gap = (kBarsW - 5 * bw) / 4, cy = kBarsY;
+    const float bw = kBarsW / 9, gap = (kBarsW - 5 * bw) / 4, cy = several ? kPad + 12 : kBarsY;
     const D2D1_COLOR_F ink = tint_ ? *tint_ : t.text;
     c.BeginInkArea(D2D1::RectF(kW - kPad - kBarsW, cy - kBarsW / 2, kW - kPad, cy + kBarsW / 2));
     for (size_t i = 0; i < MusicBars::kCount; ++i) {
@@ -292,6 +365,20 @@ void NowPlayingCard::PaintProgress(Canvas& c, const Theme& t)
     c.Text(L"-" + Clock(tl.endUs - pos), D2D1::RectF(kTrackR + 6, kTrackY - 8, kW - kPad, kTrackY + 8), kCaption, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 2);
 }
 
+D2D1_RECT_F NowPlayingCard::BeginControl(Canvas& c, const Theme& t, Part part, int at, float r, bool enabled, float plateMin)
+{
+    const D2D1_POINT_2F o = ControlCentre(at);
+    const float hv = enabled ? Hover(c, part, hover_ == part) : 0.f;
+    const float plate = std::max(hv, plateMin);
+    const bool down = enabled && pressed_ == part;
+    if (plate > 0.001f)
+        c.Circle(o.x, o.y, r, Alpha(down ? t.press : t.hover, plate));
+    c.BeginGroup(enabled ? 1.f : 0.35f, down ? 0.86f : 1.f, o.x, o.y);
+    const D2D1_RECT_F box = D2D1::RectF(o.x - r, o.y - r, o.x + r, o.y + r);
+    c.BeginInkArea(box); // one ink for the whole mark
+    return box;
+}
+
 void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
 {
     struct Control {
@@ -303,46 +390,19 @@ void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
     const std::array<Control, 3> controls{
         {{Part::Previous, -1, kControlR, media_.canPrevious}, {Part::Play, 0, kPlayR, media_.canPlayPause}, {Part::Next, 1, kControlR, media_.canNext}}};
     for (const auto& k : controls) {
-        const D2D1_POINT_2F o = ControlCentre(k.at);
-        const float hv = k.enabled ? Hover(c, k.part, hover_ == k.part) : 0.f;
-        if (hv > 0.001f)
-            c.Circle(o.x, o.y, k.r, Alpha(pressed_ == k.part ? t.press : t.hover, hv));
-        c.BeginGroup(k.enabled ? 1.f : 0.35f, pressed_ == k.part ? 0.86f : 1.f, o.x, o.y);
-        c.BeginInkArea(D2D1::RectF(o.x - k.r, o.y - k.r, o.x + k.r, o.y + k.r)); // one ink for the whole mark
-        const D2D1_COLOR_F ink = t.text;
-        // The marks (MainWindow.ExtrasScenes.cs draws the same): pause as two bars, play as a
-        // triangle, previous and next as two triangles pointing the way the track goes.
-        if (k.part == Part::Play && Playing()) {
-            c.Fill(D2D1::RectF(o.x - 7.5f, o.y - 8.5f, o.x - 2.5f, o.y + 8.5f), 1.8f, ink);
-            c.Fill(D2D1::RectF(o.x + 2.5f, o.y - 8.5f, o.x + 7.5f, o.y + 8.5f), 1.8f, ink);
-        } else if (k.part == Part::Play) {
-            const std::array<D2D1_POINT_2F, 3> play{{{o.x - 4.5f, o.y - 8}, {o.x + 8.5f, o.y}, {o.x - 4.5f, o.y + 8}}};
-            c.Polygon(play, ink, 2);
-        } else {
-            const float d = float(k.at);
-            for (float base : {-9.5f, 0.f}) {
-                const std::array<D2D1_POINT_2F, 3> tri{{{o.x + d * base, o.y - 6}, {o.x + d * (base + 8.5f), o.y}, {o.x + d * base, o.y + 6}}};
-                c.Polygon(tri, ink, 1.5f);
-            }
-        }
+        BeginControl(c, t, k.part, k.at, k.r, k.enabled);
+        PaintTransportMark(c, ControlCentre(k.at), k.part == Part::Play, Playing(), k.at, t.text);
         c.EndInkArea();
         c.EndGroup();
     }
     // Either side: the heart (the player's own like) and its lyrics, where the player takes them.
     for (const auto& [part, at, enabled] : {std::tuple{Part::Like, -2, media_.canLike}, {Part::Lyrics, 2, media_.canLyrics}}) {
-        const D2D1_POINT_2F o = ControlCentre(at);
-        const float hv = enabled ? Hover(c, part, hover_ == part) : 0.f;
         // The lyrics on: a plate behind the mark, as a pressed toggle (the mark stays in the ink).
-        const float plate = std::max(hv, part == Part::Lyrics && lyricsOn_ && enabled ? 1.f : 0.f);
-        if (plate > 0.001f)
-            c.Circle(o.x, o.y, kControlR, Alpha(pressed_ == part ? t.press : t.hover, plate));
-        c.BeginGroup(enabled ? 1.f : 0.35f, pressed_ == part ? 0.86f : 1.f, o.x, o.y);
-        const D2D1_RECT_F box = D2D1::RectF(o.x - kControlR, o.y - kControlR, o.x + kControlR, o.y + kControlR);
-        c.BeginInkArea(box);
-        if (part == Part::Like)
+        const float plateMin = part == Part::Lyrics && lyricsOn_ && enabled ? 1.f : 0.f;
+        const D2D1_RECT_F box = BeginControl(c, t, part, at, kControlR, enabled, plateMin);
+        if (part == Part::Like) {
             c.Glyph(liked_ ? L"\uEB52" : L"\uEB51", box, 16, liked_ ? kHeart : t.text); // HeartFill, Heart
-        else
-        {
+        } else {
             const std::wstring lyrics = Tr(L"Lyrics", L"button"); // 词: one character where it reads so
             c.Text(lyrics, box, lyrics.size() > 2 ? 11.f : 16.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         }
@@ -361,11 +421,22 @@ NowPlayingCard::Part NowPlayingCard::HitAt(POINT pt) const
         return Part::Session;
     if (in(ArtRect()))
         return Part::Art;
-    const std::array<std::pair<Part, int>, 5> controls{{{Part::Like, -2}, {Part::Previous, -1}, {Part::Play, 0}, {Part::Next, 1}, {Part::Lyrics, 2}}};
-    for (const auto& [part, at] : controls) {
-        const D2D1_POINT_2F o = ControlCentre(at);
+    struct ControlHit {
+        Part part;
+        int at;
+        bool enabled;
+    };
+    const std::array<ControlHit, 5> controls{{{Part::Like, -2, media_.canLike},
+                                              {Part::Previous, -1, media_.canPrevious},
+                                              {Part::Play, 0, media_.canPlayPause},
+                                              {Part::Next, 1, media_.canNext},
+                                              {Part::Lyrics, 2, media_.canLyrics}}};
+    for (const auto& k : controls) {
+        if (!k.enabled)
+            continue;
+        const D2D1_POINT_2F o = ControlCentre(k.at);
         if (std::hypot(x - o.x, y - o.y) <= kPlayR + 4)
-            return part;
+            return k.part;
     }
     return Part::None;
 }
@@ -384,6 +455,16 @@ bool NowPlayingCard::Message(UINT m, WPARAM w, LPARAM l, LRESULT&)
     case WM_ACTIVATE:
         if (LOWORD(w) == WA_INACTIVE)
             Close();
+        return false;
+    case WM_CAPTURECHANGED:
+        if (reinterpret_cast<HWND>(l) != surface_.Hwnd()) {
+            ReleaseDrag(false);
+            surface_.Invalidate();
+        }
+        return false;
+    case WM_CANCELMODE:
+        ReleaseDrag(true);
+        surface_.Invalidate();
         return false;
     case WM_MOUSEMOVE: {
         if (!tracking_) {
@@ -414,33 +495,18 @@ bool NowPlayingCard::Message(UINT m, WPARAM w, LPARAM l, LRESULT&)
     case WM_LBUTTONUP: {
         const Part was = pressed_;
         const Part at = HitAt(pt);
-        pressed_ = Part::None;
         if (dragging_) {
-            dragging_ = false;
-            ReleaseCapture();
+            ReleaseDrag(true);
             const MediaTimeline& tl = media_.timeline;
-            seekTo_ = tl.startUs + int64_t(double(tl.endUs - tl.startUs) * TrackFraction(x));
-            seekAt_ = ClockMs();
-            Send(MediaCommand::Seek, *seekTo_ - tl.startUs);
-        } else if (was == at && at == Part::Play && media_.canPlayPause) {
-            playingShown_ = !Playing();
-            playingAt_ = ClockMs();
-            Send(MediaCommand::PlayPause);
-        } else if (was == at && at == Part::Previous && media_.canPrevious) {
-            Send(MediaCommand::Previous);
-        } else if (was == at && at == Part::Next && media_.canNext) {
-            Send(MediaCommand::Next);
-        } else if (was == at && at == Part::Like && media_.canLike) {
-            liked_ = !liked_;
-            Send(MediaCommand::Like);
-        } else if (was == at && at == Part::Lyrics && media_.canLyrics) {
-            lyricsOn_ = !lyricsOn_;
-            Send(MediaCommand::Lyrics);
-        } else if (was == at && at == Part::Session) {
-            Send(MediaCommand::NextSession);
-        } else if (was == at && at == Part::Art) {
-            Send(MediaCommand::ActivateApp);
-            Close();
+            if (tl.Seekable() && media_.canSeek) {
+                seekTo_ = tl.startUs + int64_t(double(tl.endUs - tl.startUs) * TrackFraction(x));
+                seekAt_ = ClockMs();
+                Send(MediaCommand::Seek, *seekTo_);
+            }
+        } else {
+            pressed_ = Part::None;
+            if (was == at)
+                ActivatePart(at);
         }
         surface_.Invalidate();
         return true;
@@ -449,7 +515,7 @@ bool NowPlayingCard::Message(UINT m, WPARAM w, LPARAM l, LRESULT&)
         if (w == VK_ESCAPE)
             Close();
         else if (w == VK_SPACE && media_.canPlayPause)
-            Send(MediaCommand::PlayPause);
+            TogglePlayPause();
         else
             return false;
         return true;

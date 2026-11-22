@@ -72,7 +72,7 @@ void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID
     const float tile = s * 0.30f, gap = s * 0.10f, left = box.left + s * 0.15f, top = box.top;
     brush->SetColor(ink);
     for (int i = 0; i < 4; ++i) {
-        const float x = left + float(i % 2) * (tile + gap), y = top + float(i / 2) * (tile + gap);
+        const float x = left + float(i % 2) * (tile + gap), y = top + static_cast<float>(i >> 1) * (tile + gap);
         const D2D1_RECT_F t = D2D1::RectF(x + stroke / 2, y + stroke / 2, x + tile - stroke / 2, y + tile - stroke / 2);
         d2d->DrawRoundedRectangle(D2D1::RoundedRect(t, tile * 0.3f, tile * 0.3f), brush, stroke);
     }
