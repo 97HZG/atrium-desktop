@@ -244,7 +244,7 @@ D2D1_COLOR_F Canvas::InkAt(D2D1_RECT_F r, D2D1_COLOR_F c, D2D1_COLOR_F& haloInk)
     if (!isText && !isWash)
         return c;
     const D2D1_COLOR_F& from = isText ? theme.text : theme.hover;
-    D2D1_RECT_F p = Px(r);
+    D2D1_RECT_F p = Px(inkArea_ ? *inkArea_ : r);
     D2D1_MATRIX_3X2_F m;
     d2d_->GetTransform(&m); // groups move and scale what they draw
     float x0 = p.left * m._11 + m._31, y0 = p.top * m._22 + m._32, x1 = p.right * m._11 + m._31, y1 = p.bottom * m._22 + m._32;

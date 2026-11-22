@@ -1,7 +1,7 @@
 // NetEase Cloud Music's own position and length of the playing track, read (read only) from the
-// player's memory, as 岛仔 (Daozai, MIT, github.com/markvlenvision/Dynamic-Island) does: the player
-// tells Windows no timeline but keeps both as doubles (seconds) in cloudmusic.dll's data. Their
-// places move from version to version: the one Daozai verified is known; for any other the length is
+// player's memory: the player tells Windows no timeline but keeps both as doubles (seconds) in
+// cloudmusic.dll's data. Their places move from version to version: known ones are listed; for any
+// other the length is
 // found by its value (the queue's length of the track), the position as the one double that advances
 // with the clock while the track plays. Nothing is trusted before that. Media worker thread.
 #pragma once

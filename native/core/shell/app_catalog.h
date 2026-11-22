@@ -57,6 +57,8 @@ public:
     // The apps of the start menu's own arrangement (start.json): read ahead and kept like the pins'.
     void SetStartIds(std::vector<std::wstring> ids);
     void SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons);
+    // Icons read ahead behind those on screen and kept like the pins' (Launchpad's first pages).
+    void PrefetchIcons(const std::vector<std::wstring>& ids, int px);
 
     static bool Launch(const CatalogApp& app);
     // Desktop apps only (a packaged app has no exe to elevate or to show): run elevated (the
@@ -67,6 +69,9 @@ public:
     // Case-insensitive match of `query` against the name (and words in it), or the start of
     // its initials (NameInitials: "wx" finds 微信).
     static bool Matches(const CatalogApp& app, const std::wstring& query);
+    // An app to show among apps (Launchpad): not an uninstaller, nor a shortcut to a document, a web
+    // page, a help or a folder, nor one of the shell's own places.
+    static bool IsLaunchable(const CatalogApp& app);
 
 private:
     void Worker();
@@ -98,7 +103,7 @@ private:
     };
     std::map<std::pair<std::wstring, int>, CachedIcon> icons_;
     std::map<std::pair<std::wstring, int>, FailedIcon> failed_;
-    std::set<std::pair<std::wstring, int>> requested_, visibleIcons_;
+    std::set<std::pair<std::wstring, int>> requested_, visibleIcons_, aheadIcons_;
     std::set<std::wstring> liveIds_, startIds_;
     uint64_t iconUse_ = 0;
     std::thread thread_;

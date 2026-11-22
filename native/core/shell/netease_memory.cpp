@@ -14,8 +14,8 @@ namespace atrium {
 
 namespace {
 
-// Versions whose places are known (cloudmusic.dll's PE time stamp and image size): the one Daozai
-// verified, then those found here. The first is also where a new version's search starts.
+// Versions whose places are known (cloudmusic.dll's PE time stamp and image size), oldest first. The
+// first is also where a new version's search starts.
 struct KnownVersion {
     uint32_t stamp, size;
     uintptr_t position, length;

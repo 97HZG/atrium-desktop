@@ -38,17 +38,14 @@ Launchpad::Launchpad(HINSTANCE instance, AppCatalog& catalog) : surface_(instanc
 void Launchpad::Open(RECT work, HWND previous)
 {
     previous_ = previous;
-    apps_ = catalog_.Apps();
+    apps_ = LaunchableApps();
     query_.clear();
     shown_.clear();
+    Size(work);
     const float s = PopupScale(work);
-    const float workW = float(work.right - work.left) / s, workH = float(work.bottom - work.top) / s;
-    w_ = std::min(std::clamp(workW * 0.74f, kMinW, kMaxW), workW - 2 * kClear);
-    h_ = std::min(std::clamp(workH * 0.78f, kMinH, kMaxH), workH - 2 * kClear);
     const LONG cx = (work.left + work.right) / 2, cy = (work.top + work.bottom) / 2;
     const LONG halfW = std::lround(w_ * s / 2), halfH = std::lround(h_ * s / 2);
     const RECT rect{cx - halfW, cy - halfH, cx + halfW, cy + halfH};
-    grid_ = ComputeLaunchpadGrid(w_, h_);
     page_ = 0;
     pageShown_ = pageSpeed_ = 0;
     sel_ = hover_ = pressed_ = -1;
@@ -62,6 +59,38 @@ void Launchpad::Open(RECT work, HWND previous)
     PublishGlass(openedMs_);
     SetTimer(surface_.Hwnd(), kCaretTimer, GetCaretBlinkTime(), nullptr);
     PlaceIme();
+}
+
+void Launchpad::Size(RECT work)
+{
+    const float s = PopupScale(work);
+    const float workW = float(work.right - work.left) / s, workH = float(work.bottom - work.top) / s;
+    w_ = std::min(std::clamp(workW * 0.74f, kMinW, kMaxW), workW - 2 * kClear);
+    h_ = std::min(std::clamp(workH * 0.78f, kMinH, kMaxH), workH - 2 * kClear);
+    grid_ = ComputeLaunchpadGrid(w_, h_);
+}
+
+std::vector<CatalogApp> Launchpad::LaunchableApps() const
+{
+    std::vector<CatalogApp> apps = catalog_.Apps();
+    std::erase_if(apps, [](const CatalogApp& a) { return !AppCatalog::IsLaunchable(a); });
+    return apps;
+}
+
+void Launchpad::Prewarm(RECT work)
+{
+    if (surface_.Visible() || !catalog_.Loaded())
+        return;
+    const std::vector<CatalogApp> apps = LaunchableApps();
+    Size(work);
+    const int px = int(std::lround(grid_.iconDip * PopupScale(work)));
+    if (prewarmed_ == std::make_pair(px, apps.size()))
+        return;
+    prewarmed_ = {px, apps.size()};
+    std::vector<std::wstring> ids;
+    for (size_t i = 0; i < apps.size() && i < size_t(2 * grid_.perPage); ++i)
+        ids.push_back(apps[i].id);
+    catalog_.PrefetchIcons(ids, px);
 }
 
 void Launchpad::Close(bool launched)
@@ -92,7 +121,7 @@ void Launchpad::Refresh()
 {
     if (!surface_.Visible() || closing_)
         return;
-    apps_ = catalog_.Apps();
+    apps_ = LaunchableApps();
     if (!query_.empty())
         Filter();
     page_ = std::min(page_, Pages() - 1);

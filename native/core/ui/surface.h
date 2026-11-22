@@ -98,6 +98,10 @@ public:
     // (dx, dy); DIP. Groups nest.
     void BeginGroup(float opacity, float k, float cx, float cy, float dx = 0, float dy = 0, float turn = 0);
     void EndGroup();
+    // What follows is one mark of several parts (an icon): its ink is chosen once, for `r` as a whole,
+    // so it never turns dark in one part and light in another. Until EndInkArea; DIP.
+    void BeginInkArea(D2D1_RECT_F r) { inkArea_ = r; }
+    void EndInkArea() { inkArea_.reset(); }
 
     D2D1_RECT_F Px(D2D1_RECT_F r) const;
     void Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c);
@@ -152,6 +156,7 @@ private:
     ID2D1DeviceContext* d2d_;
     float alpha_ = 1; // opacity of the current group
     std::vector<std::pair<D2D1_MATRIX_3X2_F, float>> groups_;
+    std::optional<D2D1_RECT_F> inkArea_;
     winrt::com_ptr<ID2D1Image> blurTarget_;
     winrt::com_ptr<ID2D1CommandList> blurList_;
 };

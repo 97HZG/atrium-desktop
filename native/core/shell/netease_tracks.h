@@ -12,8 +12,6 @@
 
 namespace atrium {
 
-bool IsNeteasePlayer(const std::wstring& appId); // cloudmusic.exe
-
 // The queued track named `title` (by `artist`, when the queue has several of that name); 0: not found.
 int64_t NeteaseTrackLengthUs(const std::wstring& title, const std::wstring& artist);
 

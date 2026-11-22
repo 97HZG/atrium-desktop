@@ -67,9 +67,9 @@ void BarExtrasPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float o
 
 void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)
 {
-    const D2D1_RECT_F box = Square(r, 0.80f);
+    const D2D1_RECT_F box = Square(r, 0.86f);
     const float s = box.right - box.left, stroke = std::max(1.f, s * 0.075f);
-    const float tile = s * 0.33f, gap = s * 0.12f, left = box.left + s * 0.11f, top = box.top + s * 0.02f;
+    const float tile = s * 0.30f, gap = s * 0.10f, left = box.left + s * 0.15f, top = box.top;
     brush->SetColor(ink);
     for (int i = 0; i < 4; ++i) {
         const float x = left + float(i % 2) * (tile + gap), y = top + float(i / 2) * (tile + gap);
@@ -77,12 +77,12 @@ void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID
         d2d->DrawRoundedRectangle(D2D1::RoundedRect(t, tile * 0.3f, tile * 0.3f), brush, stroke);
     }
     // The pages: three dots, the middle one lit.
-    const float cx = (box.left + box.right) / 2, cy = box.top + s * 0.93f, dot = std::max(0.75f, s * 0.045f);
+    const float cx = (box.left + box.right) / 2, cy = box.top + s * 0.91f, dot = std::max(1.25f, s * 0.072f);
     for (int i = -1; i <= 1; ++i) {
         D2D1_COLOR_F c = ink;
         c.a *= i == 0 ? 1.f : 0.45f;
         brush->SetColor(c);
-        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx + float(i) * s * 0.15f, cy), dot, dot), brush);
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx + float(i) * s * 0.21f, cy), dot, dot), brush);
     }
 }
 

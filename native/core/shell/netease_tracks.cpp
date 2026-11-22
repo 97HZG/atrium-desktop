@@ -94,8 +94,6 @@ std::vector<QueuedTrack> ParseQueue(const std::wstring& text)
 
 } // namespace
 
-bool IsNeteasePlayer(const std::wstring& appId) { return Lower(appId).find(L"cloudmusic") != std::wstring::npos; }
-
 int64_t NeteaseTrackLengthUs(const std::wstring& title, const std::wstring& artist)
 {
     // The queue as last read, with the file's write time and size then.

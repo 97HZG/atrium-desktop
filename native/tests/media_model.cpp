@@ -1,3 +1,4 @@
+#include "shell/media_players.h"
 #include "shell/media_timeline.h"
 
 #include <iostream>
@@ -14,6 +15,23 @@ void Require(bool condition, const char* message)
         ++g_failures;
         std::cerr << "FAIL: " << message << '\n';
     }
+}
+
+void CheckPlayers()
+{
+    Require(PlayerOf(L"cloudmusic.exe") == MediaPlayer::Netease, "NetEase Cloud Music by its exe");
+    Require(PlayerOf(L"QQMusic.exe") == MediaPlayer::QqMusic && PlayerOf(L"Tencent.QQMusic") == MediaPlayer::QqMusic, "QQ Music, old and new names");
+    Require(PlayerOf(L"Tencent.QQ") == MediaPlayer::Other && PlayerOf(L"QQMusic.exe.bak") == MediaPlayer::Other, "not QQ Music");
+    Require(PlayerOf(L"Spotify.exe") == MediaPlayer::Spotify && PlayerOf(L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify") == MediaPlayer::Spotify,
+            "Spotify, desktop and Store");
+    Require(PlayerOf(L"AppleInc.AppleMusicWin_nzyj5cx40ttqa!App") == MediaPlayer::AppleMusic, "Apple Music");
+    Require(PlayerOf(L"msedge.exe") == MediaPlayer::Other, "a browser is another player");
+    std::wstring artist = L"\u738B\u83F2 \u2014 \u53EA\u7231\u964C\u751F\u4EBA", album;
+    SplitAppleArtist(artist, album);
+    Require(artist == L"\u738B\u83F2" && album == L"\u53EA\u7231\u964C\u751F\u4EBA", "Apple Music's artist and album apart");
+    std::wstring named = L"Artist \u2014 Alias", other = L"Other Album";
+    SplitAppleArtist(named, other);
+    Require(named == L"Artist \u2014 Alias", "a dash in a name with another album stays");
 }
 
 void CheckEstimate()
@@ -132,6 +150,7 @@ int main()
 {
     CheckTimeline();
     CheckEstimate();
+    CheckPlayers();
     CheckAppFilter();
     CheckPickSession();
     if (g_failures > 0)

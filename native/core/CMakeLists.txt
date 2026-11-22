@@ -57,6 +57,7 @@ add_library(atrium_core_lib STATIC
     shell/audio_devices.cpp
     shell/audio_meter.cpp
     shell/media_app.cpp
+    shell/media_players.cpp
     shell/media_session.cpp
     shell/netease_memory.cpp
     shell/netease_tracks.cpp

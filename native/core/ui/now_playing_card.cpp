@@ -9,19 +9,22 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <tuple>
 
 namespace atrium {
 
 namespace {
 
 // The card, DIP, long as the Dynamic Island playing music: the art with the track and the artist
-// beside it, the five bars at the far end; the progress bar between its two times; the three controls.
-constexpr float kW = 480, kH = 184, kPad = 22;
+// beside it, the five bars at the far end; the progress bar between its two times; the three controls
+// with the heart to their left and the lyrics to their right.
+constexpr float kW = 440, kH = 184, kPad = 22;
 constexpr float kArt = 72, kArtRadius = 16;
 constexpr float kTextX = kPad + kArt + 16, kBarsW = 28, kBarsY = kPad + kArt / 2;
 constexpr float kTrackY = 116, kTrackH = 5, kTrackHot = 8, kTimeW = 46, kKnob = 7;
 constexpr float kTrackL = kPad + kTimeW + 8, kTrackR = kW - kPad - kTimeW - 8;
-constexpr float kControlsY = 152, kControlStep = 76, kControlR = 21, kPlayR = 26;
+constexpr float kControlsY = 152, kControlStep = 70, kControlR = 21, kPlayR = 26;
+constexpr D2D1_COLOR_F kHeart{1.f, 0.216f, 0.373f, 1.f}; // a liked track's heart (#FF375F)
 constexpr double kArtFadeMs = 260;
 constexpr UINT_PTR kTickTimer = 0x4E50;
 constexpr UINT kTickMs = 250; // the progress bar's pace while nothing else animates
@@ -120,7 +123,8 @@ void NowPlayingCard::Close()
     lastClosed_ = GetTickCount64();
 }
 
-// Centred on the entry along the bar, kPopupGapDip off its glass, inside the work area.
+// kPopupGapDip off the bar's glass: over a horizontal bar its right side lines up with the bar's,
+// beside a vertical one it is centred on the entry; inside the work area.
 void NowPlayingCard::Place(bool show)
 {
     MONITORINFO mi{sizeof(mi)};
@@ -131,7 +135,7 @@ void NowPlayingCard::Place(bool show)
     const LONG ex = (entry_.left + entry_.right) / 2, ey = (entry_.top + entry_.bottom) / 2;
     const BarEdge edge = EdgeOf(bar_);
     RECT r{};
-    r.left = edge == BarEdge::Left ? bar_.right + gap : edge == BarEdge::Right ? bar_.left - gap - w : ex - w / 2;
+    r.left = edge == BarEdge::Left ? bar_.right + gap : edge == BarEdge::Right ? bar_.left - gap - w : bar_.right - w;
     r.top = Vertical(edge) ? ey - h / 2 : edge == BarEdge::Top ? bar_.bottom + gap : bar_.top - gap - h;
     r.left = std::clamp(r.left, work.left + gap, std::max(work.left + gap, work.right - gap - w));
     r.top = std::clamp(r.top, work.top + gap, std::max(work.top + gap, work.bottom - gap - h));
@@ -146,6 +150,9 @@ void NowPlayingCard::Place(bool show)
 void NowPlayingCard::Update(const MediaSnapshot& snapshot)
 {
     const double now = ClockMs();
+    // Another track: its heart and lyrics are not known to be on (the player does not tell).
+    if (snapshot.sessionId != media_.sessionId || snapshot.title != media_.title || snapshot.artist != media_.artist)
+        liked_ = false;
     media_ = snapshot;
     // The session agrees with the press (or never answered): its state shows again.
     if (playingShown_ && (*playingShown_ == (media_.state == MediaPlaybackState::Playing) || now - playingAt_ > 1500))
@@ -249,10 +256,12 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
         c.Continue();
     const float bw = kBarsW / 9, gap = (kBarsW - 5 * bw) / 4, cy = kBarsY;
     const D2D1_COLOR_F ink = tint_ ? *tint_ : t.text;
+    c.BeginInkArea(D2D1::RectF(kW - kPad - kBarsW, cy - kBarsW / 2, kW - kPad, cy + kBarsW / 2));
     for (size_t i = 0; i < MusicBars::kCount; ++i) {
         const float x = kW - kPad - kBarsW + float(i) * (bw + gap), h = std::max(bw, kBarsW * bars_.Height(i));
         c.Fill(D2D1::RectF(x, cy - h / 2, x + bw, cy + h / 2), bw / 2, ink);
     }
+    c.EndInkArea();
 }
 
 void NowPlayingCard::PaintProgress(Canvas& c, const Theme& t)
@@ -296,6 +305,7 @@ void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
         if (hv > 0.001f)
             c.Circle(o.x, o.y, k.r, Alpha(pressed_ == k.part ? t.press : t.hover, hv));
         c.BeginGroup(k.enabled ? 1.f : 0.35f, pressed_ == k.part ? 0.86f : 1.f, o.x, o.y);
+        c.BeginInkArea(D2D1::RectF(o.x - k.r, o.y - k.r, o.x + k.r, o.y + k.r)); // one ink for the whole mark
         const D2D1_COLOR_F ink = t.text;
         if (k.part == Part::Play && Playing()) {
             c.Fill(D2D1::RectF(o.x - 9, o.y - 10, o.x - 3, o.y + 10), 2, ink);
@@ -311,6 +321,26 @@ void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
                 c.Polygon(tri, ink, 1.5f);
             }
         }
+        c.EndInkArea();
+        c.EndGroup();
+    }
+    // Either side: the heart (the player's own like) and its lyrics, where the player takes them.
+    for (const auto& [part, at, enabled] : {std::tuple{Part::Like, -2, media_.canLike}, {Part::Lyrics, 2, media_.canLyrics}}) {
+        const D2D1_POINT_2F o = ControlCentre(at);
+        const float hv = enabled ? Hover(c, part, hover_ == part) : 0.f;
+        if (hv > 0.001f)
+            c.Circle(o.x, o.y, kControlR - 2, Alpha(pressed_ == part ? t.press : t.hover, hv));
+        c.BeginGroup(enabled ? 1.f : 0.35f, pressed_ == part ? 0.86f : 1.f, o.x, o.y);
+        const D2D1_RECT_F box = D2D1::RectF(o.x - kControlR, o.y - kControlR, o.x + kControlR, o.y + kControlR);
+        c.BeginInkArea(box);
+        if (part == Part::Like)
+            c.Glyph(liked_ ? L"\uEB52" : L"\uEB51", box, 18, liked_ ? kHeart : t.text); // HeartFill, Heart
+        else
+        {
+            const std::wstring lyrics = Tr(L"Lyrics", L"button"); // 词: one character where it reads so
+            c.Text(lyrics, box, lyrics.size() > 2 ? 12.f : 15.f, lyricsOn_ ? (tint_ ? *tint_ : t.accent) : t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        }
+        c.EndInkArea();
         c.EndGroup();
     }
 }
@@ -325,7 +355,7 @@ NowPlayingCard::Part NowPlayingCard::HitAt(POINT pt) const
         return Part::Session;
     if (in(ArtRect()))
         return Part::Art;
-    const std::array<std::pair<Part, int>, 3> controls{{{Part::Previous, -1}, {Part::Play, 0}, {Part::Next, 1}}};
+    const std::array<std::pair<Part, int>, 5> controls{{{Part::Like, -2}, {Part::Previous, -1}, {Part::Play, 0}, {Part::Next, 1}, {Part::Lyrics, 2}}};
     for (const auto& [part, at] : controls) {
         const D2D1_POINT_2F o = ControlCentre(at);
         if (std::hypot(x - o.x, y - o.y) <= kPlayR + 4)
@@ -394,6 +424,12 @@ bool NowPlayingCard::Message(UINT m, WPARAM w, LPARAM l, LRESULT&)
             Send(MediaCommand::Previous);
         } else if (was == at && at == Part::Next && media_.canNext) {
             Send(MediaCommand::Next);
+        } else if (was == at && at == Part::Like && media_.canLike) {
+            liked_ = !liked_;
+            Send(MediaCommand::Like);
+        } else if (was == at && at == Part::Lyrics && media_.canLyrics) {
+            lyricsOn_ = !lyricsOn_;
+            Send(MediaCommand::Lyrics);
         } else if (was == at && at == Part::Session) {
             Send(MediaCommand::NextSession);
         } else if (was == at && at == Part::Art) {

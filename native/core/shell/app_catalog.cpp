@@ -383,6 +383,20 @@ std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
 
 } // namespace
 
+bool AppCatalog::IsLaunchable(const CatalogApp& app)
+{
+    const std::wstring id = Fold(app.id), name = Fold(app.name);
+    if (id.starts_with(L"http:") || id.starts_with(L"https:") || id.starts_with(L"::{") || id.starts_with(L"shell:"))
+        return false;
+    for (const wchar_t* ext : {L".url", L".txt", L".pdf", L".chm", L".htm", L".html", L".md", L".rtf", L".doc", L".docx", L".website"})
+        if (id.ends_with(ext))
+            return false;
+    for (const wchar_t* word : {L"readme", L"read me", L"help", L"帮助", L"manual", L"手册", L"license", L"许可", L"website", L"官网", L"官方网站", L"release notes"})
+        if (name.find(word) != std::wstring::npos)
+            return false;
+    return !NotAnApp(app);
+}
+
 AppCatalog::AppCatalog(HWND notify, UINT readyMsg) : notify_(notify), msg_(readyMsg), stopEvent_(CreateEventW(nullptr, TRUE, FALSE, nullptr)), refresh_(true)
 {
     if (!stopEvent_)
@@ -495,6 +509,20 @@ bool AppCatalog::QueueIcon(const std::pair<std::wstring, int>& key, bool prefetc
     return true;
 }
 
+void AppCatalog::PrefetchIcons(const std::vector<std::wstring>& ids, int px)
+{
+    px = std::clamp(px, 8, 512);
+    std::lock_guard g(mutex_);
+    aheadIcons_.clear();
+    for (const std::wstring& id : ids) {
+        auto key = std::make_pair(id, px);
+        aheadIcons_.insert(key);
+        if (!icons_.contains(key))
+            QueueIcon(key, false); // behind what is on screen, in the list's order
+    }
+    cv_.notify_all();
+}
+
 void AppCatalog::SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons)
 {
     std::lock_guard g(mutex_);
@@ -506,7 +534,7 @@ void AppCatalog::SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons
 void AppCatalog::PruneIcons()
 {
     auto protectedIcon = [&](const auto& key) {
-        return visibleIcons_.contains(key) || requested_.contains(key) ||
+        return visibleIcons_.contains(key) || requested_.contains(key) || aheadIcons_.contains(key) ||
                (key.second == prefetchPx_ &&
                 (startIds_.contains(key.first) || std::any_of(startPins_.begin(), startPins_.end(), [&](const auto& app) { return app.id == key.first; })));
     };

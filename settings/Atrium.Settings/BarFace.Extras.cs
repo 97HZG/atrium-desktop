@@ -28,22 +28,22 @@ internal sealed partial class BarFace
 
     private void AddExtras(Canvas canvas)
     {
-        // DrawLaunchpad in a unit square: four squares of 0.33 with gaps of 0.12, three dots below.
+        // DrawLaunchpad in a unit square: four squares of 0.30 with gaps of 0.10, three dots below.
         for (int i = 0; i < _apps.Length; i++)
         {
             _apps[i].IsHitTestVisible = false;
-            _apps[i].Width = _apps[i].Height = 0.33;
-            _apps[i].RadiusX = _apps[i].RadiusY = 0.1;
-            Canvas.SetLeft(_apps[i], 0.11 + i % 2 * 0.45);
-            Canvas.SetTop(_apps[i], 0.02 + i / 2 * 0.45);
+            _apps[i].Width = _apps[i].Height = 0.30;
+            _apps[i].RadiusX = _apps[i].RadiusY = 0.09;
+            Canvas.SetLeft(_apps[i], 0.15 + i % 2 * 0.40);
+            Canvas.SetTop(_apps[i], i / 2 * 0.40);
             _launchpad.Children.Add(_apps[i]);
         }
         for (int i = 0; i < _pages.Length; i++)
         {
             _pages[i].IsHitTestVisible = false;
-            _pages[i].Width = _pages[i].Height = 0.09;
-            Canvas.SetLeft(_pages[i], 0.5 + (i - 1) * 0.15 - 0.045);
-            Canvas.SetTop(_pages[i], 0.93 - 0.045);
+            _pages[i].Width = _pages[i].Height = 0.144;
+            Canvas.SetLeft(_pages[i], 0.5 + (i - 1) * 0.21 - 0.072);
+            Canvas.SetTop(_pages[i], 0.91 - 0.072);
             _launchpad.Children.Add(_pages[i]);
         }
         for (int i = 0; i < _bars.Length; i++)
@@ -60,9 +60,9 @@ internal sealed partial class BarFace
         _launchpad.Visibility = l.LaunchX < 0 ? Visibility.Collapsed : Visibility.Visible;
         if (l.LaunchX >= 0)
         {
-            // 80 % of the icon square, a stroke of 7.5 % of it; the middle page dot lit.
+            // 86 % of the icon square, a stroke of 7.5 % of it; the middle page dot lit.
             var (x, y, size) = item(l.LaunchX);
-            double s = size * 0.80;
+            double s = size * 0.86;
             var brush = new SolidColorBrush(ink);
             foreach (var a in _apps)
             {

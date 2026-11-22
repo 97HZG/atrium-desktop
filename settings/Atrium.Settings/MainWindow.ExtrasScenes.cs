@@ -16,14 +16,14 @@ public sealed partial class MainWindow
 
     private sealed class NowPlayingScene : ModuleScene
     {
-        private const double CW = 480, CH = 184, Pad = 22, Art = 72, ArtR = 16, TextX = Pad + Art + 16, BarsW = 28, BarsY = Pad + Art / 2;
+        private const double CW = 440, CH = 184, Pad = 22, Art = 72, ArtR = 16, TextX = Pad + Art + 16, BarsW = 28, BarsY = Pad + Art / 2;
         private const double TrackY = 116, TrackH = 5, TimeW = 46, TrackL = Pad + TimeW + 8, TrackR = CW - Pad - TimeW - 8;
-        private const double ControlsY = 152, ControlStep = 76, MinRadius = 34;
+        private const double ControlsY = 152, ControlStep = 70, MinRadius = 34;
         private static readonly double[] Shape = [0.58, 0.86, 1.0, 0.80, 0.52];
         private static readonly double[] Rate = [0.92, 1.27, 1.71, 1.13, 0.81];
         private readonly PanelInk _ink = new();
         private readonly Border _art = new() { CornerRadius = new CornerRadius(ArtR), IsHitTestVisible = false };
-        private readonly TextBlock _title, _artist, _elapsed, _left;
+        private readonly TextBlock _title, _artist, _elapsed, _left, _heart, _lyrics;
         private readonly Border[] _bars = new Border[5];
         private readonly Border _track, _done;
         private readonly TextBlock[] _controls;
@@ -54,7 +54,11 @@ public sealed partial class MainWindow
             _track = Plate(_ink.Track, TrackH / 2);
             _done = Plate(_ink.Text, TrackH / 2);
             _controls = [Symbol("", 21, _ink.Text), Symbol("", 27, _ink.Text), Symbol("", 21, _ink.Text)];
-            foreach (var e in new UIElement[] { _art, _title, _artist, _track, _done, _elapsed, _left }) Marks.Children.Add(e);
+            // Either side of the controls: the heart and the lyrics (NetEase and QQ Music take them).
+            _heart = Symbol("\uEB51", 18, _ink.Text);
+            _lyrics = Words(15, _ink.Text, true, TextAlignment.Center);
+            _lyrics.Text = Loc.T("Lyrics", "button");
+            foreach (var e in new UIElement[] { _art, _title, _artist, _track, _done, _elapsed, _left, _heart, _lyrics }) Marks.Children.Add(e);
             foreach (var e in _bars) Marks.Children.Add(e);
             foreach (var e in _controls) Marks.Children.Add(e);
         }
@@ -67,7 +71,8 @@ public sealed partial class MainWindow
         protected override (GlassTile[] Tiles, object State) Pieces()
         {
             double w = CW * S, h = CH * S;
-            double left = Math.Clamp(Anchor.X - w / 2, 16, Math.Max(16, W - 16 - w)), top = PopupBottom - h;
+            // Its right side lined up with the bar's.
+            double left = Math.Clamp(BarRight - w, 16, Math.Max(16, W - 16 - w)), top = PopupBottom - h;
             return (new[] { new GlassTile(left, top, w, h, Math.Min(Math.Max(Radius, MinRadius), CH / 2) * S) }, new Frame(left, top));
         }
 
@@ -103,6 +108,8 @@ public sealed partial class MainWindow
             Box(_elapsed, Pad, TrackY - 9, TrackL - 8 - Pad, 18);
             Box(_left, TrackR + 8, TrackY - 9, CW - Pad - (TrackR + 8), 18);
             for (int i = 0; i < 3; i++) Box(_controls[i], CW / 2 + (i - 1) * ControlStep - 24, ControlsY - 24, 48, 48);
+            Box(_heart, CW / 2 - 2 * ControlStep - 21, ControlsY - 21, 42, 42);
+            Box(_lyrics, CW / 2 + 2 * ControlStep - 21, ControlsY - 21, 42, 42);
             return true; // it plays on
         }
     }

@@ -5,6 +5,7 @@
 #include "posted.h"
 #include "shell/audio_meter.h"
 #include "shell/media_app.h"
+#include "shell/media_players.h"
 #include "shell/netease_tracks.h"
 #include "shell/shell_icon.h"
 #include "win32_path.h"
@@ -209,7 +210,7 @@ bool SnapshotChanged(const MediaSnapshot& a, const MediaSnapshot& b)
                         a.timeline.rate == b.timeline.rate && a.timeline.playing == b.timeline.playing;
     return !tlSame || a.active != b.active || a.sessionId != b.sessionId || a.appId != b.appId || a.appName != b.appName || a.title != b.title ||
            a.artist != b.artist || a.album != b.album || a.state != b.state || a.canPlayPause != b.canPlayPause || a.canNext != b.canNext ||
-           a.canPrevious != b.canPrevious || a.canSeek != b.canSeek || a.artworkVersion != b.artworkVersion || a.sessionIndex != b.sessionIndex ||
+           a.canPrevious != b.canPrevious || a.canSeek != b.canSeek || a.canLike != b.canLike || a.canLyrics != b.canLyrics || a.artworkVersion != b.artworkVersion || a.sessionIndex != b.sessionIndex ||
            a.sessionCount != b.sessionCount;
 }
 
@@ -533,8 +534,16 @@ private:
         }
 
         // NetEase Cloud Music reports no timeline: its own (netease_tracks.h).
-        if (!outSnap.timeline.Seekable() && IsNeteasePlayer(ts.appId))
+        const MediaPlayer player = PlayerOf(ts.appId);
+        if (!outSnap.timeline.Seekable() && player == MediaPlayer::Netease)
             ts.netease.Fill(ts.title, ts.artist, outSnap.state == MediaPlaybackState::Playing, nowMs, outSnap.timeline);
+        // What the players do beyond Windows' controls (media_players.h).
+        outSnap.canLike = PlayerLikes(player);
+        outSnap.canLyrics = PlayerShowsLyrics(player);
+        if (player == MediaPlayer::QqMusic)
+            outSnap.canSeek = outSnap.canSeek || outSnap.timeline.Seekable(); // /seekto, where Windows' seek is refused
+        if (player == MediaPlayer::AppleMusic)
+            SplitAppleArtist(outSnap.artist, outSnap.album);
         outSummary = {ts.id, ts.appId, ts.title, outSnap.state, isSystemCurrent, ts.lastPlayingMs};
         return timelineUpdated;
     }
@@ -568,8 +577,13 @@ private:
             winrt::com_ptr<BoolOp> op;
             if (SUCCEEDED(active.session->TryChangePlaybackPositionAsync(action.positionUs * 10, op.put())) && op)
                 AwaitAsync<BoolHandler>(op.get(), stopEvent_.handle, kAsyncTimeoutMs);
+            // QQ Music's newer versions answer Windows' seek and stay put: its own command as well.
+            if (PlayerOf(active.appId) == MediaPlayer::QqMusic)
+                QqMusicSeek(action.positionUs);
             break;
         }
+        case MediaCommand::Like: LikeTrack(PlayerOf(active.appId)); break;
+        case MediaCommand::Lyrics: ToggleLyrics(PlayerOf(active.appId)); break;
         case MediaCommand::NextSession: cycleBy(1); break;
         case MediaCommand::ActivateApp: ActivatePlayerApp(active.appId); break;
         }

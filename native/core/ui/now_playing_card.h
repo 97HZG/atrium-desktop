@@ -44,7 +44,7 @@ public:
 
 private:
     static constexpr float kMinRadius = 34;
-    enum class Part { None, Track, Previous, Play, Next, Session, Art };
+    enum class Part { None, Track, Previous, Play, Next, Session, Art, Like, Lyrics };
 
     void Place(bool show);
     void Paint(Canvas& c);
@@ -71,6 +71,7 @@ private:
     IconImage art_;
     uint64_t artVersion_ = 0;
     std::optional<D2D1_COLOR_F> tint_;
+    bool liked_ = false, lyricsOn_ = false; // as pressed here: the players do not tell
     double artMs_ = 0; // a new picture fades in from then
     // Pressed play/pause, until the session agrees (or a second passes).
     std::optional<bool> playingShown_;

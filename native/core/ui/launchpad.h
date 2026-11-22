@@ -32,6 +32,8 @@ public:
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
     void Refresh(); // the catalog changed: the apps, an icon
+    // Reads the first pages' icons ahead, at the size a window on `work` would show them.
+    void Prewarm(RECT work);
     HWND Hwnd() const { return surface_.Hwnd(); }
 
 private:
@@ -53,6 +55,8 @@ private:
     D2D1_RECT_F Cell(int slot) const; // a slot of a page, its page at x 0
     D2D1_RECT_F SearchRect() const;
     float OpenAmount(double now) const; // 0 hidden .. 1 open, through the opening and the closing
+    void Size(RECT work);               // w_, h_ and grid_ for a window on `work`
+    std::vector<CatalogApp> LaunchableApps() const;
     float Radius() const;
 
     // Input (launchpad_input.cpp).
@@ -96,6 +100,7 @@ private:
     double openedMs_ = 0, closedMs_ = 0, lastPaint_ = 0;
     bool closing_ = false, launched_ = false;
     ULONGLONG lastClosed_ = 0;
+    std::pair<int, size_t> prewarmed_{}; // icon px and the apps' count last read ahead
     std::vector<Hit> hits_;
     std::vector<std::pair<std::wstring, int>> visibleIcons_, askedIcons_;
     std::map<int, motion::Follow> hoverAnim_;

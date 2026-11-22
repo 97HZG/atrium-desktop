@@ -112,8 +112,10 @@ void ExtrasHost::Apply(const Settings& s, float radius)
     stackModel_.SetFolders(stacksOn_ ? s.folderStacks : std::vector<std::wstring>{}, 96); // read once at a size every scale draws from
     if (!stacksOn_)
         stacks_.Close();
-    if (!s.showLaunchpad)
+    launchpadOn_ = s.showLaunchpad;
+    if (!launchpadOn_)
         launchpad_.Close(false);
+    PrewarmLaunchpad();
     card_.SetRadius(radius);
     launchpad_.SetRadius(radius);
     stacks_.SetRadius(radius);
@@ -196,7 +198,21 @@ std::wstring ExtrasHost::MusicTip() const
     return last_.artist.empty() ? last_.title : last_.title + L" \u00b7 " + last_.artist;
 }
 
-void ExtrasHost::OnCatalogChanged() { launchpad_.Refresh(); }
+void ExtrasHost::OnCatalogChanged()
+{
+    launchpad_.Refresh();
+    PrewarmLaunchpad();
+}
+
+// The first pages' icons read ahead for the main display, so Launchpad opens with them.
+void ExtrasHost::PrewarmLaunchpad()
+{
+    if (!launchpadOn_)
+        return;
+    MONITORINFO mi{sizeof(mi)};
+    if (GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi))
+        launchpad_.Prewarm(mi.rcWork);
+}
 
 void ExtrasHost::ClosePopups()
 {
