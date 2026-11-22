@@ -142,9 +142,15 @@ float CornerRadius(HWND window)
     return (pref == DWMWCP_ROUNDSMALL ? 4.f : 8.f) * float(GetDpiForWindow(window)) / 96.f;
 }
 
+bool CanPrintWindow(HWND window)
+{
+    return IsWindow(window) && !IsIconic(window) && IsWindowVisible(window) && IsWindowEnabled(window) && GetWindow(window, GW_OWNER) == nullptr &&
+           !IsHungAppWindow(window);
+}
+
 WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, int largeMax, WindowPicture* large)
 {
-    if (!IsWindow(window) || IsIconic(window))
+    if (!CanPrintWindow(window))
         return {};
     RECT win{}, frame{};
     if (!GetWindowRect(window, &win) || win.right <= win.left || win.bottom <= win.top)
@@ -174,7 +180,7 @@ WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, in
     }
     HGDIOBJ old = SelectObject(dc, dib);
     // PW_RENDERFULLCONTENT: what DWM shows, also of windows drawn with the GPU.
-    const bool printed = PrintWindow(window, dc, 2) != FALSE;
+    const bool printed = CanPrintWindow(window) && PrintWindow(window, dc, 2) != FALSE;
     GdiFlush();
     WindowPicture result;
     if (printed) {

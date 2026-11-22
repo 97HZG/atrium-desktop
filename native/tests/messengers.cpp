@@ -1,9 +1,94 @@
 #include "shell/messengers.h"
+#include "shell/wechat_source.h"
 
 #include <iostream>
 #include <stdexcept>
 
 using namespace atrium;
+
+namespace {
+
+void Require(bool condition, const char* message)
+{
+    if (!condition)
+        throw std::runtime_error(message);
+}
+
+void CheckWeChatTime()
+{
+    Require(IsWeChatTime(L"17:06"), "24h clock time");
+    Require(IsWeChatTime(L"10/27"), "month/day date");
+    Require(IsWeChatTime(L"2025/10/27"), "slash date");
+    Require(IsWeChatTime(L"2025-10-27"), "dash date");
+    Require(IsWeChatTime(L"刚刚"), "just now");
+    Require(IsWeChatTime(L"昨天"), "yesterday in Chinese");
+    Require(IsWeChatTime(L"前天"), "day before yesterday in Chinese");
+    Require(IsWeChatTime(L"星期三"), "weekday in Chinese");
+    Require(IsWeChatTime(L"Yesterday"), "yesterday in English");
+    Require(IsWeChatTime(L"3:45 PM"), "12h PM time");
+    Require(IsWeChatTime(L"11:05 am"), "12h am time");
+    Require(IsWeChatTime(L"5分钟前"), "minutes ago");
+    Require(IsWeChatTime(L"2小时前"), "hours ago");
+    Require(IsWeChatTime(L"2025年10月27日"), "CJK full date");
+    Require(!IsWeChatTime(L""), "empty string is not a time");
+    Require(!IsWeChatTime(L"你好"), "greeting text is not a time");
+    Require(!IsWeChatTime(L"[图片]"), "media tag is not a time");
+    Require(!IsWeChatTime(L"---"), "punctuation alone is not a time");
+}
+
+void CheckWeChatRows()
+{
+    Require(IsCollapsedWeChatRow(L"折叠的群聊"), "collapsed group chats");
+    Require(IsCollapsedWeChatRow(L"折叠置顶聊天"), "collapsed pinned chats");
+    Require(IsCollapsedWeChatRow(L"折叠的聊天"), "collapsed chats");
+    Require(IsCollapsedWeChatRow(L"Collapsed Chats"), "English collapsed chats");
+    Require(IsCollapsedWeChatRow(L"Folded Group Chats"), "English folded group chats");
+    Require(!IsCollapsedWeChatRow(L"产品讨论群"), "normal group is not collapsed");
+
+    const WeChatRow plain = ParseWeChatRow(L"Alice\n你好吗\n17:06");
+    Require(plain.chat == L"Alice" && plain.summary == L"你好吗" && plain.unread == 0 && !plain.muted && !plain.collapsed, "plain text row");
+
+    const WeChatRow sticker = ParseWeChatRow(L"Alice\n[1条] [动画表情]\n17:06");
+    Require(sticker.unread == 1 && sticker.summary == L"[动画表情]" && !sticker.muted, "inline sticker after unread tag");
+
+    const WeChatRow splitLink = ParseWeChatRow(L"Bob\n[2条]\n[链接] 标题\n3:45 PM");
+    Require(splitLink.unread == 2 && splitLink.summary == L"[链接] 标题", "split unread line and link summary");
+
+    const WeChatRow mention = ParseWeChatRow(L"工作群\n[有人@我]\n[1条] 请看下文档\n5分钟前");
+    Require(mention.unread == 1 && mention.summary == L"请看下文档", "mention badge before unread tag");
+
+    const WeChatRow pinnedFile = ParseWeChatRow(L"工作群\n已置顶\n[2条] [文件] report.pdf\n昨天");
+    Require(pinnedFile.unread == 2 && pinnedFile.summary == L"[文件] report.pdf", "pinned badge before unread file tag");
+
+    const WeChatRow enUnread = ParseWeChatRow(L"Team\n[3 unread] Standup at 4\nYesterday");
+    Require(enUnread.unread == 3 && enUnread.summary == L"Standup at 4", "English unread tag");
+
+    const WeChatRow enMessages = ParseWeChatRow(L"Team\n[2 messages]\n[图片]\n10:20 AM");
+    Require(enMessages.unread == 2 && enMessages.summary == L"[图片]", "English messages tag with image");
+
+    const WeChatRow saturated = ParseWeChatRow(L"大群\n[99+条] 收到\n刚刚");
+    Require(saturated.unread == 99 && saturated.summary == L"收到", "99+ saturated unread count");
+
+    const WeChatRow muted = ParseWeChatRow(L"通知群\n[5条] 周报提醒\n消息免打扰\n10:00");
+    Require(muted.unread == 5 && muted.muted && !muted.collapsed && muted.summary == L"周报提醒", "muted row");
+
+    const WeChatRow collapsed = ParseWeChatRow(L"折叠的群聊\n[4条] 群A: 收到\n2小时前");
+    Require(collapsed.collapsed && collapsed.muted && collapsed.unread == 4 && collapsed.summary == L"群A: 收到", "collapsed row is muted");
+
+    const WeChatRow collapsedPinned = ParseWeChatRow(L"折叠置顶聊天\n[1条] 群B: 测试\n2025年10月27日");
+    Require(collapsedPinned.collapsed && collapsedPinned.muted && collapsedPinned.unread == 1, "collapsed pinned row is muted");
+
+    const WeChatRow fallbackUsed = ParseWeChatRow(L"Alice\n[1条]\n10:00", L"[语音]");
+    Require(fallbackUsed.unread == 1 && fallbackUsed.summary == L"[语音]", "fallback text fills missing summary");
+
+    const WeChatRow fallbackIgnored = ParseWeChatRow(L"Alice\n[1条]\n10:00", L"Alice");
+    Require(fallbackIgnored.unread == 1 && fallbackIgnored.summary.empty(), "fallback matching chat name is ignored");
+
+    const WeChatRow fallbackTimeIgnored = ParseWeChatRow(L"Alice\n[1条]\n10:00", L"10:00");
+    Require(fallbackTimeIgnored.unread == 1 && fallbackTimeIgnored.summary.empty(), "fallback matching time is ignored");
+}
+
+} // namespace
 
 int main()
 {
@@ -40,6 +125,9 @@ int main()
         require(alerts.Due(56000).empty(), "a card just before the flash counts too");
         bool waiting = false;
         require(alerts.Flash(Messenger::WeChat, 60000) && alerts.Due(61000, &waiting).empty() && waiting, "still waiting");
+
+        CheckWeChatTime();
+        CheckWeChatRows();
         std::cout << "messengers: all checks passed\n";
         return 0;
     } catch (const std::exception& e) {

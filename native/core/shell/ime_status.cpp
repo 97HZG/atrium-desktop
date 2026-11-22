@@ -15,7 +15,8 @@ namespace {
 
 ImeWatcher* g_watcher = nullptr; // one watcher, installed on the UI thread
 
-// CapsLock's latch as the system has it now. Skips hung windows and keeps `fallback` if AttachThreadInput fails (UIPI).
+// CapsLock's latch when the foreground belongs to this thread; otherwise keeps `fallback` without
+// attaching thread input queues (AttachThreadInput across threads deadlocks modal dialogs).
 bool ForegroundCapsLock(HWND foreground, bool fallback)
 {
     if (!foreground || IsHungAppWindow(foreground))
@@ -24,11 +25,7 @@ bool ForegroundCapsLock(HWND foreground, bool fallback)
     const DWORD current = GetCurrentThreadId();
     if (!foregroundThread || foregroundThread == current)
         return (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-    if (!AttachThreadInput(current, foregroundThread, TRUE))
-        return fallback;
-    const bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-    AttachThreadInput(current, foregroundThread, FALSE);
-    return caps;
+    return fallback;
 }
 
 // The focus window of the foreground thread (it can differ from the top-level
@@ -138,7 +135,7 @@ ImeWatcher::ImeWatcher(HWND window, UINT message)
     : window_(window),
       message_(message),
       wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
-      caps_(ForegroundCapsLock(GetForegroundWindow(), false)), // initial latch; resynced on foreground change
+      caps_((GetKeyState(VK_CAPITAL) & 0x0001) != 0), // initial latch on the UI thread; keyboard hook tracks toggles
       foreground_(SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT)),
       // CHANGE is not watched: it fires for every composition and candidate
       // change, which would read the IME on every key of a sentence. Shift and

@@ -18,9 +18,22 @@
 #include <windows.h>
 
 #include <atomic>
+#include <string>
 #include <thread>
 
 namespace atrium {
+
+struct WeChatRow {
+    std::wstring chat;    // the chat's name
+    std::wstring summary; // the newest message as the list shows it
+    int unread = 0;
+    bool muted = false;
+    bool collapsed = false;
+};
+
+bool IsWeChatTime(const std::wstring& s);
+bool IsCollapsedWeChatRow(const std::wstring& chat);
+WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackText = {});
 
 class WeChatSource {
 public:

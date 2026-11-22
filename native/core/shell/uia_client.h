@@ -72,8 +72,10 @@ public:
     void Clear()
     {
         for (const auto& item : roots_) {
-            uia_->RemovePropertyChangedEventHandler(item.root.get(), changes_.get());
-            uia_->RemoveStructureChangedEventHandler(item.root.get(), changes_.get());
+            if (!IsHungAppWindow(item.window)) {
+                uia_->RemovePropertyChangedEventHandler(item.root.get(), changes_.get());
+                uia_->RemoveStructureChangedEventHandler(item.root.get(), changes_.get());
+            }
         }
         roots_.clear();
     }
@@ -81,9 +83,11 @@ public:
     {
         for (size_t i = roots_.size(); i-- > 0;)
             if (!IsWindow(roots_[i].window)) {
-                uia_->RemovePropertyChangedEventHandler(roots_[i].root.get(), changes_.get());
-                uia_->RemoveStructureChangedEventHandler(roots_[i].root.get(), changes_.get());
-                roots_.erase(roots_.begin() + i);
+                if (!IsHungAppWindow(roots_[i].window)) {
+                    uia_->RemovePropertyChangedEventHandler(roots_[i].root.get(), changes_.get());
+                    uia_->RemoveStructureChangedEventHandler(roots_[i].root.get(), changes_.get());
+                }
+                roots_.erase(roots_.begin() + ptrdiff_t(i));
             }
     }
 
@@ -99,9 +103,10 @@ private:
 
 class UiaWindowWake {
 public:
-    UiaWindowWake(HANDLE wake, const wchar_t* windowClass)
+    UiaWindowWake(HANDLE wake, const wchar_t* windowClass, bool watchNameChanges = true)
         : wake_(wake),
           windowClass_(windowClass),
+          watchNameChanges_(watchNameChanges),
           show_(SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, Changed, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS))
     {
         g_active = this;
@@ -120,6 +125,8 @@ public:
 
     template<typename Processes> void SetProcesses(const Processes& processes)
     {
+        if (!watchNameChanges_)
+            return;
         std::vector<DWORD> next;
         for (const auto& entry : processes)
             if (entry.first != 0 && std::ranges::find(next, entry.first) == next.end())
@@ -163,6 +170,7 @@ private:
     inline static thread_local UiaWindowWake* g_active = nullptr;
     HANDLE wake_;
     const wchar_t* windowClass_;
+    bool watchNameChanges_;
     std::vector<std::pair<DWORD, HWINEVENTHOOK>> nameHooks_;
     HWINEVENTHOOK show_ = nullptr;
 };
@@ -190,8 +198,10 @@ inline void WaitForUiaWake(HANDLE wake, DWORD timeout)
 }
 
 // A cache request for `properties` of the found elements alone, over the raw view,
-// without live element references (a reader keeps nothing but what it cached).
-inline HRESULT CreateRawCache(IUIAutomation* uia, std::initializer_list<PROPERTYID> properties, winrt::com_ptr<IUIAutomationCacheRequest>& cache)
+// without live element references unless `keepLiveElements` is set (so BuildUpdatedCache
+// works on held elements across close-to-tray transitions).
+inline HRESULT CreateRawCache(IUIAutomation* uia, std::initializer_list<PROPERTYID> properties, winrt::com_ptr<IUIAutomationCacheRequest>& cache,
+                              bool keepLiveElements = false)
 {
     cache = nullptr;
     winrt::com_ptr<IUIAutomationCondition> raw;
@@ -205,7 +215,7 @@ inline HRESULT CreateRawCache(IUIAutomation* uia, std::initializer_list<PROPERTY
         hr = uia->get_RawViewCondition(raw.put());
     if (SUCCEEDED(hr))
         hr = cache->put_TreeFilter(raw.get());
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(hr) && !keepLiveElements)
         hr = cache->put_AutomationElementMode(AutomationElementMode_None);
     return hr;
 }
@@ -216,9 +226,16 @@ template<typename Prepare> winrt::com_ptr<IUIAutomation> CreateUia(const std::at
 {
     for (bool logged = false; !stop; WaitForSingleObject(wake, 2000)) {
         winrt::com_ptr<IUIAutomation> uia;
-        HRESULT hr = CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put()));
-        if (SUCCEEDED(hr))
+        HRESULT hr = CoCreateInstance(__uuidof(CUIAutomation8), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put()));
+        if (FAILED(hr))
+            hr = CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put()));
+        if (SUCCEEDED(hr)) {
+            if (auto options = uia.try_as<IUIAutomation2>()) {
+                options->put_ConnectionTimeout(250);
+                options->put_TransactionTimeout(250);
+            }
             hr = prepare(uia.get());
+        }
         if (SUCCEEDED(hr))
             return uia;
         if (!logged)
