@@ -14,9 +14,17 @@ namespace atrium {
 
 namespace {
 
-// The version Daozai verified (cloudmusic.dll's PE time stamp and image size) and its places.
-constexpr uint32_t kKnownStamp = 0x6ad712e1, kKnownSize = 41054208;
-constexpr uintptr_t kKnownPosition = 0x21a74d8, kKnownLength = 0x2214778;
+// Versions whose places are known (cloudmusic.dll's PE time stamp and image size): the one Daozai
+// verified, then those found here. The first is also where a new version's search starts.
+struct KnownVersion {
+    uint32_t stamp, size;
+    uintptr_t position, length;
+};
+constexpr KnownVersion kKnown[] = {
+    {0x6ad712e1, 41054208, 0x21a74d8, 0x2214778},
+    {0x6ae94a6a, 41058304, 0x21a84d8, 0x2215798},
+};
+constexpr uintptr_t kKnownPosition = kKnown[0].position, kKnownLength = kKnown[0].length;
 constexpr double kRetryMs = 5000;      // nothing found: try again after
 constexpr double kProbeMs = 900;       // between two readings that must differ by the time between them
 constexpr double kTolerance = 0.3;     // s
@@ -125,16 +133,17 @@ NeteaseMemory::Doubles NeteaseMemory::Scan(double lo, double hi) const
     return found;
 }
 
-// The length's place: the known version's, else the one double equal to the queue's length (nearest
+// The length's place: a known version's, else the one double equal to the queue's length (nearest
 // the known place if several); the position's first guess moved with it.
 bool NeteaseMemory::Locate(double lengthSec)
 {
-    if (stamp_ == kKnownStamp && imageSize_ == kKnownSize) {
-        lengthRva_ = kKnownLength;
-        positionRva_ = kKnownPosition;
-        trusted_ = true;
-        return true;
-    }
+    for (const KnownVersion& v : kKnown)
+        if (stamp_ == v.stamp && imageSize_ == v.size) {
+            lengthRva_ = v.length;
+            positionRva_ = v.position;
+            trusted_ = true;
+            return true;
+        }
     if (!ValidLength(lengthSec))
         return false;
     const Doubles equal = Scan(lengthSec - 0.0005, lengthSec + 0.0005);
