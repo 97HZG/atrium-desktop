@@ -1,7 +1,36 @@
 #include "shell/quick_toggles.h"
 
+#include <cstdint>
 #include <iostream>
+#include <optional>
 #include <vector>
+
+namespace atrium {
+
+struct EnergySaverInput {
+    bool on = false;
+    bool onAc = false;
+    uint32_t curAc = 0;
+    uint32_t curDc = 0;
+    uint32_t defaultAc = 0;
+    uint32_t defaultDc = 20;
+    std::optional<uint32_t> savedAc;
+    std::optional<uint32_t> savedDc;
+};
+
+struct EnergySaverPlan {
+    std::optional<uint32_t> writeAc;
+    std::optional<uint32_t> writeDc;
+    std::optional<uint32_t> saveAc;
+    std::optional<uint32_t> saveDc;
+    bool clearAc = false;
+    bool clearDc = false;
+    bool NeedsApply() const { return writeAc.has_value() || writeDc.has_value(); }
+};
+
+EnergySaverPlan PlanEnergySaver(const EnergySaverInput& in);
+
+} // namespace atrium
 
 using namespace atrium;
 
@@ -45,12 +74,51 @@ bool CheckNightLightEncoding()
     return ok;
 }
 
+bool CheckEnergySaverPlanning()
+{
+    bool ok = true;
+
+    // Plugged in (AC): toggles AC threshold only, leaving custom DC threshold untouched.
+    const auto acOn = PlanEnergySaver({.on = true, .onAc = true, .curAc = 0, .curDc = 30});
+    ok &= Check(acOn.writeAc == 100u && !acOn.writeDc.has_value(), "AC enable writes AC=100 without touching DC");
+    ok &= Check(acOn.saveAc == 0u && !acOn.saveDc.has_value() && acOn.NeedsApply(), "AC enable records prior AC=0");
+
+    // Restoring after restart when saved AC threshold is reloaded.
+    const auto acOff = PlanEnergySaver({.on = false, .onAc = true, .curAc = 100, .curDc = 30, .savedAc = 0u});
+    ok &= Check(acOff.writeAc == 0u && !acOff.writeDc.has_value(), "AC disable restores saved AC=0 and leaves DC=30");
+    ok &= Check(acOff.clearAc && !acOff.clearDc && acOff.NeedsApply(), "AC disable clears saved AC entry");
+
+    // On battery (DC): preserves custom threshold 30 across toggle/restart.
+    const auto dcOn = PlanEnergySaver({.on = true, .onAc = false, .curAc = 0, .curDc = 30});
+    ok &= Check(dcOn.writeDc == 100u && !dcOn.writeAc.has_value(), "DC enable writes DC=100 without touching AC");
+    ok &= Check(dcOn.saveDc == 30u && !dcOn.saveAc.has_value(), "DC enable saves custom DC=30");
+
+    // Turned on while on DC, then plugged into AC before turning off: restores DC=30 cleanly.
+    const auto dcToAcOff = PlanEnergySaver({.on = false, .onAc = true, .curAc = 0, .curDc = 100, .savedDc = 30u});
+    ok &= Check(dcToAcOff.writeDc == 30u && !dcToAcOff.writeAc.has_value(), "disable after DC->AC switch restores DC=30");
+    ok &= Check(dcToAcOff.clearDc && !dcToAcOff.clearAc, "disable after DC->AC switch clears saved DC entry");
+
+    // Already off with custom DC threshold and no saved state: no-op (does not clobber 30 with 20).
+    const auto noopOff = PlanEnergySaver({.on = false, .onAc = false, .curAc = 0, .curDc = 30});
+    ok &= Check(!noopOff.NeedsApply() && !noopOff.writeDc.has_value() && !noopOff.writeAc.has_value(),
+                "disable when already off does not mutate custom threshold");
+
+    // Externally enabled on AC without saved entry: falls back to scheme AC default (0), not DC default (20).
+    const auto fallbackAcOff = PlanEnergySaver({.on = false, .onAc = true, .curAc = 100, .curDc = 30, .defaultAc = 0, .defaultDc = 30});
+    ok &= Check(fallbackAcOff.writeAc == 0u && !fallbackAcOff.writeDc.has_value(), "AC disable without saved entry restores AC default 0");
+
+    // Repeated enable while already at 100 with saved state: preserves original saved threshold and avoids redundant apply.
+    const auto repeatOn = PlanEnergySaver({.on = true, .onAc = false, .curAc = 0, .curDc = 100, .savedDc = 30u});
+    ok &= Check(!repeatOn.saveDc.has_value() && !repeatOn.NeedsApply(), "repeated DC enable does not overwrite saved=30");
+    return ok;
+}
+
 } // namespace
 
-// Only the record's encoding: what this PC's switches are set to is not the tests' business.
+// Only the record's encoding and energy-saver planning: what this PC's switches are set to is not the tests' business.
 int main()
 {
-    const bool ok = CheckNightLightEncoding();
+    const bool ok = CheckNightLightEncoding() && CheckEnergySaverPlanning();
     if (!ok)
         return 1;
     std::cout << "quick_toggles tests passed\n";

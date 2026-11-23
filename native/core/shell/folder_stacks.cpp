@@ -266,7 +266,7 @@ void LaunchExplorer(const std::wstring& path)
 void OpenFile(const std::wstring& path)
 {
     SHELLEXECUTEINFOW sei{sizeof(sei)};
-    sei.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    sei.fMask = SEE_MASK_FLAG_NO_UI | (IsRemotePath(path) ? 0UL : SEE_MASK_NOASYNC);
     sei.lpVerb = L"open";
     sei.lpFile = path.c_str();
     sei.nShow = SW_SHOWNORMAL;

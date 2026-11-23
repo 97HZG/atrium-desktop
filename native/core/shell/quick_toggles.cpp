@@ -1,6 +1,7 @@
 #include "shell/quick_toggles.h"
 
 #include <windows.h>
+#include <asyncinfo.h>
 #include <powrprof.h>
 #include <powersetting.h>
 #include <roapi.h>
@@ -10,8 +11,12 @@
 #include <wrl/event.h>
 #include <wrl/wrappers/corewrappers.h>
 
+#include <algorithm>
 #include <chrono>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <string>
 
 namespace atrium {
 
@@ -28,11 +33,53 @@ constexpr wchar_t kNightLightKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\CloudStore\\Store\\DefaultAccount\\Current\\"
     L"default$windows.data.bluelightreduction.bluelightreductionstate\\windows.data.bluelightreduction.bluelightreductionstate";
 constexpr wchar_t kPersonalizeKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+constexpr wchar_t kEnergySaverKey[] = L"Software\\Atrium\\EnergySaver";
 constexpr size_t kTimestampOffset = 10;
-constexpr DWORD kDefaultBatteryThreshold = 20;
+constexpr uint32_t kDefaultAcThreshold = 0;
+constexpr uint32_t kDefaultDcThreshold = 20;
 
 std::mutex g_energyMutex;
-std::optional<DWORD> g_prevDcThreshold;
+std::map<std::wstring, uint32_t> g_prevThresholds;
+
+std::wstring SchemeValueName(const GUID& scheme, bool ac)
+{
+    wchar_t buf[64]{};
+    const int n = StringFromGUID2(scheme, buf, static_cast<int>(std::size(buf)));
+    return (n > 0 ? std::wstring(buf) : std::wstring(L"{default}")) + (ac ? L"_AC" : L"_DC");
+}
+
+std::optional<uint32_t> LoadSavedThreshold(const std::wstring& keyName)
+{
+    if (const auto it = g_prevThresholds.find(keyName); it != g_prevThresholds.end())
+        return it->second;
+    DWORD value = 0;
+    DWORD size = sizeof(value);
+    if (RegGetValueW(HKEY_CURRENT_USER, kEnergySaverKey, keyName.c_str(), RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS)
+        return std::nullopt;
+    g_prevThresholds[keyName] = value;
+    return value;
+}
+
+void StoreSavedThreshold(const std::wstring& keyName, uint32_t value)
+{
+    g_prevThresholds[keyName] = value;
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kEnergySaverKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+        const DWORD dword = value;
+        RegSetValueExW(key, keyName.c_str(), 0, REG_DWORD, reinterpret_cast<const BYTE*>(&dword), sizeof(dword));
+        RegCloseKey(key);
+    }
+}
+
+void ClearSavedThreshold(const std::wstring& keyName)
+{
+    g_prevThresholds.erase(keyName);
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kEnergySaverKey, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS) {
+        RegDeleteValueW(key, keyName.c_str());
+        RegCloseKey(key);
+    }
+}
 
 size_t VarintEnd(const std::vector<uint8_t>& data, size_t start)
 {
@@ -112,20 +159,23 @@ bool AwaitTetheringOp(IAsyncOperation<NetworkOperatorTetheringOperationResult*>*
 {
     if (!op)
         return false;
-    HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!done)
+    HANDLE rawDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!rawDone)
         return false;
+    std::shared_ptr<void> done(rawDone, &CloseHandle);
     auto handler = Callback<IAsyncOperationCompletedHandler<NetworkOperatorTetheringOperationResult*>>(
         [done](IAsyncOperation<NetworkOperatorTetheringOperationResult*>*, AsyncStatus) -> HRESULT {
-            SetEvent(done);
+            SetEvent(done.get());
             return S_OK;
         });
-    if (FAILED(op->put_Completed(handler.Get()))) {
-        CloseHandle(done);
+    if (!handler || FAILED(op->put_Completed(handler.Get())))
+        return false;
+    if (WaitForSingleObject(done.get(), 15000) != WAIT_OBJECT_0) {
+        ComPtr<IAsyncInfo> info;
+        if (SUCCEEDED(op->QueryInterface(IID_PPV_ARGS(&info))) && info)
+            info->Cancel();
         return false;
     }
-    WaitForSingleObject(done, 15000);
-    CloseHandle(done);
 
     ComPtr<INetworkOperatorTetheringOperationResult> result;
     if (FAILED(op->GetResults(&result)) || !result)
@@ -212,6 +262,63 @@ std::optional<bool> ReadEnergySaver()
     return (sps.SystemStatusFlag & 1u) != 0;
 }
 
+struct EnergySaverInput {
+    bool on = false;
+    bool onAc = false;
+    uint32_t curAc = 0;
+    uint32_t curDc = 0;
+    uint32_t defaultAc = kDefaultAcThreshold;
+    uint32_t defaultDc = kDefaultDcThreshold;
+    std::optional<uint32_t> savedAc;
+    std::optional<uint32_t> savedDc;
+};
+
+struct EnergySaverPlan {
+    std::optional<uint32_t> writeAc;
+    std::optional<uint32_t> writeDc;
+    std::optional<uint32_t> saveAc;
+    std::optional<uint32_t> saveDc;
+    bool clearAc = false;
+    bool clearDc = false;
+    bool NeedsApply() const { return writeAc.has_value() || writeDc.has_value(); }
+};
+
+EnergySaverPlan PlanEnergySaver(const EnergySaverInput& in)
+{
+    EnergySaverPlan plan;
+    if (in.on) {
+        if (in.onAc) {
+            if (!in.savedAc.has_value() && in.curAc < 100)
+                plan.saveAc = in.curAc;
+            if (in.curAc != 100)
+                plan.writeAc = 100;
+        } else {
+            if (!in.savedDc.has_value() && in.curDc < 100)
+                plan.saveDc = in.curDc;
+            if (in.curDc != 100)
+                plan.writeDc = 100;
+        }
+        return plan;
+    }
+
+    auto planRestore = [](uint32_t cur, std::optional<uint32_t> saved, uint32_t fallback, bool activeSource, std::optional<uint32_t>& write, bool& clear) {
+        const uint32_t safeFallback = fallback < 100 ? fallback : kDefaultDcThreshold;
+        if (saved.has_value()) {
+            const uint32_t restore = *saved < 100 ? *saved : safeFallback;
+            if (cur != restore)
+                write = restore;
+            clear = true;
+        } else if (activeSource && cur >= 100 && cur != fallback) {
+            write = fallback;
+        }
+    };
+    const uint32_t acFallback = in.defaultAc < 100 ? in.defaultAc : kDefaultAcThreshold;
+    const uint32_t dcFallback = in.defaultDc < 100 ? in.defaultDc : kDefaultDcThreshold;
+    planRestore(in.curAc, in.savedAc, acFallback, in.onAc, plan.writeAc, plan.clearAc);
+    planRestore(in.curDc, in.savedDc, dcFallback, !in.onAc, plan.writeDc, plan.clearDc);
+    return plan;
+}
+
 bool SetEnergySaver(bool on)
 {
     std::scoped_lock lock(g_energyMutex);
@@ -219,22 +326,52 @@ bool SetEnergySaver(bool on)
     if (PowerGetActiveScheme(nullptr, &active) != ERROR_SUCCESS || !active)
         return false;
 
-    bool ok = false;
-    DWORD target = kDefaultBatteryThreshold;
-    if (on) {
-        DWORD cur = 0;
-        if (PowerReadDCValueIndex(nullptr, active, &GUID_ENERGY_SAVER_SUBGROUP, &GUID_ENERGY_SAVER_BATTERY_THRESHOLD, &cur) == ERROR_SUCCESS &&
-            !g_prevDcThreshold.has_value() && cur < 100) {
-            g_prevDcThreshold = cur;
-        }
-        target = 100;
-    } else {
-        target = g_prevDcThreshold.value_or(kDefaultBatteryThreshold);
-        g_prevDcThreshold.reset();
-    }
+    SYSTEM_POWER_STATUS sps{};
+    const bool onAc = GetSystemPowerStatus(&sps) && sps.ACLineStatus == 1;
+    DWORD curAc = 0, curDc = 0, defAc = kDefaultAcThreshold, defDc = kDefaultDcThreshold;
+    const bool hasAc = PowerReadACValueIndex(nullptr, active, &GUID_ENERGY_SAVER_SUBGROUP, &GUID_ENERGY_SAVER_BATTERY_THRESHOLD, &curAc) == ERROR_SUCCESS;
+    const bool hasDc = PowerReadDCValueIndex(nullptr, active, &GUID_ENERGY_SAVER_SUBGROUP, &GUID_ENERGY_SAVER_BATTERY_THRESHOLD, &curDc) == ERROR_SUCCESS;
+    if (PowerReadACDefaultIndex(nullptr, active, &GUID_ENERGY_SAVER_SUBGROUP, &GUID_ENERGY_SAVER_BATTERY_THRESHOLD, &defAc) != ERROR_SUCCESS)
+        defAc = kDefaultAcThreshold;
+    if (PowerReadDCDefaultIndex(nullptr, active, &GUID_ENERGY_SAVER_SUBGROUP, &GUID_ENERGY_SAVER_BATTERY_THRESHOLD, &defDc) != ERROR_SUCCESS)
+        defDc = kDefaultDcThreshold;
 
-    if (PowerWriteDCValueIndex(nullptr, active, &GUID_ENERGY_SAVER_SUBGROUP, &GUID_ENERGY_SAVER_BATTERY_THRESHOLD, target) == ERROR_SUCCESS)
+    const std::wstring acKey = SchemeValueName(*active, true);
+    const std::wstring dcKey = SchemeValueName(*active, false);
+    const EnergySaverInput input{
+        .on = on,
+        .onAc = onAc,
+        .curAc = hasAc ? curAc : (onAc ? 0u : defAc),
+        .curDc = hasDc ? curDc : kDefaultDcThreshold,
+        .defaultAc = defAc,
+        .defaultDc = defDc,
+        .savedAc = LoadSavedThreshold(acKey),
+        .savedDc = LoadSavedThreshold(dcKey),
+    };
+    const EnergySaverPlan plan = PlanEnergySaver(input);
+
+    bool ok = true;
+    if (plan.writeAc.has_value()) {
+        ok = PowerWriteACValueIndex(nullptr, active, &GUID_ENERGY_SAVER_SUBGROUP, &GUID_ENERGY_SAVER_BATTERY_THRESHOLD, static_cast<DWORD>(*plan.writeAc)) ==
+             ERROR_SUCCESS;
+    }
+    if (ok && plan.writeDc.has_value()) {
+        ok = PowerWriteDCValueIndex(nullptr, active, &GUID_ENERGY_SAVER_SUBGROUP, &GUID_ENERGY_SAVER_BATTERY_THRESHOLD, static_cast<DWORD>(*plan.writeDc)) ==
+             ERROR_SUCCESS;
+    }
+    if (ok && plan.NeedsApply())
         ok = PowerSetActiveScheme(nullptr, active) == ERROR_SUCCESS;
+
+    if (ok) {
+        if (plan.saveAc.has_value())
+            StoreSavedThreshold(acKey, *plan.saveAc);
+        if (plan.saveDc.has_value())
+            StoreSavedThreshold(dcKey, *plan.saveDc);
+        if (plan.clearAc)
+            ClearSavedThreshold(acKey);
+        if (plan.clearDc)
+            ClearSavedThreshold(dcKey);
+    }
     LocalFree(active);
     return ok;
 }

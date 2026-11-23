@@ -278,54 +278,81 @@ struct XmlItem {
     std::vector<XmlItem> kids;
 };
 
+std::wstring_view LocalXmlName(std::wstring_view q)
+{
+    const size_t c = q.rfind(L':');
+    return c == std::wstring_view::npos ? q : q.substr(c + 1);
+}
+
+void ApplyXmlAttr(std::wstring_view attr, std::wstring val, XmlItem& a)
+{
+    if (attr == L"Row")
+        a.row = int(std::wcstol(val.c_str(), nullptr, 10));
+    else if (attr == L"Column")
+        a.col = int(std::wcstol(val.c_str(), nullptr, 10));
+    else if (attr == L"Name")
+        a.name = std::move(val);
+    else if (attr == L"AppUserModelID")
+        a.pin = {StartPinItem::Kind::PackagedAppId, std::move(val)};
+    else if (attr == L"DesktopApplicationLinkPath")
+        a.pin = {StartPinItem::Kind::DesktopAppLink, std::move(val)};
+    else if (attr == L"DesktopApplicationID" && a.pin.value.empty())
+        a.pin = {StartPinItem::Kind::DesktopAppId, std::move(val)};
+}
+
 bool ParseXmlTag(std::wstring_view xml, size_t& i, std::wstring_view& tag, bool& closing, bool& selfClosing, XmlItem& a)
 {
-    auto local = [](std::wstring_view q) {
-        size_t c = q.rfind(L':');
-        return c == std::wstring_view::npos ? q : q.substr(c + 1);
-    };
     closing = i < xml.size() && xml[i] == L'/';
-    i += closing;
-    size_t n = i;
+    if (closing)
+        ++i;
+    const size_t n = i;
     while (i < xml.size() && !iswspace(xml[i]) && xml[i] != L'>' && xml[i] != L'/')
         ++i;
-    tag = local(xml.substr(n, i - n));
+    tag = LocalXmlName(xml.substr(n, i - n));
     if (closing) {
-        size_t e = xml.find(L'>', i);
-        return e != std::wstring_view::npos && (i = e + 1, true);
+        const size_t e = xml.find(L'>', i);
+        if (e == std::wstring_view::npos)
+            return false;
+        i = e + 1;
+        return true;
     }
-    for (; i < xml.size();) {
+    while (i < xml.size()) {
         while (i < xml.size() && iswspace(xml[i]))
             ++i;
-        if (i >= xml.size() || xml[i] == L'>' || (xml[i] == L'/' && i + 1 < xml.size() && xml[i + 1] == L'>'))
-            return selfClosing = (i < xml.size() && xml[i] == L'/'), i += (i < xml.size() ? 1 + selfClosing : 0), true;
-        size_t k = i;
+        if (i >= xml.size() || xml[i] == L'>' || (xml[i] == L'/' && i + 1 < xml.size() && xml[i + 1] == L'>')) {
+            selfClosing = i < xml.size() && xml[i] == L'/';
+            if (i < xml.size())
+                i += 1 + size_t(selfClosing);
+            return true;
+        }
+        const size_t k = i;
         while (i < xml.size() && !iswspace(xml[i]) && xml[i] != L'=' && xml[i] != L'>' && xml[i] != L'/')
             ++i;
-        std::wstring_view attr = local(xml.substr(k, i - k));
+        const std::wstring_view attr = LocalXmlName(xml.substr(k, i - k));
         while (i < xml.size() && (iswspace(xml[i]) || xml[i] == L'='))
             ++i;
         if (i >= xml.size() || (xml[i] != L'"' && xml[i] != L'\''))
             continue;
-        wchar_t q = xml[i++];
-        size_t ve = xml.find(q, i);
+        const wchar_t q = xml[i++];
+        const size_t ve = xml.find(q, i);
         if (ve == std::wstring_view::npos)
             return false;
-        std::wstring val = UnescapeXml(xml.substr(i, ve - i));
+        ApplyXmlAttr(attr, UnescapeXml(xml.substr(i, ve - i)), a);
         i = ve + 1;
-        if (attr == L"Row")
-            a.row = int(std::wcstol(val.c_str(), nullptr, 10));
-        else if (attr == L"Column")
-            a.col = int(std::wcstol(val.c_str(), nullptr, 10));
-        else if (attr == L"Name")
-            a.name = std::move(val);
-        else if (attr == L"AppUserModelID")
-            a.pin = {StartPinItem::Kind::PackagedAppId, std::move(val)};
-        else if (attr == L"DesktopApplicationLinkPath")
-            a.pin = {StartPinItem::Kind::DesktopAppLink, std::move(val)};
-        else if (attr == L"DesktopApplicationID" && a.pin.value.empty())
-            a.pin = {StartPinItem::Kind::DesktopAppId, std::move(val)};
     }
+    return true;
+}
+
+bool SkipXmlNonTag(std::wstring_view xml, size_t i, size_t& next)
+{
+    const std::wstring_view rest = xml.substr(i);
+    const bool isComment = rest.starts_with(L"!--");
+    const bool isCdata = rest.starts_with(L"![CDATA[");
+    if (!isComment && !isCdata && (rest.empty() || (rest[0] != L'?' && rest[0] != L'!')))
+        return false;
+    const wchar_t* end = isComment ? L"-->" : isCdata ? L"]]>" : L">";
+    const size_t p = xml.find(end, i + 1);
+    next = p == std::wstring_view::npos ? std::wstring_view::npos : p + ((isComment || isCdata) ? 3 : 1);
     return true;
 }
 
@@ -333,19 +360,32 @@ void FlushXmlGroup(std::vector<StartPinGroup>& out, std::wstring& groupName, std
 {
     auto byPos = [](const XmlItem& a, const XmlItem& b) { return a.row != b.row ? a.row < b.row : a.col < b.col; };
     std::ranges::stable_sort(groupItems, byPos);
-    StartPinGroup group{std::move(groupName), false, {}}, fg;
+    StartPinGroup group{std::move(groupName), false, {}};
     std::vector<StartPinGroup> promoted;
     for (XmlItem& item : groupItems) {
-        if (!item.folder) { group.items.push_back(std::move(item.pin)); continue; }
+        if (!item.folder) {
+            group.items.push_back(std::move(item.pin));
+            continue;
+        }
         std::ranges::stable_sort(item.kids, byPos);
-        fg = {std::move(item.name), true, {}};
-        for (XmlItem& c : item.kids) fg.items.push_back(std::move(c.pin));
-        if (!group.name.empty()) promoted.push_back(std::move(fg));
-        else { if (!group.items.empty()) out.push_back(std::move(group)), group = {}; out.push_back(std::move(fg)); }
+        StartPinGroup fg{std::move(item.name), true, {}};
+        for (XmlItem& c : item.kids)
+            fg.items.push_back(std::move(c.pin));
+        if (!group.name.empty()) {
+            promoted.push_back(std::move(fg));
+        } else {
+            if (!group.items.empty()) {
+                out.push_back(std::move(group));
+                group = {};
+            }
+            out.push_back(std::move(fg));
+        }
     }
-    if (!group.items.empty()) out.push_back(std::move(group));
+    if (!group.items.empty())
+        out.push_back(std::move(group));
     out.insert(out.end(), std::make_move_iterator(promoted.begin()), std::make_move_iterator(promoted.end()));
-    groupItems.clear(), groupName.clear();
+    groupItems.clear();
+    groupName.clear();
 }
 
 } // namespace
@@ -362,7 +402,8 @@ std::vector<StartPinGroup> ParseStartLayoutXml(std::wstring_view xml)
     auto closeFolder = [&] {
         if (inFolder && !folderItem.kids.empty())
             groupItems.push_back(std::move(folderItem));
-        folderItem = {}, inFolder = false;
+        folderItem = {};
+        inFolder = false;
     };
     auto finishGroup = [&] {
         closeFolder();
@@ -372,33 +413,38 @@ std::vector<StartPinGroup> ParseStartLayoutXml(std::wstring_view xml)
     };
     for (size_t lt = xml.find(L'<'); lt != std::wstring_view::npos; lt = xml.find(L'<', lt)) {
         size_t i = lt + 1;
-        std::wstring_view rest = xml.substr(i), tag;
-        if (rest.starts_with(L"!--") || rest.starts_with(L"![CDATA[") || (!rest.empty() && (rest[0] == L'?' || rest[0] == L'!'))) {
-            size_t p = xml.find(rest.starts_with(L"!--") ? L"-->" : rest.starts_with(L"![CDATA[") ? L"]]>" : L">", i + 1);
-            if (p == std::wstring_view::npos)
+        if (size_t next = 0; SkipXmlNonTag(xml, i, next)) {
+            if (next == std::wstring_view::npos)
                 break;
-            lt = p + (rest.starts_with(L"!--") || rest.starts_with(L"![CDATA[") ? 3 : 1);
+            lt = next;
             continue;
         }
+        std::wstring_view tag;
         bool closing = false, selfClosing = false;
         XmlItem a;
         if (!ParseXmlTag(xml, i, tag, closing, selfClosing, a))
             break;
         lt = i;
-        if (closing && tag == L"Group")
+        if (closing && tag == L"Group") {
             finishGroup();
-        else if (closing && tag == L"Folder")
+        } else if (closing && tag == L"Folder") {
             closeFolder();
-        else if (!closing && tag == L"Group") {
+        } else if (!closing && tag == L"Group") {
             finishGroup();
-            if (!selfClosing)
-                inGroup = true, groupName = std::move(a.name);
-        } else if (!closing && tag == L"Folder" && inGroup && !inFolder && !selfClosing)
-            inFolder = true, a.folder = true, folderItem = std::move(a);
-        else if (!closing && inGroup && (tag == L"Tile" || tag == L"DesktopApplicationTile") && !a.pin.value.empty())
+            if (!selfClosing) {
+                inGroup = true;
+                groupName = std::move(a.name);
+            }
+        } else if (!closing && tag == L"Folder" && inGroup && !inFolder && !selfClosing) {
+            inFolder = true;
+            a.folder = true;
+            folderItem = std::move(a);
+        } else if (!closing && inGroup && (tag == L"Tile" || tag == L"DesktopApplicationTile") && !a.pin.value.empty()) {
             (inFolder ? folderItem.kids : groupItems).push_back(std::move(a));
+        }
     }
-    return finishGroup(), out;
+    finishGroup();
+    return out;
 }
 
 bool RemoveStartFolder(std::vector<StartTile>& tiles, const std::wstring& folderId)
