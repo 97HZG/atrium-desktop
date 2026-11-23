@@ -122,7 +122,7 @@ struct Settings {
     // macOS's dimmed desktop widgets) | color (their own opaque faces, as macOS's full-colour widgets).
     std::wstring widgetMaterial = L"glass";
     // Windows' own shell (shell/system_chrome.h): put back when turned off or on exit.
-    bool hideTaskbar = false;        // the system taskbar is hidden while Atrium runs
+    bool hideTaskbar = true;         // the system taskbar is hidden while Atrium runs (a new installation's default)
     bool hideBanners = false;        // Do Not Disturb: no system banners, the notifications still become cards
     bool winKeyStart = false;        // the Windows key alone opens Atrium's start menu instead of Windows'
     bool winNumbers = false;         // Win + 1..9, 0 open the bar's apps

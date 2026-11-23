@@ -82,7 +82,7 @@
     "stageMinimize": {"type": "bool", "default": false},
     "stageExcluded": {"type": "stringArray", "default": ["snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_"]},
     "imeStatus": {"type": "bool", "default": true},
-    "hideTaskbar": {"type": "bool", "default": false},
+    "hideTaskbar": {"type": "bool", "default": true},
     "hideBanners": {"type": "bool", "default": false},
     "winKeyStart": {"type": "bool", "default": false},
     "remoteVisible": {"type": "bool", "default": false},

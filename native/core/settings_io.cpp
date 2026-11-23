@@ -135,6 +135,10 @@ void InspectSettingsFile(const std::wstring& path, SettingsFileState& state, dou
     if (o.HasKey(L"version") && o.GetNamedValue(L"version").ValueType() == json::JsonValueType::Number)
         fileVersion = o.GetNamedNumber(L"version");
     Settings::FromJson(text, Settings{}, parsed);
+    // The system taskbar is hidden by default for a new installation only: a settings file from before the
+    // key existed keeps it shown, as it was.
+    if (!o.HasKey(L"hideTaskbar"))
+        parsed.hideTaskbar = false;
     state = fileVersion > Settings::kVersion ? SettingsFileState::FutureVersion : SettingsFileState::Valid;
 }
 

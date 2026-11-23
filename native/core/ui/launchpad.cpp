@@ -42,6 +42,8 @@ void Launchpad::Open(RECT work, HWND previous)
 {
     previous_ = previous;
     apps_ = LaunchableApps();
+    Split();
+    folderOpen_ = false;
     query_.clear();
     shown_.clear();
     Size(work);
@@ -145,6 +147,7 @@ void Launchpad::Refresh()
     if (!surface_.Visible() || closing_)
         return;
     apps_ = LaunchableApps();
+    Split();
     if (!query_.empty())
         Filter();
     page_ = std::min(page_, Pages() - 1);
@@ -160,6 +163,32 @@ void Launchpad::Filter()
     page_ = 0;
     pageShown_ = pageSpeed_ = 0;
     sel_ = query_.empty() || shown_.empty() ? -1 : 0; // Enter opens the best match
+}
+
+// Windows' own apps go into one folder at the end, except its Settings, which people do open.
+void Launchpad::Split()
+{
+    tiles_.clear();
+    system_.clear();
+    for (const CatalogApp& app : apps_) {
+        const bool settings = CompareStringOrdinal(app.aumid.c_str(), -1, L"windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel",
+                                                   -1, TRUE) == CSTR_EQUAL;
+        (app.system && !settings ? system_ : tiles_).push_back(app);
+    }
+    if (!system_.empty())
+        tiles_.push_back(CatalogApp{.name = Tr(L"System apps"), .id = kFolderId});
+}
+
+void Launchpad::ShowFolder(bool open)
+{
+    folderOpen_ = open;
+    sel_ = hover_ = pressed_ = -1;
+    hoverAnim_.clear();
+    revealedMs_ = ClockMs(); // its apps settle in as the pages' did
+    page_ = open ? 0 : Pages() - 1; // closed: back to the page holding the folder
+    pageShown_ = float(page_);
+    pageSpeed_ = 0;
+    surface_.Invalidate();
 }
 
 int Launchpad::Pages() const { return std::max(1, PageCount(Shown().size(), grid_.perPage)); }
@@ -250,6 +279,8 @@ void Launchpad::Paint(Canvas& c)
         c.BeginGroup(r, 1 + 0.08f * (1 - r), w_ / 2, h_ / 2);
         if (Shown().empty() && !query_.empty())
             c.Text(Tr(L"No matching apps"), D2D1::RectF(0, h_ / 2 - 14, w_, h_ / 2 + 14), 17, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        else if (folderOpen_ && query_.empty())
+            c.Text(Tr(L"System apps"), D2D1::RectF(0, kSearchTop + kSearchH + 6, w_, grid_.gridTop), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         const int first = int(std::floor(pageShown_));
         for (int page = first; page <= first + 1; ++page)
             if (page >= 0 && page < Pages() && std::abs(float(page) - pageShown_) < 1)
@@ -314,19 +345,38 @@ void Launchpad::PaintTile(Canvas& c, const Theme& t, int index, D2D1_RECT_F cell
         c.Fill(plate, 18, Alpha(sel_ == index && hover_ != index ? t.accent : t.hover, (sel_ == index && hover_ != index ? 0.28f : 1.f) * hv));
     }
     c.BeginGroup(1, pressed_ == index ? 0.92f : 1 + 0.03f * hv, cx, top + icon / 2);
-    const int px = int(std::lround(icon * c.scale));
-    const std::wstring key = L"lp|" + app.id + L"|" + std::to_wstring(px);
-    visibleIcons_.emplace_back(app.id, px);
-    if (c.Cached(key)) {
-        c.Image(key, IconImage{}, ir);
-    } else if (IconImage image = catalog_.Icon(app.id, px); !image.Empty()) {
-        c.Image(key, image, ir);
-    } else {
-        c.Fill(ir, icon * 0.22f, Alpha(t.hover, 1.4f)); // still loading: a quiet square
-    }
+    if (app.id == kFolderId)
+        PaintFolder(c, t, ir);
+    else
+        PaintIcon(c, t, app.id, ir);
     c.EndGroup();
     c.Text(app.name, D2D1::RectF(cell.left + 6, ir.bottom + kLabelGap, cell.right - 6, ir.bottom + kLabelGap + kLabelH), kLabel, t.text,
            DWRITE_FONT_WEIGHT_NORMAL, 1);
+}
+
+void Launchpad::PaintIcon(Canvas& c, const Theme& t, const std::wstring& id, D2D1_RECT_F r)
+{
+    // Read at the tiles' size (the folder's small ones too, drawn smaller), so each is read once.
+    const int px = int(std::lround(grid_.iconDip * c.scale));
+    const std::wstring key = L"lp|" + id + L"|" + std::to_wstring(px);
+    visibleIcons_.emplace_back(id, px);
+    if (c.Cached(key))
+        c.Image(key, IconImage{}, r);
+    else if (IconImage image = catalog_.Icon(id, px); !image.Empty())
+        c.Image(key, image, r);
+    else
+        c.Fill(r, (r.right - r.left) * 0.22f, Alpha(t.hover, 1.4f));
+}
+
+// A folder as on macOS: a plate of the glass's wash holding its first nine apps, three by three.
+void Launchpad::PaintFolder(Canvas& c, const Theme& t, D2D1_RECT_F r)
+{
+    const float s = r.right - r.left, pad = s * 0.13f, gap = s * 0.05f, mini = (s - 2 * pad - 2 * gap) / 3;
+    c.Fill(r, s * 0.24f, Alpha(t.hover, 1.6f));
+    for (size_t i = 0; i < system_.size() && i < 9; ++i) {
+        const float x = r.left + pad + float(i % 3) * (mini + gap), y = r.top + pad + float(i / 3) * (mini + gap);
+        PaintIcon(c, t, system_[i].id, D2D1::RectF(x, y, x + mini, y + mini));
+    }
 }
 
 // While the icons are read: an arc turning once a second in the middle, shown only if it takes a moment.

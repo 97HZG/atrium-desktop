@@ -23,9 +23,9 @@ namespace {
 // the control centre (340).
 constexpr float kW = 360, kPad = 14, kBody = 13.5f, kCaption = 11;
 constexpr float kArt = 52, kArtRadius = 12;
-constexpr float kTextX = kPad + kArt + 12, kBarsW = 22, kBarsY = kPad + kArt / 2;
+// The bars sit in from the card's side by their own width's air, as the art sits in its corner.
+constexpr float kTextX = kPad + kArt + 12, kBarsW = 20, kBarsRight = kW - kPad - 6, kBarsY = kPad + kArt / 2;
 constexpr float kTrackY = kPad + kArt + 16, kTrackH = 4, kTrackHot = 7, kTimeW = 38, kKnob = 6;
-constexpr float kTrackL = kPad + kTimeW + 6, kTrackR = kW - kPad - kTimeW - 6;
 constexpr float kControlsY = kTrackY + 34, kControlStep = 58, kControlR = 16, kPlayR = 20;
 constexpr float kH = kControlsY + kPlayR + kPad;
 constexpr D2D1_COLOR_F kHeart{1.f, 0.216f, 0.373f, 1.f}; // a liked track's heart (#FF375F)
@@ -36,7 +36,6 @@ constexpr UINT kTickMs = 250; // the progress bar's pace while nothing else anim
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 
 D2D1_RECT_F ArtRect() { return D2D1::RectF(kPad, kPad, kPad + kArt, kPad + kArt); }
-D2D1_RECT_F TrackRect() { return D2D1::RectF(kTrackL - 6, kTrackY - 11, kTrackR + 6, kTrackY + 11); }
 D2D1_RECT_F SessionRect() { return D2D1::RectF(kW - kPad - 40, kPad + kArt - 16, kW - kPad, kPad + kArt); }
 D2D1_POINT_2F ControlCentre(int i) { return D2D1::Point2F(kW / 2 + float(i) * kControlStep, kControlsY); }
 
@@ -179,14 +178,16 @@ void NowPlayingCard::Place(bool show)
 void NowPlayingCard::Update(const MediaSnapshot& snapshot)
 {
     const double now = ClockMs();
-    // Another track: its heart and lyrics are not known to be on (the player does not tell).
+    // Another track: its heart and lyrics are not known to be on, unless the player tells (NetEase's heart).
     if (snapshot.sessionId != media_.sessionId || snapshot.title != media_.title || snapshot.artist != media_.artist) {
-        liked_ = false;
+        liked_ = snapshot.liked.value_or(false);
         seekTo_.reset();
         playingShown_.reset();
     }
     if (snapshot.appId != media_.appId || !snapshot.canLyrics)
         lyricsOn_ = false;
+    if (snapshot.liked && snapshot.liked != media_.liked)
+        liked_ = *snapshot.liked; // given or taken in the player (or here, once the player has it)
     media_ = snapshot;
     if (!media_.timeline.Seekable() || !media_.canSeek) {
         const Part keepPressed = pressed_ == Part::Track ? Part::None : pressed_;
@@ -233,7 +234,9 @@ int64_t NowPlayingCard::ShownPositionUs(double now) const
     return t.PositionUs(now);
 }
 
-float NowPlayingCard::TrackFraction(float x) const { return std::clamp((x - kTrackL) / (kTrackR - kTrackL), 0.f, 1.f); }
+float NowPlayingCard::TrackFraction(float x) const { return std::clamp((x - trackL_) / (trackR_ - trackL_), 0.f, 1.f); }
+
+D2D1_RECT_F NowPlayingCard::TrackRect() const { return D2D1::RectF(trackL_ - 6, kTrackY - 11, trackR_ + 6, kTrackY + 11); }
 
 void NowPlayingCard::Send(MediaCommand command, int64_t positionUs)
 {
@@ -316,7 +319,7 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
         c.Glyph(L"", art, 22, t.subtext); // MusicNote
     }
     const bool several = media_.sessionCount > 1;
-    const float right = kW - kPad - kBarsW - 10;
+    const float right = kBarsRight - kBarsW - 10;
     const float artistRight = several ? std::min(right, SessionRect().left - 6) : right;
     const std::wstring title = media_.title.empty() ? std::wstring(Tr(L"Not playing")) : media_.title;
     // The track and the artist, centred together on the art.
@@ -338,9 +341,9 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
         c.Continue();
     const float bw = kBarsW / 9, gap = (kBarsW - 5 * bw) / 4, cy = several ? kPad + 12 : kBarsY;
     const D2D1_COLOR_F ink = tint_ ? *tint_ : t.text;
-    c.BeginInkArea(D2D1::RectF(kW - kPad - kBarsW, cy - kBarsW / 2, kW - kPad, cy + kBarsW / 2));
+    c.BeginInkArea(D2D1::RectF(kBarsRight - kBarsW, cy - kBarsW / 2, kBarsRight, cy + kBarsW / 2));
     for (size_t i = 0; i < MusicBars::kCount; ++i) {
-        const float x = kW - kPad - kBarsW + float(i) * (bw + gap), h = std::max(bw, kBarsW * bars_.Height(i));
+        const float x = kBarsRight - kBarsW + float(i) * (bw + gap), h = std::max(bw, kBarsW * bars_.Height(i));
         c.Fill(D2D1::RectF(x, cy - h / 2, x + bw, cy + h / 2), bw / 2, ink);
     }
     c.EndInkArea();
@@ -352,23 +355,28 @@ void NowPlayingCard::PaintProgress(Canvas& c, const Theme& t)
     const float hv = Hover(c, Part::Track, hover_ == Part::Track || dragging_);
     if (!tl.Seekable())
         return; // no length known (a stream, or a player that tells none): no track at all
-    const float th = kTrackH + (kTrackHot - kTrackH) * hv;
-    const D2D1_RECT_F track = D2D1::RectF(kTrackL, kTrackY - th / 2, kTrackR, kTrackY + th / 2);
-    c.Fill(track, th / 2, Alpha(t.text, 0.16f));
+    // The times either side of the bar, as the Dynamic Island has them, each flush with the card's side (and
+    // with the art above the left one); past an hour they take the room they need from the bar.
     const int64_t pos = ShownPositionUs(c.now), length = tl.endUs - tl.startUs;
-    const float done = std::clamp(float(double(pos - tl.startUs) / double(length)), 0.f, 1.f);
-    if (done > 0)
-        c.Fill(D2D1::RectF(track.left, track.top, std::max(track.left + th, track.left + (track.right - track.left) * done), track.bottom), th / 2,
+    const std::wstring done = Clock(pos - tl.startUs), left = L"-" + Clock(tl.endUs - pos);
+    const float timeW = std::max({kTimeW, c.TextWidth(done, kCaption), c.TextWidth(left, kCaption)}) + 2;
+    trackL_ = kPad + timeW + 6;
+    trackR_ = kW - kPad - timeW - 6;
+    c.Text(done, D2D1::RectF(kPad, kTrackY - 8, trackL_ - 6, kTrackY + 8), kCaption, t.subtext);
+    c.Text(left, D2D1::RectF(trackR_ + 6, kTrackY - 8, kW - kPad, kTrackY + 8), kCaption, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 2);
+    const float th = kTrackH + (kTrackHot - kTrackH) * hv;
+    const D2D1_RECT_F track = D2D1::RectF(trackL_, kTrackY - th / 2, trackR_, kTrackY + th / 2);
+    c.Fill(track, th / 2, Alpha(t.text, 0.16f));
+    const float played = std::clamp(float(double(pos - tl.startUs) / double(length)), 0.f, 1.f);
+    if (played > 0)
+        c.Fill(D2D1::RectF(track.left, track.top, std::max(track.left + th, track.left + (track.right - track.left) * played), track.bottom), th / 2,
                tint_ && hv > 0.5f ? *tint_ : t.text);
     // Under the pointer (where the player can be told a position): a knob at the playhead, to drag.
     if (hv > 0.01f) {
-        const float x = track.left + (track.right - track.left) * done, r = kKnob * motion::EaseOut(hv);
+        const float x = track.left + (track.right - track.left) * played, r = kKnob * motion::EaseOut(hv);
         c.Circle(x, kTrackY + 0.75f, r + 0.5f, D2D1::ColorF(0, 0, 0, 0.18f * hv)); // a hint of shadow
         c.Circle(x, kTrackY, r, tint_ ? *tint_ : t.text);
     }
-    // The times either side of the bar, as the Dynamic Island has them, each flush with the card's side.
-    c.Text(Clock(pos - tl.startUs), D2D1::RectF(kPad, kTrackY - 8, kTrackL - 6, kTrackY + 8), kCaption, t.subtext);
-    c.Text(L"-" + Clock(tl.endUs - pos), D2D1::RectF(kTrackR + 6, kTrackY - 8, kW - kPad, kTrackY + 8), kCaption, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 2);
 }
 
 D2D1_RECT_F NowPlayingCard::BeginControl(Canvas& c, const Theme& t, Part part, int at, float r, bool enabled, float plateMin)

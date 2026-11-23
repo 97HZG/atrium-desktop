@@ -1,4 +1,6 @@
-// Launchpad, as on macOS: every app, oldest installed first, on one window of the bar's glass (or that
+// Launchpad, as on macOS: the apps the user installed (and Windows' Settings), oldest first, then one
+// folder holding Windows' own apps (the catalog's `system`), opened in place; a search finds every app.
+// All of them on one window of the bar's glass (or that
 // glass under a black veil: launchpadMaterial tint) in the middle of the display, in pages of a grid
 // (launchpad_model.h) with the page dots below and a search field above. It opens from its entry next to
 // the start logo: the glass fades in and the apps settle from a little larger, all at once when every
@@ -53,6 +55,10 @@ private:
     void PaintTile(Canvas& c, const Theme& t, int index, D2D1_RECT_F cell);
     void PaintDots(Canvas& c, const Theme& t);
     void PaintSpinner(Canvas& c, const Theme& t, float shown);
+    void PaintIcon(Canvas& c, const Theme& t, const std::wstring& id, D2D1_RECT_F r); // an app's icon, a quiet square until read
+    void PaintFolder(Canvas& c, const Theme& t, D2D1_RECT_F r);                       // the system folder: its first nine apps
+    void Split();                                                                      // tiles_ and system_ from apps_
+    void ShowFolder(bool open);
     std::vector<std::wstring> Ids() const; // apps_' ids
     int IconPx(RECT work) const;
     void PublishGlass(double now);
@@ -80,11 +86,14 @@ private:
     void Finish();          // the closing has played: the window goes, the focus goes back
     void Filter();          // shown_ from apps_ and query_
     int Pages() const;
-    const std::vector<CatalogApp>& Shown() const { return query_.empty() ? apps_ : shown_; }
+    const std::vector<CatalogApp>& Shown() const { return !query_.empty() ? shown_ : folderOpen_ ? system_ : tiles_; }
 
     Surface surface_;
     AppCatalog& catalog_;
+    static constexpr const wchar_t* kFolderId = L"#system"; // the system folder's tile among tiles_
     std::vector<CatalogApp> apps_, shown_;
+    std::vector<CatalogApp> tiles_, system_; // the pages, the system folder's apps
+    bool folderOpen_ = false;
     std::wstring query_;
     LaunchpadGrid grid_;
     float w_ = 0, h_ = 0; // the window, DIP

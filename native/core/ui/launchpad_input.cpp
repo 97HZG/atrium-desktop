@@ -99,11 +99,13 @@ bool Launchpad::Key(WPARAM key)
     };
     switch (key) {
     case VK_ESCAPE:
-        if (query_.empty()) {
-            Close(false);
-        } else {
-            query_.clear(); // a search goes first, then Launchpad
+        if (!query_.empty()) {
+            query_.clear(); // a search goes first, then the folder, then Launchpad
             Filter();
+        } else if (folderOpen_) {
+            ShowFolder(false);
+        } else {
+            Close(false);
         }
         break;
     case VK_LEFT: move(-1, 0); break;
@@ -196,8 +198,8 @@ void Launchpad::Release(POINT pt)
         Launch(was);
     else if (was <= -2 && was != kGlass && at == was)
         SetPage(-2 - was);
-    else if (was == kGlass && at == kGlass)
-        Close(false);
+    else if (was == kGlass && at == kGlass && folderOpen_ && query_.empty())
+        ShowFolder(false); // the empty glass around a folder's apps closes the folder
     surface_.Invalidate();
 }
 
@@ -238,6 +240,10 @@ void Launchpad::Launch(int index)
     if (index < 0 || size_t(index) >= Shown().size())
         return;
     const CatalogApp app = Shown()[size_t(index)];
+    if (app.id == kFolderId) {
+        ShowFolder(true);
+        return;
+    }
     Close(true);
     AppCatalog::Launch(app);
 }

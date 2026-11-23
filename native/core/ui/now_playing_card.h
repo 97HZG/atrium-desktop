@@ -62,6 +62,7 @@ private:
     bool Playing() const; // as shown: a press flips it before the session answers
     int64_t ShownPositionUs(double now) const;
     float TrackFraction(float x) const; // a point along the progress bar, 0..1
+    D2D1_RECT_F TrackRect() const;      // where the bar takes a press
     float Hover(Canvas& c, Part part, bool on);
     void TakeArtwork(); // the rounded art and its colour, once per picture
 
@@ -72,11 +73,12 @@ private:
     std::shared_ptr<const MusicFeed> feed_;
     MusicBars bars_;
     double lastBarsMs_ = 0;
+    float trackL_ = 58, trackR_ = 302;   // the bar's ends as last painted (DIP): the times beside it decide them
     // The art as drawn: corners rounded; its colour (the bars, the progress).
     IconImage art_;
     uint64_t artVersion_ = 0;
     std::optional<D2D1_COLOR_F> tint_;
-    bool liked_ = false, lyricsOn_ = false; // as pressed here: the players do not tell
+    bool liked_ = false, lyricsOn_ = false; // as pressed here, or the heart as the player tells it (NetEase)
     double artMs_ = 0; // a new picture fades in from then
     // Pressed play/pause, until the session agrees (or a second passes).
     std::optional<bool> playingShown_;

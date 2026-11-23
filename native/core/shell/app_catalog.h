@@ -29,6 +29,7 @@ struct CatalogApp {
     std::wstring target;  // link target exe, may be empty
     std::wstring args;    // the link's arguments (a browser's --app=..., a profile)
     int64_t installed = 0; // when it came (FILETIME ticks): a package's install, a shortcut's creation; 0 unknown
+    bool system = false;   // Windows' own (shipped with it or by Microsoft's packages), not an app the user installed
 };
 
 // A folder of the Windows start menu's All apps list (a folder of shortcuts under Start Menu\Programs,

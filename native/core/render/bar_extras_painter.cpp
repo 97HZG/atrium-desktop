@@ -67,13 +67,14 @@ void BarExtrasPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float o
 
 void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)
 {
-    // Nine small apps, three by three: squares of 0.24 with gaps of 0.14.
-    const D2D1_RECT_F box = Square(r, 0.78f);
-    const float s = box.right - box.left, tile = s * 0.24f, step = s * 0.38f, corner = tile * 0.3f;
+    // Nine small apps, three by three, in outline: squares of 0.26 with gaps of 0.11.
+    const D2D1_RECT_F box = Square(r, 0.86f);
+    const float s = box.right - box.left, tile = s * 0.26f, step = s * 0.37f, stroke = std::max(1.f, s * 0.065f);
+    const float corner = tile * 0.3f - stroke / 2;
     brush->SetColor(ink);
     for (int i = 0; i < 9; ++i) {
-        const float x = box.left + float(i % 3) * step, y = box.top + float(i / 3) * step;
-        d2d->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y, x + tile, y + tile), corner, corner), brush);
+        const float x = box.left + float(i % 3) * step + stroke / 2, y = box.top + float(i / 3) * step + stroke / 2;
+        d2d->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y, x + tile - stroke, y + tile - stroke), corner, corner), brush, stroke);
     }
 }
 

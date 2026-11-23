@@ -303,6 +303,10 @@ bool NotAnApp(const CatalogApp& app)
     return !target.empty() && !target.ends_with(L".exe");
 }
 
+// Windows' own folders of the start menu's All apps list.
+constexpr const wchar_t* kSystemFolders[] = {L"accessibility", L"accessories",  L"administrative tools", L"maintenance",
+                                             L"startup",       L"system tools", L"windows powershell",   L"windows tools"};
+
 // Every shortcut in `dir` and its subfolders (bounded depth, skipping reparse loops).
 void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, std::wstring>>& links, int depth = 0)
 {
@@ -335,8 +339,6 @@ void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, s
 // (Accessibility, Windows Tools' parts, Startup) are left out.
 std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
 {
-    static const wchar_t* const kSystem[] = {L"accessibility", L"accessories",  L"administrative tools", L"maintenance",
-                                             L"startup",       L"system tools", L"windows powershell",   L"windows tools"};
     std::vector<std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>>> found; // shown name, its links
     for (const KNOWNFOLDERID* id : {&FOLDERID_CommonPrograms, &FOLDERID_Programs}) {
         PWSTR root = nullptr;
@@ -353,7 +355,7 @@ std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
         do {
             const std::wstring name = fd.cFileName, folded = Fold(name);
             if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || name == L"." || name == L".." ||
-                std::ranges::any_of(kSystem, [&](const wchar_t* s) { return folded == s; }))
+                std::ranges::any_of(kSystemFolders, [&](const wchar_t* s) { return folded == s; }))
                 continue;
             const std::wstring dir = programs + L"\\" + name;
             std::vector<std::pair<std::wstring, std::wstring>> links;
@@ -397,19 +399,34 @@ int64_t Created(const std::wstring& path)
 }
 
 // When each app came, for Launchpad's order: a packaged app's package install date; a desktop app's start
-// menu shortcut's creation (the installer made it), else its program's; 0 when unknown (Windows' own).
+// menu shortcut's creation (the installer made it), else its program's; 0 when unknown (Windows' own). And
+// which are Windows' own, for Launchpad to keep apart: packages that ship with Windows or come from
+// Microsoft, programs under the Windows folder, shortcuts in Windows' folders of the start menu.
 void StampInstalled(std::vector<CatalogApp>& apps)
 {
-    std::map<std::wstring, int64_t> packages; // family name, folded
+    struct Package {
+        int64_t installed;
+        bool system;
+    };
+    std::map<std::wstring, Package> packages; // family name, folded
     try {
+        namespace Wam = winrt::Windows::ApplicationModel;
         winrt::Windows::Management::Deployment::PackageManager manager;
-        for (const auto& package : manager.FindPackagesForUser(L""))
-            packages[Fold(std::wstring(package.Id().FamilyName()))] = package.InstalledDate().time_since_epoch().count();
+        for (const auto& package : manager.FindPackagesForUser(L"")) {
+            const auto id = package.Id();
+            const bool system = package.SignatureKind() == Wam::PackageSignatureKind::System ||
+                                std::wstring_view(id.Publisher()).starts_with(L"CN=Microsoft Corporation, O=Microsoft Corporation");
+            packages[Fold(std::wstring(id.FamilyName()))] = {package.InstalledDate().time_since_epoch().count(), system};
+        }
     } catch (...) {
         Log(L"catalog: packages' install dates unavailable");
     }
-    // The start menu's shortcuts by their target and by their name, the earliest of each.
+    wchar_t windows[MAX_PATH] = {};
+    GetWindowsDirectoryW(windows, MAX_PATH);
+    const std::wstring windowsDir = Fold(std::wstring(windows) + L"\\");
+    // The start menu's shortcuts by their target and by their name, the earliest of each; those in Windows' folders.
     std::map<std::wstring, int64_t> byTarget, byName;
+    std::set<std::wstring> systemTargets, systemNames;
     auto earliest = [](std::map<std::wstring, int64_t>& m, const std::wstring& key, int64_t t) {
         if (key.empty() || t == 0)
             return;
@@ -424,26 +441,39 @@ void StampInstalled(std::vector<CatalogApp>& apps)
             continue;
         }
         std::vector<std::pair<std::wstring, std::wstring>> links;
-        CollectLinks(root, links);
+        const std::wstring programs = root;
+        CollectLinks(programs, links);
         CoTaskMemFree(root);
         for (const auto& [_, link] : links) {
             const int64_t t = Created(link);
-            const std::wstring file = link.substr(link.find_last_of(L'\\') + 1);
-            earliest(byName, Fold(file.substr(0, file.size() - 4)), t);
+            const std::wstring file = link.substr(link.find_last_of(L'\\') + 1), name = Fold(file.substr(0, file.size() - 4));
+            const std::wstring within = Fold(link.substr(std::min(link.size(), programs.size() + 1)));
+            const bool inSystem = std::ranges::any_of(kSystemFolders, [&](const wchar_t* f) { return within.starts_with(std::wstring(f) + L"\\"); });
+            earliest(byName, name, t);
+            if (inSystem)
+                systemNames.insert(name);
             winrt::com_ptr<IShellLinkW> shell;
             wchar_t target[MAX_PATH] = {};
             if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(shell.put()))) &&
-                SUCCEEDED(shell.as<IPersistFile>()->Load(link.c_str(), STGM_READ)) && SUCCEEDED(shell->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH)))
-                earliest(byTarget, Fold(ExpandFolders(target)), t);
+                SUCCEEDED(shell.as<IPersistFile>()->Load(link.c_str(), STGM_READ)) && SUCCEEDED(shell->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH))) {
+                const std::wstring folded = Fold(ExpandFolders(target));
+                earliest(byTarget, folded, t);
+                if (inSystem)
+                    systemTargets.insert(folded);
+            }
         }
     }
     for (CatalogApp& app : apps) {
         const std::wstring& aumid = app.aumid.empty() ? app.id : app.aumid;
         if (const size_t bang = aumid.find(L'!'); bang != std::wstring::npos)
             if (auto it = packages.find(Fold(aumid.substr(0, bang))); it != packages.end()) {
-                app.installed = it->second;
+                app.installed = it->second.installed;
+                app.system = it->second.system;
                 continue;
             }
+        const std::wstring target = Fold(app.target), id = Fold(app.id);
+        app.system = target.starts_with(windowsDir) || systemTargets.contains(target) || systemNames.contains(Fold(app.name)) ||
+                     id.starts_with(L"microsoft.windows.") || id.starts_with(L"::{");
         if (IsPath(app.id) && Fold(app.id).ends_with(L".lnk")) {
             app.installed = Created(app.id);
             continue;

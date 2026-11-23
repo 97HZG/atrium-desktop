@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace atrium {
@@ -18,6 +19,7 @@ struct MediaSnapshot {
     MediaTimeline timeline;
     bool canPlayPause = false, canNext = false, canPrevious = false, canSeek = false;
     bool canLike = false, canLyrics = false; // the player's own shortcuts (media_players.h)
+    std::optional<bool> liked;               // the track's heart in the player, where it can be read (NetEase)
     std::shared_ptr<const IconImage> artwork; // the album art, square; null: none
     uint64_t artworkVersion = 0;              // changes with the picture
     int sessionIndex = 0, sessionCount = 0;   // among the sessions shown (MediaCommand::NextSession)

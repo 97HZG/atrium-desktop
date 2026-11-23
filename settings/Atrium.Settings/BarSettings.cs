@@ -115,7 +115,7 @@ internal sealed class BarSettings
     ];
     public List<string> StageExcluded { get; set; } = [.. StageExcludedDefaults];
     public string WidgetMaterial { get; set; } = "glass"; // glass (the bar's) | dusk (dimmed glass, white ink) | color (their own faces)
-    public bool HideTaskbar { get; set; }              // the system taskbar is hidden while Atrium runs
+    public bool HideTaskbar { get; set; } = true;      // the system taskbar is hidden while Atrium runs
     public bool HideBanners { get; set; }              // Do Not Disturb: no system banners, notifications still become cards
     public bool RemoteVisible { get; set; }            // remote-control apps see Atrium; the glass shows the wallpaper
     public bool WinKeyStart { get; set; }              // the Windows key alone opens Atrium's start menu

@@ -465,12 +465,15 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
 
     // Connections: a round switch and the state; the row opens its page.
     auto row = [&](int i, const std::wstring& id, const wchar_t* glyph, const std::wstring& title, const std::wstring& sub, bool on, bool avail) {
-        const float rh = (kTopH - 16) / 2, y0 = conn.top + 8 + float(i) * rh, cy = y0 + rh / 2;
+        // The row's plate sits the same 6 DIP in from every side of the module that it borders, its corners
+        // the module's less that (nested corners stay concentric); the two plates 4 DIP apart.
+        constexpr float kInset = 6, kBetween = 4;
+        const float rh = (kTopH - 2 * kInset - kBetween) / 2, y0 = conn.top + kInset + float(i) * (rh + kBetween), cy = y0 + rh / 2;
         const std::wstring page = id + L"-page";
-        D2D1_RECT_F text = D2D1::RectF(conn.left + 6, y0 + 2, conn.right - 6, y0 + rh - 2);
+        D2D1_RECT_F text = D2D1::RectF(conn.left + kInset, y0, conn.right - kInset, y0 + rh);
         float th = Hover(c, page, hover_ == page);
         if (th > 0.001f || pressed_ == page)
-            c.Fill(text, 16, pressed_ == page ? t.press : Alpha(t.hover, th));
+            c.Fill(text, std::max(modR - kInset, 4.f), pressed_ == page ? t.press : Alpha(t.hover, th));
         hits_.push_back({text, page});
         D2D1_RECT_F disc = D2D1::RectF(conn.left + 14, cy - 18, conn.left + 50, cy + 18);
         float dh = Hover(c, id, hover_ == id);

@@ -17,7 +17,7 @@ public sealed partial class MainWindow
     private sealed class NowPlayingScene : ModuleScene
     {
         // ui/now_playing_card.cpp's numbers: the panels' type (body 13.5, caption 11), padding 14.
-        private const double CW = 360, Pad = 14, Body = 13.5, Caption = 11, Art = 52, ArtR = 12, TextX = Pad + Art + 12, BarsW = 22, BarsY = Pad + Art / 2;
+        private const double CW = 360, Pad = 14, Body = 13.5, Caption = 11, Art = 52, ArtR = 12, TextX = Pad + Art + 12, BarsW = 20, BarsRight = CW - Pad - 6, BarsY = Pad + Art / 2;
         private const double TrackY = Pad + Art + 16, TrackH = 4, TimeW = 38, TrackL = Pad + TimeW + 6, TrackR = CW - Pad - TimeW - 6;
         private const double ControlsY = TrackY + 34, ControlStep = 58, ControlR = 16, PlayR = 20, CH = ControlsY + PlayR + Pad, MinRadius = 34;
         private static readonly double[] Shape = [0.58, 0.86, 1.0, 0.80, 0.52];
@@ -107,7 +107,7 @@ public sealed partial class MainWindow
             var f = (Frame)state;
             PlaceMarks(f.Left, f.Top);
             Put(_art, Pad, Pad, Art, Art);
-            double right = CW - Pad - BarsW - 10, mid = Pad + Art / 2;
+            double right = BarsRight - BarsW - 10, mid = Pad + Art / 2;
             Box(_title, TextX, mid - 19, right - TextX, 19);
             Box(_artist, TextX, mid + 1, right - TextX, 19);
             // The bars: each on its own rhythm inside a loud song's level.
@@ -119,7 +119,7 @@ public sealed partial class MainWindow
                 double a = 2 * Math.PI * Rate[i] * t, swing = 0.5 + 0.32 * Math.Sin(a) + 0.18 * Math.Sin(1.5 * a + 1.7 * i);
                 double hgt = moving ? 0.22 + 0.78 * reach * Shape[i] * (0.38 + 0.62 * swing) : 0.22 + 0.18 * Shape[i];
                 double hh = Math.Max(bw, BarsW * hgt);
-                Put(_bars[i], CW - Pad - BarsW + i * (bw + gap), BarsY - hh / 2, bw, hh);
+                Put(_bars[i], BarsRight - BarsW + i * (bw + gap), BarsY - hh / 2, bw, hh);
             }
             // The progress: a four-minute song, a quarter in, going on; the times change once a second.
             double length = 244, pos = (61 + t) % length, done = pos / length;

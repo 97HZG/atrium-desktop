@@ -211,7 +211,7 @@ bool SnapshotChanged(const MediaSnapshot& a, const MediaSnapshot& b)
 {
     return TimelineChanged(a.timeline, b.timeline) || a.active != b.active || a.sessionId != b.sessionId || a.appId != b.appId || a.appName != b.appName ||
            a.title != b.title || a.artist != b.artist || a.album != b.album || a.state != b.state || a.canPlayPause != b.canPlayPause ||
-           a.canNext != b.canNext || a.canPrevious != b.canPrevious || a.canSeek != b.canSeek || a.canLike != b.canLike || a.canLyrics != b.canLyrics ||
+           a.canNext != b.canNext || a.canPrevious != b.canPrevious || a.canSeek != b.canSeek || a.canLike != b.canLike || a.liked != b.liked || a.canLyrics != b.canLyrics ||
            a.artworkVersion != b.artworkVersion || a.sessionIndex != b.sessionIndex || a.sessionCount != b.sessionCount;
 }
 
@@ -586,6 +586,8 @@ private:
             ts.netease.Fill(ts.title, ts.artist, outSnap.state == MediaPlaybackState::Playing, nowMs, outSnap.timeline);
         // What the players do beyond Windows' controls (media_players.h).
         outSnap.canLike = PlayerLikes(player);
+        if (player == MediaPlayer::Netease)
+            outSnap.liked = ts.netease.Liked(ts.title, ts.artist);
         outSnap.canLyrics = PlayerShowsLyrics(player);
         if (player == MediaPlayer::QqMusic)
             outSnap.canSeek = outSnap.canSeek || outSnap.timeline.Seekable(); // /seekto, where Windows' seek is refused
