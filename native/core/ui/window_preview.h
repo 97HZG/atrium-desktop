@@ -41,6 +41,7 @@ public:
     void Leave();
     void Close();
     bool Visible() const { return surface_.Visible(); }
+    void SetPeek(bool on); // windowPeek
 
 private:
     struct Card {
@@ -75,6 +76,7 @@ private:
     int hover_ = -1, pressed_ = -1;
     bool overClose_ = false;
     bool tracking_ = false, inside_ = false;
+    bool peekOn_ = true;
     float thumbAlpha_ = 0; // the pictures fade in once the glass has popped out
     double fadeStart_ = 0;
     std::unordered_set<HWND> loggedFailures_;

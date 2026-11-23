@@ -132,6 +132,9 @@ void CheckStageDragMerge()
     Require(Settings::FromJson(LR"({})", off, parsed) && !parsed.stageDragMerge, "partial updates retain disabled stageDragMerge");
     Require(Settings::FromJson(LR"({"stageDragMerge":"bad"})", off, parsed) && !parsed.stageDragMerge, "malformed stageDragMerge retains fallback");
     Require(defaults.stageAvoid && Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.stageAvoid, "stageAvoid is on by default");
+    Require(defaults.windowPeek && Settings::FromJson(LR"({"windowPeek":false})", Settings{}, parsed) && !parsed.windowPeek &&
+                Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.windowPeek,
+            "windowPeek is on by default, and off survives saving");
     Require(defaults.stageCloseButton && Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.stageCloseButton, "stageCloseButton is on by default");
     off.stageCloseButton = false;
     Require(Settings::FromJson(off.ToJson(), Settings{}, parsed) && !parsed.stageCloseButton, "disabled stageCloseButton survives saving");

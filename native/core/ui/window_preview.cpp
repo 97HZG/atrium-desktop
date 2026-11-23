@@ -254,6 +254,15 @@ void WindowPreview::Place()
     surface_.Invalidate();
 }
 
+void WindowPreview::SetPeek(bool on)
+{
+    peekOn_ = on;
+    if (!on) {
+        KillTimer(surface_.Hwnd(), kPeekTimer);
+        peek_.Hide();
+    }
+}
+
 void WindowPreview::Leave()
 {
     if (surface_.Visible())
@@ -396,7 +405,7 @@ bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         KillTimer(surface_.Hwnd(), kLeaveTimer);
         int i = CardAt(pt);
         bool c = inClose(i);
-        if (i != hover_) {
+        if (i != hover_ && peekOn_) {
             // Onto another picture: a peek at it once the pointer rests; off the pictures: none.
             if (i < 0)
                 peek_.Hide();

@@ -813,6 +813,7 @@ public sealed partial class MainWindow : Window, IDisposable
         (CurrentSettings.WidgetsOnRight ? WidgetsRight : WidgetsLeft).IsChecked = true;
         HideTaskbarSwitch.IsOn = CurrentSettings.HideTaskbar;
         GenieSwitch.IsOn = CurrentSettings.GenieMinimize;
+        PeekSwitch.IsOn = CurrentSettings.WindowPeek;
         StageSwitch.IsOn = CurrentSettings.StageManager;
         (CurrentSettings.StageOnRight ? StageRight : StageLeft).IsChecked = true;
         (CurrentSettings.StageAutoHide ? StageAutoHide : StageAlways).IsChecked = true;
@@ -1053,6 +1054,13 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_loading) return;
         CurrentSettings.GenieMinimize = GenieSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnPeekToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        CurrentSettings.WindowPeek = PeekSwitch.IsOn;
         Changed();
     }
 

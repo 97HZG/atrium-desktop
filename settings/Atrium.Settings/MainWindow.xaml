@@ -666,6 +666,9 @@
                             <local:ToggleTile x:Name="GenieSwitch" Title="Genie effect" SwitchName="Minimize with the genie effect"
                                               Toggled="OnGenieToggled"
                                               Note="As on macOS, a window being minimized pours into its icon on the Atrium bar." />
+                            <local:ToggleTile x:Name="PeekSwitch" Title="Peek at windows" SwitchName="Peek at windows"
+                                              Toggled="OnPeekToggled"
+                                              Note="Rest the pointer on a window's picture in the bar's preview to see that window where it is, with the other windows faded." />
                             <local:ToggleTile x:Name="HideBannersSwitch" Title="Hide system banners" SwitchName="Hide system banners"
                                               Toggled="OnHideBannersToggled"
                                               Note="Turns on Windows' Do Not Disturb; notifications still appear as Atrium cards. Restored when turned off or Atrium quits." />

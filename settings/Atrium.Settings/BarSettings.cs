@@ -126,6 +126,7 @@ internal sealed class BarSettings
     public string WidgetMaterial { get; set; } = "glass"; // glass (the bar's) | dusk (dimmed glass, white ink) | color (their own faces)
     public bool HideTaskbar { get; set; } = true;      // the system taskbar is hidden while Atrium runs
     public bool GenieMinimize { get; set; }            // windows minimize into their bar icon with the genie effect
+    public bool WindowPeek { get; set; } = true;       // resting on a window's picture in the bar's preview shows that window, the others veiled
     public bool HideBanners { get; set; }              // Do Not Disturb: no system banners, notifications still become cards
     public bool RemoteVisible { get; set; }            // remote-control apps see Atrium; the glass shows the wallpaper
     public bool WinKeyStart { get; set; }              // the Windows key alone opens Atrium's start menu
@@ -263,6 +264,7 @@ internal sealed class BarSettings
             ["widgetMaterial"] = WidgetMaterial,
             ["hideTaskbar"] = HideTaskbar,
             ["genieMinimize"] = GenieMinimize,
+            ["windowPeek"] = WindowPeek,
             ["hideBanners"] = HideBanners,
             ["remoteVisible"] = RemoteVisible,
             ["winKeyStart"] = WinKeyStart,
@@ -384,6 +386,7 @@ internal sealed class BarSettings
         s.WidgetMaterial = widgetMaterial is "dusk" or "color" ? widgetMaterial : "glass";
         s.HideTaskbar = Flag("hideTaskbar", f.HideTaskbar);
         s.GenieMinimize = Flag("genieMinimize", f.GenieMinimize);
+        s.WindowPeek = Flag("windowPeek", f.WindowPeek);
         s.HideBanners = Flag("hideBanners", f.HideBanners);
         s.RemoteVisible = Flag("remoteVisible", f.RemoteVisible);
         s.WinKeyStart = Flag("winKeyStart", f.WinKeyStart);
@@ -537,7 +540,7 @@ internal sealed class BarSettings
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
         StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize && StageDragMerge == o.StageDragMerge && StageCloseButton == o.StageCloseButton && StageAvoid == o.StageAvoid &&
         StageExcluded.SequenceEqual(o.StageExcluded, StringComparer.OrdinalIgnoreCase) && WidgetMaterial == o.WidgetMaterial &&
-        HideTaskbar == o.HideTaskbar && GenieMinimize == o.GenieMinimize && HideBanners == o.HideBanners && RemoteVisible == o.RemoteVisible &&
+        HideTaskbar == o.HideTaskbar && GenieMinimize == o.GenieMinimize && WindowPeek == o.WindowPeek && HideBanners == o.HideBanners && RemoteVisible == o.RemoteVisible &&
         WinKeyStart == o.WinKeyStart && WinNumbers == o.WinNumbers &&
         StartOnLogin == o.StartOnLogin &&
         DockDisplayMode == o.DockDisplayMode && DockDisplayDelay == o.DockDisplayDelay && DockDisplay == o.DockDisplay && DesktopDisplay == o.DesktopDisplay &&

@@ -655,6 +655,7 @@ void ApplySettings(const Settings& s)
     g_app.stage->SetAvoid(s.stageAvoid);
     g_app.stage->SetEnabled(s.stageManager);
     g_app.genie->SetEnabled(s.genieMinimize && s.bar);
+    g_app.preview->SetPeek(s.windowPeek);
     g_app.control->SetStage(s.stageManager, s.stageOnRight);
     g_app.control->SetModules(s.controlModules);
     g_app.widgets->SetMaterial(s.widgetMaterial == L"dusk"  ? WidgetMaterial::Dusk :
