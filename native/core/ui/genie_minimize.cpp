@@ -166,6 +166,7 @@ void GenieMinimize::Watch()
     DWORD pid = 0;
     if (root)
         GetWindowThreadProcessId(root, &pid);
+    const HWND seen = root;
     if (pid == GetCurrentProcessId() || !Minimizable(root) || (skip_ && skip_(root)))
         root = nullptr;
     const ULONGLONG now = GetTickCount64();
@@ -173,6 +174,9 @@ void GenieMinimize::Watch()
         Release(held_);
         front_ = root;
         frontSince_ = now;
+        if (seen)
+            Log(L"genie: in front %p (ours %d, minimizable %d, skipped %d, icon %d)", seen, pid == GetCurrentProcessId(), Minimizable(seen),
+                skip_ && skip_(seen), target_ && target_(seen).has_value());
     }
     std::erase_if(pictures_, [&](const auto& kv) { return kv.first != root && !IsWindow(kv.first); });
     if (!root)
