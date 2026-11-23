@@ -83,4 +83,35 @@ private:
     static RECT Round(const D2D1_RECT_F& r) { return {Round(r.left), Round(r.top), Round(r.right), Round(r.bottom)}; }
 };
 
+struct BarPlacement {
+    BarEdge edge = BarEdge::Bottom;
+    RECT monitor{};
+    RECT work{};
+    int winW = 0;
+    int winH = 0;
+    int barH = 0;
+    int margin = 0;
+    int insetTop = 0;
+    bool anchorToMonitor = true;
+    int ownReserve = 0;
+};
+
+// Places the bar window on `p.edge`. When Atrium hides Windows' taskbar, the docked edge
+// anchors to `p.monitor` regardless of stale work-area deductions; otherwise it sits inside
+// `p.work` with the bar's own app-bar reserve restored, clamped to `p.monitor`.
+inline RECT PlaceBarWindow(const BarPlacement& p)
+{
+    RECT anchor = p.work;
+    switch (p.edge) {
+    case BarEdge::Bottom: anchor.bottom = p.anchorToMonitor ? p.monitor.bottom : std::min(p.monitor.bottom, p.work.bottom + p.ownReserve); break;
+    case BarEdge::Top: anchor.top = p.anchorToMonitor ? p.monitor.top : std::max(p.monitor.top, p.work.top - p.ownReserve); break;
+    case BarEdge::Left: anchor.left = p.anchorToMonitor ? p.monitor.left : std::max(p.monitor.left, p.work.left - p.ownReserve); break;
+    case BarEdge::Right: anchor.right = p.anchorToMonitor ? p.monitor.right : std::min(p.monitor.right, p.work.right + p.ownReserve); break;
+    }
+    const EdgeFrame frame{p.edge, anchor};
+    const int x = (int(frame.Along()) - p.winW) / 2;
+    const int y = int(frame.Across()) - p.margin - p.barH - p.insetTop;
+    return frame.ToArea(RECT{x, y, x + p.winW, y + p.winH});
+}
+
 } // namespace atrium

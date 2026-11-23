@@ -236,6 +236,7 @@ private:
     HMONITOR appBarMonitor_ = nullptr;
     BarEdge appBarEdge_ = BarEdge::Bottom;
     RECT appBarRect_{};
+    RECT appBarWant_{};
     BarEdge edge_ = BarEdge::Bottom;
     std::unique_ptr<Surface> tooltip_;
     std::wstring tooltipText_;

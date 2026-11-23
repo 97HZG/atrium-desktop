@@ -391,6 +391,8 @@ void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
             appBar_ = false;
             appBarReserved_ = 0;
             appBarMonitor_ = nullptr;
+            appBarRect_ = RECT{};
+            appBarWant_ = RECT{};
             Log(L"bar: screen strip given back");
         }
         return;
@@ -401,10 +403,11 @@ void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
             return;
         appBar_ = true;
         appBarRect_ = RECT{};
+        appBarWant_ = RECT{};
     }
     const EdgeFrame frame{edge_, bounds};
     const RECT want = frame.ToArea(RECT{0, LONG(frame.Across()) - reserve, LONG(frame.Along()), LONG(frame.Across())});
-    if (appBarMonitor_ == monitor && appBarEdge_ == edge_ && appBarReserved_ == reserve && EqualRect(&appBarRect_, &want))
+    if (appBarMonitor_ == monitor && appBarEdge_ == edge_ && EqualRect(&appBarWant_, &want))
         return;
     constexpr UINT kAppBarEdge[] = {ABE_BOTTOM, ABE_TOP, ABE_LEFT, ABE_RIGHT}; // in BarEdge's order
     abd.uEdge = kAppBarEdge[int(edge_)];
@@ -414,11 +417,20 @@ void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
     rc.top = rc.bottom - reserve;
     abd.rc = frame.ToArea(rc);
     AppBarMessage(ABM_SETPOS, abd);
-    appBarRect_ = want;
-    appBarReserved_ = reserve;
+    const RECT granted = frame.FromArea(abd.rc);
+    appBarRect_ = abd.rc;
+    appBarWant_ = want;
+    appBarReserved_ = int(std::max(0L, granted.bottom - granted.top));
     appBarMonitor_ = monitor;
     appBarEdge_ = edge_;
-    Log(L"bar: keeps %d px of the screen's %s edge (always shown)", reserve, settings_.barEdge.c_str());
+    if (!EqualRect(&abd.rc, &want)) {
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(monitor, &mi);
+        Log(L"bar: appbar granted (%ld,%ld,%ld,%ld) != want (%ld,%ld,%ld,%ld), monitor (%ld,%ld,%ld,%ld), work (%ld,%ld,%ld,%ld)", abd.rc.left, abd.rc.top,
+            abd.rc.right, abd.rc.bottom, want.left, want.top, want.right, want.bottom, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right,
+            mi.rcMonitor.bottom, mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom);
+    }
+    Log(L"bar: keeps %d px of the screen's %s edge (always shown)", appBarReserved_, settings_.barEdge.c_str());
 }
 
 LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -426,7 +438,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
     POINT pt = LayoutPoint({GET_X_LPARAM(l), GET_Y_LPARAM(l)});
     if (m == AppBarNotice() && AppBarNotice()) {
         if (w == ABN_POSCHANGED) { // another app bar or the taskbar moved: claim the strip again
-            appBarRect_ = RECT{};
+            appBarWant_ = RECT{};
             Relayout();
         }
         return 0;
@@ -1027,13 +1039,12 @@ void Bar::Relayout()
     const int insetTop = std::max(inset + glassRise, rise);
 
     const int winW = roomW + 2 * side, winH = barH + insetTop + inset;
-    const int x = (int(wa.Along()) - winW) / 2;
+    const int margin = Px(st.margin, s);
     // "Always shown": the bar keeps its strip of the screen as an app bar (as the system taskbar
     // does), so maximized windows end before it (#40). Its own strip is not part of where it sits.
-    const int reserve = visible_ && st.bar && st.autoHide == L"never" ? Px(st.margin, s) + barH : 0;
-    const int base = int(wa.Across()) + (appBar_ && appBarMonitor_ == mon && appBarEdge_ == edge_ ? appBarReserved_ : 0);
-    const int y = base - Px(st.margin, s) - barH - insetTop;
-    const RECT win = wa.ToArea(RECT{x, y, x + winW, y + winH});
+    const int reserve = visible_ && st.bar && st.autoHide == L"never" ? margin + barH : 0;
+    const int ownReserve = appBar_ && appBarMonitor_ == mon && appBarEdge_ == edge_ ? appBarReserved_ : 0;
+    const RECT win = PlaceBarWindow({edge_, mi.rcMonitor, mi.rcWork, winW, winH, barH, margin, insetTop, st.hideTaskbar, ownReserve});
 
     // Display order: during a drag the dragged app leaves its slot and the
     // others close up around the insertion point.
