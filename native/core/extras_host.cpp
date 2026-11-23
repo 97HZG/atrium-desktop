@@ -114,6 +114,7 @@ void ExtrasHost::Apply(const Settings& s, float radius)
     if (!stacksOn_)
         stacks_.Close();
     launchpadOn_ = s.showLaunchpad;
+    launchpad_.SetTint(s.launchpadMaterial == L"tint");
     if (!launchpadOn_)
         launchpad_.Close(false);
     PrewarmLaunchpad();
@@ -201,7 +202,7 @@ void ExtrasHost::OnCatalogChanged()
     PrewarmLaunchpad();
 }
 
-// The first pages' icons read ahead for the main display, so Launchpad opens with them.
+// Every app's icon read ahead for the main display, so Launchpad opens with them all.
 void ExtrasHost::PrewarmLaunchpad()
 {
     if (!launchpadOn_)

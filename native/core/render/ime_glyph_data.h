@@ -1,5 +1,5 @@
 // The input method entry's letters as outlines (tools/generate-ime-glyphs.py; do not edit):
-// Noto Sans CJK SC Version 2.004, SIL Open Font License 1.1. Em units, centred on the ink, y down.
+// 中 drawn by the script; the others from Noto Sans CJK SC Version 2.004, SIL Open Font License 1.1. Em units, centred on the ink, y down.
 #pragma once
 
 #include <span>
@@ -23,32 +23,35 @@ struct Glyph {
 // clang-format off: one step a line, as generated
 // NOLINTBEGIN(modernize-use-std-numbers): outline coordinates, some of which merely resemble constants
 inline constexpr Cmd kZhong[] = {
-    {Op::Move, -0.041f, -0.4595f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.041f, -0.2805f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.403f, -0.2805f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.403f, 0.1945f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.328f, 0.1945f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.328f, 0.1325f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.041f, 0.1325f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.041f, 0.4595f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.038f, 0.4595f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.038f, 0.1325f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.326f, 0.1325f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.326f, 0.1895f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.403f, 0.1895f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.403f, -0.2805f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.038f, -0.2805f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.038f, -0.4595f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Move, -0.29f, -0.27f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Line, 0.29f, -0.27f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, 0.34523f, -0.27f, 0.39f, -0.22523f, 0.39f, -0.17f},
+    {Op::Line, 0.39f, 0.07f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, 0.39f, 0.12523f, 0.34523f, 0.17f, 0.29f, 0.17f},
+    {Op::Line, -0.29f, 0.17f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, -0.34523f, 0.17f, -0.39f, 0.12523f, -0.39f, 0.07f},
+    {Op::Line, -0.39f, -0.17f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, -0.39f, -0.22523f, -0.34523f, -0.27f, -0.29f, -0.27f},
     {Op::Close, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Move, -0.328f, 0.0585f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.328f, -0.2075f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.041f, -0.2075f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, -0.041f, 0.0585f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Move, -0.288f, -0.188f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, -0.29905f, -0.188f, -0.308f, -0.17905f, -0.308f, -0.168f},
+    {Op::Line, -0.308f, 0.068f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, -0.308f, 0.07905f, -0.29905f, 0.088f, -0.288f, 0.088f},
+    {Op::Line, 0.288f, 0.088f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, 0.29905f, 0.088f, 0.308f, 0.07905f, 0.308f, 0.068f},
+    {Op::Line, 0.308f, -0.168f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, 0.308f, -0.17905f, 0.29905f, -0.188f, 0.288f, -0.188f},
+    {Op::Line, -0.288f, -0.188f, 0.f, 0.f, 0.f, 0.f},
     {Op::Close, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Move, 0.326f, 0.0585f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.038f, 0.0585f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.038f, -0.2075f, 0.f, 0.f, 0.f, 0.f},
-    {Op::Line, 0.326f, -0.2075f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Move, 0.f, -0.46f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Line, 0.f, -0.46f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, 0.02264f, -0.46f, 0.041f, -0.44164f, 0.041f, -0.419f},
+    {Op::Line, 0.041f, 0.419f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, 0.041f, 0.44164f, 0.02264f, 0.46f, 0.f, 0.46f},
+    {Op::Line, 0.f, 0.46f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, -0.02264f, 0.46f, -0.041f, 0.44164f, -0.041f, 0.419f},
+    {Op::Line, -0.041f, -0.419f, 0.f, 0.f, 0.f, 0.f},
+    {Op::Cubic, -0.041f, -0.44164f, -0.02264f, -0.46f, 0.f, -0.46f},
     {Op::Close, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f},
 };
 

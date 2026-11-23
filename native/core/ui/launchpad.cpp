@@ -11,8 +11,10 @@ namespace atrium {
 namespace launchpad {
 
 constexpr double kOpenMs = 300, kCloseMs = 200;
-// The window: about three quarters of the work area, within these bounds (DIP), and 24 DIP clear of its edges.
-constexpr float kMinW = 760, kMaxW = 1120, kMinH = 540, kMaxH = 780, kMinRadius = 26, kClear = 24;
+constexpr double kLoadWaitMs = 4000; // the longest the spinner waits for the icons
+// The window: about two thirds of the work area, within these bounds (DIP), and 24 DIP clear of its edges.
+constexpr float kMinW = 680, kMaxW = 960, kMinH = 480, kMaxH = 660, kMinRadius = 26, kClear = 24;
+constexpr float kVeil = 0.45f; // launchpadMaterial tint: the black over the glass
 constexpr float kSearchW = 280, kSearchH = 34, kSearchTop = 34;
 constexpr float kLabel = 12.5f, kLabelH = 18, kLabelGap = 8;
 constexpr float kDotsFromBottom = 40, kDotStep = 18, kDot = 4;
@@ -42,6 +44,7 @@ void Launchpad::Open(RECT work, HWND previous)
     query_.clear();
     shown_.clear();
     Size(work);
+    iconPx_ = IconPx(work);
     const float s = PopupScale(work);
     const LONG cx = (work.left + work.right) / 2, cy = (work.top + work.bottom) / 2;
     const LONG halfW = std::lround(w_ * s / 2), halfH = std::lround(h_ * s / 2);
@@ -53,7 +56,8 @@ void Launchpad::Open(RECT work, HWND previous)
     wheel_ = 0;
     hoverAnim_.clear();
     KillTimer(surface_.Hwnd(), kCloseTimer);
-    openedMs_ = lastPaint_ = ClockMs();
+    openedMs_ = lastPaint_ = revealedMs_ = ClockMs();
+    loading_ = !catalog_.IconsReady(Ids(), iconPx_); // every icon at once, after a spinner
     surface_.SetRadius(Radius());
     surface_.Show(rect, true, POINT{cx, cy}, false);
     PublishGlass(openedMs_);
@@ -65,8 +69,8 @@ void Launchpad::Size(RECT work)
 {
     const float s = PopupScale(work);
     const float workW = float(work.right - work.left) / s, workH = float(work.bottom - work.top) / s;
-    w_ = std::min(std::clamp(workW * 0.74f, kMinW, kMaxW), workW - 2 * kClear);
-    h_ = std::min(std::clamp(workH * 0.78f, kMinH, kMaxH), workH - 2 * kClear);
+    w_ = std::min(std::clamp(workW * 0.62f, kMinW, kMaxW), workW - 2 * kClear);
+    h_ = std::min(std::clamp(workH * 0.66f, kMinH, kMaxH), workH - 2 * kClear);
     grid_ = ComputeLaunchpadGrid(w_, h_);
 }
 
@@ -74,23 +78,33 @@ std::vector<CatalogApp> Launchpad::LaunchableApps() const
 {
     std::vector<CatalogApp> apps = catalog_.Apps();
     std::erase_if(apps, [](const CatalogApp& a) { return !AppCatalog::IsLaunchable(a); });
+    // As on macOS: Windows' own first, then the apps in the order they came (by name among equals).
+    std::ranges::stable_sort(apps, {}, &CatalogApp::installed);
     return apps;
 }
+
+std::vector<std::wstring> Launchpad::Ids() const
+{
+    std::vector<std::wstring> ids;
+    ids.reserve(apps_.size());
+    for (const CatalogApp& app : apps_)
+        ids.push_back(app.id);
+    return ids;
+}
+
+int Launchpad::IconPx(RECT work) const { return int(std::lround(grid_.iconDip * PopupScale(work))); }
 
 void Launchpad::Prewarm(RECT work)
 {
     if (surface_.Visible() || !catalog_.Loaded())
         return;
-    const std::vector<CatalogApp> apps = LaunchableApps();
+    apps_ = LaunchableApps();
     Size(work);
-    const int px = int(std::lround(grid_.iconDip * PopupScale(work)));
-    if (prewarmed_ == std::make_pair(px, apps.size()))
+    const int px = IconPx(work);
+    if (prewarmed_ == std::make_pair(px, apps_.size()))
         return;
-    prewarmed_ = {px, apps.size()};
-    std::vector<std::wstring> ids;
-    for (size_t i = 0; i < apps.size() && i < size_t(2 * grid_.perPage); ++i)
-        ids.push_back(apps[i].id);
-    catalog_.PrefetchIcons(ids, px);
+    prewarmed_ = {px, apps_.size()};
+    catalog_.PrefetchIcons(Ids(), px);
 }
 
 void Launchpad::Close(bool launched)
@@ -179,6 +193,11 @@ float Launchpad::Hover(Canvas& c, int id, bool on)
 
 void Launchpad::Paint(Canvas& c)
 {
+    if (tint_) { // light ink on the veil, whatever the glass under it
+        c.theme = Theme::For(false);
+        c.inkDark = 0;
+        c.ink = {};
+    }
     const Theme& t = c.theme;
     const float dt = float(std::clamp(c.now - lastPaint_, 0.0, 100.0)) / 1000.f;
     lastPaint_ = c.now;
@@ -199,20 +218,37 @@ void Launchpad::Paint(Canvas& c)
     const D2D1_RECT_F all = D2D1::RectF(0, 0, w_, h_);
     if (c.panel)
         c.Fill(all, Radius(), Alpha(t.panel, a));
-    // A faint veil over the glass, so the names read on any wallpaper.
-    c.Fill(all, Radius(), t.light ? D2D1::ColorF(1, 1, 1, 0.10f * a) : D2D1::ColorF(0, 0, 0, 0.22f * a));
-    // The apps settle from a little larger as the sheet fades in, and grow away as it fades out.
+    if (tint_)
+        c.Fill(all, Radius(), D2D1::ColorF(0, 0, 0, kVeil * a));
+    if (loading_ && !closing_) {
+        if (catalog_.IconsReady(Ids(), iconPx_) || c.now - openedMs_ > kLoadWaitMs) {
+            loading_ = false;
+            revealedMs_ = c.now;
+        }
+        c.Continue();
+    }
+    // The apps settle from a little larger as the sheet fades in (or once their icons are read), and grow
+    // away as it fades out.
     c.BeginGroup(a, 1 + (closing_ ? 0.05f : 0.08f) * (1 - a), w_ / 2, h_ / 2);
     hits_.clear();
     visibleIcons_.clear();
     PaintSearch(c, t, a);
-    if (Shown().empty() && !query_.empty())
-        c.Text(Tr(L"No matching apps"), D2D1::RectF(0, h_ / 2 - 14, w_, h_ / 2 + 14), 17, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
-    const int first = int(std::floor(pageShown_));
-    for (int page = first; page <= first + 1; ++page)
-        if (page >= 0 && page < Pages() && std::abs(float(page) - pageShown_) < 1)
-            PaintPage(c, t, page, (float(page) - pageShown_) * w_);
-    PaintDots(c, t);
+    if (loading_) {
+        PaintSpinner(c, t, a);
+    } else {
+        const float r = closing_ || revealedMs_ <= openedMs_ ? 1.f : motion::EaseOut(float((c.now - revealedMs_) / kOpenMs));
+        if (r < 1)
+            c.Continue();
+        c.BeginGroup(r, 1 + 0.08f * (1 - r), w_ / 2, h_ / 2);
+        if (Shown().empty() && !query_.empty())
+            c.Text(Tr(L"No matching apps"), D2D1::RectF(0, h_ / 2 - 14, w_, h_ / 2 + 14), 17, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        const int first = int(std::floor(pageShown_));
+        for (int page = first; page <= first + 1; ++page)
+            if (page >= 0 && page < Pages() && std::abs(float(page) - pageShown_) < 1)
+                PaintPage(c, t, page, (float(page) - pageShown_) * w_);
+        PaintDots(c, t);
+        c.EndGroup();
+    }
     c.EndGroup();
     if (visibleIcons_ != askedIcons_) {
         askedIcons_ = visibleIcons_;
@@ -283,6 +319,16 @@ void Launchpad::PaintTile(Canvas& c, const Theme& t, int index, D2D1_RECT_F cell
     c.EndGroup();
     c.Text(app.name, D2D1::RectF(cell.left + 6, ir.bottom + kLabelGap, cell.right - 6, ir.bottom + kLabelGap + kLabelH), kLabel, t.text,
            DWRITE_FONT_WEIGHT_NORMAL, 1);
+}
+
+// While the icons are read: an arc turning once a second in the middle, shown only if it takes a moment.
+void Launchpad::PaintSpinner(Canvas& c, const Theme& t, float shown)
+{
+    const float fade = std::clamp(float((c.now - openedMs_ - 150) / 200), 0.f, 1.f) * shown;
+    if (fade <= 0)
+        return;
+    const float from = float(std::fmod(c.now * 0.36, 360.0));
+    c.Arc(w_ / 2, h_ / 2, 13, from, from + 270, Alpha(t.subtext, fade), 2.5f);
 }
 
 void Launchpad::PaintDots(Canvas& c, const Theme& t)

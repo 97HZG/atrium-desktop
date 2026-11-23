@@ -168,7 +168,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
     "The Explorer AUMID must default to allowing multiple windows.");
 {
     var extrasDefault = new BarSettings();
-    Require(extrasDefault.ShowLaunchpad && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
+    Require(extrasDefault.ShowLaunchpad && extrasDefault.LaunchpadMaterial == "bar" && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
             extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingRhythm == "live" && extrasDefault.NowPlayingAppMode == "all" &&
             extrasDefault.NowPlayingApps.Count == 0 && extrasDefault.NowPlayingScrollVolume &&
             !extrasDefault.ShowFolderStacks && extrasDefault.FolderStackLayout == "fan" &&
@@ -177,6 +177,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
     var extrasCustom = new BarSettings
     {
         ShowLaunchpad = false,
+        LaunchpadMaterial = "tint",
         ShowNowPlaying = false,
         NowPlayingShowPaused = false,
         NowPlayingMotion = "vivid",
@@ -193,7 +194,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
         "Extras settings must survive a round trip.");
     foreach (var edit in new Action<BarSettings>[]
     {
-        s => s.ShowLaunchpad = false, s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
+        s => s.ShowLaunchpad = false, s => s.LaunchpadMaterial = "tint", s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
         s => s.NowPlayingMotion = "subtle", s => s.NowPlayingRhythm = "loop", s => s.NowPlayingAppMode = "allow",
         s => s.NowPlayingApps = ["a.exe"], s => s.NowPlayingScrollVolume = false,
         s => s.ShowFolderStacks = true, s => s.FolderStackLayout = "column",

@@ -23,28 +23,19 @@ internal sealed partial class BarFace
     private readonly Canvas _launchpad = new() { IsHitTestVisible = false, Width = 1, Height = 1 }, _music = new() { IsHitTestVisible = false };
     private readonly Rectangle[] _bars = new Rectangle[5];
     private readonly Path _folder = Folder(FrontFolder), _folderBack = Folder(BackFolder);
-    private readonly Rectangle[] _apps = [new(), new(), new(), new()];
-    private readonly Ellipse[] _pages = [new(), new(), new()];
+    private readonly Rectangle[] _apps = [new(), new(), new(), new(), new(), new(), new(), new(), new()];
 
     private void AddExtras(Canvas canvas)
     {
-        // DrawLaunchpad in a unit square: four squares of 0.30 with gaps of 0.10, three dots below.
+        // DrawLaunchpad in a unit square: nine squares of 0.24, three by three, gaps of 0.14.
         for (int i = 0; i < _apps.Length; i++)
         {
             _apps[i].IsHitTestVisible = false;
-            _apps[i].Width = _apps[i].Height = 0.30;
-            _apps[i].RadiusX = _apps[i].RadiusY = 0.09;
-            Canvas.SetLeft(_apps[i], 0.15 + i % 2 * 0.40);
-            Canvas.SetTop(_apps[i], i / 2 * 0.40);
+            _apps[i].Width = _apps[i].Height = 0.24;
+            _apps[i].RadiusX = _apps[i].RadiusY = 0.072;
+            Canvas.SetLeft(_apps[i], i % 3 * 0.38);
+            Canvas.SetTop(_apps[i], i / 3 * 0.38);
             _launchpad.Children.Add(_apps[i]);
-        }
-        for (int i = 0; i < _pages.Length; i++)
-        {
-            _pages[i].IsHitTestVisible = false;
-            _pages[i].Width = _pages[i].Height = 0.144;
-            Canvas.SetLeft(_pages[i], 0.5 + (i - 1) * 0.21 - 0.072);
-            Canvas.SetTop(_pages[i], 0.91 - 0.072);
-            _launchpad.Children.Add(_pages[i]);
         }
         for (int i = 0; i < _bars.Length; i++)
         {
@@ -60,17 +51,11 @@ internal sealed partial class BarFace
         _launchpad.Visibility = l.LaunchX < 0 ? Visibility.Collapsed : Visibility.Visible;
         if (l.LaunchX >= 0)
         {
-            // 86 % of the icon square, a stroke of 7.5 % of it; the middle page dot lit.
+            // 78 % of the icon square.
             var (x, y, size) = item(l.LaunchX);
-            double s = size * 0.86;
+            double s = size * 0.78;
             var brush = new SolidColorBrush(ink);
-            foreach (var a in _apps)
-            {
-                a.Stroke = brush;
-                a.StrokeThickness = Math.Max(1, s * 0.075) / s;
-            }
-            for (int i = 0; i < _pages.Length; i++)
-                _pages[i].Fill = i == 1 ? brush : new SolidColorBrush(Color.FromArgb((byte)(ink.A * 0.45), ink.R, ink.G, ink.B));
+            foreach (var a in _apps) a.Fill = brush;
             _launchpad.RenderTransform = new ScaleTransform { ScaleX = s, ScaleY = s };
             Canvas.SetLeft(_launchpad, x + (size - s) / 2);
             Canvas.SetTop(_launchpad, y + (size - s) / 2);

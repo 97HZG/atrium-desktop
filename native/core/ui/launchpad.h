@@ -1,7 +1,8 @@
-// Launchpad, as on macOS: every app on one large window of the bar's glass in the middle of the
-// display, in pages of a grid (launchpad_model.h) with the page dots below and a search field above. It opens from its
-// entry next to the start logo: the glass fades in and the apps settle from a little larger, and it
-// leaves the same way. Typing searches (by name or initials, as the start menu does); the wheel, a
+// Launchpad, as on macOS: every app, oldest installed first, on one window of the bar's glass (or that
+// glass under a black veil: launchpadMaterial tint) in the middle of the display, in pages of a grid
+// (launchpad_model.h) with the page dots below and a search field above. It opens from its entry next to
+// the start logo: the glass fades in and the apps settle from a little larger, all at once when every
+// icon is read (a spinner meanwhile; they are read ahead at start), and it leaves the same way. Typing searches (by name or initials, as the start menu does); the wheel, a
 // drag or the arrows turn the pages with a spring; a click launches, a click on the empty glass or
 // Esc closes (Esc clears a search first), and so does a click outside it.
 #pragma once
@@ -28,11 +29,12 @@ public:
     // give the focus back to when closed without launching.
     void Open(RECT work, HWND previous);
     void SetRadius(float dip) { radius_ = dip; }
+    void SetTint(bool tint) { tint_ = tint; }
     void Close(bool launched);
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
     void Refresh(); // the catalog changed: the apps, an icon
-    // Reads the first pages' icons ahead, at the size a window on `work` would show them.
+    // Reads every app's icon ahead, at the size a window on `work` would show them.
     void Prewarm(RECT work);
     HWND Hwnd() const { return surface_.Hwnd(); }
 
@@ -50,6 +52,9 @@ private:
     void PaintPage(Canvas& c, const Theme& t, int page, float dx);
     void PaintTile(Canvas& c, const Theme& t, int index, D2D1_RECT_F cell);
     void PaintDots(Canvas& c, const Theme& t);
+    void PaintSpinner(Canvas& c, const Theme& t, float shown);
+    std::vector<std::wstring> Ids() const; // apps_' ids
+    int IconPx(RECT work) const;
     void PublishGlass(double now);
     float Hover(Canvas& c, int id, bool on);
     D2D1_RECT_F Cell(int slot) const; // a slot of a page, its page at x 0
@@ -84,6 +89,10 @@ private:
     LaunchpadGrid grid_;
     float w_ = 0, h_ = 0; // the window, DIP
     float radius_ = 24;   // the bar's popups' corner
+    bool tint_ = false;   // launchpadMaterial tint: a black veil over the glass, light ink
+    int iconPx_ = 0;      // the icons' size on the display it opened on
+    bool loading_ = false;  // icons still being read: a spinner instead of the apps
+    double revealedMs_ = 0; // when the apps began to settle in
     int page_ = 0;
     float pageShown_ = 0, pageSpeed_ = 0; // the page on screen (fractional while it glides), pages/s
     int sel_ = -1, hover_ = -1, pressed_ = -1;

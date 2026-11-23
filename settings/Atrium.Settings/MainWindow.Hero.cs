@@ -244,7 +244,7 @@ public sealed partial class MainWindow
             if (_face.Icons[i].DataContext != vm) _face.Icons[i].DataContext = vm;
             if (_loupeFace.Icons[i].DataContext != vm) _loupeFace.Icons[i].DataContext = vm;
         }
-        var clock = DateTime.Now;
+        var clock = PreviewClock.Now;
         string time = clock.ToString(CurrentSettings.ShowClockSeconds ? "H:mm:ss" : "H:mm"), date = clock.ToString("yyyy/M/d");
         _face.SetClock(time, date);
         var status = StatusLook.Current();

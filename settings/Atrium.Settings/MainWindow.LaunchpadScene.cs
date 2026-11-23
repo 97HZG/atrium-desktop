@@ -8,7 +8,8 @@ using Windows.Foundation;
 namespace Atrium.Settings;
 
 // Launchpad's preview (ui/launchpad.cpp, drawn smaller): its window of glass in the middle of the
-// screen, the search field, a page of apps that settle from a little larger as it opens, the page dots.
+// screen (under a black veil, light ink, with the original color), the search field, a page of apps that
+// settle from a little larger as it opens, the page dots.
 public sealed partial class MainWindow
 {
     private sealed class LaunchpadScene : ModuleScene
@@ -29,6 +30,8 @@ public sealed partial class MainWindow
         ];
 
         private readonly PanelInk _ink = new();
+        private readonly Border _veil = new() { IsHitTestVisible = false, Background = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(115, 0, 0, 0)) }; // kVeil
+        private bool _glassDark;
         private readonly Border _search;
         private readonly TextBlock _searchGlyph, _hint;
         private readonly Grid[] _icons = new Grid[Apps.Length];
@@ -40,6 +43,8 @@ public sealed partial class MainWindow
 
         public LaunchpadScene(MainWindow m, Border stage, Canvas root) : base(m, stage, root)
         {
+            ContinuousCorners.SetEnabled(_veil, true);
+            Marks.Children.Add(_veil);
             _search = Plate(_ink.Search, SearchH / 2);
             _search.BorderBrush = _ink.Border;
             _search.BorderThickness = new Thickness(1);
@@ -67,7 +72,8 @@ public sealed partial class MainWindow
         protected override bool IsOpen => M.CurrentSettings.ShowLaunchpad;
         protected override Size PopupSize => new(CW, CH);
         protected override Vector2 Anchor => new((float)(Bar!.LaunchX >= 0 ? Bar.LaunchX + Bar.P / 2 : Bar.StartX + Bar.P / 2), (float)PopupBottom);
-        protected override void Ink(int piece, bool dark) => _ink.Set(dark);
+        private bool Tint => M.CurrentSettings.LaunchpadMaterial == "tint";
+        protected override void Ink(int piece, bool dark) => _ink.Set((_glassDark = dark) && !Tint);
         protected override void Entered() => _opened = double.MaxValue;
         protected override void PoppedIn() => _opened = Now;
 
@@ -83,6 +89,10 @@ public sealed partial class MainWindow
         {
             var f = (Frame)state;
             PlaceMarks(f.Left, f.Top);
+            _ink.Set(_glassDark && !Tint);
+            _veil.Visibility = Tint ? Visibility.Visible : Visibility.Collapsed;
+            _veil.CornerRadius = new CornerRadius(Math.Max(Radius, MinRadius));
+            Put(_veil, 0, 0, CW, CH);
             Put(_search, (CW - SearchW) / 2, SearchTop, SearchW, SearchH);
             Box(_searchGlyph, (CW - SearchW) / 2 + 10, SearchTop, 20, SearchH);
             Box(_hint, (CW - SearchW) / 2 + 34, SearchTop, SearchW - 48, SearchH);

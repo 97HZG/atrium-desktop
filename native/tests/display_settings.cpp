@@ -151,7 +151,7 @@ void CheckSettingsNormalization()
 void CheckExtrasSettings()
 {
     Settings defaults, parsed;
-    Require(defaults.showLaunchpad && defaults.showNowPlaying && defaults.nowPlayingShowPaused && defaults.nowPlayingMotion == L"normal" &&
+    Require(defaults.showLaunchpad && defaults.launchpadMaterial == L"bar" && defaults.showNowPlaying && defaults.nowPlayingShowPaused && defaults.nowPlayingMotion == L"normal" &&
                 defaults.nowPlayingAppMode == L"all" && defaults.nowPlayingApps.empty() && defaults.nowPlayingScrollVolume && !defaults.showFolderStacks &&
                 defaults.folderStackLayout == L"fan" && defaults.folderStackMax == 8 && defaults.folderStacks.empty(),
             "extras settings have expected defaults");
@@ -162,6 +162,7 @@ void CheckExtrasSettings()
 
     Settings custom;
     custom.showLaunchpad = false;
+    custom.launchpadMaterial = L"tint";
     custom.showNowPlaying = false;
     custom.nowPlayingShowPaused = false;
     custom.nowPlayingMotion = L"vivid";
@@ -172,14 +173,14 @@ void CheckExtrasSettings()
     custom.folderStackLayout = L"column";
     custom.folderStackMax = 12;
     custom.folderStacks = {L"C:\\Users\\Demo\\Desktop", L"D:\\Projects"};
-    Require(Settings::FromJson(custom.ToJson(), Settings{}, parsed) && !parsed.showLaunchpad && !parsed.showNowPlaying && !parsed.nowPlayingShowPaused &&
+    Require(Settings::FromJson(custom.ToJson(), Settings{}, parsed) && !parsed.showLaunchpad && parsed.launchpadMaterial == L"tint" && !parsed.showNowPlaying && !parsed.nowPlayingShowPaused &&
                 parsed.nowPlayingMotion == L"vivid" && parsed.nowPlayingAppMode == L"allow" && parsed.nowPlayingApps == custom.nowPlayingApps &&
                 !parsed.nowPlayingScrollVolume && parsed.showFolderStacks && parsed.folderStackLayout == L"column" && parsed.folderStackMax == 12 &&
                 parsed.folderStacks == custom.folderStacks,
             "extras settings survive round trip");
 
-    Require(Settings::FromJson(LR"({"nowPlayingMotion":"bad","nowPlayingAppMode":"bad","folderStackLayout":"bad"})", custom, parsed) &&
-                parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.folderStackLayout == L"fan",
+    Require(Settings::FromJson(LR"({"launchpadMaterial":"bad","nowPlayingMotion":"bad","nowPlayingAppMode":"bad","folderStackLayout":"bad"})", custom, parsed) &&
+                parsed.launchpadMaterial == L"bar" && parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.folderStackLayout == L"fan",
             "invalid extras enums normalize to defaults");
     Require(Settings::FromJson(LR"({"folderStackMax":1})", Settings{}, parsed) && parsed.folderStackMax == 4, "folderStackMax clamps lower bound");
     Require(Settings::FromJson(LR"({"folderStackMax":99})", Settings{}, parsed) && parsed.folderStackMax == 16, "folderStackMax clamps upper bound");

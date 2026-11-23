@@ -25,6 +25,7 @@ public abstract partial class AppRowVm : INotifyPropertyChanged
     }
     public Visibility FallbackVisibility => Icon == null ? Visibility.Visible : Visibility.Collapsed;
     internal string IconSource { get; set; } = ""; // a parsing name for ShellIcons; empty: found from Programs, else the glyph
+    internal string Bundled { get; init; } = ""; // an icon of Assets\Apps (assets/apps), shown whether or not the app is installed
     internal string[] Programs { get; init; } = []; // program file names to look for
     internal string Folder { get; init; } = ""; // a game's folder: its icon is its program's
     internal bool Describe { get; init; } // the title is the program's description, once found
@@ -101,16 +102,21 @@ public sealed partial class MainWindow
     {
         _sources.Add(new SourceVm(this, "WeChat",
             "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.",
-            "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v));
+            "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v)
+        { Bundled = "wechat" });
         _sources.Add(new SourceVm(this, "QQ", "QQ's Windows notifications; when it flashes for a message without one, a card says there is a new message.",
-            "\ue8bd", ["QQ.exe"], s => s.NotifyQQ, (s, v) => s.NotifyQQ = v));
+            "\ue8bd", ["QQ.exe"], s => s.NotifyQQ, (s, v) => s.NotifyQQ = v)
+        { Bundled = "qq" });
         _sources.Add(new SourceVm(this, "Feishu",
             "Reads the text of Feishu's popups; when it flashes for a message without one, a card says there is a new message.",
-            "\ue8bd", ["Feishu.exe", "Lark.exe"], s => s.NotifyFeishu, (s, v) => s.NotifyFeishu = v));
+            "\ue8bd", ["Feishu.exe", "Lark.exe"], s => s.NotifyFeishu, (s, v) => s.NotifyFeishu = v)
+        { Bundled = "feishu" });
         _sources.Add(new SourceVm(this, "WeCom", "When WeCom flashes for a new message, a card says so.",
-            "\ue8bd", ["WXWork.exe", "WeCom.exe", "WXWorkLocal.exe", "WXWorkLocalPro.exe"], s => s.NotifyWeCom, (s, v) => s.NotifyWeCom = v));
+            "\ue8bd", ["WXWork.exe", "WeCom.exe", "WXWorkLocal.exe", "WXWorkLocalPro.exe"], s => s.NotifyWeCom, (s, v) => s.NotifyWeCom = v)
+        { Bundled = "wecom" });
         _sources.Add(new SourceVm(this, "DingTalk", "When DingTalk flashes for a new message, a card says so.",
-            "\ue8bd", ["DingTalk.exe"], s => s.NotifyDingTalk, (s, v) => s.NotifyDingTalk = v));
+            "\ue8bd", ["DingTalk.exe"], s => s.NotifyDingTalk, (s, v) => s.NotifyDingTalk = v)
+        { Bundled = "dingtalk" });
         _sources.Add(new SourceVm(this, "Other apps", "Apps that send Windows notifications. Allow notification access in Windows privacy settings.",
             "\uea8f", [], s => s.NotifyListener, (s, v) => s.NotifyListener = v));
         SourcesList.ItemsSource = _sources;
@@ -319,6 +325,11 @@ public sealed partial class MainWindow
     // Off the UI thread: finding the program reads the start menu's shortcuts.
     private async Task LoadRowIconAsync(AppRowVm vm)
     {
+        if (vm.Bundled.Length > 0)
+        {
+            vm.Icon = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "Apps", vm.Bundled + ".png"))) { DecodePixelWidth = 96 };
+            return;
+        }
         string source = vm.IconSource;
         if (source.Length == 0 && vm.Programs.Length > 0)
             source = vm.IconSource = await Task.Run(() => Program(vm.Programs));

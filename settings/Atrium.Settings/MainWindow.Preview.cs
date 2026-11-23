@@ -211,7 +211,7 @@ public sealed partial class MainWindow
                 var vm = i < _previewPins.Length ? _previewPins[i] : _previewRunning;
                 if (_notifyFace.Icons[i].DataContext != vm) _notifyFace.Icons[i].DataContext = vm;
             }
-            var clock = DateTime.Now;
+            var clock = PreviewClock.Now;
             _notifyFace.SetClock(clock.ToString(CurrentSettings.ShowClockSeconds ? "H:mm:ss" : "H:mm"), clock.ToString("yyyy/M/d"));
             _notifyFace.Layout(bar, dark, bar.N, running, 2, 1, 0, 0, StatusLook.Current());
             // Its new size has come: it grows or shrinks there from the size it had, on the

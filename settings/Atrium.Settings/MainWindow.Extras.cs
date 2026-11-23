@@ -22,7 +22,7 @@ public sealed partial class MainWindow
     private Canvas? _npCanvas, _stCanvas, _lpCanvas;
     private ModuleScene? _npScene, _stScene, _lpScene;
     private ToggleTile? _launchpadSwitch, _npSwitch, _npPausedSwitch, _stSwitch;
-    private SegmentTrack? _npMotion, _npRhythm, _stLayout, _stMax;
+    private SegmentTrack? _lpMaterial, _npMotion, _npRhythm, _stLayout, _stMax;
     private StackPanel? _stList;
     private TextBlock? _stCount;
 
@@ -67,7 +67,9 @@ public sealed partial class MainWindow
         _npMain.Children.Add(BuildPlayers());
         _launchpadSwitch = Toggle("Show on the taskbar", "Show Launchpad on the taskbar",
             "An entry next to the start logo opens every app, page by page, in one large window of glass, as on macOS.", (s, on) => s.ShowLaunchpad = on);
-        _lpSide = Side("Launchpad", _launchpadSwitch);
+        _lpMaterial = Segments("launchpadmaterial", [("Follow the taskbar", "bar"), ("Original color", "tint")],
+            tag => CurrentSettings.LaunchpadMaterial = tag);
+        _lpSide = Side("Launchpad", _launchpadSwitch, Row("Material", _lpMaterial));
         InspectorStack.Children.Add(_npSide);
         InspectorStack.Children.Add(_stSide);
         InspectorStack.Children.Add(_lpSide);
@@ -78,7 +80,7 @@ public sealed partial class MainWindow
         AddNavItem(StacksPage, "", "Folder Stacks", "10"); // the bar's order: the stack sits left of the tray
         _lpSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_lpSide.Visibility == Visibility.Visible) LoadExtras(); });
         // The bar's order, left to right: the start menu, Launchpad, the stack, then the tray's side.
-        AddNavItem(LaunchpadPage, "\uE71D", "Launchpad", "10");
+        AddNavItem(LaunchpadPage, "\uF0E2", "Launchpad", "10");
     }
 
     // A page's picture: a stage the size of the other bar pages', its scene drawn on the canvas.
@@ -250,6 +252,7 @@ public sealed partial class MainWindow
         _loading = true;
         var s = CurrentSettings;
         _launchpadSwitch?.IsOn = s.ShowLaunchpad;
+        Check(_lpMaterial, s.LaunchpadMaterial == "tint" ? "tint" : "bar");
         _npSwitch?.IsOn = s.ShowNowPlaying;
         _npPausedSwitch?.IsOn = s.NowPlayingShowPaused;
         Check(_npMotion, MotionTags.Contains(s.NowPlayingMotion) ? s.NowPlayingMotion : "normal");

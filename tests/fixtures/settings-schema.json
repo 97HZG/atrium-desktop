@@ -42,6 +42,7 @@
     "autoWidth": {"type": "bool", "default": true},
     "showRunning": {"type": "bool", "default": true},
     "showLaunchpad": {"type": "bool", "default": true},
+    "launchpadMaterial": {"type": "enum", "default": "bar", "values": ["bar", "tint"], "fallback": "bar"},
     "showNowPlaying": {"type": "bool", "default": true},
     "nowPlayingShowPaused": {"type": "bool", "default": true},
     "nowPlayingMotion": {"type": "enum", "default": "normal", "values": ["off", "subtle", "normal", "vivid"], "fallback": "normal"},

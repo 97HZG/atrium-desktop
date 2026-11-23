@@ -20,7 +20,7 @@ public:
               const MusicBars& bars);
     // The Windows logo, as four panes in Windows 11's light-to-deep blue.
     void DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity);
-    // Launchpad: a page of apps (four rounded squares in outline) over its page dots, in the bar's ink.
+    // Launchpad: nine small apps, three by three, in the bar's ink.
     static void DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink);
     // Now playing: five round-ended bars in the bar's ink, as tall as `bars` has them.
     static void DrawMusic(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, const MusicBars& bars, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink);

@@ -10,6 +10,7 @@
 #include <windows.h>
 
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -26,6 +27,7 @@ struct CatalogApp {
     std::wstring aumid;   // System.AppUserModel.ID, may be empty
     std::wstring target;  // link target exe, may be empty
     std::wstring args;    // the link's arguments (a browser's --app=..., a profile)
+    int64_t installed = 0; // when it came (FILETIME ticks): a package's install, a shortcut's creation; 0 unknown
 };
 
 // A folder of the Windows start menu's All apps list (a folder of shortcuts under Start Menu\Programs,
@@ -57,8 +59,10 @@ public:
     // The apps of the start menu's own arrangement (start.json): read ahead and kept like the pins'.
     void SetStartIds(std::vector<std::wstring> ids);
     void SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons);
-    // Icons read ahead behind those on screen and kept like the pins' (Launchpad's first pages).
+    // Icons read ahead behind those on screen and kept like the pins' (Launchpad's apps).
     void PrefetchIcons(const std::vector<std::wstring>& ids, int px);
+    // Every one of these icons read (or found missing): asks for those not yet asked for.
+    bool IconsReady(const std::vector<std::wstring>& ids, int px);
 
     static bool Launch(const CatalogApp& app);
     // Desktop apps only (a packaged app has no exe to elevate or to show): run elevated (the

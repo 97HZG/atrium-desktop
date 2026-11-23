@@ -50,6 +50,7 @@
 | `autoWidth` | bool | | true | 宽度随内容伸缩，最大为 `width` |
 | `showRunning` | bool | | true | 显示未固定但正在运行的应用 |
 | `showLaunchpad` | bool | | true | 开始徽标旁的启动台入口 |
+| `launchpadMaterial` | string | `bar` / `tint` | `bar` | 启动台的材质：跟随任务栏的玻璃，或玻璃上加一层黑色蒙版（原色） |
 | `showNowPlaying` | bool | | true | 任务栏正在播放媒体入口（仅在存在媒体会话时出现） |
 | `nowPlayingShowPaused` | bool | | true | 媒体会话暂停时是否在任务栏保留正在播放入口 |
 | `nowPlayingMotion` | string | `off` / `subtle` / `normal` / `vivid` | `normal` | 正在播放入口五根竖杠的波形动效幅度 |

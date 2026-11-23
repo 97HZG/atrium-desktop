@@ -14,11 +14,11 @@ public sealed partial class MainWindow
     [
         ("NetEase Cloud Music",
             "Its progress is read from the player itself. The heart and the lyrics use its shortcuts (Ctrl+Alt+L, Ctrl+Alt+D). It takes no position from other apps.",
-            ["cloudmusic.exe"], "", ["cloudmusic.exe"]),
+            ["cloudmusic.exe"], "netease", ["cloudmusic.exe"]),
         ("QQ Music", "Progress and seeking. The heart and the lyrics use its shortcuts (Ctrl+Alt+V, Ctrl+Alt+W).",
-            ["QQMusic.exe"], "", ["QQMusic.exe", "Tencent.QQMusic"]),
-        ("Spotify", "Progress and seeking.", ["Spotify.exe"], "", ["Spotify.exe", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!"]),
-        ("Apple Music", "Progress, and the artist and the album apart.", ["AppleMusic.exe"], @"shell:AppsFolder\AppleInc.AppleMusicWin_nzyj5cx40ttqa!App",
+            ["QQMusic.exe"], "qqmusic", ["QQMusic.exe", "Tencent.QQMusic"]),
+        ("Spotify", "Progress and seeking.", ["Spotify.exe"], "spotify", ["Spotify.exe", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!"]),
+        ("Apple Music", "Progress, and the artist and the album apart.", ["AppleMusic.exe"], "applemusic",
             ["AppleMusic.exe", "AppleInc.AppleMusicWin_nzyj5cx40ttqa!"]),
     ];
 
@@ -30,7 +30,7 @@ public sealed partial class MainWindow
         var rows = new StackPanel { Padding = new Thickness(0, 4, 0, 4) };
         foreach (var (name, note, programs, icon, ids) in KnownPlayers)
         {
-            var vm = new SourceVm(this, name, note, "\uE8D6", programs, s => PlayerShown(s, ids), (s, on) => ShowPlayer(s, ids, on)) { IconSource = icon };
+            var vm = new SourceVm(this, name, note, "\uE8D6", programs, s => PlayerShown(s, ids), (s, on) => ShowPlayer(s, ids, on)) { Bundled = icon };
             var sw = new ToggleSwitch { Style = (Style)res["SwitchStyle"], IsOn = vm.IsOn, VerticalAlignment = VerticalAlignment.Center };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(sw, vm.Title);
             sw.Toggled += (_, _) => { if (!_loading) vm.IsOn = sw.IsOn; };
@@ -42,7 +42,7 @@ public sealed partial class MainWindow
         return new StackPanel { Margin = new Thickness(0, 14, 0, 0), Children = { title, new Border { Style = (Style)res["GroupStyle"], Child = rows } } };
     }
 
-    // A row as the sources' (MainWindow.xaml, SourcesList): the icon (a glyph until it is found), the name, the switch.
+    // A row as the sources' (MainWindow.xaml, SourcesList): the icon (assets/apps), the name, the switch.
     private static Grid PlayerRow(SourceVm vm, ToggleSwitch sw)
     {
         var row = new Grid { Padding = new Thickness(14, 8, 14, 8), ColumnSpacing = 14, MinHeight = 60, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };

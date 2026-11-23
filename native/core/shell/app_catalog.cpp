@@ -12,6 +12,9 @@
 #include <propkey.h>
 
 #include <winrt/base.h>
+#include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Management.Deployment.h>
 
 #include <algorithm>
 #include <cwctype>
@@ -381,6 +384,75 @@ std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
     return out;
 }
 
+int64_t Ticks(const FILETIME& t) { return int64_t((uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime); }
+
+int64_t Created(const std::wstring& path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA fa{};
+    return !path.empty() && GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fa) ? Ticks(fa.ftCreationTime) : 0;
+}
+
+// When each app came, for Launchpad's order: a packaged app's package install date; a desktop app's start
+// menu shortcut's creation (the installer made it), else its program's; 0 when unknown (Windows' own).
+void StampInstalled(std::vector<CatalogApp>& apps)
+{
+    std::map<std::wstring, int64_t> packages; // family name, folded
+    try {
+        winrt::Windows::Management::Deployment::PackageManager manager;
+        for (const auto& package : manager.FindPackagesForUser(L""))
+            packages[Fold(std::wstring(package.Id().FamilyName()))] = package.InstalledDate().time_since_epoch().count();
+    } catch (...) {
+        Log(L"catalog: packages' install dates unavailable");
+    }
+    // The start menu's shortcuts by their target and by their name, the earliest of each.
+    std::map<std::wstring, int64_t> byTarget, byName;
+    auto earliest = [](std::map<std::wstring, int64_t>& m, const std::wstring& key, int64_t t) {
+        if (key.empty() || t == 0)
+            return;
+        auto [it, added] = m.try_emplace(key, t);
+        if (!added)
+            it->second = std::min(it->second, t);
+    };
+    for (const KNOWNFOLDERID* id : {&FOLDERID_CommonPrograms, &FOLDERID_Programs}) {
+        PWSTR root = nullptr;
+        if (FAILED(SHGetKnownFolderPath(*id, KF_FLAG_DEFAULT, nullptr, &root)) || !root) {
+            CoTaskMemFree(root);
+            continue;
+        }
+        std::vector<std::pair<std::wstring, std::wstring>> links;
+        CollectLinks(root, links);
+        CoTaskMemFree(root);
+        for (const auto& [_, link] : links) {
+            const int64_t t = Created(link);
+            const std::wstring file = link.substr(link.find_last_of(L'\\') + 1);
+            earliest(byName, Fold(file.substr(0, file.size() - 4)), t);
+            winrt::com_ptr<IShellLinkW> shell;
+            wchar_t target[MAX_PATH] = {};
+            if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(shell.put()))) &&
+                SUCCEEDED(shell.as<IPersistFile>()->Load(link.c_str(), STGM_READ)) && SUCCEEDED(shell->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH)))
+                earliest(byTarget, Fold(ExpandFolders(target)), t);
+        }
+    }
+    for (CatalogApp& app : apps) {
+        const std::wstring& aumid = app.aumid.empty() ? app.id : app.aumid;
+        if (const size_t bang = aumid.find(L'!'); bang != std::wstring::npos)
+            if (auto it = packages.find(Fold(aumid.substr(0, bang))); it != packages.end()) {
+                app.installed = it->second;
+                continue;
+            }
+        if (IsPath(app.id) && Fold(app.id).ends_with(L".lnk")) {
+            app.installed = Created(app.id);
+            continue;
+        }
+        if (auto it = byTarget.find(Fold(app.target)); !app.target.empty() && it != byTarget.end())
+            app.installed = it->second;
+        else if (auto named = byName.find(Fold(app.name)); named != byName.end())
+            app.installed = named->second;
+        else
+            app.installed = Created(app.target);
+    }
+}
+
 } // namespace
 
 bool AppCatalog::IsLaunchable(const CatalogApp& app)
@@ -523,6 +595,25 @@ void AppCatalog::PrefetchIcons(const std::vector<std::wstring>& ids, int px)
     cv_.notify_all();
 }
 
+bool AppCatalog::IconsReady(const std::vector<std::wstring>& ids, int px)
+{
+    px = std::clamp(px, 8, 512);
+    std::lock_guard g(mutex_);
+    bool ready = true, asked = false;
+    for (const std::wstring& id : ids) {
+        auto key = std::make_pair(id, px);
+        if (icons_.contains(key))
+            continue;
+        if (auto it = failed_.find(key); it != failed_.end() && !requested_.contains(key) && it->second.attempts >= 1)
+            continue; // no icon to wait for: its quiet square
+        ready = false;
+        asked |= QueueIcon(key, false);
+    }
+    if (asked)
+        cv_.notify_all();
+    return ready;
+}
+
 void AppCatalog::SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons)
 {
     std::lock_guard g(mutex_);
@@ -617,6 +708,11 @@ void AppCatalog::Worker()
                 apps = Enumerate();
             } catch (...) {
                 Log(L"catalog: enumeration failed");
+            }
+            try {
+                StampInstalled(apps);
+            } catch (...) {
+                Log(L"catalog: install dates failed");
             }
             Log(L"catalog: %zu apps in %llu ms", apps.size(), GetTickCount64() - t0);
             // The start menu's pins: exported again only when its layout file changed.

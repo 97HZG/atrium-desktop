@@ -1,9 +1,11 @@
 """Writes the input method entry's letters as outlines, so the bar draws them without shipping a font.
 
-The five letters the entry shows for the common cases (中 あ 가 A a, shell/ime_status.cpp ImeGlyph) are
-read from an OFL font, flipped to screen coordinates (y down), centred on their ink and measured in
-ems, so a letter drawn at the entry's text size matches what the font would draw. Run once when the
-letters or the font change; the outputs are checked in:
+The five letters the entry shows for the common cases (中 あ 가 A a, shell/ime_status.cpp ImeGlyph):
+中 is drawn here, in Atrium's line (a closed box with rounded corners, a stem with round ends through
+it, nothing standing out under the box); the others are read from an OFL font. All are in screen
+coordinates (y down), centred on their ink and measured in ems, so a letter drawn at the entry's text
+size matches what the font would draw. Run once when the letters or the font change; the outputs are
+checked in:
 
     python3 tools/generate-ime-glyphs.py --font NotoSansCJKsc-Regular.otf
 
@@ -18,6 +20,13 @@ from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTFont
 
 LETTERS = [('中', 'kZhong'), ('あ', 'kA'), ('가', 'kGa'), ('A', 'kLatinUpper'), ('a', 'kLatinLower')]
+KAPPA = 0.5522847498  # a quarter circle as a cubic
+
+# 中 in ems: the stroke of the font's Regular stems; the box a little above the middle, as the font's.
+STROKE = 0.082
+BOX = (-0.39, -0.27, 0.39, 0.17)  # outer edges: left, top, right, bottom
+BOX_RADIUS = 0.10
+STEM = 0.46  # half its length
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -54,6 +63,36 @@ class Outline(BasePen):
         self.cmds.append(('Z', []))
 
 
+def rounded_rect(x0, y0, x1, y1, r, clockwise=True):
+    """A closed rectangle with quarter-circle corners of radius r; clockwise on screen (y down) or not."""
+    k = r * KAPPA
+    cmds = [('M', [(x0 + r, y0)]), ('L', [(x1 - r, y0)]), ('C', [(x1 - r + k, y0), (x1, y0 + r - k), (x1, y0 + r)]),
+            ('L', [(x1, y1 - r)]), ('C', [(x1, y1 - r + k), (x1 - r + k, y1), (x1 - r, y1)]), ('L', [(x0 + r, y1)]),
+            ('C', [(x0 + r - k, y1), (x0, y1 - r + k), (x0, y1 - r)]), ('L', [(x0, y0 + r)]),
+            ('C', [(x0, y0 + r - k), (x0 + r - k, y0), (x0 + r, y0)]), ('Z', [])]
+    if clockwise:
+        return cmds
+    # The same outline the other way round: from the end back, each cubic's controls swapped.
+    rev, at = [('M', [cmds[0][1][0]])], cmds[0][1][0]
+    steps = []
+    for op, pts in cmds[1:-1]:
+        steps.append((at, op, pts))
+        at = pts[-1]
+    for start, op, pts in reversed(steps):
+        rev.append(('L', [start]) if op == 'L' else ('C', [pts[1], pts[0], start]))
+    return rev + [('Z', [])]
+
+
+def drawn_zhong():
+    """中: the box as a ring (outer clockwise, inner the other way) and the stem over it; nonzero fill."""
+    x0, y0, x1, y1 = BOX
+    inner = max(BOX_RADIUS - STROKE, 0.02)
+    half = STROKE / 2
+    return (rounded_rect(x0, y0, x1, y1, BOX_RADIUS) +
+            rounded_rect(x0 + STROKE, y0 + STROKE, x1 - STROKE, y1 - STROKE, inner, clockwise=False) +
+            rounded_rect(-half, -STEM, half, STEM, half))
+
+
 def read(font_path):
     font = TTFont(font_path)
     em = font['head'].unitsPerEm
@@ -61,6 +100,9 @@ def read(font_path):
     glyphs = font.getGlyphSet()
     out = []
     for ch, name in LETTERS:
+        if ch == '中':
+            out.append((ch, name, drawn_zhong()))
+            continue
         glyph = glyphs[cmap[ord(ch)]]
         bounds = BoundsPen(glyphs)
         glyph.draw(bounds)
@@ -85,7 +127,7 @@ def num(v):
 def write_cpp(letters, source):
     lines = [
         '// The input method entry\'s letters as outlines (tools/generate-ime-glyphs.py; do not edit):',
-        f'// {source}, SIL Open Font License 1.1. Em units, centred on the ink, y down.',
+        f'// 中 drawn by the script; the others from {source}, SIL Open Font License 1.1. Em units, centred on the ink, y down.',
         '#pragma once',
         '',
         '#include <span>',
@@ -152,7 +194,7 @@ def write_cs(letters, source):
 
     lines = [
         '// The input method entry\'s letters as outlines (tools/generate-ime-glyphs.py; do not edit):',
-        f'// {source}, SIL Open Font License 1.1. Em units, centred on the ink, y down.',
+        f'// 中 drawn by the script; the others from {source}, SIL Open Font License 1.1. Em units, centred on the ink, y down.',
         'namespace Atrium.Settings;',
         '',
         'internal static class ImeGlyphData',

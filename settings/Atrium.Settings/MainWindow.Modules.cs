@@ -589,7 +589,7 @@ public sealed partial class MainWindow
 
         protected void SetBarClock()
         {
-            var clock = DateTime.Now;
+            var clock = PreviewClock.Now;
             Face.SetClock(clock.ToString(M.CurrentSettings.ShowClockSeconds ? "H:mm:ss" : "H:mm"), clock.ToString("yyyy/M/d"));
         }
 
@@ -1428,7 +1428,6 @@ public sealed partial class MainWindow
         private readonly TextBlock[] _week = new TextBlock[7], _days = new TextBlock[42], _labels = new TextBlock[42];
         private readonly Border _today = Plate(AccentBrush, 12);
         private readonly Rectangle _line = new() { IsHitTestVisible = false };
-        private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _tick;
 
         private sealed record Frame(double Left, double Top);
 
@@ -1453,17 +1452,12 @@ public sealed partial class MainWindow
             _lunar = Words(11.5, _cap.Sub, false, TextAlignment.Right);
             Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(_time, FontNumeralAlignment.Tabular);
             foreach (var e in new UIElement[] { _time, _date, _lunar }) Marks.Children.Add(e);
-            _tick = m.DispatcherQueue.CreateTimer();
-            _tick.Interval = TimeSpan.FromSeconds(1);
-            _tick.Tick += (_, _) => Kick(); // the seconds
         }
 
         private static double CardH => MonthH + WeekH + 6 * CellH + 8 + Footer;
         protected override bool IsOpen => M.CurrentSettings.ShowClock;
         protected override Size PopupSize => new(CW, CardH + CapGap + BarHeight);
         protected override Vector2 Anchor => new((float)(Bar!.ClockX >= 0 ? Bar.ClockX + Bar.ClockW / 2 : BarRight), (float)PopupBottom);
-        protected override void Entered() { if (!M._scenesPaused) _tick.Start(); }
-        protected override void Left() => _tick.Stop(); protected override void Paused() => _tick.Stop(); protected override void Resumed() => _tick.Start();
 
         protected override (GlassTile[] Tiles, object State) Pieces()
         {
@@ -1481,7 +1475,7 @@ public sealed partial class MainWindow
         {
             var f = (Frame)state;
             PlaceMarks(f.Left, f.Top);
-            var now = DateTime.Now;
+            var now = PreviewClock.Now;
             // The month and its buttons (PaintMonth).
             _title.Text = Loc.English ? $"{Loc.T(Months[now.Month - 1])} {now.Year}" : $"{now.Year}年{now.Month}月";
             Box(_title, Pad + 6, 0, CW / 2 + 20 - Pad - 6, MonthH);

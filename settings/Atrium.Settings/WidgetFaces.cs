@@ -115,7 +115,7 @@ internal static partial class WidgetFaces
         try
         {
             string zone = WorldCities.FirstOrDefault(c => c.Name == name).Zone;
-            if (zone != null) t = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone));
+            if (zone != null) t = TimeZoneInfo.ConvertTimeFromUtc(PreviewClock.Utc, TimeZoneInfo.FindSystemTimeZoneById(zone));
         }
         catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException) { }
         double hours = Math.Round((t - now).TotalMinutes / 15) / 4;
@@ -151,7 +151,7 @@ internal static partial class WidgetFaces
                 Fill = kind == "weather" ? SkyBrush() : new SolidColorBrush(Colors.White),
             });
         }
-        var now = DateTime.Now;
+        var now = PreviewClock.Now;
         switch (kind)
         {
             case "clock" when size == "small":
@@ -392,9 +392,6 @@ internal static partial class WidgetFaces
     // existing render request; it does not add a clock or a polling timer to the gallery.
     public static long Stamp(string kind) => kind switch
     {
-        "clock" => DateTime.Now.Ticks / TimeSpan.TicksPerSecond,
-        "digital" => DateTime.Now.Ticks / TimeSpan.TicksPerMinute,
-        "calendar" => DateTime.Today.Ticks,
         "battery" => BatteryStamp(),
         "weather" => WeatherStamp(),
         _ => 0,

@@ -42,6 +42,8 @@
     <Content Include="..\..\assets\atrium.ico" Link="Assets\atrium.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\assets\atrium-256.png" Link="Assets\atrium-256.png" CopyToOutputDirectory="PreserveNewest" />
     <!-- The Stage Manager page's windows and icons (drawn by the export-stage-art option of a development build). -->
+    <!-- The icons of the apps the notification sources and the players lists name (assets/apps/README.md). -->
+    <Content Include="..\..\assets\apps\*.png" Link="Assets\Apps\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\assets\stage\*.png" Link="Assets\Stage\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\assets\backgrounds\*.jpg;..\..\assets\backgrounds\README.md" Link="Assets\Backgrounds\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- The interface face (D40); the core reads it from here too (Settings\Fonts). -->
