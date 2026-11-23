@@ -58,6 +58,10 @@ private:
 
     void Paint(Canvas& c);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
+    bool InClose(int index, POINT pt) const;
+    bool OnTimer(WPARAM timerId);
+    void OnMouseMove(POINT pt);
+    void OnButtonUp(UINT message, POINT pt);
     void Layout(float scale, float maxSpanDip, bool vertical);
     void Place();          // the surface's rectangle for the cards, inside the anchor
     void UpdateThumbs();   // DWM: where the pictures go, how visible

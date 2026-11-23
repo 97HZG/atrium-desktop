@@ -148,13 +148,13 @@ void TestLifecycle(Runner& r)
         const double inf = INFINITY;
         ImeBubbleModel bubble;
         bubble.Begin(nan);
-        Require(r, !bubble.active() && !bubble.Step(1000).active, "a broken start never begins");
+        Require(r, !bubble.Active() && !bubble.Step(1000).active, "a broken start never begins");
         bubble.Begin(inf);
-        Require(r, !bubble.active(), "and neither does an infinite one");
+        Require(r, !bubble.Active(), "and neither does an infinite one");
         bubble.Begin(0);
-        Require(r, !bubble.active() && !bubble.Mergeable(1) && !bubble.Fuse(1), "time nought is no clock either");
+        Require(r, !bubble.Active() && !bubble.Mergeable(1) && !bubble.Fuse(1), "time nought is no clock either");
         bubble.Begin(1000);
-        Require(r, !bubble.Fuse(nan) && !bubble.Fuse(inf) && bubble.fusions() == 1, "a broken merge time changes nothing");
+        Require(r, !bubble.Fuse(nan) && !bubble.Fuse(inf) && bubble.Fusions() == 1, "a broken merge time changes nothing");
         Require(r, !bubble.Step(nan).active && !bubble.Step(inf).active, "a broken frame time draws nothing");
         Require(r, bubble.Step(1100).active, "while the real clock still runs it");
     });
@@ -237,8 +237,8 @@ void TestDeterminismAndConstants(Runner& r)
 void TestFeelAndTimeline(Runner& r)
 {
     Run(r, "the merge feel and the life are the model's own, and a restart keeps them", [&] {
-        Require(r, std::abs(ImeBubbleModel::softBounce(196, ImeBubbleModel::kRebound) - 1.308f) < 0.01f, "the bounce matches the old one");
-        Require(r, ImeBubbleModel::softBounce(900, ImeBubbleModel::kRebound) < 1.01f && ImeBubbleModel::softBounce(196, 0.05f) < 1.10f,
+        Require(r, std::abs(ImeBubbleModel::SoftBounce(196, ImeBubbleModel::kRebound) - 1.308f) < 0.01f, "the bounce matches the old one");
+        Require(r, ImeBubbleModel::SoftBounce(900, ImeBubbleModel::kRebound) < 1.01f && ImeBubbleModel::SoftBounce(196, 0.05f) < 1.10f,
                 "the bounce settles and scales with rebound");
         static_assert(ImeBubbleModel::kCompression == 0.10f && ImeBubbleModel::kRebound == 0.31f && ImeBubbleModel::kWobbleAmp == 0.875f &&
                           ImeBubbleModel::kWobbleHz == 4.3f && ImeBubbleModel::kLifeMs == 1060.f,
@@ -346,7 +346,7 @@ void TestMergesAndFeelAnchor(Runner& r)
         const double fuseAt = 1000 + ImeBubbleModel::kPopAt - 100;
         const double end1 = bubble.EndMs();
         const auto before = bubble.Step(fuseAt);
-        Require(r, bubble.fusions() == 1 && before.active && bubble.Fuse(fuseAt) && bubble.fusions() == 2 && bubble.EndMs() > end1,
+        Require(r, bubble.Fusions() == 1 && before.active && bubble.Fuse(fuseAt) && bubble.Fusions() == 2 && bubble.EndMs() > end1,
                 "a live state merges and extends life");
         const auto at = bubble.Step(fuseAt);
         Require(r, std::abs(at.scale - before.scale) < 0.01f && std::abs(at.grow - 1.f) < 1e-4f, "the size waits for the newcomer to touch");
@@ -370,7 +370,7 @@ void TestMergesAndFeelAnchor(Runner& r)
         const float step = bubble.ScaleAt(2) - bubble.ScaleAt(1);
         for (int t = 1200; double(t) < bubble.PopAt(); t += 7) {
             const double td = double(t);
-            const float want = td < touch ? bubble.ScaleAt(1) : bubble.ScaleAt(1) + step * ImeBubbleModel::softBounce(td - touch, ImeBubbleModel::kRebound);
+            const float want = td < touch ? bubble.ScaleAt(1) : bubble.ScaleAt(1) + step * ImeBubbleModel::SoftBounce(td - touch, ImeBubbleModel::kRebound);
             Require(r, std::abs(bubble.Step(td).grow - want) < 1e-5f, "the size is the base plus one step");
         }
         const double absorb = bubble.AbsorbMs();
@@ -406,7 +406,7 @@ void TestMergesAndFeelAnchor(Runner& r)
         for (int i = 0; i < 30; ++i, now += 100)
             Require(r, bubble.Fuse(now), "each state inside the life merges");
         Require(r,
-                bubble.fusions() > ImeBubbleModel::kMaxFusions && bubble.EndMs() > now &&
+                bubble.Fusions() > ImeBubbleModel::kMaxFusions && bubble.EndMs() > now &&
                     bubble.EndMs() - 1000 >= ImeBubbleModel::kPopAt + ImeBubbleModel::kSwellMs + ImeBubbleModel::kBurstMs - 1,
                 "the last merge still owns the bubble");
         const auto grown = bubble.Step(bubble.PopAt() - 1);
@@ -584,7 +584,7 @@ void TestRapidMergesAndMelt(Runner& r)
     Run(r, "two states in the same millisecond both rise", [&] {
         ImeBubbleModel bubble;
         bubble.Begin(1000);
-        Require(r, bubble.Fuse(1200) && bubble.Fuse(1200) && bubble.fusions() == 3, "both merge at same time");
+        Require(r, bubble.Fuse(1200) && bubble.Fuse(1200) && bubble.Fusions() == 3, "both merge at same time");
         const auto both = bubble.Step(1200);
         Require(r, both.lobeCount == 2, "both newcomers rise");
         for (int i = 0; i < both.lobeCount; ++i)
@@ -613,13 +613,13 @@ void TestRapidMergesAndMelt(Runner& r)
         }
         const auto nearPop = bubble.Step(bubble.PopAt() - 1);
         Require(r,
-                bubble.fusions() == 11 && bubble.Step(now - 150 + 1).lobeCount == 6 &&
+                bubble.Fusions() == 11 && bubble.Step(now - 150 + 1).lobeCount == 6 &&
                     std::abs(nearPop.grow - bubble.ScaleAt(ImeBubbleModel::kMaxFusions)) < 0.02f && nearPop.lobeCount == 0,
                 "ten merges reach cap and swallow before burst");
     });
     Run(r, "a frame carries the newest newcomers, the model counts them all", [&] {
         ImeBubbleModel bubble = MakeMerged(1000, 8, 1200, 5.0);
-        Require(r, bubble.fusions() == 9, "the model counts them all");
+        Require(r, bubble.Fusions() == 9, "the model counts them all");
         const auto f = bubble.Step(1240);
         const float thirdU = float((1240 - (1200 + 2 * 5.0)) / bubble.AbsorbMs());
         const float newestU = float((1240 - (1200 + 7 * 5.0)) / bubble.AbsorbMs());
@@ -649,7 +649,7 @@ void TestRapidMergesAndMelt(Runner& r)
     });
     Run(r, "ten rapid switches keep every frame inside the window", [&] {
         ImeBubbleModel bubble = MakeMerged(1000, 10, 1150, 120.0);
-        Require(r, bubble.fusions() == 11, "ten switches on top of the first bubble");
+        Require(r, bubble.Fusions() == 11, "ten switches on top of the first bubble");
         for (int t = 1008; double(t) < bubble.EndMs(); t += 8)
             if (const auto f = bubble.Step(double(t)); f.active)
                 CheckFrameBounds(r, f, true);
@@ -721,7 +721,7 @@ void TestBurstAndFoam(Runner& r)
         ImeBubbleModel merged = MakeMerged(1000, 10, 1150, 120.0);
         const int mergedCount = merged.Step(merged.PopAt() + ImeBubbleModel::kSwellMs + 10).beadCount;
         Require(r,
-                merged.fusions() == 11 && mergedCount - loneCount >= 15 && mergedCount == ImeBubbleModel::kMaxBeads && loneCount >= ImeBubbleModel::kMinBeads &&
+                merged.Fusions() == 11 && mergedCount - loneCount >= 15 && mergedCount == ImeBubbleModel::kMaxBeads && loneCount >= ImeBubbleModel::kMinBeads &&
                     loneCount <= 13,
                 "ten-merge foam reaches cap and exceeds lone");
     });
