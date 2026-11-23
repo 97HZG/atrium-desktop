@@ -14,14 +14,17 @@ namespace atrium {
 
 namespace {
 
-constexpr UINT WM_GENIE_PICTURE = WM_APP + 0x5E;
-constexpr UINT_PTR kWatchTimer = 0x4751, kIdleTimer = 0x4752;
+constexpr UINT WM_GENIE_PICTURE = WM_APP + 0x5E, WM_GENIE_RESTORE = WM_APP + 0x5F;
+constexpr UINT_PTR kWatchTimer = 0x4751, kIdleTimer = 0x4752, kFreshTimer = 0x4753;
 constexpr UINT kWatchMs = 300;
 constexpr ULONGLONG kDrawnMs = 700;      // a window this long in front has drawn itself
 constexpr ULONGLONG kNearMs = 1500;      // the picture's age while the pointer is near the caption buttons
 constexpr ULONGLONG kFarMs = 20000;      // elsewhere: PrintWindow makes the app draw itself whole
 constexpr int kLargeMax = 1600;          // the picture, at most this many px either way
+constexpr UINT kIdleMs = 4000;          // the layer stays this long after it was last wanted
+constexpr UINT kFreshMs = 180;           // the bar's minimize waits at most this long for a fresh picture
 constexpr double kFlightMs = 560;
+constexpr double kHoldMs = 90, kDissolveMs = 160; // out of the icon: the picture over the window, then fading
 constexpr int kRows = 64;                // the picture poured as this many slices
 
 GenieMinimize* g_genie = nullptr; // the one effect, for its hook
@@ -67,23 +70,32 @@ GenieMinimize::GenieMinimize(HINSTANCE instance, std::function<std::optional<REC
     : surface_(instance, L"Atrium Genie", false, 0), snapshots_(surface_.Hwnd(), WM_GENIE_PICTURE), target_(std::move(target)), skip_(std::move(skip))
 {
     surface_.SetGlassless(true);
+    // Over everything and never in the way: clicks go through to the windows below.
+    const HWND h = surface_.Hwnd();
+    SetWindowLongPtrW(h, GWL_EXSTYLE, GetWindowLongPtrW(h, GWL_EXSTYLE) | WS_EX_LAYERED | WS_EX_TRANSPARENT);
+    SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM, LRESULT&) {
         if (m == WM_TIMER && w == kWatchTimer) {
             Watch();
-            return true;
-        }
-        if (m == WM_TIMER && w == kIdleTimer) {
+        } else if (m == WM_TIMER && w == kIdleTimer) {
             KillTimer(surface_.Hwnd(), kIdleTimer);
             if (flights_.empty())
                 surface_.Hide(false); // idle for a while: its buffers go
-            return true;
-        }
-        if (m != WM_GENIE_PICTURE)
+        } else if (m == WM_TIMER && w == kFreshTimer) {
+            RunPending();
+        } else if (m == WM_GENIE_RESTORE) {
+            RunRestores();
+        } else if (m == WM_GENIE_PICTURE) {
+            for (WindowSnapshots::Result& r : snapshots_.Take())
+                if (r.large.ok && pictures_.contains(r.window)) {
+                    pictures_[r.window].large = std::make_shared<const WindowPicture>(std::move(r.large));
+                    if (r.window == pending_)
+                        RunPending();
+                }
+        } else {
             return false;
-        for (WindowSnapshots::Result& r : snapshots_.Take())
-            if (r.large.ok && pictures_.contains(r.window))
-                pictures_[r.window].large = std::make_shared<const WindowPicture>(std::move(r.large));
+        }
         return true;
     };
 }
@@ -105,6 +117,7 @@ void GenieMinimize::SetEnabled(bool on)
             UnhookWinEvent(hook_);
         hook_ = nullptr;
         KillTimer(surface_.Hwnd(), kWatchTimer);
+        RunPending();
         Release(held_);
         pictures_.clear();
         front_ = nullptr;
@@ -119,6 +132,29 @@ void GenieMinimize::Release(HWND window)
             Transitions(window, true);
         held_ = nullptr;
     }
+}
+
+void GenieMinimize::Hold(HWND window)
+{
+    if (window == held_)
+        return;
+    Release(held_);
+    Transitions(window, false);
+    held_ = window;
+}
+
+void GenieMinimize::Arm(const RECT& frame)
+{
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromRect(&frame, MONITOR_DEFAULTTONEAREST), &mi);
+    if (!surface_.Visible()) {
+        surface_.Show(mi.rcMonitor, false, POINT{mi.rcMonitor.left, mi.rcMonitor.top}, false);
+    } else {
+        const RECT now = surface_.Rect();
+        if (!EqualRect(&now, &mi.rcMonitor))
+            surface_.Move(mi.rcMonitor);
+    }
+    SetTimer(surface_.Hwnd(), kIdleTimer, kIdleMs, nullptr);
 }
 
 // The window in front: its picture kept fresh, and its own minimize animation off once there is one.
@@ -142,15 +178,15 @@ void GenieMinimize::Watch()
         return;
     Picture& p = pictures_[root];
     p.frame = Frame(root);
-    if (p.large && held_ != root) {
-        Transitions(root, false);
-        held_ = root;
-    }
+    if (p.large)
+        Hold(root);
     POINT pt{};
     GetCursorPos(&pt);
     const float s = float(GetDpiForWindow(root)) / 96.f;
     const RECT& r = p.frame;
     const bool atButtons = PtInRect(&r, pt) && pt.y < r.top + LONG(56 * s) && pt.x > r.right - LONG(200 * s);
+    if (atButtons && p.large)
+        Arm(r); // a minimize may come: the first frame should not wait for the layer
     if (now - frontSince_ < kDrawnMs || now - p.taken < (atButtons ? kNearMs : kFarMs))
         return;
     p.taken = now;
@@ -161,35 +197,93 @@ void GenieMinimize::Minimizing(HWND window)
 {
     if (!enabled_ || window != held_)
         return; // not prepared for: Windows' own animation played
+    eventMs_ = ClockMs();
     const auto it = pictures_.find(window);
     const std::optional<RECT> to = target_ ? target_(window) : std::nullopt;
-    Release(window); // down now: restoring it is Windows' own
+    Release(window); // down now: restoring it is Windows' own unless the bar restores it
     front_ = nullptr;
     if (it == pictures_.end() || !it->second.large || !to)
         return;
     Flight f;
     f.picture = it->second.large;
-    f.key = L"genie|" + std::to_wstring(++flightGen_);
     f.from = it->second.frame;
     f.to = *to;
-    f.startMs = ClockMs();
+    f.window = window;
+    Launch(std::move(f));
+}
+
+bool GenieMinimize::Minimize(HWND window, std::function<void()> minimize)
+{
+    if (!enabled_ || pending_ || !Minimizable(window) || (skip_ && skip_(window)) || !target_ || !target_(window))
+        return false;
+    Picture& p = pictures_[window];
+    p.frame = Frame(window);
+    p.taken = GetTickCount64();
+    Hold(window);
+    front_ = window;
+    Arm(p.frame);
+    pending_ = window;
+    pendingMinimize_ = std::move(minimize);
+    snapshots_.Request(window, 64, 64, 0, kLargeMax);
+    SetTimer(surface_.Hwnd(), kFreshTimer, kFreshMs, nullptr);
+    return true;
+}
+
+void GenieMinimize::RunPending()
+{
+    KillTimer(surface_.Hwnd(), kFreshTimer);
+    const HWND window = std::exchange(pending_, nullptr);
+    std::function<void()> minimize = std::exchange(pendingMinimize_, nullptr);
+    if (!window || !minimize)
+        return;
+    const auto it = pictures_.find(window);
+    if (it == pictures_.end() || !it->second.large)
+        Release(window); // nothing to pour: Windows' own animation
+    minimize();
+}
+
+bool GenieMinimize::Restore(HWND window, std::function<void()> restore)
+{
+    if (!enabled_ || (skip_ && skip_(window)))
+        return false;
+    const auto it = pictures_.find(window);
+    const std::optional<RECT> to = target_ ? target_(window) : std::nullopt;
+    if (it == pictures_.end() || !it->second.large || !to)
+        return false;
+    Flight f;
+    f.picture = it->second.large;
+    f.from = it->second.frame;
+    f.to = *to;
+    f.window = window;
+    f.restore = std::move(restore);
+    eventMs_ = ClockMs();
+    Launch(std::move(f));
+    return true;
+}
+
+void GenieMinimize::Launch(Flight f)
+{
+    f.key = L"genie|" + std::to_wstring(++flightGen_);
+    Arm(f.from);
     flights_.push_back(std::move(f));
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(MonitorFromRect(&it->second.frame, MONITOR_DEFAULTTONEAREST), &mi);
-    KillTimer(surface_.Hwnd(), kIdleTimer);
-    if (!surface_.Visible())
-        surface_.Show(mi.rcMonitor, false, POINT{mi.rcMonitor.left, mi.rcMonitor.top}, false);
-    else
-        surface_.Move(mi.rcMonitor);
     surface_.Invalidate();
+}
+
+// Out of the icon and landed: the window comes back under its picture, without an animation of its own.
+void GenieMinimize::RunRestores()
+{
+    for (Flight& f : flights_)
+        if (f.restoreDue && f.restore) {
+            if (IsWindow(f.window))
+                Transitions(f.window, false);
+            std::exchange(f.restore, nullptr)();
+        }
 }
 
 void GenieMinimize::Paint(Canvas& c)
 {
     for (auto it = flights_.begin(); it != flights_.end();) {
-        const float t = float(std::clamp((c.now - it->startMs) / kFlightMs, 0.0, 1.0));
-        PaintFlight(c, *it, t);
-        if (t >= 1) {
+        if (PaintOne(c, *it)) {
             surface_.ForgetImage(it->key);
             it = flights_.erase(it);
         } else {
@@ -199,14 +293,37 @@ void GenieMinimize::Paint(Canvas& c)
     if (!flights_.empty())
         c.Continue();
     else
-        SetTimer(surface_.Hwnd(), kIdleTimer, 3000, nullptr);
+        SetTimer(surface_.Hwnd(), kIdleTimer, kIdleMs, nullptr);
+}
+
+// One flight's frame: into the icon over kFlightMs; out of it the same way backwards, then the picture held
+// over the restored window while it draws, then fading into it.
+bool GenieMinimize::PaintOne(Canvas& c, Flight& f)
+{
+    if (f.startMs <= 0) {
+        f.startMs = c.now; // time runs from the first frame on screen: no jump at the start
+        Log(L"genie: %s, first frame %.0f ms after it began", f.restore ? L"restore" : L"minimize", c.now - eventMs_);
+    }
+    const double ms = c.now - f.startMs;
+    const float t = float(std::clamp(ms / kFlightMs, 0.0, 1.0));
+    if (!f.restore && !f.restoreDue) {
+        PaintFlight(c, f, t, 1);
+        return t >= 1;
+    }
+    if (t >= 1 && !f.restoreDue) {
+        f.restoreDue = true;
+        PostMessageW(surface_.Hwnd(), WM_GENIE_RESTORE, 0, 0);
+    }
+    const float fade = 1 - SmoothStep(float(kFlightMs + kHoldMs), float(kFlightMs + kHoldMs + kDissolveMs), float(ms));
+    PaintFlight(c, f, 1 - t, fade);
+    return ms >= kFlightMs + kHoldMs + kDissolveMs && !f.restore;
 }
 
 // The picture in kRows slices across the way to the icon ("along"). In the frame where the icon lies
 // ahead, a slice at v (0 the far side, 1 the near) slides from its place to the icon's line, the near
 // ones first; at any point of the way the two sides bend from the window's towards the icon's, more as
 // the pour goes on, along an S curve.
-void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t)
+void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t, float alpha)
 {
     const WindowPicture& pic = *f.picture;
     const RECT origin = surface_.Rect();
@@ -234,7 +351,9 @@ void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t)
         lo = Lerp(b0, iconMid - iconHalf, k);
         hi = Lerp(b1, iconMid + iconHalf, k);
     };
-    const float opacity = 1 - SmoothStep(0.86f, 1.f, t);
+    const float opacity = (1 - SmoothStep(0.86f, 1.f, t)) * alpha;
+    if (opacity <= 0.002f)
+        return;
     const IconImage& image = pic.image;
     const float pw = float(pic.width), ph = float(pic.height), pad = float(kPicturePad);
     for (int i = 0; i < kRows; ++i) {

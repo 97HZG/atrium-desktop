@@ -43,6 +43,8 @@ namespace atrium {
 
 namespace {
 
+TaskModel::WindowStep g_minimizing, g_restoring; // SetWindowSteps
+
 constexpr UINT_PTR kTimerId = 0xA701;     // >= 0xA700: clear of the host's own timers
 constexpr UINT kCoalesceMs = 30;
 constexpr UINT kWindowIconTimeoutMs = 100; // WM_GETICON on a possibly hung window
@@ -1467,11 +1469,24 @@ struct TaskModel::Impl {
             SendMessageTimeoutW(h, WM_SYSCOMMAND, command, 0, SMTO_ABORTIFHUNG, 500, &ignored);
     }
 
+    static void Minimize(HWND h)
+    {
+        if (!g_minimizing || !g_minimizing(h, [h] { SysCommand(h, SC_MINIMIZE); }))
+            SysCommand(h, SC_MINIMIZE);
+    }
+
     static void BringToFront(HWND h)
     {
         // A closed-to-tray window must be restored by its app, not by the task switcher.
         if (!IsWindowVisible(h))
             return;
+        if (IsIconic(h) && g_restoring && g_restoring(h, [h] { Raise(h); }))
+            return;
+        Raise(h);
+    }
+
+    static void Raise(HWND h)
+    {
         if (IsIconic(h))
             SysCommand(h, SC_RESTORE);
         HWND target = GetLastActivePopup(h);
@@ -1512,7 +1527,7 @@ struct TaskModel::Impl {
         if (windows.size() == 1) {
             HWND w = windows[0];
             if (inGroup && !IsIconic(w))
-                SysCommand(w, SC_MINIMIZE);
+                Minimize(w);
             else
                 BringToFront(w);
             return;
@@ -1682,6 +1697,12 @@ void TaskModel::ActivateWindow(HWND window)
 {
     if (IsWindow(window))
         Impl::BringToFront(window);
+}
+
+void TaskModel::SetWindowSteps(WindowStep minimizing, WindowStep restoring)
+{
+    g_minimizing = std::move(minimizing);
+    g_restoring = std::move(restoring);
 }
 
 bool TaskModel::CloseWindow(HWND window)

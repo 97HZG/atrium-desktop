@@ -67,9 +67,9 @@ void BarExtrasPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float o
 
 void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)
 {
-    // Nine small apps, three by three, in outline: squares of 0.26 with gaps of 0.11.
-    const D2D1_RECT_F box = Square(r, 0.86f);
-    const float s = box.right - box.left, tile = s * 0.26f, step = s * 0.37f, stroke = std::max(1.f, s * 0.065f);
+    // Nine small apps, three by three, in outline: squares of 0.30 with gaps of 0.05.
+    const D2D1_RECT_F box = Square(r, 0.90f);
+    const float s = box.right - box.left, tile = s * 0.30f, step = s * 0.35f, stroke = std::max(1.f, s * 0.065f);
     const float corner = tile * 0.3f - stroke / 2;
     brush->SetColor(ink);
     for (int i = 0; i < 9; ++i) {

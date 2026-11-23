@@ -183,6 +183,7 @@ private:
     D2D1_RECT_F MainRect() const;
     D2D1_RECT_F ShelfRect() const;
     D2D1_RECT_F PowerRect() const; // the power card when fully open
+    float PowerRadius() const;     // its corners, concentric with the panel's
     D2D1_RECT_F SearchRect() const;
     D2D1_RECT_F AllButton() const; // "全部应用" / "返回"
     D2D1_RECT_F SyncButton() const; // beside it: sync with the Windows start menu
@@ -195,7 +196,7 @@ private:
     int FolderRows() const;
     D2D1_RECT_F FolderCell(int slot) const; // likewise in the folder's card
     float ButtonSize() const;      // round buttons in the capsule
-    float Covered(const D2D1_RECT_F& r, double now) const; // 1, or less while the power card covers r
+    float Covered(const D2D1_RECT_F& r) const; // 1, or less while the power card covers r
     D2D1_RECT_F IndexRect() const; // the A-Z letters down the list's left side
     bool Indexed() const { return allApps_ && query_.empty(); }
 
@@ -298,7 +299,7 @@ private:
     std::vector<PowerRow> power_;
     bool powerOpen_ = false;
     int powerSel_ = -1;
-    double powerMs_ = 0;
+    float powerGrow_ = 0, powerV_ = 0; // the card's spring: 0 folded into the corner, 1 open
     // Account shown on the shelf.
     std::wstring userName_;
     IconImage avatar_;

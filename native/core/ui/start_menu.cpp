@@ -62,9 +62,9 @@ constexpr StartIconSize kStartIcons[StartLayout::kSizes] = {
 constexpr float kRowH = 52, kRowIcon = 28, kHeadH = 34, kListTop = 84;
 constexpr float kFolderHead = 52, kFolderFoot = 24, kFolderPad = 14; // the open folder: its name above its apps, its dots below
 constexpr float kIndexW = 22, kHint = 52;           // the A-Z list's letters down its left side; the letter picked, large
-constexpr float kPowerW = 176, kPowerRowH = 44, kPowerPad = 12;
+constexpr float kPowerW = 176, kPowerRowH = 44, kPowerPad = 12, kPowerInset = 8;
 constexpr float kGrip = 30; // the resize grip: the panel's top right corner
-constexpr double kStageMs = 260, kStaggerMs = 12, kRippleMs = 520, kPowerMs = 220;
+constexpr double kStageMs = 260, kStaggerMs = 12, kRippleMs = 520;
 // The folder's card out of its tile, with a little overshoot; back into it quicker, without.
 constexpr motion::Spring kFolderOpen{0.46f, 0.72f}, kFolderClose{0.30f, 1.f};
 constexpr double kFolderAppMs = 300, kFolderAppStaggerMs = 22; // its apps, one after another
@@ -344,23 +344,25 @@ D2D1_RECT_F StartMenu::FolderCell(int slot) const
 
 D2D1_RECT_F StartMenu::PowerRect() const
 {
-    // Right-aligned with the power button, the last in the capsule.
-    D2D1_RECT_F shelf = ShelfRect();
-    float right = std::min(shelf.right - (barH_ - ButtonSize()) / 2 + 6, W());
-    float bottom = shelf.top - 8, h = float(power_.size()) * kPowerRowH + 2 * kPowerPad;
+    // In the panel's bottom right corner, over the power button at the capsule's end: the same inset from
+    // the panel's right and bottom edges.
+    const D2D1_RECT_F main = MainRect();
+    const float right = main.right - kPowerInset, bottom = main.bottom - kPowerInset, h = float(power_.size()) * kPowerRowH + 2 * kPowerPad;
     return D2D1::RectF(right - kPowerW, bottom - h, right, bottom);
 }
 
-float StartMenu::Covered(const D2D1_RECT_F& r, double now) const
+float StartMenu::PowerRadius() const { return std::max(12.f, radius_ - kPowerInset); }
+
+float StartMenu::Covered(const D2D1_RECT_F& r) const
 {
     // Content under the power card fades as it opens: the card's glass is
     // below the content layer, so the content would show through it.
-    if (!powerOpen_)
+    if (powerGrow_ <= 0)
         return 1;
     D2D1_RECT_F p = PowerRect();
     if (r.right <= p.left || r.left >= p.right || r.bottom <= p.top || r.top >= p.bottom)
         return 1;
-    return 1 - motion::EaseOut(float((now - powerMs_) / (kPowerMs * 0.6)));
+    return 1 - std::clamp(powerGrow_ * 1.6f, 0.f, 1.f);
 }
 
 void StartMenu::LoadAccount()
@@ -425,6 +427,7 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     hover_.clear();
     pressed_.clear();
     powerOpen_ = false;
+    powerGrow_ = powerV_ = 0;
     power_ = {{L"\uE708", Tr(L"Sleep"), PowerAction::Sleep},
               {L"\uE72C", Tr(L"Restart"), PowerAction::Restart},
               {L"\uE7E8", Tr(L"Shut down"), PowerAction::Shutdown},
@@ -1020,15 +1023,26 @@ void StartMenu::Paint(Canvas& c)
     if (drag_.on)
         PaintDragged(c, t);
     catalog_.SetVisibleIcons(VisibleIconsOwner::Start, visibleIcons_);
-    if (powerOpen_) {
-        float e = float((now - powerMs_) / kPowerMs);
-        D2D1_RECT_F pc = PowerRect();
-        float grow = 0.55f + 0.45f * motion::EaseOutBack(e, 1.5f);
-        pc.top = pc.bottom - (pc.bottom - pc.top) * grow;
-        shapes.push_back({pc, 20});
-        if (c.panel)
-            c.Fill(pc, 20, t.panel);
-        PaintPower(c, t);
+    if (powerOpen_ || powerGrow_ > 0) {
+        // The power card springs out of its corner as popups open (kPop) and folds back as the folder does.
+        const float goal = powerOpen_ ? 1.f : 0.f;
+        (powerOpen_ ? motion::kPop : kFolderClose).Step(powerGrow_, powerV_, goal, dt_ / 1000);
+        if (motion::Spring::AtRest(powerGrow_, powerV_, goal) || (!powerOpen_ && powerGrow_ < 0.01f)) {
+            powerGrow_ = goal;
+            powerV_ = 0;
+        } else {
+            c.Continue();
+            animating = true;
+        }
+        if (powerGrow_ > 0) {
+            const D2D1_RECT_F full = PowerRect();
+            const float k = 0.5f + 0.5f * powerGrow_;
+            const D2D1_RECT_F pc = D2D1::RectF(full.right - (full.right - full.left) * k, full.bottom - (full.bottom - full.top) * k, full.right, full.bottom);
+            shapes.push_back({pc, PowerRadius() * std::min(k, 1.f)});
+            if (c.panel)
+                c.Fill(pc, PowerRadius(), t.panel);
+            PaintPower(c, t);
+        }
     }
     c.EndGroup();
     for (ShapeDip& sh : shapes) {
@@ -1193,7 +1207,7 @@ void StartMenu::PaintTiles(Canvas& c, const Theme& t, float shown)
         float e = motion::EaseOut(float((now - stageMs_ - kStaggerMs * std::min(slot % per, 18)) / kStageMs));
         if (e < 1)
             c.Continue();
-        float vis = Covered(r, now) * shown;
+        float vis = Covered(r) * shown;
         if (vis <= 0.01f)
             continue;
         if (vis < 1)
@@ -1271,7 +1285,7 @@ void StartMenu::PaintRows(Canvas& c, const Theme& t, const std::vector<Row>& row
         float e = motion::EaseOut(float((now - stageMs_ - kStaggerMs * std::min(staged++, 8)) / kStageMs));
         if (e < 1)
             c.Continue();
-        float visible = Covered(r, now) * shown;
+        float visible = Covered(r) * shown;
         if (visible <= 0.01f)
             continue;
         if (visible < 1)
@@ -1623,20 +1637,21 @@ void StartMenu::PaintShelf(Canvas& c, const Theme& t)
 void StartMenu::PaintPower(Canvas& c, const Theme& t)
 {
     D2D1_RECT_F card = PowerRect();
-    float e = float((c.now - powerMs_) / kPowerMs);
-    if (e < 1)
-        c.Continue();
-    c.BeginGroup(motion::EaseOut(e * 1.3f), 0.92f + 0.08f * motion::EaseOutBack(e, 1.5f), card.right - 22, card.bottom);
+    // The rows grow with the card from its corner; they fade in a little behind it.
+    c.BeginGroup(std::clamp((powerGrow_ - 0.15f) / 0.6f, 0.f, 1.f), 0.5f + 0.5f * powerGrow_, card.right, card.bottom);
+    constexpr float kRowInset = 8;
+    const float rowR = std::max(4.f, PowerRadius() - kRowInset); // nested in the card's corners
     for (int i = 0; i < int(power_.size()); ++i) {
-        D2D1_RECT_F row =
-            D2D1::RectF(card.left + 8, card.top + kPowerPad + kPowerRowH * float(i), card.right - 8, card.top + kPowerPad + kPowerRowH * float(i + 1));
+        D2D1_RECT_F row = D2D1::RectF(card.left + kRowInset, card.top + kPowerPad + kPowerRowH * float(i), card.right - kRowInset,
+                                      card.top + kPowerPad + kPowerRowH * float(i + 1));
         std::wstring id = L"pw:" + std::to_wstring(i);
         float hv = Hover(c, id, hover_ == id || powerSel_ == i);
         if (hv > 0)
-            c.Fill(row, 14, powerSel_ == i && hover_ != id ? Alpha(t.accent, 0.24f * hv) : Alpha(t.hover, hv));
+            c.Fill(row, rowR, powerSel_ == i && hover_ != id ? Alpha(t.accent, 0.24f * hv) : Alpha(t.hover, hv));
         c.Glyph(power_[size_t(i)].glyph, D2D1::RectF(row.left + 6, row.top, row.left + 38, row.bottom), 15, t.text);
         c.Text(power_[size_t(i)].name, D2D1::RectF(row.left + 44, row.top, row.right - 8, row.bottom), 14, t.text);
-        hits_.push_back({row, id});
+        if (powerOpen_)
+            hits_.push_back({row, id});
     }
     c.EndGroup();
 }
@@ -2127,7 +2142,6 @@ void StartMenu::Activate(const std::wstring& id)
     } else if (id == L"power") {
         powerOpen_ = !powerOpen_;
         powerSel_ = -1;
-        powerMs_ = ClockMs();
         surface_.Invalidate();
     } else if (id.starts_with(L"pw:")) {
         RunPower(Index(id, 3));

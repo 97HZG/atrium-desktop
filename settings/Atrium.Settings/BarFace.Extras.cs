@@ -32,15 +32,15 @@ internal sealed partial class BarFace
         _launchpad.RenderTransform = _launchpadScale;
         _folder.RenderTransform = _folderScale;
         _folderBack.RenderTransform = _folderBackScale;
-        // DrawLaunchpad in a unit square: nine squares of 0.26 in outline, three by three, gaps of 0.11.
+        // DrawLaunchpad in a unit square: nine squares of 0.30 in outline, three by three, gaps of 0.05.
         for (int i = 0; i < _apps.Length; i++)
         {
             _apps[i].IsHitTestVisible = false;
-            _apps[i].Width = _apps[i].Height = 0.26;
-            _apps[i].RadiusX = _apps[i].RadiusY = 0.078;
+            _apps[i].Width = _apps[i].Height = 0.30;
+            _apps[i].RadiusX = _apps[i].RadiusY = 0.09;
             _apps[i].Stroke = _extrasInkBrush;
-            Canvas.SetLeft(_apps[i], i % 3 * 0.37);
-            Canvas.SetTop(_apps[i], i / 3 * 0.37);
+            Canvas.SetLeft(_apps[i], i % 3 * 0.35);
+            Canvas.SetTop(_apps[i], i / 3 * 0.35);
             _launchpad.Children.Add(_apps[i]);
         }
         for (int i = 0; i < _bars.Length; i++)
@@ -63,7 +63,7 @@ internal sealed partial class BarFace
         {
             // 86 % of the icon square, a stroke of 6.5 % of it.
             var (x, y, size) = item(l.LaunchX);
-            double s = size * 0.86;
+            double s = size * 0.90;
             if (s > 0)
             {
                 _launchpad.Visibility = Visibility.Visible;

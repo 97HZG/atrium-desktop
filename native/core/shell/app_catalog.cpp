@@ -307,13 +307,18 @@ bool NotAnApp(const CatalogApp& app)
 constexpr const wchar_t* kSystemFolders[] = {L"accessibility", L"accessories",  L"administrative tools", L"maintenance",
                                              L"startup",       L"system tools", L"windows powershell",   L"windows tools"};
 
-// Beyond those, what came with the PC rather than from the user, for Launchpad's folder of Windows' own
-// apps: the start menu's folders of tools, the computer makers' and the chip makers' apps (by publisher or
-// by their folder), and the apps Windows brings along as programs.
+// Beyond those, the tools that came with the PC, for Launchpad's folder of Windows' own apps: the start
+// menu's folders of tools, the computer makers' and the chip makers' apps (by publisher or by their
+// folder) and Windows' packaged helpers. Microsoft's everyday apps (Edge, Photos, Notepad, Outlook...)
+// stay with the user's, as Safari and Mail do on macOS.
 constexpr const wchar_t* kToolFolders[] = {L"microsoft office tools", L"windows kits"};
 constexpr const wchar_t* kMakers[] = {L"nvidia", L"intel", L"realtek", L"dolby", L"lenovo", L"dell", L"hp inc", L"hewlett",
                                       L"asus", L"acer", L"micro-star", L"synaptics", L"waves audio", L"elan"};
-constexpr const wchar_t* kBundled[] = {L"msedge.exe", L"onedrive.exe"};
+constexpr const wchar_t* kHelperPackages[] = {L"microsoft.windowsfeedbackhub_",     L"microsoft.gethelp_",
+                                              L"microsoft.getstarted_",             L"microsoft.windows.devhome_",
+                                              L"microsoftcorporationii.quickassist_", L"microsoftcorporationii.microsoftfamily_",
+                                              L"microsoft.powerautomatedesktop_",   L"microsoft.xboxgamingoverlay_",
+                                              L"microsoftwindows.client."};
 
 bool ByMaker(const std::wstring& folded)
 {
@@ -413,8 +418,8 @@ int64_t Created(const std::wstring& path)
 
 // When each app came, for Launchpad's order: a packaged app's package install date; a desktop app's start
 // menu shortcut's creation (the installer made it), else its program's; 0 when unknown (Windows' own). And
-// which are Windows' own, for Launchpad to keep apart: packages that ship with Windows or come from
-// Microsoft, programs under the Windows folder, shortcuts in Windows' folders of the start menu.
+// which are Windows' own tools, for Launchpad to keep apart: packages that ship inside Windows, makers' and
+// Windows' helper packages, programs under the Windows folder, shortcuts in Windows' folders of the start menu.
 void StampInstalled(std::vector<CatalogApp>& apps)
 {
     struct Package {
@@ -428,9 +433,10 @@ void StampInstalled(std::vector<CatalogApp>& apps)
         for (const auto& package : manager.FindPackagesForUser(L"")) {
             const auto id = package.Id();
             const std::wstring publisher = Fold(std::wstring(id.Publisher()));
-            const bool system = package.SignatureKind() == Wam::PackageSignatureKind::System ||
-                                publisher.starts_with(L"cn=microsoft corporation, o=microsoft corporation") || ByMaker(publisher);
-            packages[Fold(std::wstring(id.FamilyName()))] = {package.InstalledDate().time_since_epoch().count(), system};
+            const std::wstring family = Fold(std::wstring(id.FamilyName()));
+            const bool system = package.SignatureKind() == Wam::PackageSignatureKind::System || ByMaker(publisher) ||
+                                std::ranges::any_of(kHelperPackages, [&](const wchar_t* p) { return family.starts_with(p); });
+            packages[family] = {package.InstalledDate().time_since_epoch().count(), system};
         }
     } catch (...) {
         Log(L"catalog: packages' install dates unavailable");
@@ -493,9 +499,10 @@ void StampInstalled(std::vector<CatalogApp>& apps)
         const std::wstring vendor = target.find(L"\\program files") == std::wstring::npos || afterRoot == std::wstring::npos
                                         ? std::wstring()
                                         : target.substr(afterRoot, target.find(L'\\', afterRoot + 1) - afterRoot);
-        app.system = target.starts_with(windowsDir) || systemTargets.contains(target) || systemNames.contains(Fold(app.name)) ||
-                     id.starts_with(L"microsoft.windows.") || id.starts_with(L"::{") || ByMaker(vendor) ||
-                     std::ranges::any_of(kBundled, [&](const wchar_t* b) { return exe == b; });
+        // File Explorer is Windows' own and everyday, as the Finder.
+        app.system = (target.starts_with(windowsDir) && exe != L"explorer.exe") || systemTargets.contains(target) ||
+                     systemNames.contains(Fold(app.name)) || (id.starts_with(L"microsoft.windows.") && id != L"microsoft.windows.explorer") ||
+                     id.starts_with(L"::{") || ByMaker(vendor);
         if (IsPath(app.id) && Fold(app.id).ends_with(L".lnk")) {
             app.installed = Created(app.id);
             continue;

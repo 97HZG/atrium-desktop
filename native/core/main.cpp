@@ -1641,6 +1641,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
             return icon;
         },
         [](HWND window) { return g_app.stage && g_app.stage->OwnsMinimize(window); });
+    // The bar's clicks minimize and restore through it: it pours the window into its icon and back out.
+    TaskModel::SetWindowSteps([](HWND w, std::function<void()> step) { return g_app.genie && g_app.genie->Minimize(w, std::move(step)); },
+                              [](HWND w, std::function<void()> step) { return g_app.genie && g_app.genie->Restore(w, std::move(step)); });
     g_app.control->onStage = SetStageManager;
     g_app.widgets->onStatusRequest = UpdateStatus;
     g_app.status = std::make_unique<SystemStatusReader>(g_app.host, WM_STATUS, WM_VOLUME);
@@ -1734,6 +1737,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     g_app.tray.reset();
     g_app.start.reset();
     g_app.menu.reset(), g_app.preview.reset();
+    TaskModel::SetWindowSteps({}, {});
     g_app.genie.reset();
     g_app.stage.reset();
     Surface::SetGlassHost(nullptr);
