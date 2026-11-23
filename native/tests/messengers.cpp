@@ -34,6 +34,7 @@ void CheckWeChatTime()
     Require(!IsWeChatTime(L"你好"), "greeting text is not a time");
     Require(!IsWeChatTime(L"[图片]"), "media tag is not a time");
     Require(!IsWeChatTime(L"---"), "punctuation alone is not a time");
+    Require(!IsWeChatTime(L"1") && !IsWeChatTime(L"666") && !IsWeChatTime(L"123456"), "pure numbers are not times");
 }
 
 void CheckWeChatRows()
@@ -89,6 +90,21 @@ void CheckWeChatRows()
 
     const WeChatRow fallbackTimeIgnored = ParseWeChatRow(L"Alice\n[1条]\n10:00", L"10:00");
     Require(fallbackTimeIgnored.unread == 1 && fallbackTimeIgnored.summary.empty(), "fallback matching time is ignored");
+
+    const WeChatRow numericSummary = ParseWeChatRow(L"Alice\n[1条] 666\n17:06");
+    Require(numericSummary.unread == 1 && numericSummary.summary == L"666", "pure numeric summary is not dropped as time");
+}
+
+void CheckWeChatDiff()
+{
+    std::map<std::wstring, WeChatChatState> s{{L"off", {2, L"old"}}, {L"big", {99, L"m1"}}};
+    Require(DiffWeChatRows({{L"a", {L"A", L"hi", 0}}}, false, false, s).empty() && s[L"off"].unread == 2, "keep");
+    Require(DiffWeChatRows({{L"off", {L"Off", L"old", 2}}}, true, false, s).empty(), "no re-fire");
+    auto c = DiffWeChatRows({{L"off", {L"Off", L"old", 0}}}, false, false, s);
+    Require(c.size() == 1 && !c[0].unread && s[L"off"].unread == 0, "unread -> 0 clears");
+    Require(DiffWeChatRows({{L"big", {L"Big", L"m1", 99}}}, true, false, s).empty(), "99+ same");
+    auto sat = DiffWeChatRows({{L"big", {L"Big", L"m2", 99}}}, true, false, s);
+    Require(sat.size() == 1 && sat[0].unread && sat[0].body == L"m2", "99+ new summary");
 }
 
 } // namespace
@@ -128,9 +144,13 @@ int main()
         require(alerts.Due(56000).empty(), "a card just before the flash counts too");
         bool waiting = false;
         require(alerts.Flash(Messenger::WeChat, 60000) && alerts.Due(61000, &waiting).empty() && waiting, "still waiting");
+        alerts.Cancel(Messenger::WeChat);
+        require(alerts.Due(65000, &waiting).empty() && !waiting, "cancelled burst produces no plain card");
+        require(alerts.Flash(Messenger::WeChat, 66000), "flash after cancel begins a new burst");
 
         CheckWeChatTime();
         CheckWeChatRows();
+        CheckWeChatDiff();
         std::cout << "messengers: all checks passed\n";
         return 0;
     } catch (const std::exception& e) {

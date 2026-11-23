@@ -7,6 +7,7 @@
 #include "motion.h"
 #include "shell/displays.h"
 #include "ui/notification_layout.h"
+#include "win32_path.h"
 
 #include <shellapi.h>
 #include <shellscalingapi.h>
@@ -188,7 +189,8 @@ void Notifications::Post(Notice n, bool silent)
     // app, become one card with a count.
     for (auto it = notices_.begin(); it != notices_.end(); ++it) {
         bool sameExternal = n.externalId && it->externalId == n.externalId && it->source == n.source;
-        bool burst = it->source == n.source && it->appId == n.appId && it->app == n.app && it->title == n.title && n.time - it->time < kMergeMs;
+        bool burst =
+            it->source == n.source && FoldCase(it->appId) == FoldCase(n.appId) && it->app == n.app && it->title == n.title && n.time - it->time < kMergeMs;
         if (sameExternal && it->title == n.title && it->body == n.body)
             return; // seen already
         if (sameExternal) { // the sender changed its notification: the card follows, as new

@@ -20,8 +20,11 @@
 #include <windows.h>
 
 #include <atomic>
+#include <map>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace atrium {
 
@@ -34,12 +37,19 @@ struct WeChatRow {
     bool official = false; // the official accounts' row (公众号, 订阅号, 服务号): wechatBlockOfficial leaves it out
 };
 
+struct WeChatChatState {
+    int unread = 0;
+    std::wstring summary;
+};
+
 bool IsWeChatTime(const std::wstring& s);
 bool IsCollapsedWeChatRow(const std::wstring& chat);
 // WeChat lists its official accounts' messages in rows of their own name (its UI Automation names a row
 // by its chat's shown name only, so a service account listed as a chat of its own is not told apart).
 bool IsOfficialWeChatRow(const std::wstring& chat);
 WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackText = {});
+std::vector<Notice> DiffWeChatRows(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool baseline, bool blockOfficial,
+                                   std::map<std::wstring, WeChatChatState>& states);
 
 class WeChatSource {
 public:
@@ -50,7 +60,11 @@ public:
     WeChatSource(const WeChatSource&) = delete;
     WeChatSource& operator=(const WeChatSource&) = delete;
     // WeChat flashed for a message: read its chat list now.
-    void Wake() { SetEvent(wake_); }
+    void Wake()
+    {
+        wakePending_ = true;
+        SetEvent(wake_);
+    }
     // The chat list reads (a shown window's, or the rows held from it).
     bool Reading() const { return reading_; }
     // wechatBlockOfficial: no cards for the official accounts' rows.
@@ -63,6 +77,7 @@ private:
     std::atomic<bool> stop_{false};
     std::atomic<bool> reading_{false};
     std::atomic<bool> blockOfficial_{false};
+    std::atomic<bool> wakePending_{false};
     HANDLE wake_ = nullptr;
     std::thread thread_;
 };

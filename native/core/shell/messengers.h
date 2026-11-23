@@ -104,6 +104,13 @@ public:
         if (m != Messenger::None)
             state_[size_t(m)].noticed = now;
     }
+    void Cancel(Messenger m)
+    {
+        if (m != Messenger::None) {
+            state_[size_t(m)].pending = false;
+            state_[size_t(m)].last = 0;
+        }
+    }
     // The apps whose burst is over without a card; `waiting` tells whether one is still pending.
     std::vector<Messenger> Due(ULONGLONG now, bool* waiting = nullptr)
     {

@@ -545,7 +545,7 @@ void MessengerFlashed(const std::wstring& program)
     const Messenger m = MessengerOfProgram(program);
     if (m == Messenger::None || !g_app.barOn.value_or(true) || !MessengerOn(m))
         return;
-    g_app.messengerProgram[size_t(m)] = program;
+    g_app.messengerProgram[size_t(m)] = FoldCase(program);
     if (m == Messenger::WeChat && g_app.wechat)
         g_app.wechat->Wake();
     if (g_app.alerts.Flash(m, GetTickCount64()))
@@ -1299,6 +1299,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                                                bool(g_app.listener);
             on = on && (messenger != Messenger::None ? MessengerOn(messenger) : n->source != L"windows" || g_app.displaySettings.notifyListener);
             if (g_app.notes && on) {
+                if (n->source == L"wechat" && n->unread && (n->title != Tr(L"New message") || !n->body.empty()))
+                    g_app.notes->Post(Notice{.source = L"wechat", .title = Tr(L"New message"), .unread = false});
                 g_app.notes->Post(*n);
                 if (n->unread)
                     g_app.alerts.Noticed(messenger, GetTickCount64()); // its flash needs no plain card
@@ -1708,6 +1710,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         g_app.host,
         [] {
             const double t0 = ClockMs();
+            if (HWND fg = GetForegroundWindow(); fg && MessengerOfProgram(ProgramOf(fg)) == Messenger::WeChat) {
+                g_app.alerts.Cancel(Messenger::WeChat);
+                if (g_app.notes)
+                    g_app.notes->Post(Notice{.source = L"wechat", .title = Tr(L"New message"), .unread = false});
+            }
             const std::vector<TaskItem> all = g_app.tasks->Snapshot(true); // once for both
             if (g_app.stage)
                 g_app.stage->Update(all);

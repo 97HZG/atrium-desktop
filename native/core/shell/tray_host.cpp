@@ -71,6 +71,20 @@ struct NotifyIconIdentifier32 {
 
 HWND Handle(DWORD value) { return reinterpret_cast<HWND>(static_cast<ULONG_PTR>(value)); }
 
+uint64_t HashIconImage(const IconImage& img)
+{
+    uint64_t h = 14695981039346656037ULL;
+    auto mix = [&](uint64_t v) {
+        h ^= v;
+        h *= 1099511628211ULL;
+    };
+    mix(uint64_t(img.width));
+    mix(uint64_t(img.height));
+    for (uint8_t b : img.bgra)
+        mix(b);
+    return h;
+}
+
 std::wstring KeyOf(HWND hwnd, UINT uid, const GUID* guid)
 {
     wchar_t key[64];
@@ -339,9 +353,12 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
             {
                 std::lock_guard g(mutex_);
                 const ULONGLONG now = GetTickCount64();
-                const bool flashing = std::ranges::any_of(icons_, [&](const auto& i) { return i.second.flashUntil > now; });
-                if (flashing != flashing_) {
-                    flashing_ = flashing;
+                std::vector<std::wstring> flashing;
+                for (const auto& [key, icon] : icons_)
+                    if (icon.flash.until > now)
+                        flashing.push_back(key);
+                if (flashing != flashingKeys_) {
+                    flashingKeys_ = std::move(flashing);
                     dirty_ = true; // a flash began or ended: the bar lights or dims the app
                 }
             }
@@ -535,14 +552,11 @@ void TrayHost::Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage
     if (nid.uFlags & NIF_MESSAGE)
         icon.callback = nid.uCallbackMessage;
     if ((nid.uFlags & NIF_ICON) && image) {
+        const uint64_t hash = HashIconImage(*image);
         icon.image = std::move(image);
         icon.imageVersion = kImageBase + ++nextImage_;
-        // Four picture changes within three seconds: it flashes (an icon blinking for a message).
-        const ULONGLONG now = GetTickCount64();
-        std::erase_if(icon.pictureChanges, [&](ULONGLONG t) { return now - t > 3000; });
-        icon.pictureChanges.push_back(now);
-        if (icon.pictureChanges.size() >= 4)
-            icon.flashUntil = now + 2500;
+        tray::RecordIconPicture(icon.flash, GetTickCount64(), hash);
+        icon.flashUntil = icon.flash.until;
     }
     if (nid.uFlags & NIF_TIP) {
         std::wstring tip = tray::RepairMojibakeTip(std::wstring(nid.szTip, wcsnlen(nid.szTip, std::size(nid.szTip))));
@@ -755,7 +769,7 @@ std::vector<std::wstring> TrayHost::Flashing() const
     std::vector<std::wstring> out;
     const ULONGLONG now = GetTickCount64();
     for (const auto& [key, icon] : icons_)
-        if (icon.flashUntil > now && !icon.exe.empty())
+        if (icon.flash.until > now && !icon.exe.empty())
             out.push_back(icon.exe);
     return out;
 }

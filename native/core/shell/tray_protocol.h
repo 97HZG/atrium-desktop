@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <cstdint>
 #include <vector>
 
 namespace atrium::tray {
@@ -77,6 +78,44 @@ inline LRESULT DecideHostForwardResult(DWORD message, bool shellPresent, LRESULT
     if ((message == NIM_MODIFY || message == NIM_SETVERSION) && knownIcon)
         return TRUE;
     return 0;
+}
+
+struct IconFlashState {
+    static constexpr ULONGLONG kWindowMs = 4500;
+    static constexpr ULONGLONG kHoldMs = 4000;
+    static constexpr size_t kMinChanges = 3;
+
+    struct Change {
+        ULONGLONG at = 0;
+        uint64_t hash = 0;
+    };
+    uint64_t lastHash = 0;
+    bool hasPicture = false;
+    std::vector<Change> changes;
+    ULONGLONG until = 0;
+};
+
+// Records an icon picture update at `now` and returns whether it is flashing.
+// Only real picture changes count; >= 3 changes within 4500 ms across at least
+// two distinct pictures trigger flashing, held for 4000 ms after the last change.
+inline bool RecordIconPicture(IconFlashState& state, ULONGLONG now, uint64_t hash)
+{
+    if (state.hasPicture && hash == state.lastHash)
+        return state.until > now;
+    state.hasPicture = true;
+    state.lastHash = hash;
+    std::erase_if(state.changes, [&](const IconFlashState::Change& c) { return now - c.at > IconFlashState::kWindowMs; });
+    state.changes.push_back({now, hash});
+    bool twoPictures = false;
+    for (const auto& c : state.changes) {
+        if (c.hash != hash) {
+            twoPictures = true;
+            break;
+        }
+    }
+    if (state.changes.size() >= IconFlashState::kMinChanges && twoPictures)
+        state.until = now + IconFlashState::kHoldMs;
+    return state.until > now;
 }
 
 } // namespace atrium::tray

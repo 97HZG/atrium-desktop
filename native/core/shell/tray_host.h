@@ -143,8 +143,8 @@ struct HostIcon {
     uint64_t imageVersion = 0;
     bool hidden = false; // NIS_HIDDEN
     uint64_t added = 0;  // order of arrival
-    std::vector<ULONGLONG> pictureChanges; // the last few seconds' picture changes (a flashing icon)
-    ULONGLONG flashUntil = 0; // flashing (a new message in QQ or WeChat) until then
+    tray::IconFlashState flash; // picture changes for a flashing icon
+    ULONGLONG flashUntil = 0;   // flashing (a new message in QQ or WeChat) until then
 };
 
 class TrayHost {
@@ -218,7 +218,7 @@ private:
     ULONGLONG lostAt_ = 0, broadcastAt_ = 0;
     TrayHostYieldPolicy yieldPolicy_;
     std::wstring loggedKeys_; // host thread: the list as last logged
-    bool flashing_ = false;   // host thread: some icon flashed at the last look
+    std::vector<std::wstring> flashingKeys_; // host thread: icons flashing at the last look
     bool loggedState_ = false;
     TrayHostYieldReason lastLoggedReason_ = TrayHostYieldReason::None;
     bool loggedRefusedForward_ = false;

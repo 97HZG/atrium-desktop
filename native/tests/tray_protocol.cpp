@@ -95,6 +95,41 @@ void TestDecideHostForwardResult()
     Check(DecideHostForwardResult(NIM_SETVERSION, true, 0, false, true) == 0, "refused NIM_SETVERSION for unknown key stays 0");
     Check(DecideHostForwardResult(NIM_DELETE, true, 0, true, true) == 0, "refused NIM_DELETE stays 0");
 }
+
+void TestIconFlash()
+{
+    constexpr uint64_t kPicA = 0x1111, kPicB = 0x2222, kPicC = 0x3333;
+
+    // One-off icon update and repeated identical updates do not flash.
+    {
+        IconFlashState s;
+        Check(!RecordIconPicture(s, 1000, kPicA), "initial picture is not a flash");
+        Check(!RecordIconPicture(s, 2000, kPicA), "same picture again is not a flash");
+        Check(!RecordIconPicture(s, 3000, kPicA), "repeated identical picture is not a flash");
+        Check(!RecordIconPicture(s, 10000, kPicB), "one-off icon update is not a flash");
+        Check(!RecordIconPicture(s, 10500, kPicC), "two updates alone are not a flash");
+    }
+
+    // 1000 +/- 30 ms jittered alternation: detected within ~2.2 s, never drops while ongoing, ends within ~4.5 s.
+    {
+        IconFlashState s;
+        const int jitter[] = {+30, -30, +25, -20, +30, +30, -30, +15, -25, +30};
+        ULONGLONG t = 10000;
+        ULONGLONG detectedAt = 0;
+        for (int i = 0; i < 60; ++i) {
+            const uint64_t pic = (i % 2 == 0) ? kPicA : kPicB;
+            if (detectedAt != 0)
+                Check(s.until > t, "ongoing 1 Hz alternation never drops between updates");
+            const bool flashing = RecordIconPicture(s, t, pic);
+            if (flashing && detectedAt == 0)
+                detectedAt = t;
+            t += ULONGLONG(1000 + jitter[size_t(i) % std::size(jitter)]);
+        }
+        Check(detectedAt != 0 && detectedAt - 10000 <= 2200, "1000 +/- 30 ms alternation is detected within 2.2 s");
+        Check(s.until > t - 1030 && s.until <= t - 970 + 4500, "flash ends within ~4.5 s after stopping");
+        Check(s.until <= (t - 970) + 4500 && !(s.until > (t - 970) + 4500), "flash is off by +4.5 s after last change");
+    }
+}
 } // namespace
 
 int main()
@@ -128,6 +163,7 @@ int main()
 
     TestYieldPolicy();
     TestDecideHostForwardResult();
+    TestIconFlash();
 
     if (!g_failures)
         std::printf("tray protocol: all checks passed\n");

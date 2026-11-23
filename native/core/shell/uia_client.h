@@ -224,7 +224,8 @@ inline HRESULT CreateRawCache(IUIAutomation* uia, std::initializer_list<PROPERTY
 // returns an HRESULT.
 template<typename Prepare> winrt::com_ptr<IUIAutomation> CreateUia(const std::atomic<bool>& stop, HANDLE wake, const wchar_t* who, Prepare prepare)
 {
-    for (bool logged = false; !stop; WaitForSingleObject(wake, 2000)) {
+    DWORD retryMs = 250;
+    for (bool logged = false; !stop;) {
         winrt::com_ptr<IUIAutomation> uia;
         HRESULT hr = CoCreateInstance(__uuidof(CUIAutomation8), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put()));
         if (FAILED(hr))
@@ -241,6 +242,8 @@ template<typename Prepare> winrt::com_ptr<IUIAutomation> CreateUia(const std::at
         if (!logged)
             Log(L"%s: UI Automation set-up failed (0x%08X), retrying", who, unsigned(hr));
         logged = true;
+        WaitForSingleObject(wake, retryMs);
+        retryMs = std::min<DWORD>(retryMs * 2, 2000);
     }
     return nullptr;
 }
