@@ -27,8 +27,6 @@ struct HeldRow {
     int failures = 0;
 };
 
-enum class BusyState { None, Foreground, ForegroundShown, Dialog };
-
 std::wstring Trim(std::wstring s)
 {
     while (!s.empty() && iswspace(s.back()))
@@ -131,7 +129,7 @@ bool IsWeChatPid(const std::vector<std::pair<DWORD, std::wstring>>& procs, DWORD
     return pid != 0 && std::ranges::any_of(procs, [pid](const auto& p) { return p.first == pid; });
 }
 
-BusyState WeChatBusyState(const std::vector<std::pair<DWORD, std::wstring>>& procs)
+WeChatBusyState QueryWeChatBusyState(const std::vector<std::pair<DWORD, std::wstring>>& procs)
 {
     struct Ctx {
         const std::vector<std::pair<DWORD, std::wstring>>& procs;
@@ -158,11 +156,11 @@ BusyState WeChatBusyState(const std::vector<std::pair<DWORD, std::wstring>>& pro
         },
         reinterpret_cast<LPARAM>(&ctx));
     if (ctx.dialog)
-        return BusyState::Dialog;
+        return WeChatBusyState::Dialog;
     if (HWND fg = GetForegroundWindow(); fg && (IsWeChatPid(procs, WindowPid(fg)) || IsWeChatPid(procs, WindowPid(GetWindow(fg, GW_OWNER))) ||
                                                 IsWeChatPid(procs, WindowPid(GetAncestor(fg, GA_ROOTOWNER)))))
-        return ctx.hasShownEnabledMain ? BusyState::ForegroundShown : BusyState::Foreground;
-    return BusyState::None;
+        return ctx.hasShownEnabledMain ? WeChatBusyState::ForegroundShown : WeChatBusyState::Foreground;
+    return WeChatBusyState::None;
 }
 
 bool ShouldReadWeChatWindow(HWND h, DWORD pid, bool* hung = nullptr)
@@ -489,42 +487,87 @@ WeChatSource::~WeChatSource()
     CloseHandle(wake_);
 }
 
+WeChatThrottleOutput EvaluateWeChatThrottle(const WeChatThrottleInput& in)
+{
+    constexpr ULONGLONG kForegroundUnreadGapMs = 2000;
+    constexpr DWORD kBusyWaitMs = 1000;
+
+    WeChatThrottleOutput out{};
+    out.nextBusyUntilTick = in.busyUntilTick;
+    out.nextSampledWhileBusy = in.sampledWhileBusy;
+    out.nextFollowUpTick = in.followUpTick;
+
+    const bool initialSample = in.busy == WeChatBusyState::ForegroundShown && !in.hasHeld && !in.sampledWhileBusy;
+    const bool foregroundUnreadSample = in.busy == WeChatBusyState::ForegroundShown && in.unread > 0;
+    if (in.busy == WeChatBusyState::None)
+        out.nextSampledWhileBusy = false;
+    else if (initialSample)
+        out.nextSampledWhileBusy = true;
+
+    if (foregroundUnreadSample && !initialSample) {
+        out.nextBusyUntilTick = in.tick + 300;
+        out.clearReadingAndBaseline = true;
+        out.nextFollowUpTick = 0;
+        if (in.lastRead && in.tick - in.lastRead < kForegroundUnreadGapMs)
+            out.waitMs = DWORD(std::min<ULONGLONG>(kBusyWaitMs, kForegroundUnreadGapMs - (in.tick - in.lastRead)));
+        return out;
+    }
+
+    if ((in.busy != WeChatBusyState::None && !initialSample) || (!initialSample && in.tick < in.busyUntilTick)) {
+        if (in.busy != WeChatBusyState::None)
+            out.nextBusyUntilTick = in.tick + 300;
+        out.clearReadingAndBaseline = true;
+        out.nextFollowUpTick = 0;
+        out.waitMs = in.busy != WeChatBusyState::None ? kBusyWaitMs : DWORD(std::min<ULONGLONG>(kBusyWaitMs, in.busyUntilTick - in.tick));
+        return out;
+    }
+
+    const DWORD minGap = (in.flashWake || (in.followUpTick && in.tick >= in.followUpTick)) ? 200 : 1000;
+    if (in.followUpTick && in.tick >= in.followUpTick)
+        out.nextFollowUpTick = 0;
+    if (in.lastRead && in.tick - in.lastRead < minGap) {
+        out.requeueFlashWake = in.flashWake;
+        out.waitMs = DWORD(minGap - (in.tick - in.lastRead));
+        return out;
+    }
+    if (in.flashWake)
+        out.nextFollowUpTick = in.tick + 450;
+    return out;
+}
+
+namespace {
+
 DWORD WeChatPollWait(int state, ULONGLONG followUpTick)
 {
     const DWORD waitMs = state >= 2 ? 2000 : (state == 1 ? 10000 : 6000);
     return followUpTick ? std::min(waitMs, GetTickCount64() < followUpTick ? DWORD(followUpTick - GetTickCount64()) : 0) : waitMs;
 }
 
-DWORD WeChatBusyOrThrottleWait(const std::vector<std::pair<DWORD, std::wstring>>& procs, bool hasHeld, ULONGLONG tick, ULONGLONG& busyUntilTick,
+DWORD WeChatBusyOrThrottleWait(const std::vector<std::pair<DWORD, std::wstring>>& procs, bool hasHeld, int unread, ULONGLONG tick, ULONGLONG& busyUntilTick,
                                ULONGLONG lastRead, ULONGLONG& followUpTick, bool& sampledWhileBusy, std::atomic<bool>& reading, std::atomic<bool>& wakePending,
                                bool& baseline)
 {
-    const BusyState busy = WeChatBusyState(procs);
-    const bool initialSample = busy == BusyState::ForegroundShown && !hasHeld && !sampledWhileBusy;
-    if (busy == BusyState::None)
-        sampledWhileBusy = false;
-    else if (initialSample)
-        sampledWhileBusy = true;
-    if ((busy != BusyState::None && !initialSample) || (!initialSample && tick < busyUntilTick)) {
-        if (busy != BusyState::None)
-            busyUntilTick = tick + 300;
+    const WeChatThrottleInput input{QueryWeChatBusyState(procs), hasHeld,     unread, tick, lastRead, busyUntilTick, sampledWhileBusy,
+                                    wakePending.exchange(false), followUpTick};
+    const WeChatThrottleOutput out = EvaluateWeChatThrottle(input);
+    busyUntilTick = out.nextBusyUntilTick;
+    sampledWhileBusy = out.nextSampledWhileBusy;
+    followUpTick = out.nextFollowUpTick;
+    if (out.clearReadingAndBaseline)
         reading = baseline = false;
-        followUpTick = 0;
-        return busy != BusyState::None ? 1000 : DWORD(std::min<ULONGLONG>(1000, busyUntilTick - tick));
-    }
-    const bool flashWake = wakePending.exchange(false);
-    const DWORD minGap = (flashWake || (followUpTick && tick >= followUpTick)) ? 200 : 1000;
-    if (followUpTick && tick >= followUpTick)
-        followUpTick = 0;
-    if (lastRead && tick - lastRead < minGap) {
-        if (flashWake)
-            wakePending = true;
-        return DWORD(minGap - (tick - lastRead));
-    }
-    if (flashWake)
-        followUpTick = tick + 450;
-    return 0;
+    if (out.requeueFlashWake)
+        wakePending = true;
+    return out.waitMs;
 }
+
+void ResetUnreadState(std::map<std::wstring, WeChatChatState>& states, std::atomic<int>& unread, HWND notify, UINT badgeMsg)
+{
+    states.clear();
+    if (unread.exchange(0) != 0 && badgeMsg)
+        PostMessageW(notify, badgeMsg, 0, 0);
+}
+
+} // namespace
 
 void WeChatSource::Run()
 {
@@ -581,15 +624,13 @@ void WeChatSource::Run()
                     lastMainHwnd = nullptr;
                     report(0, L"WeChat is not running");
                     held.clear();
-                    states.clear();
                     baseline = false; // after a restart its list is a new baseline
-                    if (unread_.exchange(0) != 0 && badgeMsg_)
-                        PostMessageW(notify_, badgeMsg_, 0, 0);
+                    ResetUnreadState(states, unread_, notify_, badgeMsg_);
                     WaitForUiaWake(wake_, 6000);
                     continue;
                 }
-                if (const DWORD skipMs = WeChatBusyOrThrottleWait(procs, !held.empty(), tick, busyUntilTick, lastRead, followUpTick, sampledWhileBusy, reading_,
-                                                                  wakePending_, baseline)) {
+                if (const DWORD skipMs = WeChatBusyOrThrottleWait(procs, !held.empty(), unread_.load(), tick, busyUntilTick, lastRead, followUpTick,
+                                                                  sampledWhileBusy, reading_, wakePending_, baseline)) {
                     WaitForUiaWake(wake_, skipMs);
                     continue;
                 }
@@ -610,6 +651,8 @@ void WeChatSource::Run()
                 if (!found && !anyHung) {
                     report(1, L"WeChat's chat list is not readable (open its window once)");
                     baseline = false;
+                    if (held.empty())
+                        ResetUnreadState(states, unread_, notify_, badgeMsg_);
                 } else if (found) {
                     if (state < 2 || (state == 3 && !fromHeld))
                         Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());

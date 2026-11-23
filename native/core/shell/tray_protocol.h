@@ -66,11 +66,13 @@ inline void EncodeCallback(UINT version, UINT uid, UINT notification, POINT at, 
 
 // Outcome of a forwarded Shell_NotifyIcon call: Explorer's answer wins when non-zero;
 // when Explorer is absent or refuses, the host still accepts a valid live window's NIM_ADD
-// or an already-known icon's NIM_MODIFY/NIM_SETVERSION (unknown NIM_MODIFY stays 0 for probing).
+// or an already-known icon's NIM_MODIFY/NIM_SETVERSION/NIM_DELETE (unknown NIM_MODIFY stays 0 for probing).
 inline LRESULT DecideHostForwardResult(DWORD message, bool shellPresent, LRESULT forwardResult, bool knownIcon, bool validWindow)
 {
     if (forwardResult)
         return forwardResult;
+    if (message == NIM_DELETE && knownIcon)
+        return TRUE;
     if (!shellPresent)
         return message != NIM_DELETE ? TRUE : 0;
     if (message == NIM_ADD && validWindow)

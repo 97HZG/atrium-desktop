@@ -52,6 +52,31 @@ std::vector<Notice> DiffWeChatRows(const std::vector<std::pair<std::wstring, WeC
                                    std::map<std::wstring, WeChatChatState>& states);
 int SumWeChatUnread(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool blockOfficial);
 
+enum class WeChatBusyState { None, Foreground, ForegroundShown, Dialog };
+
+struct WeChatThrottleInput {
+    WeChatBusyState busy = WeChatBusyState::None;
+    bool hasHeld = false;
+    int unread = 0;
+    ULONGLONG tick = 0;
+    ULONGLONG lastRead = 0;
+    ULONGLONG busyUntilTick = 0;
+    bool sampledWhileBusy = false;
+    bool flashWake = false;
+    ULONGLONG followUpTick = 0;
+};
+
+struct WeChatThrottleOutput {
+    DWORD waitMs = 0;
+    bool requeueFlashWake = false;
+    bool clearReadingAndBaseline = false;
+    ULONGLONG nextBusyUntilTick = 0;
+    bool nextSampledWhileBusy = false;
+    ULONGLONG nextFollowUpTick = 0;
+};
+
+WeChatThrottleOutput EvaluateWeChatThrottle(const WeChatThrottleInput& in);
+
 class WeChatSource {
 public:
     // Posts `msg` to `notify` with a heap-allocated Notice* in lParam (the
@@ -70,7 +95,11 @@ public:
     bool Reading() const { return reading_; }
     int Unread() const { return unread_; }
     // wechatBlockOfficial: no cards or badge count for the official accounts' rows.
-    void SetBlockOfficial(bool on) { blockOfficial_ = on; }
+    void SetBlockOfficial(bool on)
+    {
+        if (blockOfficial_.exchange(on) != on && wake_)
+            SetEvent(wake_);
+    }
     void SetPostCards(bool on) { postCards_ = on; }
 
 private:

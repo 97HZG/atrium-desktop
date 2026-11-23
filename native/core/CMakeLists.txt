@@ -43,6 +43,7 @@ add_library(atrium_core_lib STATIC
     shell/ime_status.cpp
     shell/keyboard_hook.cpp
     shell/shell_icon.cpp
+    shell/task_launch.cpp
     shell/task_model.cpp
     shell/app_processes.cpp
     shell/app_catalog.cpp

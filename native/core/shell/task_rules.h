@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace atrium {
@@ -32,9 +33,17 @@ struct PendingRestore {
 
 enum class WindowShow { Gone, Minimized, Shown };
 
+inline WindowShow ClassifyWindowShow(bool isWindow, bool isVisible, bool isIconic)
+{
+    if (!isWindow)
+        return WindowShow::Gone;
+    if (!isVisible || isIconic)
+        return WindowShow::Minimized;
+    return WindowShow::Shown;
+}
+
 // The windows that came back meanwhile; those gone, hidden or past their time are dropped.
-template <class ShowOf>
-std::vector<HWND> TakeRestored(std::vector<PendingRestore>& pending, ULONGLONG nowMs, ShowOf showOf)
+template<class ShowOf> std::vector<HWND> TakeRestored(std::vector<PendingRestore>& pending, ULONGLONG nowMs, ShowOf showOf)
 {
     std::vector<HWND> restored;
     std::erase_if(pending, [&](const PendingRestore& p) {
@@ -46,14 +55,27 @@ std::vector<HWND> TakeRestored(std::vector<PendingRestore>& pending, ULONGLONG n
     return restored;
 }
 
+inline bool IsSystemHelperWindowClass(std::wstring_view className) { return className == L"IME" || className == L"MSCTFIME UI" || className == L"GDI+ Window"; }
+
+inline bool IsHiddenMainWindowCandidate(bool visible, bool owned, DWORD exStyle, bool enabled, bool cloaked, std::wstring_view title,
+                                        std::wstring_view className)
+{
+    return !visible && !owned && (exStyle & WS_EX_TOOLWINDOW) == 0 && enabled && !cloaked && !title.empty() && !IsSystemHelperWindowClass(className);
+}
+
 struct HiddenWindow {
     RECT rect{};
     DWORD style = 0, exStyle = 0;
     bool owned = false;
+    bool enabled = true;
+    bool cloaked = false;
+    bool hasTitle = true;
+    bool systemHelper = false;
 };
 
-// The main window of an app that shows none, restored as a last resort (#147): an unowned window of
-// a window's size, captioned before uncaptioned, then the largest. -1 when none is one.
+// The main window of an app that shows none, restored as a last resort (#147): an unowned enabled
+// uncloaked titled non-helper window of a window's size, captioned before uncaptioned, then the largest.
+// -1 when none is one.
 inline int PickHiddenMainWindow(const std::vector<HiddenWindow>& windows)
 {
     int best = -1;
@@ -62,7 +84,7 @@ inline int PickHiddenMainWindow(const std::vector<HiddenWindow>& windows)
     for (int i = 0; i < int(windows.size()); ++i) {
         const HiddenWindow& w = windows[size_t(i)];
         const int64_t width = int64_t{w.rect.right} - w.rect.left, height = int64_t{w.rect.bottom} - w.rect.top;
-        if (w.owned || (w.exStyle & WS_EX_TOOLWINDOW) || width < 200 || height < 150)
+        if (w.owned || (w.exStyle & WS_EX_TOOLWINDOW) || !w.enabled || w.cloaked || !w.hasTitle || w.systemHelper || width < 200 || height < 150)
             continue;
         const bool captioned = (w.style & WS_CAPTION) == WS_CAPTION;
         if (best < 0 || captioned > bestCaptioned || (captioned == bestCaptioned && width * height > bestArea)) {

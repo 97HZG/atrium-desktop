@@ -1,9 +1,13 @@
+#include "shell/games.h"
 #include "shell/shell_taskbar.h"
 #include "shell/task_rules.h"
 #include <cstdio>
 #include <thread>
+#include <vector>
 
-int main()
+namespace {
+
+bool TestWindowResponsive()
 {
     auto run = [](bool pump, UINT timeoutMs, ULONGLONG& elapsedMs) {
         HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr), stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -34,13 +38,87 @@ int main()
     ULONGLONG elapsed = 0;
     if (atrium::WindowResponsive(nullptr, 50) || run(true, 1000, elapsed) != 1 || run(false, 150, elapsed) != 0 || elapsed < 100 || elapsed >= 1000) {
         std::fprintf(stderr, "FAIL: shell_taskbar WindowResponsive check failed (%llu ms)\n", elapsed);
-        return 1;
+        return false;
     }
     const HWND a = reinterpret_cast<HWND>(uintptr_t{0x101}), b = reinterpret_cast<HWND>(uintptr_t{0x202});
     if (atrium::IconicSetChanged({a, b}, {b, a}) || !atrium::IconicSetChanged({a}, {a, b}) || !atrium::IconicSetChanged({a, b}, {a})) {
         std::fprintf(stderr, "FAIL: shell_taskbar IconicSetChanged check failed\n");
-        return 1;
+        return false;
     }
-    std::printf("ok: shell_taskbar WindowResponsive and IconicSetChanged checks passed\n");
+    return true;
+}
+
+bool TestGamePredicates()
+{
+    const RECT mon{0, 0, 1920, 1080}, work{0, 0, 1920, 1040}, negMon{-1920, 0, 0, 1080};
+    if (!atrium::IsFullscreenGameBounds(mon, mon, WS_POPUP, false) || !atrium::IsFullscreenGameBounds(mon, mon, WS_POPUP, true) ||
+        !atrium::IsFullscreenGameBounds(negMon, negMon, WS_POPUP, false) || atrium::IsFullscreenGameBounds(work, mon, WS_OVERLAPPEDWINDOW, true) ||
+        atrium::IsFullscreenGameBounds(mon, mon, WS_OVERLAPPEDWINDOW, true) || atrium::IsFullscreenGameBounds(work, mon, WS_OVERLAPPEDWINDOW, false)) {
+        std::fprintf(stderr, "FAIL: shell_taskbar IsFullscreenGameBounds check failed\n");
+        return false;
+    }
+    if (!atrium::IsGamePidCacheValid(1000, 3000, 2, 2) || atrium::IsGamePidCacheValid(3000, 3000, 2, 2) || atrium::IsGamePidCacheValid(1000, 3000, 1, 2)) {
+        std::fprintf(stderr, "FAIL: shell_taskbar IsGamePidCacheValid check failed\n");
+        return false;
+    }
+    return true;
+}
+
+bool TestPendingRestoresAndHiddenWindows()
+{
+    const HWND a = reinterpret_cast<HWND>(uintptr_t{0x101});
+    if (atrium::ClassifyWindowShow(false, false, false) != atrium::WindowShow::Gone ||
+        atrium::ClassifyWindowShow(true, false, false) != atrium::WindowShow::Minimized ||
+        atrium::ClassifyWindowShow(true, true, true) != atrium::WindowShow::Minimized ||
+        atrium::ClassifyWindowShow(true, true, false) != atrium::WindowShow::Shown) {
+        std::fprintf(stderr, "FAIL: shell_taskbar ClassifyWindowShow check failed\n");
+        return false;
+    }
+    std::vector<atrium::PendingRestore> pending{{a, 2000}};
+    auto ready = atrium::TakeRestored(pending, 500, [](HWND) { return atrium::ClassifyWindowShow(true, false, false); });
+    if (!ready.empty() || pending.size() != 1) {
+        std::fprintf(stderr, "FAIL: shell_taskbar hidden pending restore dropped early\n");
+        return false;
+    }
+    ready = atrium::TakeRestored(pending, 1000, [](HWND) { return atrium::ClassifyWindowShow(true, true, false); });
+    if (ready.size() != 1 || ready[0] != a || !pending.empty()) {
+        std::fprintf(stderr, "FAIL: shell_taskbar shown pending restore not raised\n");
+        return false;
+    }
+    if (!atrium::IsSystemHelperWindowClass(L"IME") || !atrium::IsSystemHelperWindowClass(L"MSCTFIME UI") ||
+        !atrium::IsSystemHelperWindowClass(L"GDI+ Window") || atrium::IsSystemHelperWindowClass(L"Notepad")) {
+        std::fprintf(stderr, "FAIL: shell_taskbar IsSystemHelperWindowClass check failed\n");
+        return false;
+    }
+    if (atrium::IsHiddenMainWindowCandidate(false, false, 0, false, false, L"App", L"MainWnd") ||
+        atrium::IsHiddenMainWindowCandidate(false, false, 0, true, true, L"App", L"MainWnd") ||
+        atrium::IsHiddenMainWindowCandidate(false, false, 0, true, false, L"", L"MainWnd") ||
+        atrium::IsHiddenMainWindowCandidate(false, false, 0, true, false, L"Default IME", L"IME") ||
+        atrium::IsHiddenMainWindowCandidate(false, false, 0, true, false, L"MSCTFIME UI", L"MSCTFIME UI") ||
+        atrium::IsHiddenMainWindowCandidate(false, false, 0, true, false, L"GDI+ Window", L"GDI+ Window") ||
+        !atrium::IsHiddenMainWindowCandidate(false, false, 0, true, false, L"Main Window", L"AppFrame")) {
+        std::fprintf(stderr, "FAIL: shell_taskbar IsHiddenMainWindowCandidate check failed\n");
+        return false;
+    }
+    const std::vector<atrium::HiddenWindow> hidden{
+        {{0, 0, 1200, 800}, WS_OVERLAPPEDWINDOW, 0, false, false, false, true, false},
+        {{0, 0, 1200, 800}, WS_OVERLAPPEDWINDOW, 0, false, true, true, true, false},
+        {{0, 0, 1200, 800}, WS_OVERLAPPEDWINDOW, 0, false, true, false, false, false},
+        {{0, 0, 1200, 800}, WS_OVERLAPPEDWINDOW, 0, false, true, false, true, true},
+    };
+    if (atrium::PickHiddenMainWindow(hidden) != -1) {
+        std::fprintf(stderr, "FAIL: shell_taskbar PickHiddenMainWindow accepted invalid candidate\n");
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+int main()
+{
+    if (!TestWindowResponsive() || !TestGamePredicates() || !TestPendingRestoresAndHiddenWindows())
+        return 1;
+    std::printf("ok: shell_taskbar checks passed\n");
     return 0;
 }

@@ -12,6 +12,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -103,5 +104,33 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+namespace detail {
+
+struct LaunchPlan {
+    std::wstring file, args, dir;
+};
+
+struct TaskFallbackRunner {
+    TaskFallbackRunner() = default;
+    virtual ~TaskFallbackRunner() = default;
+    TaskFallbackRunner(const TaskFallbackRunner&) = delete;
+    TaskFallbackRunner& operator=(const TaskFallbackRunner&) = delete;
+    virtual void Queue(std::optional<LaunchPlan> plan, std::wstring exe) = 0;
+};
+
+std::unique_ptr<TaskFallbackRunner> CreateFallbackRunner(HWND ui, UINT restoreMsg);
+std::wstring AppsFolderPath(const std::wstring& aumid);
+bool IsPackagedPath(const std::wstring& path);
+std::wstring PackagedAumidForExe(const std::wstring& exe);
+std::wstring TaskProcessImagePath(HANDLE process);
+bool ExecTaskLaunch(const std::wstring& file, const std::wstring& args, const std::wstring& dir, bool noAsync = false);
+bool ProcessRuns(const std::wstring& exe);
+std::optional<LaunchPlan> BuildLaunchPlan(const PinnedApp* pin, const std::wstring& aumid, const std::wstring& exePath, const std::wstring& key);
+bool OpenFilesWithTaskApp(const std::wstring& desktopExe, const std::wstring& aumid, const std::vector<std::wstring>& files);
+bool SendTaskSysCommand(HWND h, WPARAM command);
+void RaiseTaskWindow(HWND h, HWND ui, UINT restoreMsg, const std::function<void(HWND)>& deferActivate, const std::function<bool(HWND)>& isPending);
+
+} // namespace detail
 
 } // namespace atrium

@@ -4,6 +4,7 @@
 #include "shell/tray_click.h"
 #include "shell/tray_image.h"
 #include "shell/messengers.h"
+#include "shell/task_model.h"
 
 #include "log.h"
 #include "shell/shell_icon.h"
@@ -106,7 +107,7 @@ bool DecodePng(const std::vector<BYTE>& bytes, IconImage& out)
     for (size_t i = 3; i < out.bgra.size(); i += 4)
         if (out.bgra[i])
             return true;
-    return false; // an empty startup snapshot must fall back to the executable's artwork
+    return false;
 }
 
 // Whether an icon is a glyph in one light (1) or dark (-1) neutral shade, or
@@ -1049,15 +1050,43 @@ std::map<std::wstring, size_t> BuildWindowsOrder(const std::vector<Record>& reco
     return out;
 }
 
+const wchar_t* ActionName(tray::Action action)
+{
+    return action == tray::Action::Right              ? L"right" :
+           action == tray::Action::Double             ? L"double" :
+           action == tray::Action::DoubleContinuation ? L"double-continuation" :
+                                                        L"left";
+}
+
+void LogTrayRefresh(bool changed, size_t iconCount, int recognised, bool ordered, const std::vector<Found>& buttons, const std::vector<Record>& records,
+                    const std::vector<int>& match, ULONGLONG elapsedMs, ULONGLONG readMs, bool available)
+{
+    const bool classic = std::ranges::any_of(buttons, [](const Found& f) { return f.toolbar != nullptr; });
+    if (changed) {
+        Log(L"tray: %zu icons (%d recognised %s%s) in %llu ms%s", iconCount, recognised, ordered ? L"in Windows' order" : L"by name",
+            classic ? L", classic tray" : L"", elapsedMs, available ? L"" : L", the shell's tray was not found");
+        for (size_t b = 0; b < buttons.size(); ++b) {
+            const wchar_t* exe = match[b] >= 0 ? records[size_t(match[b])].exe.c_str() : L"-";
+            Log(L"tray: item=%zu source=%s match=%s promoted=%d index=%d identity=%s tip='%s' exe='%s'", b, buttons[b].element ? L"uia" : L"record",
+                tray::MethodName(buttons[b].method), buttons[b].promoted, buttons[b].index, buttons[b].recordId.c_str(), tray::Title(buttons[b].tip).c_str(),
+                exe);
+        }
+    } else if (elapsedMs > 500)
+        Log(L"tray: slow unchanged refresh totalMs=%llu uiaMs=%llu", elapsedMs, readMs);
+}
+
 } // namespace
 
 DWORD TrayModel::LastSyntheticInput() { return g_syntheticInput; }
 
 std::wstring TrayModel::Title(const std::wstring& tip) { return tray::Title(tip); }
 
-TrayModel::TrayModel(HWND notify, UINT msg, std::function<std::vector<PinnedApp>()> appNames) : notify_(notify), msg_(msg), appNames_(std::move(appNames))
+TrayModel::TrayModel(HWND notify, UINT msg, std::function<std::vector<PinnedApp>()> appNames)
+    : notify_(notify),
+      msg_(msg),
+      appNames_(std::move(appNames)),
+      thread_([this] { Worker(); })
 {
-    thread_ = std::thread([this] { Worker(); });
 }
 
 TrayModel::~TrayModel()
@@ -1066,8 +1095,7 @@ TrayModel::~TrayModel()
         std::lock_guard g(mutex_);
         stop_ = true;
     }
-    cv_.notify_all();
-    thread_.join();
+    cv_.notify_all(), thread_.join();
 }
 
 void TrayModel::Refresh()
@@ -1088,12 +1116,9 @@ void TrayModel::SetHosting(bool on)
         host.reset();
     {
         std::lock_guard g(mutex_);
-        std::swap(host, host_);
-        hostInk_.clear();
+        std::swap(host, host_), hostInk_.clear();
     }
-    host.reset();
-    PostMessageW(notify_, msg_, 0, 0);
-    Refresh();
+    host.reset(), PostMessageW(notify_, msg_, 0, 0), Refresh();
 }
 
 std::vector<std::wstring> TrayModel::Flashing() const
@@ -1111,18 +1136,14 @@ void TrayModel::SetHostPlaces(RECT anchor)
 void TrayModel::MiddleClick(const TrayIcon& icon)
 {
     POINT at{};
-    GetCursorPos(&at);
-    if (host_ && !icon.hostKey.empty()) {
-        host_->Hover(L"", at); // a click ends the hover and any popup it asked for
-        host_->Send(icon.hostKey, tray::HostAction::Middle, at);
-    }
+    if (host_ && !icon.hostKey.empty() && GetCursorPos(&at))
+        host_->Hover(L"", at), host_->Send(icon.hostKey, tray::HostAction::Middle, at);
 }
 
 void TrayModel::Hover(const TrayIcon* icon)
 {
     POINT at{};
-    GetCursorPos(&at);
-    if (host_)
+    if (host_ && GetCursorPos(&at))
         host_->Hover(icon ? icon->hostKey : L"", at);
 }
 
@@ -1181,39 +1202,18 @@ bool TrayModel::OpenExisting(const std::wstring& exe)
             return true;
         }
     }
-    // At startup the tray's first read may still be in progress. A resident messenger
-    // must not be launched again: enqueue its exact program identity for the worker's fresh lookup.
-    std::wstring name = Lower(PathFindFileNameW(exe.c_str()));
-    if (MessengerOfProgram(name) == Messenger::None)
+    if (MessengerOfProgram(Lower(PathFindFileNameW(exe.c_str()))) == Messenger::None || !detail::ProcessRuns(exe))
         return false;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE)
-        return false;
-    bool running = false;
-    PROCESSENTRY32W pe{sizeof(pe)};
-    for (BOOL ok = Process32FirstW(snap, &pe); ok && !running; ok = Process32NextW(snap, &pe)) {
-        if (_wcsicmp(pe.szExeFile, name.c_str()) != 0)
-            continue;
-        if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID)) {
-            wchar_t path[MAX_PATH * 2];
-            DWORD size = DWORD(std::size(path));
-            running = QueryFullProcessImageNameW(process, 0, path, &size) && _wcsicmp(path, exe.c_str()) == 0;
-            CloseHandle(process);
+    TrayIcon icon;
+    icon.exe = Lower(exe);
+    for (const TrayIcon& t : Icons())
+        if (t.exe == icon.exe) {
+            icon = t;
+            break;
         }
-    }
-    CloseHandle(snap);
-    if (running) {
-        TrayIcon icon;
-        icon.exe = Lower(exe);
-        for (const TrayIcon& t : Icons()) // its hosted icon may have come meanwhile
-            if (t.exe == icon.exe) {
-                icon = t;
-                break;
-            }
-        if (!ClickHosted(icon, tray::HostAction::Open))
-            Click(icon, false);
-    }
-    return running;
+    if (!ClickHosted(icon, tray::HostAction::Open))
+        Click(icon, false);
+    return true;
 }
 
 std::vector<TrayIcon> TrayModel::Icons() const
@@ -1228,12 +1228,7 @@ std::vector<TrayIcon> TrayModel::Icons() const
         std::lock_guard g(mutex_);
         if (!host_ || host_->Yielded())
             return InWindowsOrder(icons_);
-        hostPtr = host_.get();
-        hosted = host_->Icons();
-        explorer = InWindowsOrder(icons_);
-        order = windowsOrder_;
-        names = hostNames_;
-        ink = hostInk_;
+        hostPtr = host_.get(), hosted = host_->Icons(), explorer = InWindowsOrder(icons_), order = windowsOrder_, names = hostNames_, ink = hostInk_;
     }
     std::erase_if(hosted, [](const HostIcon& h) { return h.hidden; });
     std::vector<tray::HostedEntry> hostEntries;
@@ -1374,13 +1369,10 @@ void TrayModel::Worker()
                     target->element->get_CurrentIsEnabled(&enabled);
                 Log(L"tray: click begin action=%s tip='%s' exe='%s' identity=%s source=%s match=%s taskbarVisible=%d autoHide=%d overflowExists=%d "
                     L"overflowVisible=%d offscreen=%d enabled=%d stateHr=0x%08X",
-                    job.action == tray::Action::Right              ? L"right" :
-                    job.action == tray::Action::Double             ? L"double" :
-                    job.action == tray::Action::DoubleContinuation ? L"double-continuation" :
-                                                                     L"left",
-                    Title(job.icon.tip).c_str(), job.icon.exe.c_str(), job.icon.recordId.c_str(), target && target->element ? L"uia" : L"record",
-                    target ? tray::MethodName(target->method) : L"missing", IsWindowVisible(taskbar), (AppBarMessage(ABM_GETSTATE, abd) & ABS_AUTOHIDE) != 0,
-                    overflow != nullptr, IsWindowVisible(overflow), offscreen, enabled, unsigned(state));
+                    ActionName(job.action), Title(job.icon.tip).c_str(), job.icon.exe.c_str(), job.icon.recordId.c_str(),
+                    target && target->element ? L"uia" : L"record", target ? tray::MethodName(target->method) : L"missing", IsWindowVisible(taskbar),
+                    (AppBarMessage(ABM_GETSTATE, abd) & ABS_AUTOHIDE) != 0, overflow != nullptr, IsWindowVisible(overflow), offscreen, enabled,
+                    unsigned(state));
                 const auto before = CaptureResponse(job.icon.exe);
                 auto observe = [&](bool accepted) {
                     // A context menu (Steam's, toolkits') can take longer to show than a window.
@@ -1521,19 +1513,9 @@ void TrayModel::Worker()
             }
             if (diagnostics.records > 0 && diagnostics.live == 0)
                 LogShellTrayWindows();
-            if (changed) {
-                Log(L"tray: %zu icons (%d recognised %s%s) in %llu ms%s", buttons.size(), recognised, ordered ? L"in Windows' order" : L"by name",
-                    std::ranges::any_of(buttons, [](const Found& f) { return f.toolbar != nullptr; }) ? L", classic tray" : L"", GetTickCount64() - readStart,
-                    available ? L"" : L", the shell's tray was not found");
-                for (size_t b = 0; b < buttons.size(); ++b) {
-                    std::wstring exe = match[b] >= 0 ? records[size_t(match[b])].exe : L"-";
-                    Log(L"tray: item=%zu source=%s match=%s promoted=%d index=%d identity=%s tip='%s' exe='%s'", b, buttons[b].element ? L"uia" : L"record",
-                        tray::MethodName(buttons[b].method), buttons[b].promoted, buttons[b].index, buttons[b].recordId.c_str(), Title(buttons[b].tip).c_str(),
-                        exe.c_str());
-                }
+            LogTrayRefresh(changed, buttons.size(), recognised, ordered, buttons, records, match, GetTickCount64() - readStart, readMs, available);
+            if (changed)
                 PostMessageW(notify_, msg_, 0, 0);
-            } else if (GetTickCount64() - readStart > 500)
-                Log(L"tray: slow unchanged refresh totalMs=%llu uiaMs=%llu", GetTickCount64() - readStart, readMs);
         } catch (...) {
             Log(L"tray: worker exception job=%s hr=0x%08X", job.refresh ? L"refresh" : L"click", unsigned(winrt::to_hresult()));
             if (!job.refresh)

@@ -85,7 +85,8 @@ void TestDecideHostForwardResult()
     Check(DecideHostForwardResult(NIM_ADD, true, TRUE, false, false) == TRUE, "accepted forward is preserved");
     Check(DecideHostForwardResult(NIM_MODIFY, true, 42, false, false) == 42, "non-zero forward result is preserved");
     Check(DecideHostForwardResult(NIM_ADD, false, 0, false, false) == TRUE, "missing shell accepts NIM_ADD");
-    Check(DecideHostForwardResult(NIM_DELETE, false, 0, false, false) == 0, "missing shell does not turn NIM_DELETE into TRUE");
+    Check(DecideHostForwardResult(NIM_DELETE, false, 0, false, false) == 0, "missing shell does not turn unknown NIM_DELETE into TRUE");
+    Check(DecideHostForwardResult(NIM_DELETE, false, 0, true, false) == TRUE, "missing shell accepts NIM_DELETE for known icon");
 
     Check(DecideHostForwardResult(NIM_ADD, true, 0, false, true) == TRUE, "refused NIM_ADD from valid live window is accepted");
     Check(DecideHostForwardResult(NIM_ADD, true, 0, false, false) == 0, "refused NIM_ADD from invalid/shell window stays 0");
@@ -93,7 +94,8 @@ void TestDecideHostForwardResult()
     Check(DecideHostForwardResult(NIM_MODIFY, true, 0, false, true) == 0, "refused NIM_MODIFY for unknown key stays 0 for probing");
     Check(DecideHostForwardResult(NIM_SETVERSION, true, 0, true, true) == TRUE, "refused NIM_SETVERSION for known icon is accepted");
     Check(DecideHostForwardResult(NIM_SETVERSION, true, 0, false, true) == 0, "refused NIM_SETVERSION for unknown key stays 0");
-    Check(DecideHostForwardResult(NIM_DELETE, true, 0, true, true) == 0, "refused NIM_DELETE stays 0");
+    Check(DecideHostForwardResult(NIM_DELETE, true, 0, true, true) == TRUE, "refused NIM_DELETE for known icon is accepted");
+    Check(DecideHostForwardResult(NIM_DELETE, true, 0, false, true) == 0, "refused NIM_DELETE for unknown icon stays 0");
 }
 
 void TestIconFlash()

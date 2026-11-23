@@ -84,14 +84,17 @@ void TestJumpListAndStart(int& f)
         L"<start:SecondaryTile AppUserModelID=\"Sec!Tile\"/><start:DesktopApplicationTile Row=\"0\" Column=\"0\" "
         L"DesktopApplicationID=\"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\notepad.exe\"/><start:Tile Row=\"0\" Column=\"2\" AppUserModelID=\"Pkg3!App\"/>"
         L"</start:Group></StartLayout></LayoutModificationTemplate>");
-    Check(f, g.size() == 4 && !g[0].folder && g[0].items[0].value == L"Pkg1!App" && !g[2].folder && g[2].items[0].value == L"%APPDATA%\\A & B.lnk" &&
-                 g[1].folder && g[1].name == L"Tools \"X\"" && g[1].items[0].kind == atrium::StartPinItem::Kind::DesktopAppId &&
-                 g[1].items[1].value == L"Pkg2!App" && !g[3].folder && g[3].name == L"生产力 & 办公" && g[3].items.size() == 2 &&
-                 g[3].items[1].value == L"Pkg3!App" && atrium::ParseStartLayoutXml(L"<start:Group Name=\"Bad\"><start:Tile AppUserModelID=\"x").empty(),
+    Check(f,
+          g.size() == 4 && !g[0].folder && g[0].items[0].value == L"Pkg1!App" && !g[2].folder && g[2].items[0].value == L"%APPDATA%\\A & B.lnk" &&
+              g[1].folder && g[1].name == L"Tools \"X\"" && g[1].items[0].kind == atrium::StartPinItem::Kind::DesktopAppId &&
+              g[1].items[1].value == L"Pkg2!App" && !g[3].folder && g[3].name == L"生产力 & 办公" && g[3].items.size() == 2 &&
+              g[3].items[1].value == L"Pkg3!App" && atrium::ParseStartLayoutXml(L"<start:Group Name=\"Bad\"><start:Tile AppUserModelID=\"x").empty(),
           "xml");
-    std::vector<atrium::StartTile> ft = {{L"a", L"A", {}}, {L"folder:1", L"F1", {{L"b", L"B", {}}, {L"c", L"C", {}}}}, {L"folder:2", L"F2", {{L"d", L"D", {}}}}};
-    Check(f, !atrium::RemoveStartFolder(ft, L"folder:9") && atrium::RemoveStartFolder(ft, L"folder:1") && ft.size() == 2 &&
-                 !atrium::UngroupStartFolder(ft, L"folder:9") && atrium::UngroupStartFolder(ft, L"folder:2") && ft.size() == 2 && ft[1].id == L"d",
+    std::vector<atrium::StartTile> ft = {
+        {L"a", L"A", {}}, {L"folder:1", L"F1", {{L"b", L"B", {}}, {L"c", L"C", {}}}}, {L"folder:2", L"F2", {{L"d", L"D", {}}}}};
+    Check(f,
+          !atrium::RemoveStartFolder(ft, L"folder:9") && atrium::RemoveStartFolder(ft, L"folder:1") && ft.size() == 2 &&
+              !atrium::UngroupStartFolder(ft, L"folder:9") && atrium::UngroupStartFolder(ft, L"folder:2") && ft.size() == 2 && ft[1].id == L"d",
           "folder ops");
 }
 void TestTitleBadges(int& f)
