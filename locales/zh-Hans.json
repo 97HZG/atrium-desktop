@@ -992,6 +992,16 @@
   "Night light": "夜间模式",
   "Energy saver": "节电模式",
   "Dark mode": "深色模式",
-  "Mobile hotspot": "移动热点"
+  "Mobile hotspot": "移动热点",
+  "Control centre modules": "控制中心模块",
+  "Click a module to add it to the control centre, and again to take it away. Wi-Fi, Bluetooth, battery, casting, brightness and sound always stay.": "点一下模块即可添加到控制中心，再点一下移除。Wi-Fi、蓝牙、电池、投屏、亮度和声音始终保留。",
+  "In the control centre": "已在控制中心",
+  "Turn Stage Manager on or off": "开关台前调度",
+  "Warmer colours on the screen": "让屏幕颜色更暖",
+  "Save battery": "节省电量",
+  "Windows and apps in dark colours": "系统和应用使用深色",
+  "Share this PC's internet": "共享这台电脑的网络",
+  "Remove {0} from the control centre": "从控制中心移除{0}",
+  "Add {0} to the control centre": "将{0}添加到控制中心"
  }
 }

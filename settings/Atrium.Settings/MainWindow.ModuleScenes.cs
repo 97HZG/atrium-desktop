@@ -316,9 +316,10 @@ public sealed partial class MainWindow
 
     private sealed class StatusScene : ModuleScene
     {
-        private const double CW = 340, CGap = 10, TopH = 150, SliderH = 68, StageH = 58, Pad = 14;
+        private const double CW = 340, CGap = 10, TopH = 150, SliderH = 68, ModuleH = 58, Pad = 14;
         private const double Loop = 12000, LevelShowMs = 1500;
-        private readonly PanelInk[] _inks = [new(), new(), new(), new(), new(), new()];
+        // Pieces: connections, battery, casting, brightness, sound, then the modules' tiles in their order.
+        private readonly PanelInk[] _inks = [.. Enumerable.Range(0, 5 + BarSettings.ControlModuleIds.Length).Select(_ => new PanelInk())];
         // Connections.
         private readonly Ellipse[] _discs = [new() { Fill = AccentBrush, IsHitTestVisible = false }, new() { Fill = AccentBrush, IsHitTestVisible = false }];
         private readonly WifiFan _wifi = new();
@@ -326,9 +327,10 @@ public sealed partial class MainWindow
         private readonly TextBlock[] _rowTitle = new TextBlock[2], _rowSub = new TextBlock[2];
         // Battery (or power), casting, Stage Manager.
         private readonly Path _battTrack = RingPath(4), _battLevel = RingPath(4);
-        private readonly Ellipse _powerDisc = new() { IsHitTestVisible = false }, _castDisc = new() { IsHitTestVisible = false },
-                                 _stageDisc = new() { IsHitTestVisible = false };
-        private readonly TextBlock _battGlyph, _battTitle, _battSub, _castGlyph, _castTitle, _castSub, _stageGlyph, _stageTitle, _stageSub;
+        private readonly Ellipse _powerDisc = new() { IsHitTestVisible = false }, _castDisc = new() { IsHitTestVisible = false };
+        private readonly TextBlock _battGlyph, _battTitle, _battSub, _castGlyph, _castTitle, _castSub;
+        // The optional modules (controlModules), a tile for each place.
+        private readonly ModuleTile[] _tiles;
         // The sliders.
         private readonly LevelRow _bright, _sound;
         private readonly Border _chevron; private readonly TextBlock _chevronGlyph;
@@ -340,6 +342,7 @@ public sealed partial class MainWindow
 
         private sealed record Frame(double Left, double Top);
         private sealed class LevelRow { public required TextBlock Title, Value, Glyph; public required Border Track, Fill; }
+        private sealed class ModuleTile { public required Ellipse Disc; public required TextBlock Glyph, Title, Sub; }
 
         public StatusScene(MainWindow m) : base(m, m.StatusStage, m.StatusCanvas)
         {
@@ -371,16 +374,21 @@ public sealed partial class MainWindow
             _castSub = Words(11.5, cast.Sub);
             _castSub.Text = Loc.T("Wireless display");
             foreach (var e in new UIElement[] { _castDisc, _castGlyph, _castTitle, _castSub }) Marks.Children.Add(e);
-            var stage = _inks[3];
-            _stageGlyph = Symbol("\uE7C4", 14, stage.Text);
-            _stageTitle = Words(13.5, stage.Text, true);
-            _stageTitle.Text = Loc.T("Stage Manager");
-            _stageSub = Words(11.5, stage.Sub);
-            foreach (var e in new UIElement[] { _stageDisc, _stageGlyph, _stageTitle, _stageSub }) Marks.Children.Add(e);
-            _bright = NewRow(_inks[4], Loc.T("Displays"), "\uE706");
-            _sound = NewRow(_inks[5], Loc.T("Sound"), "\uE994");
-            _chevron = Plate(_inks[5].Chevron, 12);
-            _chevronGlyph = Symbol("\uE76C", 9.5, _inks[5].Text);
+            _tiles = [.. Enumerable.Range(0, BarSettings.ControlModuleIds.Length).Select(i =>
+            {
+                var ink = _inks[5 + i];
+                var tile = new ModuleTile
+                {
+                    Disc = new Ellipse { IsHitTestVisible = false }, Glyph = Symbol("", 14, ink.Text),
+                    Title = Words(13.5, ink.Text, true), Sub = Words(11.5, ink.Sub),
+                };
+                foreach (var e in new UIElement[] { tile.Disc, tile.Glyph, tile.Title, tile.Sub }) Marks.Children.Add(e);
+                return tile;
+            })];
+            _bright = NewRow(_inks[3], Loc.T("Displays"), "\uE706");
+            _sound = NewRow(_inks[4], Loc.T("Sound"), "\uE994");
+            _chevron = Plate(_inks[4].Chevron, 12);
+            _chevronGlyph = Symbol("\uE76C", 9.5, _inks[4].Text);
             Marks.Children.Add(_chevron);
             Marks.Children.Add(_chevronGlyph);
             _tick = m.DispatcherQueue.CreateTimer();
@@ -403,19 +411,34 @@ public sealed partial class MainWindow
             return row;
         }
 
-        private static double MainH => TopH + CGap + StageH + CGap + SliderH + CGap + SliderH; // ControlCenter::MainHeight
+        private List<string> Modules => M.CurrentSettings.ControlModules;
+        private double ModulesH => (Modules.Count + 1) / 2 * (ModuleH + CGap); // ControlCenter::ModulesHeight
+        private double MainH => TopH + CGap + ModulesH + SliderH + CGap + SliderH; // ControlCenter::MainHeight
         protected override bool IsOpen => M.CurrentSettings.ShowStatus;
         protected override Size PopupSize => new(CW, MainH);
         protected override Vector2 Anchor => new((float)(Bar!.StatusX >= 0 ? Bar.StatusX + (Bar.P + Bar.StatusExtra) / 2 : BarRight), (float)PopupBottom);
 
-        // ControlCenter::MainShapes: connections; battery over casting; Stage Manager; brightness; sound.
-        private static readonly Rect[] Shapes =
-        [
-            new(0, 0, (CW - CGap) / 2, TopH), new((CW - CGap) / 2 + CGap, 0, (CW - CGap) / 2, (TopH - CGap) / 2),
-            new((CW - CGap) / 2 + CGap, (TopH - CGap) / 2 + CGap, (CW - CGap) / 2, (TopH - CGap) / 2),
-            new(0, TopH + CGap, CW, StageH), new(0, TopH + CGap + StageH + CGap, CW, SliderH),
-            new(0, TopH + CGap + StageH + CGap + SliderH + CGap, CW, SliderH),
-        ];
+        // ControlCenter::MainShapes: connections; battery over casting; brightness; sound; then ModuleRects, two
+        // to a row under the casting (one alone in its row takes it whole).
+        private Rect[] Shapes
+        {
+            get
+            {
+                double col = (CW - CGap) / 2, sliders = TopH + CGap + ModulesH;
+                var shapes = new List<Rect>
+                {
+                    new(0, 0, col, TopH), new(col + CGap, 0, col, (TopH - CGap) / 2), new(col + CGap, (TopH - CGap) / 2 + CGap, col, (TopH - CGap) / 2),
+                    new(0, sliders, CW, SliderH), new(0, sliders + SliderH + CGap, CW, SliderH),
+                };
+                int n = Modules.Count;
+                for (int i = 0; i < n; i++)
+                {
+                    double top = TopH + CGap + i / 2 * (ModuleH + CGap), left = i % 2 == 1 ? col + CGap : 0;
+                    shapes.Add(new Rect(left, top, i + 1 == n && i % 2 == 0 ? CW : col, ModuleH));
+                }
+                return [.. shapes];
+            }
+        }
 
         protected override (GlassTile[] Tiles, object State) Pieces()
         {
@@ -498,9 +521,9 @@ public sealed partial class MainWindow
 
             ArrangeConnections();
             ArrangeTiles(real);
-            ArrangeRow(_bright, Shapes[4], _brightness, laptop, laptop ? $"{_brightness}%" : Loc.T("Not adjustable"), _inks[4], false);
+            ArrangeRow(_bright, Shapes[3], _brightness, laptop, laptop ? $"{_brightness}%" : Loc.T("Not adjustable"), _inks[3], false);
             _sound.Glyph.Text = StatusGlyph.VolumeGlyph(Look());
-            ArrangeRow(_sound, Shapes[5], _volume, true, $"{_volume}%", _inks[5], true);
+            ArrangeRow(_sound, Shapes[4], _volume, true, $"{_volume}%", _inks[4], true);
             return moving;
         }
 
@@ -562,20 +585,37 @@ public sealed partial class MainWindow
             Box(_castTitle, kx + 24, ky - 18, k.Right - 8 - kx - 24, 19);
             Box(_castSub, kx + 24, ky + 1, k.Right - 8 - kx - 24, 17);
 
-            // Stage Manager: its symbol lit while on.
-            var s = Shapes[3];
-            var stageInk = _inks[3];
-            bool on = M.CurrentSettings.StageManager;
-            double sx = s.X + 32, sy = s.Y + s.Height / 2;
-            Put(_stageDisc, sx - 18, sy - 18, 36, 36);
-            _stageDisc.Fill = on ? AccentBrush : stageInk.Quiet;
-            _stageGlyph.Foreground = on ? WhiteInk : stageInk.Text;
-            Box(_stageGlyph, sx - 14, sy - 14, 28, 28);
-            _stageSub.Text = on
-                ? Loc.T(M.CurrentSettings.StageOnRight ? "On · recent apps on the right" : "On · recent apps on the left")
-                : Loc.T("Off");
-            Box(_stageTitle, sx + 28, sy - 18, s.Right - Pad - sx - 28, 18);
-            Box(_stageSub, sx + 28, sy, s.Right - Pad - sx - 28, 18);
+            ArrangeModules();
+        }
+
+        // ControlCenter::PaintModules: a round switch, its name and state. Stage Manager's shows the setting; the
+        // system's switches are shown as they would be with nothing read yet: off.
+        private void ArrangeModules()
+        {
+            var shapes = Shapes;
+            for (int i = 0; i < _tiles.Length; i++)
+            {
+                var tile = _tiles[i];
+                bool shown = i < Modules.Count;
+                foreach (var e in new UIElement[] { tile.Disc, tile.Glyph, tile.Title, tile.Sub }) e.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+                if (!shown) continue;
+                string id = Modules[i];
+                var r = shapes[5 + i];
+                var ink = _inks[5 + i];
+                bool stage = id == "stage", on = stage && M.CurrentSettings.StageManager, wide = r.Width > CW / 2;
+                double cx = r.X + 32, cy = r.Y + r.Height / 2;
+                Put(tile.Disc, cx - 18, cy - 18, 36, 36);
+                tile.Disc.Fill = on ? AccentBrush : ink.Quiet;
+                tile.Glyph.Text = ModuleGlyph(id);
+                tile.Glyph.Foreground = on ? WhiteInk : ink.Text;
+                Box(tile.Glyph, cx - 14, cy - 14, 28, 28);
+                tile.Title.Text = Loc.T(ModuleTitle(id));
+                tile.Sub.Text = !on ? Loc.T("Off")
+                    : !wide ? Loc.T("On")
+                    : Loc.T(M.CurrentSettings.StageOnRight ? "On · recent apps on the right" : "On · recent apps on the left");
+                Box(tile.Title, cx + 28, cy - 18, r.Right - Pad - cx - 28, 18);
+                Box(tile.Sub, cx + 28, cy, r.Right - Pad - cx - 28, 18);
+            }
         }
 
         // PaintSlider: the title, the value on the right, a wide pill filled from the left with the symbol at its start.

@@ -314,6 +314,7 @@ public sealed partial class MainWindow : Window, IDisposable
             ShowWidgetMap();
         }
         if (_mains[index] == MainNotify) ShowNotifyPreview(true);
+        if (_mains[index] == MainStatus) BuildModuleGallery(); // follows the settings each time it shows
         if (_mains[index] == MainStage) ShowStagePreview(true);
         if (_mains[index] == MainDisplays) RefreshDisplays();
         if (index >= 10) EnterModulePage(index);
