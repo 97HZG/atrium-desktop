@@ -43,6 +43,7 @@ constexpr float kPictureScale = 1.25f; // pictures are taken this much larger th
 constexpr float kPictureRadius = 8;
 constexpr float kBarRoom = 90;         // the bar floats over the bottom of the work area
 constexpr int kMaxEntries = 6;
+constexpr float kMoreOpacity = 0.45f, kMoreBlur = 5; // the last card while more sets wait past it
 constexpr UINT_PTR kWatchTimer = 0x5C01, kDownTimer = 0x5C02, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
 constexpr UINT kWatchMs = 30, kRaiseMs = 220, kDownMs = 700;
 constexpr ULONGLONG kDesktopMs = 250; // the desktop in front this long: it was clicked
@@ -1780,8 +1781,20 @@ void StageManager::Paint(Canvas& c)
     const bool moving = Animate(c.now);
     for (Entry& e : leaving_)
         PaintEntry(c, e, -1, false);
-    for (size_t i = 0; i < entries_.size(); ++i)
+    // More sets than the strip holds (the wheel pages through them): the last card fades out, blurred,
+    // so the strip reads as one that goes on (#112).
+    const bool more = scrollCount_ > entries_.size();
+    for (size_t i = 0; i < entries_.size(); ++i) {
+        if (!more || i + 1 < entries_.size()) {
+            PaintEntry(c, entries_[i], int(i), true);
+            continue;
+        }
+        c.BeginGroup(kMoreOpacity, 1, 0, 0);
+        c.BeginBlur();
         PaintEntry(c, entries_[i], int(i), true);
+        c.EndBlur(kMoreBlur);
+        c.EndGroup();
+    }
     UpdateRegion(moving);
     if (moving)
         c.Continue();
