@@ -132,6 +132,9 @@ void CheckStageDragMerge()
     Require(Settings::FromJson(LR"({})", off, parsed) && !parsed.stageDragMerge, "partial updates retain disabled stageDragMerge");
     Require(Settings::FromJson(LR"({"stageDragMerge":"bad"})", off, parsed) && !parsed.stageDragMerge, "malformed stageDragMerge retains fallback");
     Require(defaults.stageAvoid && Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.stageAvoid, "stageAvoid is on by default");
+    Require(defaults.imeBubble && Settings::FromJson(LR"({"imeBubble":false})", Settings{}, parsed) && !parsed.imeBubble &&
+                Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.imeBubble,
+            "imeBubble is on by default, and off survives saving");
     Require(defaults.windowPeek && Settings::FromJson(LR"({"windowPeek":false})", Settings{}, parsed) && !parsed.windowPeek &&
                 Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.windowPeek,
             "windowPeek is on by default, and off survives saving");

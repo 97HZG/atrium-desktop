@@ -89,6 +89,7 @@
     "stageCloseButton": {"type": "bool", "default": true},
     "stageExcluded": {"type": "stringArray", "default": ["snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_"]},
     "imeStatus": {"type": "bool", "default": true},
+    "imeBubble": {"type": "bool", "default": true},
     "hideTaskbar": {"type": "bool", "default": true},
     "genieMinimize": {"type": "bool", "default": false},
     "windowPeek": {"type": "bool", "default": true},

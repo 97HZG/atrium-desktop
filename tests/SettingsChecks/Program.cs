@@ -38,6 +38,9 @@ Require(new BarSettings().ImeStatus, "The input method status is on by default."
 var imeOff = BarSettings.FromJson(JsonNode.Parse("""{"imeStatus":false}""")!.AsObject(), new());
 Require(!imeOff.ImeStatus && !new BarSettings().SameAs(imeOff) && !BarSettings.FromJson(imeOff.ToJson(), new()).ImeStatus,
     "Turning the input method status off must be saved, compared and survive a round trip.");
+var bubbleOff = BarSettings.FromJson(JsonNode.Parse("""{"imeBubble":false}""")!.AsObject(), new());
+Require(new BarSettings().ImeBubble && !bubbleOff.ImeBubble && !BarSettings.FromJson(bubbleOff.ToJson(), new()).ImeBubble && !new BarSettings().SameAs(bubbleOff),
+    "The input method bubble is on by default, and off survives a round trip and marks the settings dirty.");
 Require(!BarSettings.FromJson([], new()).HoverRise, "Old files must keep the glass flat.");
 Require(BarSettings.FromJson([], new() { HoverRise = true }).HoverRise, "Partial updates must retain enabled hover rise.");
 Require(!BarSettings.FromJson([], settings).HoverRise, "Partial updates must retain disabled hover rise.");

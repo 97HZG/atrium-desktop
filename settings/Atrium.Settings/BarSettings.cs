@@ -95,6 +95,7 @@ internal sealed class BarSettings
     public static readonly string[] NotifyCorners = ["topLeft", "topRight", "bottomLeft", "bottomRight"];
     public bool NotifyHideBody { get; set; }           // privacy: no message text, excluded from capture
     public bool ImeStatus { get; set; } = true;        // the status icon shows the foreground window's input language
+    public bool ImeBubble { get; set; } = true;        // with ImeStatus: a bubble from the bottom announces a change while the bar is hidden
     public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
     public bool NotifyFeishu { get; set; } = true;     // Feishu messages as Atrium cards (its own popup, read only)
     public bool NotifyWeChat { get; set; } = true;     // WeChat messages as Atrium cards (its chat list, read only)
@@ -241,6 +242,7 @@ internal sealed class BarSettings
             ["notifyPlacement"] = NotifyPlacement,
             ["notifyHideBody"] = NotifyHideBody,
             ["imeStatus"] = ImeStatus,
+            ["imeBubble"] = ImeBubble,
             ["notifyListener"] = NotifyListener,
             ["notifyWeChat"] = NotifyWeChat,
             ["wechatBlockOfficial"] = WeChatBlockOfficial,
@@ -357,6 +359,7 @@ internal sealed class BarSettings
         s.NotifyTimeout = Math.Clamp(Num("notifyTimeout", f.NotifyTimeout), 3, 30);
         s.NotifyHideBody = Flag("notifyHideBody", f.NotifyHideBody);
         s.ImeStatus = Flag("imeStatus", f.ImeStatus);
+        s.ImeBubble = Flag("imeBubble", f.ImeBubble);
         // Version 1 files saved the old default (off): from version 2 it is on (as in the core).
         bool v1 = o?["version"] is JsonValue ver && ver.TryGetValue(out double vn) && vn < 2;
         s.NotifyListener = v1 ? f.NotifyListener : Flag("notifyListener", f.NotifyListener);
@@ -533,7 +536,7 @@ internal sealed class BarSettings
         FolderStackFiles.SequenceEqual(o.FolderStackFiles, StringComparer.OrdinalIgnoreCase) &&
         TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
         BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && ControlModules.SequenceEqual(o.ControlModules) && NotifyTimeout == o.NotifyTimeout &&
-        NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus &&
+        NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus && ImeBubble == o.ImeBubble &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && WeChatBlockOfficial == o.WeChatBlockOfficial && NotifyFeishu == o.NotifyFeishu &&
         NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk &&
         AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && Bar == o.Bar && Widgets == o.Widgets &&

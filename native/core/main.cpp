@@ -146,6 +146,7 @@ struct App {
     ImeWatch imeWatch;                     // what announces (a foreground change only reseeds it)
     std::unique_ptr<ImeBubble> ime;        // the bubble that announces while the bar is hidden
     bool imeOn = true;                     // the "show the input language" setting, as last applied
+    bool imeBubble = true;                 // imeBubble, as last applied
     HANDLE guard = nullptr; // the guard process (EnsureGuard)
     bool winKeyStart = false, winNumbers = false; // what it watches
     bool widgetsOn = false;
@@ -176,7 +177,7 @@ template<class Action> void ForBars(const Action& action)
 // screen, not just its work area) keeps the bubble quiet.
 void ShowImeBubble(HWND foreground, const ImeStatus& status)
 {
-    if (!g_app.barOn.value_or(true) || !g_app.ime)
+    if (!g_app.barOn.value_or(true) || !g_app.ime || !g_app.imeBubble)
         return; // the bar is off with Windows' taskbar back: it shows its own
     const HMONITOR monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
     Bar* bar = g_app.bar && g_app.bar->Monitor() == monitor ? g_app.bar.get() : nullptr;
@@ -581,6 +582,9 @@ void ApplySettings(const Settings& s)
     // It reads the state already in front when it starts, so the icon is right
     // before the user changes anything.
     g_app.imeOn = s.imeStatus;
+    g_app.imeBubble = s.imeBubble;
+    if (!s.imeBubble && g_app.ime)
+        g_app.ime->Cancel();
     if (g_app.imeOn && !g_app.imeWatcher) {
         g_app.imeWatcher = std::make_unique<ImeWatcher>(g_app.host, WM_IME_STATE);
         g_app.imeWatch.Reset();

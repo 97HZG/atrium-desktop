@@ -798,6 +798,8 @@ public sealed partial class MainWindow : Window, IDisposable
         RunningSwitch.IsOn = CurrentSettings.ShowRunning;
         HideBodySwitch.IsOn = CurrentSettings.NotifyHideBody;
         ImeStatusSwitch.IsOn = CurrentSettings.ImeStatus;
+        ImeBubbleSwitch.IsOn = CurrentSettings.ImeBubble;
+        ImeBubbleSwitch.IsEnabled = CurrentSettings.ImeStatus;
         bool notifyCorner = BarSettings.NotifyCorners.Contains(CurrentSettings.NotifyPlacement);
         if (notifyCorner) _notifyCorner = CurrentSettings.NotifyPlacement;
         (notifyCorner ? NotifyAtCorner : NotifyAtDock).IsChecked = true;
@@ -1005,6 +1007,14 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_loading) return;
         CurrentSettings.ImeStatus = ImeStatusSwitch.IsOn;
+        ImeBubbleSwitch.IsEnabled = ImeStatusSwitch.IsOn; // the bubble announces what the status reads
+        Changed();
+    }
+
+    private void OnImeBubbleToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        CurrentSettings.ImeBubble = ImeBubbleSwitch.IsOn;
         Changed();
     }
 

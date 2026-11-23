@@ -88,6 +88,7 @@ void ReadBarSettingsJson(const json::JsonObject& o, Settings& s)
     num(L"nearLeave", s.nearLeave);
     flag(L"notifyHideBody", s.notifyHideBody);
     flag(L"imeStatus", s.imeStatus);
+    flag(L"imeBubble", s.imeBubble);
 }
 
 void ReadModuleSettingsJson(const json::JsonObject& o, Settings& s)
@@ -413,6 +414,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"notifyPlacement", json::JsonValue::CreateStringValue(notifyPlacement));
     o.SetNamedValue(L"notifyHideBody", json::JsonValue::CreateBooleanValue(notifyHideBody));
     o.SetNamedValue(L"imeStatus", json::JsonValue::CreateBooleanValue(imeStatus));
+    o.SetNamedValue(L"imeBubble", json::JsonValue::CreateBooleanValue(imeBubble));
     o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
     o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
     o.SetNamedValue(L"wechatBlockOfficial", json::JsonValue::CreateBooleanValue(wechatBlockOfficial));

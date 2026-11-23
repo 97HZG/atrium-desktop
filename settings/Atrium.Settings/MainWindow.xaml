@@ -935,6 +935,9 @@
                                 <TextBlock Text="Input method" Style="{StaticResource SectionStyle}" />
                                 <local:ToggleTile x:Name="ImeStatusSwitch" Title="Show on the taskbar" SwitchName="Show input method"
                                                   Toggled="OnImeStatusToggled" Flat="True" />
+                                <local:ToggleTile x:Name="ImeBubbleSwitch" Title="Bubble while the bar is hidden" SwitchName="Input method bubble"
+                                                  Toggled="OnImeBubbleToggled" Flat="True"
+                                                  Note="While the taskbar is hidden, a glass bubble rises from the bottom of the screen with the new input language, then bursts. Not over full-screen apps." />
                             </StackPanel>
                         </StackPanel>
 
