@@ -141,6 +141,7 @@ void GenieMinimize::Hold(HWND window)
     Release(held_);
     Transitions(window, false);
     held_ = window;
+    Log(L"genie: ready for %p", window);
 }
 
 void GenieMinimize::Arm(const RECT& frame)
@@ -178,14 +179,15 @@ void GenieMinimize::Watch()
         return;
     Picture& p = pictures_[root];
     p.frame = Frame(root);
-    if (p.large)
+    // Only a window with its icon on a bar to pour into: any other keeps Windows' own animation.
+    if (p.large && target_ && target_(root))
         Hold(root);
     POINT pt{};
     GetCursorPos(&pt);
     const float s = float(GetDpiForWindow(root)) / 96.f;
     const RECT& r = p.frame;
     const bool atButtons = PtInRect(&r, pt) && pt.y < r.top + LONG(56 * s) && pt.x > r.right - LONG(200 * s);
-    if (atButtons && p.large)
+    if (atButtons && held_ == root)
         Arm(r); // a minimize may come: the first frame should not wait for the layer
     if (now - frontSince_ < kDrawnMs || now - p.taken < (atButtons ? kNearMs : kFarMs))
         return;
@@ -202,8 +204,10 @@ void GenieMinimize::Minimizing(HWND window)
     const std::optional<RECT> to = target_ ? target_(window) : std::nullopt;
     Release(window); // down now: restoring it is Windows' own unless the bar restores it
     front_ = nullptr;
-    if (it == pictures_.end() || !it->second.large || !to)
+    if (it == pictures_.end() || !it->second.large || !to) {
+        Log(L"genie: %p went down without it (picture %d, icon %d)", window, it != pictures_.end() && it->second.large, to.has_value());
         return;
+    }
     Flight f;
     f.picture = it->second.large;
     f.from = it->second.frame;
