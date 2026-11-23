@@ -341,8 +341,22 @@ public sealed partial class MainWindow
             string description = await Task.Run(() => Description(source));
             if (description.Length > 0) vm.Title = description;
         }
-        if (await IconFor(source) is ImageSource image)
-            vm.Icon = image;
+        var image = await IconFor(source);
+        if (image == null && vm.Programs.Length > 0)
+        {
+            string fallback = await Task.Run(() => Program(vm.Programs));
+            if (fallback.Length > 0 && !string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase))
+            {
+                source = vm.IconSource = fallback;
+                if (vm.Describe && source.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    string description = await Task.Run(() => Description(source));
+                    if (description.Length > 0) vm.Title = description;
+                }
+                image = await IconFor(source);
+            }
+        }
+        if (image != null) vm.Icon = image;
     }
 
     private async Task<ImageSource?> IconFor(string source)

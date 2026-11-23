@@ -13,6 +13,7 @@
 #include "bar_extras_painter.h"
 #include "glass_panel.h"
 #include "hover_wave.h"
+#include "ime_glyph.h"
 
 #include <d2d1_3.h>
 #include <dwrite_3.h>
@@ -160,6 +161,7 @@ private:
     winrt::com_ptr<ID2D1SolidColorBrush> contentBrush_;
     winrt::com_ptr<ID2D1Effect> shadow_;
     BarExtrasPainter extras_;
+    ImeGlyphCache imeCache_;
     MusicBars music_;
     struct StatusArc {
         winrt::com_ptr<ID2D1PathGeometry> path;

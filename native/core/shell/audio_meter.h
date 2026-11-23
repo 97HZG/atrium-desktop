@@ -1,4 +1,4 @@
-// WASAPI peak meter and per-app volume adjustment for the Now Playing indicator.
+// WASAPI peak meter for the Now Playing indicator.
 #pragma once
 
 #include <memory>
@@ -18,7 +18,6 @@ public:
     AudioPeakMeter& operator=(AudioPeakMeter&&) noexcept;
 
     float Sample(const std::wstring& appIdOrExe);
-    bool AdjustAppVolume(const std::wstring& appIdOrExe, int deltaPercent);
     void Reset();
 
 private:

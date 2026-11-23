@@ -59,11 +59,21 @@ bool Launchpad::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     case WM_LBUTTONDOWN:
         Press(pt);
-        SetCapture(surface_.Hwnd());
+        if (!closing_)
+            SetCapture(surface_.Hwnd());
         return true;
     case WM_LBUTTONUP:
-        ReleaseCapture();
         Release(pt);
+        if (GetCapture() == surface_.Hwnd())
+            ReleaseCapture();
+        return true;
+    case WM_CAPTURECHANGED:
+        if (reinterpret_cast<HWND>(l) != surface_.Hwnd() && (down_ || dragging_ || pressed_ != -1)) {
+            down_ = dragging_ = false;
+            pressed_ = -1;
+            page_ = std::clamp(int(std::lround(pageShown_)), 0, Pages() - 1);
+            surface_.Invalidate();
+        }
         return true;
     case WM_MOUSEWHEEL: Wheel(GET_WHEEL_DELTA_WPARAM(w)); return true;
     case WM_MOUSEHWHEEL: Wheel(-GET_WHEEL_DELTA_WPARAM(w)); return true;
@@ -154,7 +164,7 @@ void Launchpad::Drag(POINT pt)
     // The sheet follows the pointer; past the ends it gives only a little, as a rubber band.
     const float raw = dragFrom_ - dx / w_, end = float(Pages() - 1);
     const float held = std::clamp(raw, 0.f, end);
-    pageShown_ = held + (raw - held) * kRubber;
+    pageShown_ = held + std::clamp((raw - held) * kRubber, -0.45f, 0.45f);
     const double now = ClockMs();
     if (now > dragMs_) {
         const float speed = (x - lastDragX_) / w_ / float((now - dragMs_) / 1000.0);
@@ -175,7 +185,8 @@ void Launchpad::Release(POINT pt)
     if (dragging_) {
         dragging_ = false;
         const float moved = float(pt.x - downPt_.x) / surface_.Scale() / w_;
-        page_ = SettlePageDrag(page_, Pages(), moved, ClockMs() - dragMs_ > 120 ? 0.f : dragSpeed_);
+        const int basePage = std::clamp(int(std::lround(dragFrom_)), 0, Pages() - 1);
+        page_ = SettlePageDrag(basePage, Pages(), moved, ClockMs() - dragMs_ > 120 ? 0.f : dragSpeed_);
         pageSpeed_ = -dragSpeed_; // the glide goes on from the drag's pace
         surface_.Invalidate();
         return;
@@ -185,6 +196,8 @@ void Launchpad::Release(POINT pt)
         Launch(was);
     else if (was <= -2 && was != kGlass && at == was)
         SetPage(-2 - was);
+    else if (was == kGlass && at == kGlass)
+        Close(false);
     surface_.Invalidate();
 }
 

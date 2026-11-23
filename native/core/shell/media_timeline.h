@@ -1,11 +1,14 @@
 // Pure media timeline interpolation, app allow/block filtering, and session selection.
 #pragma once
 
+#include "win32_path.h"
+
 #include <windows.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -26,15 +29,35 @@ struct MediaTimeline {
     int64_t PositionUs(double nowMs) const
     {
         int64_t pos = anchorPosUs;
-        if (playing) {
+        if (playing && std::isfinite(nowMs) && std::isfinite(anchorMs) && std::isfinite(rate) && rate > 0.0) {
             const double deltaUs = (nowMs - anchorMs) * 1000.0 * rate;
-            pos += static_cast<int64_t>(std::llround(deltaUs));
+            if (std::isfinite(deltaUs)) {
+                constexpr double kMaxStepUs = 86400.0 * 1e6 * 365.0;
+                const int64_t step = static_cast<int64_t>(std::llround(std::clamp(deltaUs, -kMaxStepUs, kMaxStepUs)));
+                if (step > 0 && pos > std::numeric_limits<int64_t>::max() - step)
+                    pos = std::numeric_limits<int64_t>::max();
+                else if (step < 0 && pos < std::numeric_limits<int64_t>::min() - step)
+                    pos = std::numeric_limits<int64_t>::min();
+                else
+                    pos += step;
+            } else if (deltaUs > 0.0) {
+                pos = Seekable() ? endUs : std::numeric_limits<int64_t>::max();
+            } else {
+                pos = startUs;
+            }
         }
         if (Seekable())
             return std::clamp(pos, startUs, endUs);
         return std::max(startUs, pos);
     }
 };
+
+inline bool TimelineChanged(const MediaTimeline& a, const MediaTimeline& b)
+{
+    if (a.startUs != b.startUs || a.endUs != b.endUs || a.anchorPosUs != b.anchorPosUs || a.rate != b.rate || a.playing != b.playing)
+        return true;
+    return a.playing && !(std::abs(a.anchorMs - b.anchorMs) < 250.0);
+}
 
 // A timeline for a player that reports none (NetEase Cloud Music): its length from the player's own
 // files, its position counted from when the track was seen to start, through pauses. A track already
@@ -44,6 +67,8 @@ public:
     // `track` names the track (its title and artist); lengthUs 0: unknown. Fills `t` when known.
     void Update(const std::wstring& track, bool playing, int64_t lengthUs, double nowMs, MediaTimeline& t)
     {
+        if (!seen_ && (track.empty() || track.front() == L'\n'))
+            return;
         if (track != track_) {
             fromStart_ = seen_; // a change seen happen: the new track starts at 0
             seen_ = true;
@@ -73,7 +98,14 @@ public:
     }
 
 private:
-    int64_t ElapsedUs(double nowMs) const { return static_cast<int64_t>(std::llround(std::max(0.0, nowMs - anchorMs_) * 1000.0)); }
+    int64_t ElapsedUs(double nowMs) const
+    {
+        if (!std::isfinite(nowMs) || !std::isfinite(anchorMs_))
+            return 0;
+        constexpr double kMaxStepUs = 86400.0 * 1e6 * 365.0;
+        const double us = std::clamp(std::max(0.0, nowMs - anchorMs_) * 1000.0, 0.0, kMaxStepUs);
+        return static_cast<int64_t>(std::llround(us));
+    }
     int64_t Position(double nowMs) const { return posUs_ + (playing_ ? ElapsedUs(nowMs) : 0); }
 
     std::wstring track_;
@@ -93,23 +125,9 @@ struct MediaSessionSummary {
 
 namespace media_detail {
 
-inline std::wstring Lower(std::wstring value)
-{
-    if (!value.empty())
-        CharLowerBuffW(value.data(), static_cast<DWORD>(value.size()));
-    return value;
-}
-
-inline std::wstring StripExe(std::wstring name)
-{
-    if (name.size() > 4 && name.ends_with(L".exe"))
-        name.resize(name.size() - 4);
-    return name;
-}
-
 inline bool MatchesAppEntry(const std::wstring& appLower, const std::wstring& fileLower, const std::wstring& stemLower, const std::wstring& rawEntry)
 {
-    const std::wstring entry = Lower(rawEntry);
+    const std::wstring entry = FoldCase(rawEntry);
     if (entry.empty())
         return false;
     if (appLower == entry || fileLower == entry)
@@ -118,7 +136,7 @@ inline bool MatchesAppEntry(const std::wstring& appLower, const std::wstring& fi
     if ((last == L'\\' || last == L'/' || last == L'_' || last == L'!') && appLower.starts_with(entry))
         return true;
     if (entry.find_first_of(L"\\/") == std::wstring::npos && last != L'_' && last != L'!') {
-        if (stemLower == StripExe(entry))
+        if (stemLower == ExeStemFolded(entry))
             return true;
         if (appLower.starts_with(entry + L'_') || appLower.starts_with(entry + L'!'))
             return true;
@@ -130,15 +148,15 @@ inline bool MatchesAppEntry(const std::wstring& appLower, const std::wstring& fi
 
 inline bool MediaAppAllowed(const std::wstring& appId, const std::wstring& mode, const std::vector<std::wstring>& list)
 {
-    const std::wstring m = media_detail::Lower(mode);
+    const std::wstring m = FoldCase(mode);
     if (m != L"allow" && m != L"block")
         return true;
-    const std::wstring app = media_detail::Lower(appId);
+    const std::wstring app = FoldCase(appId);
     if (app.empty())
         return m == L"block";
     const size_t slash = app.find_last_of(L"\\/");
     const std::wstring file = slash == std::wstring::npos ? app : app.substr(slash + 1);
-    const std::wstring stem = media_detail::StripExe(file);
+    const std::wstring stem = ExeStemFolded(file);
     const bool matched = std::ranges::any_of(list, [&](const std::wstring& entry) { return media_detail::MatchesAppEntry(app, file, stem, entry); });
     return m == L"allow" ? matched : !matched;
 }

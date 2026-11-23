@@ -37,14 +37,16 @@ public:
     // setting (0 still, 1 normal, up to 1.5 vivid). True while any bar still moves.
     bool Step(float peak, bool playing, float intensity, double dtMs)
     {
-        const float dt = float(std::clamp(dtMs, 0.0, 100.0)) / 1000.f;
-        const bool live = playing && intensity > 0.f;
+        const double safeDtMs = std::isfinite(dtMs) ? std::clamp(dtMs, 0.0, 100.0) : 0.0;
+        const float safeIntensity = std::isfinite(intensity) ? std::max(0.f, intensity) : 0.f;
+        const float dt = float(safeDtMs) / 1000.f;
+        const bool live = playing && safeIntensity > 0.f;
         const float loud = live ? Loudness(peak) : 0.f;
         level_ += (loud - level_) * (1.f - std::exp(-dt * (loud > level_ ? kAttack : kRelease)));
         bool moving = live;
         for (size_t i = 0; i < kCount; ++i) {
             phase_[i] = std::fmod(phase_[i] + dt * kRate[i] * (0.55f + 0.6f * level_), 1.f);
-            const float target = Target(i, live, intensity);
+            const float target = Target(i, live, safeIntensity);
             const float rate = target > heights_[i] ? kRise : kFall;
             heights_[i] += (target - heights_[i]) * (1.f - std::exp(-dt * rate));
             moving = moving || std::abs(target - heights_[i]) > 0.002f;
@@ -58,7 +60,7 @@ public:
     // Linear amplitude to 0..1 loudness: kRangeDb below full scale is silence.
     static float Loudness(float peak)
     {
-        if (peak <= 0.f)
+        if (!std::isfinite(peak) || peak <= 0.f)
             return 0.f;
         return std::clamp(1.f + 20.f * std::log10(peak) / kRangeDb, 0.f, 1.f);
     }

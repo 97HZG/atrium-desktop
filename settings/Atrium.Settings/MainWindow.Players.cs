@@ -45,7 +45,13 @@ public sealed partial class MainWindow
     // A row as the sources' (MainWindow.xaml, SourcesList): the icon (assets/apps), the name, the switch.
     private static Grid PlayerRow(SourceVm vm, ToggleSwitch sw)
     {
-        var row = new Grid { Padding = new Thickness(14, 8, 14, 8), ColumnSpacing = 14, MinHeight = 60, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var row = new Grid
+        {
+            Padding = new Thickness(14, 8, 14, 8),
+            ColumnSpacing = 14,
+            MinHeight = 60,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+        };
         ToolTipService.SetToolTip(row, vm.Note);
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -80,7 +86,37 @@ public sealed partial class MainWindow
         foreach (var (vm, sw) in _players) sw.IsOn = vm.IsOn;
     }
 
-    private static bool Listed(BarSettings s, string[] ids) => s.NowPlayingApps.Any(a => ids.Contains(a, StringComparer.OrdinalIgnoreCase));
+    private static bool MatchesPlayerId(string entry, string[] ids)
+    {
+        string trimmed = entry.Trim();
+        if (trimmed.Length == 0) return false;
+        string file = Path.GetFileName(trimmed);
+        foreach (string id in ids)
+        {
+            if (string.Equals(trimmed, id, StringComparison.OrdinalIgnoreCase) ||
+                (file.Length > 0 && string.Equals(file, id, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+            if (id.EndsWith('!') && trimmed.StartsWith(id, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            if (!id.EndsWith('!') && !id.EndsWith('_') &&
+                (trimmed.StartsWith(id + "_", StringComparison.OrdinalIgnoreCase) ||
+                 trimmed.StartsWith(id + "!", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+            if ((trimmed.EndsWith('!') || trimmed.EndsWith('_')) && id.StartsWith(trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool Listed(BarSettings s, string[] ids) => s.NowPlayingApps.Any(a => MatchesPlayerId(a, ids));
 
     private static bool PlayerShown(BarSettings s, string[] ids) => s.NowPlayingAppMode switch
     {
@@ -89,16 +125,36 @@ public sealed partial class MainWindow
         _ => true,
     };
 
-    // The player on or off the bar; the list kept as players switched off (an earlier "only these" list
-    // becomes the players not on it).
     private static void ShowPlayer(BarSettings s, string[] ids, bool on)
     {
-        var off = KnownPlayers.Where(p => !PlayerShown(s, p.Ids)).SelectMany(p => p.Ids).ToList();
-        if (s.NowPlayingAppMode == "block")
-            off.AddRange(s.NowPlayingApps.Where(a => !KnownPlayers.Any(p => p.Ids.Contains(a, StringComparer.OrdinalIgnoreCase))));
-        off.RemoveAll(a => ids.Contains(a, StringComparer.OrdinalIgnoreCase));
-        if (!on) off.AddRange(ids);
-        s.NowPlayingApps = [.. off.Distinct(StringComparer.OrdinalIgnoreCase).Take(64)];
+        if (s.NowPlayingAppMode == "allow")
+        {
+            var allowed = s.NowPlayingApps.ToList();
+            if (on)
+            {
+                foreach (string id in ids)
+                {
+                    if (!allowed.Contains(id, StringComparer.OrdinalIgnoreCase) && allowed.Count < 64)
+                        allowed.Add(id);
+                }
+            }
+            else
+            {
+                allowed.RemoveAll(a => MatchesPlayerId(a, ids));
+            }
+            s.NowPlayingApps = [.. allowed.Distinct(StringComparer.OrdinalIgnoreCase).Take(64)];
+            return;
+        }
+
+        var custom = s.NowPlayingAppMode == "block"
+            ? s.NowPlayingApps.Where(a => !KnownPlayers.Any(p => MatchesPlayerId(a, p.Ids))).ToList()
+            : [];
+        var knownOff = KnownPlayers
+            .Where(p => !p.Ids.SequenceEqual(ids, StringComparer.OrdinalIgnoreCase) && !PlayerShown(s, p.Ids))
+            .SelectMany(p => p.Ids)
+            .ToList();
+        if (!on) knownOff.AddRange(ids);
+        s.NowPlayingApps = [.. custom.Concat(knownOff).Distinct(StringComparer.OrdinalIgnoreCase).Take(64)];
         s.NowPlayingAppMode = s.NowPlayingApps.Count == 0 ? "all" : "block";
     }
 }

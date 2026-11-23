@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 using namespace atrium;
 
@@ -79,6 +80,23 @@ int main()
     Require(jumpy.Step(0.9f, true, 1.f, 5000), "a long frame is clamped, never a jump past the target");
     for (size_t i = 0; i < MusicBars::kCount; ++i)
         Require(jumpy.Height(i) <= 1.f, "a long frame keeps the bars inside the icon");
+
+    const float qnan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    Require(MusicBars::Loudness(qnan) == 0.f, "NaN peak produces zero loudness");
+    Require(MusicBars::Loudness(inf) == 0.f, "+Inf peak produces zero loudness");
+    Require(MusicBars::Loudness(-inf) == 0.f, "-Inf peak produces zero loudness");
+    Require(MusicBars::Loudness(-0.5f) == 0.f, "negative peak produces zero loudness");
+
+    MusicBars bad;
+    bad.Step(qnan, true, 1.f, 16.0);
+    bad.Step(inf, true, inf, inf);
+    bad.Step(0.5f, true, qnan, qnan);
+    Require(std::isfinite(bad.Level()), "level stays finite after NaN/Inf inputs");
+    for (size_t i = 0; i < MusicBars::kCount; ++i)
+        Require(std::isfinite(bad.Height(i)) && bad.Height(i) >= MusicBars::kRest && bad.Height(i) <= 1.f,
+                "heights stay finite and bounded after NaN/Inf inputs");
+    Require(!Run(bad, 0.f, false, 1.f, 2500), "bars settle normally after NaN/Inf inputs");
 
     std::cout << (g_failures ? "music_bars: FAILED" : "music_bars: ok") << '\n';
     return g_failures ? 1 : 0;

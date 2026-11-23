@@ -547,8 +547,8 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         // The letter cross-fades from the one before; built-in outlines for the usual five (ime_glyph).
         IDWriteTextFormat* f = Format((iconArea.bottom - iconArea.top) * 0.64f, DWRITE_FONT_WEIGHT_NORMAL);
         const float e = motion::EaseOut(imeFade_);
-        DrawImeGlyph(d2d, dwrite_.get(), f, scene.imePrevGlyph, iconArea, brush, ink, (1 - e) * m.appear);
-        DrawImeGlyph(d2d, dwrite_.get(), f, scene.imeGlyph, iconArea, brush, ink, e * m.appear);
+        DrawImeGlyph(d2d, dwrite_.get(), f, scene.imePrevGlyph, iconArea, brush, ink, (1 - e) * m.appear, &imeCache_);
+        DrawImeGlyph(d2d, dwrite_.get(), f, scene.imeGlyph, iconArea, brush, ink, e * m.appear, &imeCache_);
         d2d->SetTransform(D2D1::Matrix3x2F::Identity());
         return;
     }

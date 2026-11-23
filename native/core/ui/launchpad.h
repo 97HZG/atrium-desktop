@@ -109,7 +109,7 @@ private:
     double openedMs_ = 0, closedMs_ = 0, lastPaint_ = 0;
     bool closing_ = false, launched_ = false;
     ULONGLONG lastClosed_ = 0;
-    std::pair<int, size_t> prewarmed_{}; // icon px and the apps' count last read ahead
+    std::pair<int, size_t> prewarmed_; // icon px and the apps' count last read ahead
     std::vector<Hit> hits_;
     std::vector<std::pair<std::wstring, int>> visibleIcons_, askedIcons_;
     std::map<int, motion::Follow> hoverAnim_;

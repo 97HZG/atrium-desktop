@@ -20,6 +20,14 @@ namespace {
 // Small text over glass is a step heavier: below 12.5 DIP a regular reads as a medium (D40).
 DWRITE_FONT_WEIGHT GlassWeight(float size, DWRITE_FONT_WEIGHT w) { return size <= 12.5f && w <= DWRITE_FONT_WEIGHT_NORMAL ? DWRITE_FONT_WEIGHT_MEDIUM : w; }
 
+D2D1_RECT_F TransformRect(D2D1_RECT_F r, const D2D1_MATRIX_3X2_F& m)
+{
+    auto pt = [&](float x, float y) -> D2D1_POINT_2F { return {x * m._11 + y * m._21 + m._31, x * m._12 + y * m._22 + m._32}; };
+    const D2D1_POINT_2F c0 = pt(r.left, r.top), c1 = pt(r.right, r.top), c2 = pt(r.left, r.bottom), c3 = pt(r.right, r.bottom);
+    return D2D1::RectF(std::min({c0.x, c1.x, c2.x, c3.x}), std::min({c0.y, c1.y, c2.y, c3.y}), std::max({c0.x, c1.x, c2.x, c3.x}),
+                       std::max({c0.y, c1.y, c2.y, c3.y}));
+}
+
 } // namespace
 
 D2D1_RECT_F Canvas::Px(D2D1_RECT_F r) const { return D2D1::RectF(r.left * scale, r.top * scale, r.right * scale, r.bottom * scale); }
@@ -146,11 +154,22 @@ void Canvas::Crescent(float cx, float cy, float radius, float dx, float dy, floa
 
 void Canvas::Polygon(std::span<const D2D1_POINT_2F> points, D2D1_COLOR_F c, float round)
 {
+    if (points.size() < 3)
+        return;
+    D2D1_RECT_F bounds = D2D1::RectF(points[0].x, points[0].y, points[0].x, points[0].y);
+    for (const auto& p : points.subspan(1)) {
+        bounds.left = std::min(bounds.left, p.x);
+        bounds.top = std::min(bounds.top, p.y);
+        bounds.right = std::max(bounds.right, p.x);
+        bounds.bottom = std::max(bounds.bottom, p.y);
+    }
+    D2D1_COLOR_F unused;
+    c = InkAt(bounds, c, unused);
     winrt::com_ptr<ID2D1Factory> f;
     d2d_->GetFactory(f.put());
     winrt::com_ptr<ID2D1PathGeometry> path;
     winrt::com_ptr<ID2D1GeometrySink> sink;
-    if (points.size() < 3 || FAILED(f->CreatePathGeometry(path.put())) || FAILED(path->Open(sink.put())))
+    if (FAILED(f->CreatePathGeometry(path.put())) || FAILED(path->Open(sink.put())))
         return;
     sink->BeginFigure(D2D1::Point2F(points[0].x * scale, points[0].y * scale), D2D1_FIGURE_BEGIN_FILLED);
     for (const auto& p : points.subspan(1))
@@ -219,10 +238,10 @@ float Canvas::DarkAt(D2D1_RECT_F r) const
 {
     if (ink.dark.empty())
         return inkDark;
-    D2D1_RECT_F p = Px(r);
     D2D1_MATRIX_3X2_F m;
     d2d_->GetTransform(&m);
-    return ink.DarkAt(p.left * m._11 + m._31, p.top * m._22 + m._32, p.right * m._11 + m._31, p.bottom * m._22 + m._32, inkDark);
+    const D2D1_RECT_F p = TransformRect(Px(r), m);
+    return ink.DarkAt(p.left, p.top, p.right, p.bottom, inkDark);
 }
 
 D2D1_COLOR_F Canvas::InkAt(D2D1_RECT_F r, D2D1_COLOR_F c, D2D1_COLOR_F& haloInk) const
@@ -244,11 +263,10 @@ D2D1_COLOR_F Canvas::InkAt(D2D1_RECT_F r, D2D1_COLOR_F c, D2D1_COLOR_F& haloInk)
     if (!isText && !isWash)
         return c;
     const D2D1_COLOR_F& from = isText ? theme.text : theme.hover;
-    D2D1_RECT_F p = Px(inkArea_ ? *inkArea_ : r);
     D2D1_MATRIX_3X2_F m;
     d2d_->GetTransform(&m); // groups move and scale what they draw
-    float x0 = p.left * m._11 + m._31, y0 = p.top * m._22 + m._32, x1 = p.right * m._11 + m._31, y1 = p.bottom * m._22 + m._32;
-    float dark = ink.DarkAt(x0, y0, x1, y1, inkDark);
+    const D2D1_RECT_F p = TransformRect(Px(inkArea_ ? *inkArea_ : r), m);
+    float dark = ink.DarkAt(p.left, p.top, p.right, p.bottom, inkDark);
     if (std::fabs(dark - inkDark) < 0.002f)
         return c;
     Theme t = Theme::Mix(dark);
@@ -474,7 +492,7 @@ void Canvas::BeginGroup(float opacity, float k, float cx, float cy, float dx, fl
     const D2D1_POINT_2F pivot = D2D1::Point2F(cx * scale, cy * scale);
     D2D1_MATRIX_3X2_F local = D2D1::Matrix3x2F::Scale(k, k, pivot) * D2D1::Matrix3x2F::Translation(dx * scale, dy * scale);
     if (turn != 0)
-        local = D2D1::Matrix3x2F::Rotation(turn * 180.f / 3.14159265f, pivot) * local;
+        local = D2D1::Matrix3x2F::Rotation(turn * 180.f / std::numbers::pi_v<float>, pivot) * local;
     d2d_->SetTransform(local * current);
     alpha_ *= std::clamp(opacity, 0.f, 1.f);
 }

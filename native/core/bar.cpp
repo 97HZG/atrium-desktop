@@ -15,7 +15,6 @@
 #include "render/ui_font.h"
 #include "ui/surface.h"
 
-#include <dwmapi.h>
 #include <psapi.h>
 #include <shellapi.h>
 #include <shellscalingapi.h>
@@ -53,17 +52,15 @@ constexpr wchar_t kVisualClass[] = L"AtriumBarVisual";
 constexpr wchar_t kInputClass[] = L"AtriumBarInput";
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
 constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
-constexpr UINT_PTR kTooltipTimer = 1, kFileHoverTimer = 2, kGuardTimer = 3;
-constexpr UINT kTooltipDelayMs = 450, kPreviewSwapMs = 60, kFileHoverDelayMs = 600, kGuardMs = 1000;
+constexpr UINT_PTR kTooltipTimer = 1, kFileHoverTimer = 2;
+constexpr UINT kTooltipDelayMs = 450, kPreviewSwapMs = 60, kFileHoverDelayMs = 600;
 constexpr float kTooltipFont = 12.5f, kTooltipPadX = 12, kTooltipPadY = 6, kTooltipMinH = 28;
 constexpr float kTooltipTailH = 5, kTooltipTailHalfW = 12, kTooltipTailInset = 8;
-constexpr UINT kGuardFastMs = 150; // while below a system taskbar the user is using
 constexpr UINT_PTR kSlideTimer = 4;   // the slide out is over: hide the windows
-constexpr UINT_PTR kPointerTimer = 5; // while covered: watch the pointer
 constexpr UINT_PTR kDisplayTimer = 6; // the shared Dock's cross-display gesture
 constexpr UINT_PTR kCoverTimer = 7;   // windows moved on this monitor: look at what covers it, once for a burst
 constexpr UINT_PTR kNearTimer = 8;    // the pointer coming down onto the bar (hoverRise)
-constexpr UINT kNearMs = 16, kCoverMs = 50, kPointerMs = 50;
+constexpr UINT kNearMs = 16, kCoverMs = 50;
 constexpr DWORD kLeaveMs = 500;       // a revealed bar goes down this long after the pointer left it
 
 std::map<HWINEVENTHOOK, Bar*> g_guards; // each display has its own stacking guard
@@ -82,39 +79,6 @@ void ApplyCapturePolicies()
         SetCaptureExclusion(windows.input, visible);
     }
     Surface::SetCaptureVisible(visible);
-}
-
-// Windows the bar never climbs over: menus, tooltips, the shell's own
-// surfaces, input method windows.
-bool IgnoredCover(HWND w)
-{
-    static const wchar_t* const kClasses[] = {L"#32768",
-                                              L"tooltips_class32",
-                                              L"Shell_SecondaryTrayWnd",
-                                              L"NotifyIconOverflowWindow",
-                                              L"TopLevelWindowForOverflowXamlIsland",
-                                              L"Xaml_WindowedPopupClass",
-                                              L"XamlExplorerHostIslandWindow",
-                                              L"Windows.UI.Core.CoreWindow",
-                                              L"SysShadow",
-                                              L"IME",
-                                              L"MSCTFIME UI",
-                                              L"ForegroundStaging",
-                                              L"MultitaskingViewFrame",
-                                              L"Shell_InputSwitchTopLevelWindow",
-                                              L"Progman",
-                                              L"WorkerW"};
-    wchar_t cls[96] = {};
-    GetClassNameW(w, cls, 96);
-    for (const wchar_t* c : kClasses)
-        if (wcscmp(cls, c) == 0)
-            return true;
-    LONG ex = GetWindowLongW(w, GWL_EXSTYLE);
-    if ((ex & WS_EX_TRANSPARENT) && (ex & WS_EX_LAYERED))
-        return true; // click-through overlays
-    BOOL cloaked = FALSE;
-    DwmGetWindowAttribute(w, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
-    return cloaked != FALSE;
 }
 
 int Px(double dip, float scale) { return int(std::lround(dip * scale)); }
@@ -250,23 +214,6 @@ void RegisterClasses(HINSTANCE instance)
     wc.lpszClassName = kInputClass;
     RegisterClassExW(&wc);
     done = true;
-}
-
-bool AllowRaise(std::map<HWND, std::pair<int, ULONGLONG>>& raises, HWND target)
-{
-    const ULONGLONG now = GetTickCount64();
-    for (auto it = raises.begin(); it != raises.end();)
-        it = now - it->second.second > 10000 || !IsWindow(it->first) ? raises.erase(it) : std::next(it);
-    auto& count = raises.try_emplace(target, 0, now).first->second;
-    if (++count.first > 4) {
-        if (count.first == 5) {
-            wchar_t cls[64] = {};
-            GetClassNameW(target, cls, 64);
-            Log(L"bar: %s keeps covering the bar; leaving it in front", cls);
-        }
-        return false;
-    }
-    return true;
 }
 
 } // namespace
@@ -671,7 +618,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             Publish();
         }
         return 0;
-    case WM_MOUSEWHEEL: { // over the status icon: the volume; over the now-playing entry: the player's
+    case WM_MOUSEWHEEL: { // over the status icon: the volume
         onInteract();
         POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
         ScreenToClient(h, &p);
@@ -679,8 +626,6 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         const std::wstring over = notches ? HitTest(LayoutPoint(p)) : std::wstring();
         if (over == kStatusKey && onStatusWheel)
             onStatusWheel(notches);
-        else if (over == kMusicKey && onMusicWheel)
-            onMusicWheel(notches); // the player's own volume
         return 0;
     }
     case WM_RBUTTONUP: {
@@ -914,9 +859,12 @@ void Bar::SetItems(std::vector<TaskItem> items)
 
 void Bar::SetVisible(bool visible)
 {
+    const bool changed = visible_ != visible;
     visible_ = visible;
     Relayout();
     UpdateNearWatch();
+    if (changed && onTuckChanged)
+        onTuckChanged();
 }
 
 HMONITOR Bar::ResolveRelayoutMonitor(MONITORINFO& mi)
@@ -1364,80 +1312,6 @@ void CALLBACK Bar::WinEvent(HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG idO
     bar->GuardStacking(event == EVENT_SYSTEM_FOREGROUND ? L"foreground" : L"move");
 }
 
-// Focus may be on another screen; use this monitor's app Z-order instead.
-bool Bar::MonitorCoveredByApp() const
-{
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(hmonitor_, &mi);
-    std::vector<RECT> tiles; // snapped windows in front, filling the screen together
-    for (HWND window = GetTopWindow(nullptr); window; window = GetWindow(window, GW_HWNDNEXT)) {
-        if (!IsWindowVisible(window) || IsIconic(window))
-            continue;
-        DWORD pid = 0;
-        GetWindowThreadProcessId(window, &pid);
-        const HMONITOR windowMonitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
-        if (pid == GetCurrentProcessId() || windowMonitor != hmonitor_)
-            continue;
-        const LONG_PTR ex = GetWindowLongPtrW(window, GWL_EXSTYLE);
-        if (!(ex & WS_EX_APPWINDOW) && ((ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) || GetWindow(window, GW_OWNER)))
-            continue; // transient UI must not reveal a bar over a full-screen app
-        if ((ex & WS_EX_TRANSPARENT) && (ex & WS_EX_LAYERED))
-            continue;
-        BOOL cloaked = FALSE;
-        DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
-        if (cloaked)
-            continue; // windows on another virtual desktop do not cover this one
-        wchar_t cls[64] = {};
-        GetClassNameW(window, cls, 64);
-        if (wcscmp(cls, L"Shell_TrayWnd") == 0 || wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0 || wcscmp(cls, L"Progman") == 0 || wcscmp(cls, L"WorkerW") == 0)
-            continue;
-        RECT frame{};
-        if (!GetWindowRect(window, &frame))
-            continue;
-        if (auto covered = WindowCoverOnMonitor(windowMonitor, frame, IsZoomed(window) != FALSE, hmonitor_, monitor_)) {
-            if (*covered)
-                return true;
-            // Snapped side by side, the windows fill the screen as a maximized one does.
-            RECT bounds = frame; // without the invisible resize borders
-            DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds));
-            const int slack = MulDiv(8, int(GetDpiForWindow(window)), 96);
-            if (IsTile(bounds, mi.rcWork, slack)) {
-                tiles.push_back(bounds);
-                if (TilesFill(tiles, mi.rcWork, slack))
-                    return true;
-            }
-            // A smaller window in front (a mail opened from a chat, a dialog, a float) does not
-            // decide: what fills the screen behind it still does.
-        }
-    }
-    return false;
-}
-
-void Bar::UpdateCover()
-{
-    // Apply the hide mode independently on each display.
-    const std::wstring& mode = settings_.autoHide;
-    bool covered = mode == L"always" || (mode != L"never" && MonitorCoveredByApp());
-    if (covered == covered_)
-        return;
-    covered_ = covered;
-    // Maximizing with the pointer on the bar keeps it up until the pointer leaves.
-    POINT p{};
-    GetCursorPos(&p);
-    RECT zone = EdgeZone();
-    revealed_ = covered && !slidOut_ && PtInRect(&zone, p) && !FullScreenInFront(hmonitor_);
-    leftAt_ = 0;
-    if (mode == L"fullscreen")
-        Log(L"bar: monitor %p %s", hmonitor_, covered ? L"covered by its top app: auto-hide" : L"not covered by its top app");
-    else
-        Log(L"bar: auto-hide %s (%s)", covered ? L"always" : L"never", mode.c_str());
-    if (covered)
-        SetTimer(input_, kPointerTimer, kPointerMs, nullptr);
-    else
-        KillTimer(input_, kPointerTimer);
-    UpdateAutoHide();
-}
-
 void Bar::Reveal()
 {
     if (!covered_ || revealed_ || !visible_ || FullScreenInFront(hmonitor_))
@@ -1539,107 +1413,6 @@ void Bar::UpdateNearWatch()
             nearRise_ = nearMagnify_ = scene_.nearRise = scene_.nearMagnify = false;
             Publish();
         }
-    }
-}
-
-void Bar::Raise()
-{
-    SetWindowPos(visual_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-    SetWindowPos(input_, visual_, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-}
-
-// Keeps the bar on top: hidden behind a full-screen app, below a revealed
-// system taskbar that overlaps it while the user is using that taskbar (the
-// pointer on it outside the bar, or the keyboard in it), and otherwise raised again when
-// another topmost window covers it. A taskbar held up only by an app's
-// flashing button does not push the bar down (the bar shows the app's
-// attention itself). A window that keeps pushing itself over the bar
-// wins after a few rounds, so two always-on-top windows never fight.
-void Bar::GuardStacking(const wchar_t* why)
-{
-    UpdateCover();
-    if (!visible_ || tucked_ || dragging_)
-        return;
-    RECT bar = BarRect(), r{}, overlap{}, trayRect{};
-    HWND tray = ShellTaskbar();
-    bool trayOver = tray && IsWindowVisible(tray) && GetWindowRect(tray, &trayRect) && IntersectRect(&overlap, &trayRect, &bar) &&
-                    overlap.right - overlap.left > 2 && overlap.bottom - overlap.top > 2;
-    bool usingTray = false;
-    POINT cur{};
-    wchar_t fgCls[64] = {};
-    if (trayOver) {
-        GetCursorPos(&cur);
-        HWND fg = GetForegroundWindow();
-        GetClassNameW(fg, fgCls, 64);
-        // The pointer counts on the system taskbar outside the bar: over the bar it is meant for the bar.
-        RECT ours = EdgeZone();
-        usingTray = (PtInRect(&trayRect, cur) && !PtInRect(&ours, cur)) || fg == tray || wcscmp(fgCls, L"TopLevelWindowForOverflowXamlIsland") == 0 ||
-                    wcscmp(fgCls, L"Shell_TrayWnd") == 0;
-    }
-    bool trayAbove = false;
-    HWND cover = nullptr;
-    for (HWND w = GetTopWindow(nullptr); w && w != visual_; w = GetWindow(w, GW_HWNDNEXT)) {
-        if (w == tray) {
-            trayAbove = true;
-            continue;
-        }
-        if (w == input_ || !IsWindowVisible(w))
-            continue;
-        DWORD pid = 0;
-        GetWindowThreadProcessId(w, &pid);
-        if (pid == GetCurrentProcessId())
-            continue;
-        if (!(GetWindowLongW(w, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
-            cover = w; // the bar has lost its topmost place
-            break;
-        }
-        if (GetWindowRect(w, &r) && IntersectRect(&overlap, &r, &bar) && !IgnoredCover(w)) {
-            cover = w;
-            break;
-        }
-    }
-    if (trayOver && usingTray) {
-        // The revealed taskbar stays in front; it slides away again by itself.
-        if (!trayAbove) {
-            SetWindowPos(visual_, tray, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-            SetWindowPos(input_, visual_, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-            if (!belowTray_)
-                Log(L"bar: below the revealed system taskbar (pointer %ld,%ld, foreground %s)", cur.x, cur.y, fgCls);
-        }
-        if (!belowTray_) // the system taskbar gets the pointer now: watch for it coming back to the bar
-            SetTimer(input_, kGuardTimer, kGuardFastMs, nullptr);
-        belowTray_ = true;
-        return;
-    }
-    if (trayOver && trayAbove) {
-        const bool wasBelow = belowTray_;
-        if (wasBelow)
-            SetTimer(input_, kGuardTimer, kGuardMs, nullptr);
-        belowTray_ = false;
-        const bool wasHeld = trayHeldUp_;
-        trayHeldUp_ = true;
-        if (!AllowRaise(raises_, tray))
-            return;
-        // Up without the user (an app's button flashing): the bar stays in front.
-        Raise();
-        if (wasBelow || !wasHeld)
-            Log(L"bar: over the system taskbar, which an app holds up");
-        return;
-    }
-    if (belowTray_) {
-        Log(L"bar: the system taskbar went down again");
-        SetTimer(input_, kGuardTimer, kGuardMs, nullptr);
-    }
-    belowTray_ = false;
-    trayHeldUp_ = trayOver;
-    if (!cover || !AllowRaise(raises_, cover))
-        return;
-    Raise();
-    if (cover != lastCover_) {
-        wchar_t cls[64] = {};
-        GetClassNameW(cover, cls, 64);
-        Log(L"bar: raised over %s (%s)", cls, why ? why : L"check");
-        lastCover_ = cover;
     }
 }
 

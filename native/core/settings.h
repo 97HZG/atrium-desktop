@@ -67,7 +67,6 @@ struct Settings {
     std::wstring nowPlayingRhythm = L"live";   // live: the bars follow the sound | loop: a steady animation
     std::wstring nowPlayingAppMode = L"all";   // all | allow | block
     std::vector<std::wstring> nowPlayingApps;  // AUMIDs or exe names (max 64)
-    bool nowPlayingScrollVolume = true;
     bool showFolderStacks = false;   // the folder stack entry left of the tray
     std::wstring folderStackLayout = L"fan";   // fan | column
     int folderStackMax = 8;          // 4..16

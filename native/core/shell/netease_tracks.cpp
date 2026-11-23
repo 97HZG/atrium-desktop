@@ -1,5 +1,7 @@
 #include "shell/netease_tracks.h"
 
+#include "win32_path.h"
+
 #include <windows.h>
 #include <shlobj.h>
 
@@ -10,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace atrium {
@@ -17,18 +20,6 @@ namespace atrium {
 namespace {
 
 namespace json = winrt::Windows::Data::Json;
-
-struct QueuedTrack {
-    std::wstring title, artists; // artists: their names joined by "/", as the player tells Windows
-    int64_t lengthUs = 0;
-};
-
-std::wstring Lower(std::wstring s)
-{
-    if (!s.empty())
-        CharLowerBuffW(s.data(), DWORD(s.size()));
-    return s;
-}
 
 std::wstring QueuePath()
 {
@@ -63,65 +54,95 @@ std::wstring ReadText(const std::wstring& path)
     return text;
 }
 
-std::vector<QueuedTrack> ParseQueue(const std::wstring& text)
+NeteaseQueuedTrack ParseTrackObject(const json::JsonObject& track)
 {
+    NeteaseQueuedTrack t;
+    if (track.HasKey(L"name") && track.GetNamedValue(L"name").ValueType() == json::JsonValueType::String)
+        t.title = track.GetNamedString(L"name");
+    if (track.HasKey(L"duration") && track.GetNamedValue(L"duration").ValueType() == json::JsonValueType::Number) {
+        const double ms = track.GetNamedNumber(L"duration");
+        if (std::isfinite(ms) && ms > 0.0 && ms < 86400000.0)
+            t.lengthUs = static_cast<int64_t>(std::llround(ms * 1000.0));
+    }
+    if (track.HasKey(L"artists") && track.GetNamedValue(L"artists").ValueType() == json::JsonValueType::Array) {
+        for (const auto& a : track.GetNamedArray(L"artists")) {
+            if (a.ValueType() != json::JsonValueType::Object)
+                continue;
+            const auto obj = a.GetObject();
+            if (obj.HasKey(L"name") && obj.GetNamedValue(L"name").ValueType() == json::JsonValueType::String)
+                t.artists += (t.artists.empty() ? L"" : L"/") + std::wstring(obj.GetNamedString(L"name"));
+        }
+    }
+    return t;
+}
+
+bool ParseQueue(const std::wstring& text, std::vector<NeteaseQueuedTrack>& out)
+{
+    out.clear();
     json::JsonObject root{nullptr};
-    std::vector<QueuedTrack> tracks;
-    if (text.empty() || !json::JsonObject::TryParse(text, root) || !root.HasKey(L"list") || root.GetNamedValue(L"list").ValueType() != json::JsonValueType::Array)
-        return tracks;
+    if (text.empty() || !json::JsonObject::TryParse(text, root) || !root.HasKey(L"list") ||
+        root.GetNamedValue(L"list").ValueType() != json::JsonValueType::Array)
+        return false;
     for (const auto& item : root.GetNamedArray(L"list")) {
         if (item.ValueType() != json::JsonValueType::Object)
             continue;
         const json::JsonObject entry = item.GetObject();
         if (!entry.HasKey(L"track") || entry.GetNamedValue(L"track").ValueType() != json::JsonValueType::Object)
             continue;
-        const json::JsonObject track = entry.GetNamedObject(L"track");
-        QueuedTrack t;
-        if (track.HasKey(L"name") && track.GetNamedValue(L"name").ValueType() == json::JsonValueType::String)
-            t.title = track.GetNamedString(L"name");
-        if (track.HasKey(L"duration") && track.GetNamedValue(L"duration").ValueType() == json::JsonValueType::Number)
-            t.lengthUs = int64_t(track.GetNamedNumber(L"duration") * 1000.0);
-        if (track.HasKey(L"artists") && track.GetNamedValue(L"artists").ValueType() == json::JsonValueType::Array)
-            for (const auto& a : track.GetNamedArray(L"artists"))
-                if (a.ValueType() == json::JsonValueType::Object && a.GetObject().HasKey(L"name") &&
-                    a.GetObject().GetNamedValue(L"name").ValueType() == json::JsonValueType::String)
-                    t.artists += (t.artists.empty() ? L"" : L"/") + std::wstring(a.GetObject().GetNamedString(L"name"));
+        NeteaseQueuedTrack t = ParseTrackObject(entry.GetNamedObject(L"track"));
         if (!t.title.empty() && t.lengthUs > 0)
-            tracks.push_back(std::move(t));
+            out.push_back(std::move(t));
     }
-    return tracks;
+    return true;
 }
 
 } // namespace
 
-int64_t NeteaseTrackLengthUs(const std::wstring& title, const std::wstring& artist)
+bool NeteaseQueueCache::Update(const std::wstring& text, uint64_t writeTime, uint64_t sizeBytes)
 {
-    // The queue as last read, with the file's write time and size then.
-    static FILETIME written{};
-    static ULONGLONG bytes = 0;
-    static std::vector<QueuedTrack> queue;
-    const std::wstring path = QueuePath();
-    WIN32_FILE_ATTRIBUTE_DATA info{};
-    if (path.empty() || !GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info))
-        return 0;
-    const ULONGLONG size = (ULONGLONG(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
-    if (CompareFileTime(&info.ftLastWriteTime, &written) != 0 || size != bytes) {
-        queue = ParseQueue(ReadText(path));
-        written = info.ftLastWriteTime;
-        bytes = size;
-    }
-    const std::wstring wantArtist = Lower(artist);
+    if (text.empty())
+        return false;
+    std::vector<NeteaseQueuedTrack> parsed;
+    if (!ParseQueue(text, parsed))
+        return false;
+    tracks_ = std::move(parsed);
+    writeTime_ = writeTime;
+    sizeBytes_ = sizeBytes;
+    return true;
+}
+
+int64_t NeteaseQueueCache::FindLengthUs(const std::wstring& title, const std::wstring& artist) const
+{
+    const std::wstring wantArtist = FoldCase(artist);
     int64_t byName = 0;
-    for (const QueuedTrack& t : queue) {
+    for (const NeteaseQueuedTrack& t : tracks_) {
         if (t.title != title)
             continue;
-        const std::wstring has = Lower(t.artists);
-        if (!wantArtist.empty() && !has.empty() && (has == wantArtist || wantArtist.find(has) != std::wstring::npos || has.find(wantArtist) != std::wstring::npos))
+        const std::wstring has = FoldCase(t.artists);
+        if (!wantArtist.empty() && !has.empty() &&
+            (has == wantArtist || wantArtist.find(has) != std::wstring::npos || has.find(wantArtist) != std::wstring::npos))
             return t.lengthUs;
         if (!byName)
             byName = t.lengthUs;
     }
     return byName;
+}
+
+int64_t NeteaseTrackLengthUs(const std::wstring& title, const std::wstring& artist)
+{
+    static NeteaseQueueCache cache;
+    const std::wstring path = QueuePath();
+    WIN32_FILE_ATTRIBUTE_DATA info{};
+    if (path.empty() || !GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info))
+        return 0;
+    const uint64_t writeTime = (uint64_t(info.ftLastWriteTime.dwHighDateTime) << 32) | info.ftLastWriteTime.dwLowDateTime;
+    const uint64_t size = (uint64_t(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
+    if (cache.NeedsRead(writeTime, size)) {
+        const std::wstring text = ReadText(path);
+        if (!text.empty())
+            cache.Update(text, writeTime, size);
+    }
+    return cache.FindLengthUs(title, artist);
 }
 
 void NeteaseTimeline::Fill(const std::wstring& title, const std::wstring& artist, bool playing, double nowMs, MediaTimeline& t)
@@ -135,9 +156,12 @@ void NeteaseTimeline::Fill(const std::wstring& title, const std::wstring& artist
     }
     track_ = track;
     playing_ = playing;
+    MediaTimeline est = t;
+    estimate_.Update(track, playing, lengthUs_, nowMs, est);
     if (changed || nowMs - readMs_ >= 500) {
         readMs_ = nowMs;
         double pos = 0, len = 0;
+        const bool wasFromMemory = fromMemory_;
         fromMemory_ = memory_.Read(double(lengthUs_) / 1e6, playing, nowMs, pos, len);
         if (fromMemory_) {
             MediaTimeline m;
@@ -145,14 +169,15 @@ void NeteaseTimeline::Fill(const std::wstring& title, const std::wstring& artist
             m.anchorPosUs = int64_t(std::llround(pos * 1e6));
             m.anchorMs = nowMs;
             m.playing = playing;
-            if (changed || last_.endUs != m.endUs || std::llabs(last_.PositionUs(nowMs) - m.anchorPosUs) > 250'000)
+            if (!wasFromMemory || changed || last_.playing != m.playing || last_.endUs != m.endUs ||
+                std::llabs(last_.PositionUs(nowMs) - m.anchorPosUs) > 250'000)
                 last_ = m;
         }
     }
     if (fromMemory_)
         t = last_;
     else
-        estimate_.Update(track, playing, lengthUs_, nowMs, t);
+        t = est;
 }
 
 } // namespace atrium

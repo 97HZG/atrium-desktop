@@ -46,6 +46,7 @@ internal sealed partial class BarFace
     private readonly StatusGlyph _status = new();
     private readonly StatusIcons _statusIcons = new();
     private readonly TextBlock _time = Clock(true), _date = Clock(false), _timeHalo = Clock(true), _dateHalo = Clock(false);
+    private readonly SolidColorBrush _inkBrush = new(), _plateBrush = new(), _dotBrush = new(), _sepBrush = new(), _haloBrush = new();
     private (MainWindow.BarGeometry Geometry, bool Dark, int Apps, int Running, double Magnify, double Zoom, double X, double Y,
              StatusLook Status)? _layout;
     private (double X, double Y, double Size, bool Icons, Color Ink)? _statusAt;
@@ -56,6 +57,7 @@ internal sealed partial class BarFace
     {
         _badgeText.FontFamily = (FontFamily)Application.Current.Resources["TitleFont"];
         _badge.Child = _badgeText;
+        _plate.Background = _plateBrush;
         for (int i = 0; i < _logoPanes.Length; ++i)
         {
             var pane = new Rectangle { IsHitTestVisible = false, Fill = LogoBrush() };
@@ -123,8 +125,10 @@ internal sealed partial class BarFace
                 p.Data = (Geometry)XamlBindingHelper.ConvertValue(typeof(Geometry), "F1 " + markup);
             }
             double em = Math.Max(1, size * 0.64);
-            p.Fill = new SolidColorBrush(color);
-            p.RenderTransform = new ScaleTransform { ScaleX = em, ScaleY = em };
+            if (p.ReadLocalValue(Shape.FillProperty) is SolidColorBrush brush) brush.Color = color;
+            else p.Fill = new SolidColorBrush(color);
+            if (p.ReadLocalValue(UIElement.RenderTransformProperty) is ScaleTransform scale) { scale.ScaleX = scale.ScaleY = em; }
+            else { p.RenderTransform = new ScaleTransform { ScaleX = em, ScaleY = em }; }
             Canvas.SetLeft(p, x + size / 2);
             Canvas.SetTop(p, y + size / 2);
             return;
@@ -136,6 +140,7 @@ internal sealed partial class BarFace
     private static TextBlock Ime() => new()
     {
         Text = "中",
+        Foreground = new SolidColorBrush(Colors.Transparent),
         TextAlignment = TextAlignment.Center,
         IsHitTestVisible = false,
         IsTextScaleFactorEnabled = false,
@@ -206,7 +211,8 @@ internal sealed partial class BarFace
         if (_layout == layout) return;
         _layout = layout;
         var inkColor = darkInk ? DarkInk : LightInk;
-        var ink = new SolidColorBrush(inkColor);
+        _inkBrush.Color = inkColor;
+        var ink = _inkBrush;
         double X(double u) => (l.Map(u) - ox) * zoom;
         double Y(double v) => (v - oy) * zoom;
         double iconTop = l.PlateY + (l.P - l.Icon) / 2, iconBottom = iconTop + l.Icon, barBottom = l.BarY + l.BarH;
@@ -225,7 +231,7 @@ internal sealed partial class BarFace
         _plate.Visibility = plate ? Visibility.Visible : Visibility.Collapsed;
         if (plate)
         {
-            _plate.Background = new SolidColorBrush(darkInk ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(51, 255, 255, 255));
+            _plateBrush.Color = darkInk ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(51, 255, 255, 255);
             _plate.Width = _plate.Height = l.P * zoom;
             _plate.CornerRadius = new CornerRadius(l.PlateR * zoom);
             Canvas.SetLeft(_plate, X(l.PlateX(1)));
@@ -253,6 +259,7 @@ internal sealed partial class BarFace
             Canvas.SetTop(_logo, y + (size - w) / 2);
         }
 
+        _dotBrush.Color = Color.FromArgb((byte)(inkColor.A * 0.45), inkColor.R, inkColor.G, inkColor.B);
         for (int i = 0; i < Icons.Count; i++)
         {
             bool shown = i < shownApps;
@@ -266,11 +273,12 @@ internal sealed partial class BarFace
             // Running: a 1.9 DIP dot in the gap under the icon, 45 % ink (not the foreground app).
             double r = 1.9 * l.S * zoom;
             _dots[i].Width = _dots[i].Height = 2 * r;
-            _dots[i].Fill = new SolidColorBrush(Color.FromArgb((byte)(inkColor.A * 0.45), inkColor.R, inkColor.G, inkColor.B));
+            _dots[i].Fill = _dotBrush;
             Canvas.SetLeft(_dots[i], X(l.PlateX(i) + l.P / 2) - r);
             Canvas.SetTop(_dots[i], Y((iconBottom + barBottom) / 2) - r);
         }
 
+        _sepBrush.Color = Color.FromArgb((byte)(255 * (darkInk ? 0.18 : 0.30)), inkColor.R, inkColor.G, inkColor.B);
         // The separator: 46 % of the bar's height, 30 % (light) or 18 % (dark) ink.
         _sep.Visibility = l.SepX >= 0 ? Visibility.Visible : Visibility.Collapsed;
         if (l.SepX >= 0)
@@ -278,7 +286,7 @@ internal sealed partial class BarFace
             double h = l.BarH * 0.46;
             _sep.Width = Math.Max(1, l.S * zoom);
             _sep.Height = h * zoom;
-            _sep.Fill = new SolidColorBrush(Color.FromArgb((byte)(255 * (darkInk ? 0.18 : 0.30)), inkColor.R, inkColor.G, inkColor.B));
+            _sep.Fill = _sepBrush;
             Canvas.SetLeft(_sep, X(l.SepX) - _sep.Width / 2);
             Canvas.SetTop(_sep, Y(l.BarY + (l.BarH - h) / 2));
         }
@@ -290,7 +298,7 @@ internal sealed partial class BarFace
             double h = l.BarH * 0.46;
             _desk.Width = Math.Max(1, l.S * zoom);
             _desk.Height = h * zoom;
-            _desk.Fill = new SolidColorBrush(Color.FromArgb((byte)(255 * (darkInk ? 0.18 : 0.30)), inkColor.R, inkColor.G, inkColor.B));
+            _desk.Fill = _sepBrush;
             Canvas.SetLeft(_desk, X(l.DeskX) - _desk.Width / 2);
             Canvas.SetTop(_desk, Y(l.BarY + (l.BarH - h) / 2));
         }
@@ -355,7 +363,8 @@ internal sealed partial class BarFace
             double cx = X(l.ClockX + l.ClockW / 2), w = Math.Max(l.ClockW, l.TimePx * 4) * zoom;
             double top = Y(l.BarY + l.BarH / 2 - (lineT + lineD) / 2);
             double halo = Math.Max(0.6 * l.S, 0.5) * zoom;
-            var haloBrush = new SolidColorBrush(darkInk ? Color.FromArgb(89, 255, 255, 255) : Color.FromArgb(82, 0, 0, 0));
+            _haloBrush.Color = darkInk ? Color.FromArgb(89, 255, 255, 255) : Color.FromArgb(82, 0, 0, 0);
+            var haloBrush = _haloBrush;
             void Place(TextBlock t, double size, double line, double y, Brush brush)
             {
                 t.FontSize = Math.Max(1, size * zoom);
@@ -424,6 +433,7 @@ internal sealed partial class StatusGlyph : Canvas
     private readonly Path _track = Stroke(), _level = Stroke(), _bolt = new() { IsHitTestVisible = false };
     private readonly WifiFan _fan = new();
     private readonly TextBlock _wired = Symbol(), _speaker = Symbol(), _sun = Symbol(), _gapSpeaker = Symbol();
+    private readonly SolidColorBrush _trackBrush = new(), _levelBrush = new(), _boltBrush = new();
 
     public StatusGlyph()
     {
@@ -436,6 +446,7 @@ internal sealed partial class StatusGlyph : Canvas
     internal static TextBlock Symbol() => new()
     {
         IsHitTestVisible = false,
+        Foreground = new SolidColorBrush(Colors.Transparent),
         FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
         TextAlignment = TextAlignment.Center,
         IsTextScaleFactorEnabled = false,
@@ -448,7 +459,8 @@ internal sealed partial class StatusGlyph : Canvas
         t.Text = glyph;
         t.FontSize = Math.Max(1, size);
         t.Width = w;
-        t.Foreground = new SolidColorBrush(color);
+        if (t.ReadLocalValue(TextBlock.ForegroundProperty) is SolidColorBrush brush) brush.Color = color;
+        else t.Foreground = new SolidColorBrush(color);
         SetLeft(t, x);
         SetTop(t, y + (w - TextMetrics.Line(t)) / 2);
     }
@@ -514,12 +526,14 @@ internal sealed partial class StatusGlyph : Canvas
         }
         bool silent = s.Muted && mix > 0.5;
         _track.Data = Arc(cx, cy, rad, Start, Sweep);
-        _track.Stroke = new SolidColorBrush(Fade(ink, silent ? 0.16 : 0.24));
+        _trackBrush.Color = Fade(ink, silent ? 0.16 : 0.24);
+        _track.Stroke = _trackBrush;
         _track.StrokeThickness = stroke;
         double fill = Math.Clamp(s.Fill, 0, 1);
         _level.Visibility = fill > 0.0005 ? Visibility.Visible : Visibility.Collapsed;
         _level.Data = Arc(cx, cy, rad, Start, Math.Max(0.01, Sweep * Math.Min(fill, 0.9999)));
-        _level.Stroke = new SolidColorBrush(level);
+        _levelBrush.Color = level;
+        _level.Stroke = _levelBrush;
         _level.StrokeThickness = stroke;
 
         // In the gap: the bolt while charging (fading out while a level shows).
@@ -531,7 +545,8 @@ internal sealed partial class StatusGlyph : Canvas
             var f = new PathFigure { IsClosed = true, IsFilled = true, StartPoint = P(BoltPoints[0]) };
             for (int i = 1; i < BoltPoints.Length; i++) f.Segments.Add(new LineSegment { Point = P(BoltPoints[i]) });
             _bolt.Data = new PathGeometry { Figures = { f } };
-            _bolt.Fill = new SolidColorBrush(Fade(ink, bolt));
+            _boltBrush.Color = Fade(ink, bolt);
+            _bolt.Fill = _boltBrush;
         }
 
         // Inside: the connection, or the speaker or the sun while a level shows.
@@ -551,10 +566,14 @@ internal sealed partial class WifiFan : Canvas
 {
     private readonly Path _wedge = new() { IsHitTestVisible = false, StrokeLineJoin = PenLineJoin.Round };
     private readonly Path _arc1 = StatusGlyph.Stroke(), _arc2 = StatusGlyph.Stroke();
+    private readonly SolidColorBrush _wedgeBrush = new(), _arc1Brush = new(), _arc2Brush = new();
 
     public WifiFan()
     {
         IsHitTestVisible = false;
+        _wedge.Fill = _wedge.Stroke = _wedgeBrush;
+        _arc1.Stroke = _arc1Brush;
+        _arc2.Stroke = _arc2Brush;
         Children.Add(_wedge);
         Children.Add(_arc1);
         Children.Add(_arc2);
@@ -573,13 +592,13 @@ internal sealed partial class WifiFan : Canvas
             SweepDirection = SweepDirection.Clockwise,
         });
         _wedge.Data = new PathGeometry { Figures = { wedge } };
-        _wedge.Fill = _wedge.Stroke = new SolidColorBrush(lit >= 1 ? on : off);
+        _wedgeBrush.Color = lit >= 1 ? on : off;
         _wedge.StrokeThickness = 0.19 * 0.3 * radius;
         _arc1.Data = StatusGlyph.Arc(cx, oy, 0.595 * radius, From, Span);
-        _arc1.Stroke = new SolidColorBrush(lit >= 2 ? on : off);
+        _arc1Brush.Color = lit >= 2 ? on : off;
         _arc1.StrokeThickness = 0.19 * radius;
         _arc2.Data = StatusGlyph.Arc(cx, oy, 0.905 * radius, From, Span);
-        _arc2.Stroke = new SolidColorBrush(lit >= 3 ? on : off);
+        _arc2Brush.Color = lit >= 3 ? on : off;
         _arc2.StrokeThickness = 0.19 * radius;
     }
 }
@@ -595,10 +614,14 @@ internal sealed partial class StatusIcons : Canvas
     private readonly Path[] _waves = [StatusGlyph.Stroke(), StatusGlyph.Stroke(), StatusGlyph.Stroke()];
     private readonly Path _cross = StatusGlyph.Stroke();
     private readonly Path _body = new() { IsHitTestVisible = false }, _nub = new() { IsHitTestVisible = false }, _fill = new() { IsHitTestVisible = false };
+    private readonly SolidColorBrush _onBrush = new(), _coneBrush = new(), _waveOffBrush = new(), _outlineBrush = new(), _lowBrush = new();
 
     public StatusIcons()
     {
         IsHitTestVisible = false;
+        _cone.Fill = _cone.Stroke = _coneBrush;
+        _cross.Stroke = _onBrush;
+        _body.Stroke = _nub.Fill = _outlineBrush;
         foreach (var e in new UIElement[] { _fan, _wired, _cone, _waves[0], _waves[1], _waves[2], _cross, _body, _nub, _fill }) Children.Add(e);
     }
 
@@ -615,7 +638,8 @@ internal sealed partial class StatusIcons : Canvas
         double cy = h / 2, stroke = Math.Max(0.75, h * 0.075);
         double netW = 0.62 * h, speakerW = 0.60 * h, batteryW = 0.68 * h, gap = 0.18 * h;
         double x = h / 2 - (netW + speakerW + (s.Battery ? batteryW + gap : 0) + gap) / 2;
-        var on = new SolidColorBrush(ink);
+        _onBrush.Color = ink;
+        var on = _onBrush;
 
         // The network: the fan lit by the signal, the wired glyph, or a faint fan offline.
         bool wired = s.Connected && !s.Wifi;
@@ -644,16 +668,17 @@ internal sealed partial class StatusIcons : Canvas
                 ]),
             },
         };
-        _cone.Fill = _cone.Stroke = new SolidColorBrush(StatusGlyph.Fade(ink, s.Muted ? 0.55 : 1));
+        _coneBrush.Color = StatusGlyph.Fade(ink, s.Muted ? 0.55 : 1);
         _cone.StrokeThickness = stroke * 0.6;
         double ox = x + 0.25 * h;
         int waves = s.Volume <= 0 ? 0 : s.Volume < 34 ? 1 : s.Volume < 67 ? 2 : 3;
+        _waveOffBrush.Color = StatusGlyph.Fade(ink, 0.24);
         for (int i = 0; i < 3; i++)
         {
             _waves[i].Visibility = s.Muted ? Visibility.Collapsed : Visibility.Visible;
             double r = (0.11 + 0.105 * i) * h;
             _waves[i].Data = StatusGlyph.Arc(ox, cy, r, -43, 86);
-            _waves[i].Stroke = i < waves ? on : new SolidColorBrush(StatusGlyph.Fade(ink, 0.24));
+            _waves[i].Stroke = i < waves ? on : _waveOffBrush;
             _waves[i].StrokeThickness = stroke;
         }
         _cross.Visibility = s.Muted ? Visibility.Visible : Visibility.Collapsed;
@@ -668,7 +693,6 @@ internal sealed partial class StatusIcons : Canvas
                 g.Figures.Add(f);
             }
             _cross.Data = g;
-            _cross.Stroke = on;
             _cross.StrokeThickness = stroke;
         }
         x += speakerW + gap;
@@ -679,12 +703,10 @@ internal sealed partial class StatusIcons : Canvas
         if (!s.Battery) return;
         double bw = 0.58 * h, bh = 0.36 * h, rad = 0.09 * h;
         var body = new Rect(x + stroke / 2, cy - bh / 2, bw - stroke / 2, bh);
-        var outline = new SolidColorBrush(StatusGlyph.Fade(ink, 0.9));
+        _outlineBrush.Color = StatusGlyph.Fade(ink, 0.9);
         _body.Data = RoundRect(body, rad);
-        _body.Stroke = outline;
         _body.StrokeThickness = stroke;
         _nub.Data = RoundRect(new Rect(body.Right + 0.03 * h, cy - 0.075 * h, 0.05 * h, 0.15 * h), 0.02 * h);
-        _nub.Fill = outline;
         double pad = stroke + 0.035 * h, level = Math.Clamp(s.Percent / 100.0, 0, 1);
         var inner = new Rect(body.Left + pad, body.Top + pad, Math.Max(0, body.Width - 2 * pad), Math.Max(0, body.Height - 2 * pad));
         var levelRect = new Rect(inner.Left, inner.Top, Math.Max(0.06 * h, inner.Width * level), inner.Height);
@@ -699,7 +721,15 @@ internal sealed partial class StatusIcons : Canvas
             });
         }
         _fill.Data = shape;
-        _fill.Fill = s.Low ? new SolidColorBrush(StatusGlyph.Red(ink)) : on;
+        if (s.Low)
+        {
+            _lowBrush.Color = StatusGlyph.Red(ink);
+            _fill.Fill = _lowBrush;
+        }
+        else
+        {
+            _fill.Fill = on;
+        }
     }
 
     private static PathGeometry RoundRect(Rect r, double radius)

@@ -2,28 +2,20 @@
 
 #include "ime_glyph_data.h"
 
-#include <winrt/base.h>
-
-#include <map>
-
 namespace atrium {
 
 namespace {
 
-// The outline of `g` in em units, as a path of the drawing thread's factory.
-ID2D1PathGeometry* Outline(ID2D1DeviceContext* d2d, const ime_glyph::Glyph& g)
+// The outline of `g` in em units, cached on `cache` for `d2d`'s factory.
+ID2D1PathGeometry* Outline(ID2D1DeviceContext* d2d, const ime_glyph::Glyph& g, ImeGlyphCache& cache)
 {
     winrt::com_ptr<ID2D1Factory> factory;
     d2d->GetFactory(factory.put());
-    // The paths per drawing thread; replacing the factory drops the old ones.
-    struct Paths {
-        winrt::com_ptr<ID2D1Factory> factory;
-        std::map<wchar_t, winrt::com_ptr<ID2D1PathGeometry>> byLetter;
-    };
-    thread_local Paths paths;
-    if (paths.factory != factory)
-        paths = Paths{factory, {}};
-    auto& path = paths.byLetter[g.ch];
+    if (cache.factory != factory) {
+        cache.byLetter.clear();
+        cache.factory = factory;
+    }
+    auto& path = cache.byLetter[g.ch];
     if (path)
         return path.get();
     winrt::com_ptr<ID2D1GeometrySink> sink;
@@ -62,7 +54,7 @@ ID2D1PathGeometry* Outline(ID2D1DeviceContext* d2d, const ime_glyph::Glyph& g)
 bool HasImeOutline(const std::wstring& text) { return ime_glyph::Find(text) != nullptr; }
 
 void DrawImeGlyph(ID2D1DeviceContext* d2d, IDWriteFactory* dwrite, IDWriteTextFormat* format, const std::wstring& text, D2D1_RECT_F area,
-                  ID2D1SolidColorBrush* brush, D2D1_COLOR_F color, float alpha)
+                  ID2D1SolidColorBrush* brush, D2D1_COLOR_F color, float alpha, ImeGlyphCache* cache)
 {
     if (text.empty() || alpha <= 0.003f || !format)
         return;
@@ -70,7 +62,8 @@ void DrawImeGlyph(ID2D1DeviceContext* d2d, IDWriteFactory* dwrite, IDWriteTextFo
     brush->SetColor(color);
     const float w = area.right - area.left, h = area.bottom - area.top;
     if (const ime_glyph::Glyph* g = ime_glyph::Find(text)) {
-        ID2D1PathGeometry* path = Outline(d2d, *g);
+        ImeGlyphCache uncached;
+        ID2D1PathGeometry* path = Outline(d2d, *g, cache ? *cache : uncached);
         if (!path)
             return;
         // Em units at the format's size, the ink's centre on the area's.

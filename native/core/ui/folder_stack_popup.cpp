@@ -64,6 +64,7 @@ void FolderStackPopup::Close()
     if (!surface_.Visible() || closing_)
         return;
     lastClosed_ = GetTickCount64();
+    pressed_ = hover_ = sel_ = -1;
     if (!place_.fan || folders_.empty()) {
         surface_.Hide();
         return;
@@ -85,9 +86,13 @@ void FolderStackPopup::Refresh()
         next.resize(maxVisible_);
     const bool same = next.size() == folders_.size() &&
                       std::ranges::equal(next, folders_, [](const StackFolder& a, const StackFolder& b) { return a.path == b.path && a.name == b.name; });
+    for (const auto& f : folders_)
+        surface_.ForgetImage(L"stack|" + f.path);
     folders_ = std::move(next);
-    if (!same)
+    if (!same) {
+        pressed_ = hover_ = sel_ = -1;
         Place(false); // other folders or names: other places (icons alone just repaint)
+    }
     surface_.Invalidate();
 }
 
@@ -181,8 +186,7 @@ void FolderStackPopup::PaintIcon(Canvas& c, size_t i, D2D1_RECT_F r, float opaci
     const StackFolder& f = folders_[i];
     const float fade = opacity * (f.missing ? 0.45f : 1.f);
     if (f.icon.width > 0) {
-        const int px = int(std::lround((r.right - r.left) * c.scale));
-        c.Image(L"stack|" + f.path + L"|" + std::to_wstring(px), f.icon, r, fade);
+        c.Image(L"stack|" + f.path, f.icon, r, fade);
         return;
     }
     c.BeginGroup(fade, 1, (r.left + r.right) / 2, (r.top + r.bottom) / 2);
@@ -339,6 +343,10 @@ bool FolderStackPopup::Message(UINT m, WPARAM w, LPARAM l, LRESULT&)
         return true;
     case WM_LBUTTONUP:
     case WM_MBUTTONUP: {
+        if (closing_) {
+            pressed_ = -1;
+            return true;
+        }
         const int h = HitAt(pt);
         const bool same = h == pressed_ && h != -1;
         pressed_ = -1;
@@ -359,6 +367,8 @@ bool FolderStackPopup::Message(UINT m, WPARAM w, LPARAM l, LRESULT&)
 
 bool FolderStackPopup::Key(WPARAM key)
 {
+    if (closing_)
+        return false;
     const int n = int(place_.items.size());
     // Up the fan or the column away from a bottom bar, down it from a top one.
     const int away = EdgeOf(bar_) == BarEdge::Top ? VK_DOWN : VK_UP, toward = away == VK_UP ? VK_DOWN : VK_UP;

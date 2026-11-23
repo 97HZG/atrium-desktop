@@ -117,6 +117,8 @@ StackFolder ResolveFolder(const std::wstring& path, int iconPx)
 
 bool TryFocusOpenExplorer(const std::wstring& path)
 {
+    if (IsRemotePath(path))
+        return false;
     PIDLIST_ABSOLUTE rawTarget = nullptr;
     if (FAILED(SHParseDisplayName(path.c_str(), nullptr, &rawTarget, 0, nullptr)) || !rawTarget)
         return false;
@@ -141,6 +143,12 @@ bool TryFocusOpenExplorer(const std::wstring& path)
         auto sp = disp.try_as<IServiceProvider>();
         if (!browser || !sp)
             continue;
+        SHANDLE_PTR rawHwnd = 0;
+        if (FAILED(browser->get_HWND(&rawHwnd)) || !rawHwnd)
+            continue;
+        const HWND hwnd = reinterpret_cast<HWND>(rawHwnd);
+        if (!IsWindow(hwnd) || IsHungAppWindow(hwnd) || !ShellResponsive(hwnd, 150, false))
+            continue;
         winrt::com_ptr<IShellBrowser> shellBrowser;
         if (FAILED(sp->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(shellBrowser.put()))) || !shellBrowser)
             continue;
@@ -158,12 +166,6 @@ bool TryFocusOpenExplorer(const std::wstring& path)
             continue;
         const ScopedPidl cur(rawCur);
         if (!ILIsEqual(target.pidl, cur.pidl))
-            continue;
-        SHANDLE_PTR rawHwnd = 0;
-        if (FAILED(browser->get_HWND(&rawHwnd)) || !rawHwnd)
-            continue;
-        const HWND hwnd = reinterpret_cast<HWND>(rawHwnd);
-        if (!IsWindow(hwnd))
             continue;
         if (IsIconic(hwnd))
             ShowWindowAsync(hwnd, SW_RESTORE);
@@ -246,13 +248,7 @@ FolderStackModel::~FolderStackModel()
 
 void FolderStackModel::SetFolders(std::vector<std::wstring> paths, int iconPx)
 {
-    std::vector<std::wstring> normalized;
-    normalized.reserve(paths.size());
-    for (auto& p : paths) {
-        std::wstring norm = NormalizeFolderPath(std::move(p));
-        if (!norm.empty())
-            normalized.push_back(std::move(norm));
-    }
+    std::vector<std::wstring> normalized = DedupeFolders(std::move(paths), 32);
     const int clampedPx = std::clamp(iconPx, 8, 512);
     {
         std::lock_guard g(mutex_);
@@ -308,8 +304,8 @@ void FolderStackModel::Worker()
         if (hasOpen) {
             // Explorer's windows are asked only while it answers: a hung shell never holds this thread
             // (nor Atrium's exit, which joins it).
-            const bool shellAnswers = ShellResponsive(GetShellWindow(), 300, false);
-            if (openJob.forceNewWindow || !shellAnswers || !TryFocusOpenExplorer(openJob.path))
+            const bool tryFocus = !openJob.forceNewWindow && !IsRemotePath(openJob.path) && ShellResponsive(GetShellWindow(), 300, false);
+            if (!tryFocus || !TryFocusOpenExplorer(openJob.path))
                 LaunchExplorer(openJob.path);
             continue;
         }

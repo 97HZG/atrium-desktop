@@ -3,7 +3,6 @@
 #include "win32_path.h"
 
 #include <windows.h>
-#include <appmodel.h>
 #include <audioclient.h>
 #include <audiopolicy.h>
 #include <endpointvolume.h>
@@ -12,8 +11,11 @@
 #include <winrt/base.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace atrium {
@@ -21,6 +23,7 @@ namespace atrium {
 namespace {
 
 constexpr uint64_t kSessionRefreshIntervalMs = 1000;
+constexpr uint64_t kDeviceRetryMs = 1000;
 
 struct ScopedHandle {
     HANDLE handle = nullptr;
@@ -34,29 +37,33 @@ struct ScopedHandle {
     }
 };
 
-std::wstring NormalizeExeStem(const std::wstring& value)
-{
-    std::wstring folded = FoldCase(value);
-    const size_t slash = folded.find_last_of(L"\\/");
-    if (slash != std::wstring::npos)
-        folded = folded.substr(slash + 1);
-    if (folded.size() > 4 && folded.compare(folded.size() - 4, 4, L".exe") == 0)
-        folded.resize(folded.size() - 4);
-    return folded;
-}
+struct DeviceNotifyClient : winrt::implements<DeviceNotifyClient, IMMNotificationClient, IAgileObject> {
+    explicit DeviceNotifyClient(std::shared_ptr<std::atomic<bool>> dirty) : dirty_(std::move(dirty)) {}
 
-std::wstring ProcessAumid(HANDLE process)
-{
-    UINT32 len = 0;
-    if (GetApplicationUserModelId(process, &len, nullptr) != ERROR_INSUFFICIENT_BUFFER || len == 0)
-        return {};
-    std::wstring aumid(len, L'\0');
-    if (GetApplicationUserModelId(process, &len, aumid.data()) != ERROR_SUCCESS)
-        return {};
-    if (!aumid.empty() && aumid.back() == L'\0')
-        aumid.pop_back();
-    return aumid;
-}
+    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR /*pwstrDeviceId*/, DWORD /*dwNewState*/) noexcept override
+    {
+        if (dirty_)
+            dirty_->store(true, std::memory_order_release);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR /*pwstrDeviceId*/) noexcept override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR /*pwstrDeviceId*/) noexcept override
+    {
+        if (dirty_)
+            dirty_->store(true, std::memory_order_release);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR /*pwstrDefaultDeviceId*/) noexcept override
+    {
+        if (flow == eRender && (role == eMultimedia || role == eConsole) && dirty_)
+            dirty_->store(true, std::memory_order_release);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR /*pwstrDeviceId*/, const PROPERTYKEY /*key*/) noexcept override { return S_OK; }
+
+private:
+    std::shared_ptr<std::atomic<bool>> dirty_;
+};
 
 bool SessionMatchesApp(IAudioSessionControl2* control, const std::wstring& targetFolded, const std::wstring& targetStem)
 {
@@ -76,40 +83,64 @@ bool SessionMatchesApp(IAudioSessionControl2* control, const std::wstring& targe
         return false;
     if (path == targetFolded)
         return true;
-    return !targetStem.empty() && NormalizeExeStem(path) == targetStem;
+    return !targetStem.empty() && ExeStemFolded(path) == targetStem;
+}
+
+winrt::com_ptr<IMMDevice> GetDefaultRenderDevice(IMMDeviceEnumerator* enumerator, std::wstring& outId)
+{
+    outId.clear();
+    if (!enumerator)
+        return {};
+    winrt::com_ptr<IMMDevice> dev;
+    if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, dev.put()))) {
+        if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, dev.put())))
+            return {};
+    }
+    if (!dev)
+        return {};
+    LPWSTR rawId = nullptr;
+    if (SUCCEEDED(dev->GetId(&rawId)) && rawId) {
+        outId = rawId;
+        CoTaskMemFree(rawId);
+    }
+    return dev;
 }
 
 } // namespace
 
 struct AudioPeakMeter::Impl {
+    winrt::com_ptr<IMMDeviceEnumerator> enumerator;
+    winrt::com_ptr<DeviceNotifyClient> notifyClient;
+    std::shared_ptr<std::atomic<bool>> deviceDirty = std::make_shared<std::atomic<bool>>(false);
     winrt::com_ptr<IMMDevice> device;
+    std::wstring deviceId;
     winrt::com_ptr<IAudioSessionManager2> sessionManager;
     winrt::com_ptr<IAudioMeterInformation> masterMeter;
     std::vector<winrt::com_ptr<IAudioMeterInformation>> sessionMeters;
     std::wstring cachedAppId;
     uint64_t lastRefreshMs = 0;
+    uint64_t nextRetryMs = 0;
 
+    void ClearDevice();
+    bool ActivateDevice(winrt::com_ptr<IMMDevice> dev, std::wstring id);
     bool EnsureDevice();
     bool RefreshSessions(const std::wstring& appIdOrExe);
 };
 
-bool AudioPeakMeter::Impl::EnsureDevice()
+void AudioPeakMeter::Impl::ClearDevice()
 {
-    if (device && sessionManager && masterMeter)
-        return true;
+    device = nullptr;
+    deviceId.clear();
+    sessionManager = nullptr;
+    masterMeter = nullptr;
+    sessionMeters.clear();
+    lastRefreshMs = 0;
+}
 
-    winrt::com_ptr<IMMDeviceEnumerator> enumerator;
-    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(enumerator.put()))) || !enumerator)
-        return false;
-
-    winrt::com_ptr<IMMDevice> dev;
-    if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, dev.put()))) {
-        if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, dev.put())))
-            return false;
-    }
+bool AudioPeakMeter::Impl::ActivateDevice(winrt::com_ptr<IMMDevice> dev, std::wstring id)
+{
     if (!dev)
         return false;
-
     winrt::com_ptr<IAudioSessionManager2> manager;
     if (FAILED(dev->Activate(__uuidof(IAudioSessionManager2), CLSCTX_INPROC_SERVER, nullptr, manager.put_void())) || !manager)
         return false;
@@ -119,13 +150,59 @@ bool AudioPeakMeter::Impl::EnsureDevice()
         return false;
 
     device = std::move(dev);
+    deviceId = std::move(id);
     sessionManager = std::move(manager);
     masterMeter = std::move(meter);
+    sessionMeters.clear();
+    lastRefreshMs = 0;
+    nextRetryMs = 0;
+    return true;
+}
+
+bool AudioPeakMeter::Impl::EnsureDevice()
+{
+    if (deviceDirty->exchange(false, std::memory_order_acq_rel)) {
+        ClearDevice();
+        nextRetryMs = 0;
+    }
+    if (device && sessionManager && masterMeter)
+        return true;
+
+    const uint64_t now = GetTickCount64();
+    if (now < nextRetryMs)
+        return false;
+
+    if (!enumerator) {
+        if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(enumerator.put()))) || !enumerator) {
+            nextRetryMs = now + kDeviceRetryMs;
+            return false;
+        }
+        auto client = winrt::make_self<DeviceNotifyClient>(deviceDirty);
+        if (SUCCEEDED(enumerator->RegisterEndpointNotificationCallback(client.get())))
+            notifyClient = std::move(client);
+    }
+
+    std::wstring devId;
+    winrt::com_ptr<IMMDevice> dev = GetDefaultRenderDevice(enumerator.get(), devId);
+    if (!ActivateDevice(std::move(dev), std::move(devId))) {
+        ClearDevice();
+        nextRetryMs = now + kDeviceRetryMs;
+        return false;
+    }
     return true;
 }
 
 bool AudioPeakMeter::Impl::RefreshSessions(const std::wstring& appIdOrExe)
 {
+    if (enumerator) {
+        std::wstring currentId;
+        winrt::com_ptr<IMMDevice> currentDev = GetDefaultRenderDevice(enumerator.get(), currentId);
+        if (!currentDev)
+            return false;
+        if (currentId != deviceId && !ActivateDevice(std::move(currentDev), std::move(currentId)))
+            return false;
+    }
+
     sessionMeters.clear();
     cachedAppId = appIdOrExe;
     lastRefreshMs = GetTickCount64();
@@ -141,7 +218,7 @@ bool AudioPeakMeter::Impl::RefreshSessions(const std::wstring& appIdOrExe)
         return true;
 
     const std::wstring targetFolded = FoldCase(appIdOrExe);
-    const std::wstring targetStem = NormalizeExeStem(appIdOrExe);
+    const std::wstring targetStem = ExeStemFolded(appIdOrExe);
     int count = 0;
     sessions->GetCount(&count);
     for (int i = 0; i < count; ++i) {
@@ -161,7 +238,7 @@ bool AudioPeakMeter::Impl::RefreshSessions(const std::wstring& appIdOrExe)
 }
 
 AudioPeakMeter::AudioPeakMeter() : impl_(std::make_unique<Impl>()) {}
-AudioPeakMeter::~AudioPeakMeter() = default;
+AudioPeakMeter::~AudioPeakMeter() { Reset(); }
 AudioPeakMeter::AudioPeakMeter(AudioPeakMeter&&) noexcept = default;
 AudioPeakMeter& AudioPeakMeter::operator=(AudioPeakMeter&&) noexcept = default;
 
@@ -169,12 +246,14 @@ void AudioPeakMeter::Reset()
 {
     if (!impl_)
         return;
-    impl_->device = nullptr;
-    impl_->sessionManager = nullptr;
-    impl_->masterMeter = nullptr;
-    impl_->sessionMeters.clear();
+    impl_->ClearDevice();
+    if (impl_->enumerator && impl_->notifyClient)
+        impl_->enumerator->UnregisterEndpointNotificationCallback(impl_->notifyClient.get());
+    impl_->notifyClient = nullptr;
+    impl_->enumerator = nullptr;
     impl_->cachedAppId.clear();
-    impl_->lastRefreshMs = 0;
+    impl_->nextRetryMs = 0;
+    impl_->deviceDirty->store(false, std::memory_order_release);
 }
 
 float AudioPeakMeter::Sample(const std::wstring& appIdOrExe)
@@ -185,7 +264,8 @@ float AudioPeakMeter::Sample(const std::wstring& appIdOrExe)
     const uint64_t now = GetTickCount64();
     if (appIdOrExe != impl_->cachedAppId || impl_->lastRefreshMs == 0 || (now - impl_->lastRefreshMs) >= kSessionRefreshIntervalMs) {
         if (!impl_->RefreshSessions(appIdOrExe)) {
-            Reset();
+            impl_->ClearDevice();
+            impl_->nextRetryMs = now + kDeviceRetryMs;
             return 0.0f;
         }
     }
@@ -196,10 +276,10 @@ float AudioPeakMeter::Sample(const std::wstring& appIdOrExe)
             float peak = 0.0f;
             const HRESULT hr = meter->GetPeakValue(&peak);
             if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
-                Reset();
+                impl_->ClearDevice();
                 return 0.0f;
             }
-            if (SUCCEEDED(hr))
+            if (SUCCEEDED(hr) && std::isfinite(peak))
                 maxPeak = std::max(maxPeak, peak);
         }
         return std::clamp(maxPeak, 0.0f, 1.0f);
@@ -208,62 +288,10 @@ float AudioPeakMeter::Sample(const std::wstring& appIdOrExe)
     float masterPeak = 0.0f;
     const HRESULT hr = impl_->masterMeter->GetPeakValue(&masterPeak);
     if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
-        Reset();
+        impl_->ClearDevice();
         return 0.0f;
     }
-    return SUCCEEDED(hr) ? std::clamp(masterPeak, 0.0f, 1.0f) : 0.0f;
-}
-
-bool AudioPeakMeter::AdjustAppVolume(const std::wstring& appIdOrExe, int deltaPercent)
-{
-    if (appIdOrExe.empty() || !impl_ || !impl_->EnsureDevice())
-        return false;
-
-    winrt::com_ptr<IAudioSessionEnumerator> sessions;
-    const HRESULT enumHr = impl_->sessionManager->GetSessionEnumerator(sessions.put());
-    if (enumHr == AUDCLNT_E_DEVICE_INVALIDATED) {
-        Reset();
-        return false;
-    }
-    if (FAILED(enumHr) || !sessions)
-        return false;
-
-    const std::wstring targetFolded = FoldCase(appIdOrExe);
-    const std::wstring targetStem = NormalizeExeStem(appIdOrExe);
-    int count = 0;
-    sessions->GetCount(&count);
-    bool adjusted = false;
-
-    for (int i = 0; i < count; ++i) {
-        winrt::com_ptr<IAudioSessionControl> control;
-        if (FAILED(sessions->GetSession(i, control.put())) || !control)
-            continue;
-        AudioSessionState state = AudioSessionStateExpired;
-        if (FAILED(control->GetState(&state)) || state == AudioSessionStateExpired)
-            continue;
-        auto control2 = control.try_as<IAudioSessionControl2>();
-        if (!SessionMatchesApp(control2.get(), targetFolded, targetStem))
-            continue;
-        auto volume = control.try_as<ISimpleAudioVolume>();
-        if (!volume)
-            continue;
-        float level = 0.0f;
-        if (FAILED(volume->GetMasterVolume(&level)))
-            continue;
-        const long nextPct = std::clamp(std::lround(level * 100.0f) + long(deltaPercent), 0L, 100L);
-        const float nextLevel = float(nextPct) / 100.0f;
-        const HRESULT setHr = volume->SetMasterVolume(nextLevel, nullptr);
-        if (setHr == AUDCLNT_E_DEVICE_INVALIDATED) {
-            Reset();
-            return false;
-        }
-        if (SUCCEEDED(setHr)) {
-            if (nextPct > 0)
-                volume->SetMute(FALSE, nullptr);
-            adjusted = true;
-        }
-    }
-    return adjusted;
+    return SUCCEEDED(hr) && std::isfinite(masterPeak) ? std::clamp(masterPeak, 0.0f, 1.0f) : 0.0f;
 }
 
 } // namespace atrium

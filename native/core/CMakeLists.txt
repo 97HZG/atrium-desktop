@@ -30,6 +30,7 @@ add_library(atrium_core_lib STATIC
     bar.cpp
     bar_drop.cpp
     bar_entries.cpp
+    bar_stacking.cpp
     desktop_helpers.cpp
     extras_host.cpp
     guard_process.cpp
@@ -72,6 +73,7 @@ add_library(atrium_core_lib STATIC
     shell/wechat_source.cpp
     shell/feishu_source.cpp
     ui/surface.cpp
+    ui/popup_theme.cpp
     ui/canvas.cpp
     ui/start_menu.cpp
     ui/notifications.cpp

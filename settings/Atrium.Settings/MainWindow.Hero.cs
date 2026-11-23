@@ -161,7 +161,8 @@ public sealed partial class MainWindow
         double rightW = (rightCount - (s.ShowClock ? 1 : 0) - (s.ShowDesktop ? 1 : 0)) * p +
             (s.ShowStatus ? statusExtra : 0) + clockW + deskW + Math.Max(0, rightCount - 1) * gap;
         double launch = s.ShowLaunchpad ? p + gap : 0; // Launchpad, one slot right of the logo
-        double Content(int n) => Math.Max(2 * h, 2 * pad + p + 2 * gap + launch + n * p + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
+        double Content(int n) => Math.Max(2 * h,
+            2 * pad + p + 2 * gap + launch + n * p + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
         double mag = Math.Clamp(s.Magnify, 1, 2), pitch = p + gap;
         double stretch = mag > 1.001 ? Math.Ceiling((mag - 1) * pitch * 2.3) : 0;
         double maxW = Math.Max(2 * h, Math.Min(s.Width, (viewW - 16) / scale - stretch));

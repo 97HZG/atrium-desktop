@@ -27,19 +27,26 @@ private:
     using Doubles = std::vector<std::pair<uintptr_t, double>>; // rva, value; by rva
 
     bool Attach();
+    bool TryAttachProcess(DWORD pid);
+    bool LoadPeSections(HMODULE module, DWORD pid);
     void Detach();
+    void ResetMatch();
     bool Locate(double lengthSec);
     void Verify(bool playing, double nowMs, double length);
     bool ReadDouble(uintptr_t rva, double& value) const;
+    void ScanRegion(uintptr_t rva, uintptr_t avail, double lo, double hi, std::vector<uint8_t>& bytes, Doubles& found) const;
     Doubles Scan(double lo, double hi) const; // every double in [lo, hi] in the writable sections
 
     winrt::handle process_;
+    DWORD attachedPid_ = 0;
+    DWORD avoidPid_ = 0;
     uintptr_t base_ = 0;
     uint32_t stamp_ = 0, imageSize_ = 0;
     std::vector<std::pair<uintptr_t, uintptr_t>> sections_; // writable: rva, size
     uintptr_t lengthRva_ = 0, positionRva_ = 0;
     bool trusted_ = false; // positionRva_ seen to advance with the clock
     double retryMs_ = 0;   // nothing found: not before then
+    double mismatchSinceMs_ = 0;
     // Verifying: the candidates' values when last read, and when.
     Doubles candidates_;
     double probeMs_ = 0;

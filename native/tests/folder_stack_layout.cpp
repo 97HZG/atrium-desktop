@@ -88,6 +88,12 @@ int main()
     const auto tall = FanPlacement(kBar, entry, kWork, 1.f, BarEdge::Bottom, many);
     Require(tall.items.size() < many.size() && tall.window.top >= kWork.top, "a fan taller than the display ends at its top");
 
+    const auto tight = FanPlacement(RECT{300, 100, 1620, 160}, RECT{1400, 105, 1450, 155}, RECT{0, 60, 1920, 160}, 1.f, BarEdge::Bottom, names);
+    Require(tight.fan && tight.items.size() == 1, "tight room still keeps at least one fan item");
+    CheckFan(tight, 1.f, "single tight-room fan item lies inside its window");
+    const auto emptyFan = FanPlacement(kBar, entry, kWork, 1.f, BarEdge::Bottom, {});
+    Require(emptyFan.fan && emptyFan.items.empty(), "empty input yields empty fan");
+
     const auto side = FanPlacement(RECT{0, 100, 60, 980}, RECT{5, 500, 55, 550}, RECT{70, 0, 1920, 1080}, 1.f, BarEdge::Left, names);
     Require(!side.fan && side.items.size() == names.size(), "on a side edge the column stands in");
     Require(side.window.left == 72, "the column stands 12 DIP off a left bar");

@@ -183,6 +183,7 @@ void OnImeSample(ImeWatcher::Sample& sample)
 }
 
 void ConfigureBar(Bar& bar);
+void CloseBarPopups();
 void SyncDisplayBars(const Settings& settings, bool refresh = false, bool workAreaOnly = false);
 
 // GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS: Windows reports every change of the
@@ -569,15 +570,8 @@ void ApplySettings(const Settings& s)
     SyncDisplayBars(s);
     if (g_app.barOn != s.bar) {
         g_app.barOn = s.bar;
-        if (!s.bar) {
-            // The bar's popups go with it.
-            g_app.start->Close(false);
-            g_app.trayPanel->Close();
-            g_app.control->Close();
-            g_app.calendar->Close();
-            if (g_app.notes->CenterVisible())
-                g_app.notes->ToggleCenter();
-        }
+        if (!s.bar)
+            CloseBarPopups(); // the bar's popups go with it
         // The bar's windows go, its render thread stays: it draws the widgets' and menus' glass.
         ForBars([&](Bar& bar) { bar.SetVisible(s.bar); });
         Log(L"modules: bar %s", s.bar ? L"on" : L"off");
@@ -1027,15 +1021,18 @@ void SyncDisplayBars(const Settings& settings, bool refresh, bool workAreaOnly)
     // Keep existing renderers when changing appearance; only retire disconnected or unused bars.
     const bool all = settings.bar && settings.dockDisplayMode == L"all";
     std::vector<std::unique_ptr<Bar>> retired;
+    bool closeActive = false;
     std::erase_if(g_app.secondaryBars, [&](auto& bar) {
         if (all && std::ranges::any_of(displays, [&](const DisplayInfo& d) { return !d.primary && d.id == bar->DisplayOverride(); }))
             return false;
         if (g_app.activeBar == bar.get())
-            CloseBarPopups(), g_app.activeBar = g_app.bar.get();
-        bar->SetVisible(false);
+            g_app.activeBar = g_app.bar.get(), closeActive = true;
         retired.push_back(std::move(bar));
         return true;
     });
+    if (closeActive)
+        CloseBarPopups();
+    std::ranges::for_each(retired, [](const auto& bar) { bar->SetVisible(false); });
     for (auto& bar : retired)
         if (!bar->StopRendering(5000)) {
             Log(L"core: secondary display renderer slow during removal; draining");

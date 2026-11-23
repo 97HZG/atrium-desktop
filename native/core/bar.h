@@ -107,7 +107,6 @@ public:
     std::function<void(int notches)> onStatusWheel; // the wheel over the status icon (volume)
     // Launchpad (#launchpad), the now-playing entry (#music) and the folder stack (#stacks).
     std::function<void(const std::wstring& key, RECT anchor)> onExtraClick;
-    std::function<void(int notches)> onMusicWheel; // the wheel over the now-playing entry (the player's volume)
     // The now-playing entry, right of the status entry, while `shown` (a player has a session); its
     // bars move with `feed`; `tip` its tooltip (the track). Every call wakes the render thread.
     void SetMusic(std::shared_ptr<const MusicFeed> feed, bool shown, std::wstring tip);
@@ -136,6 +135,9 @@ public:
     std::function<void()> onTuckChanged = [] {};  // auto-hide tucked the bar away or brought it up
 
 private:
+    static constexpr UINT_PTR kGuardTimer = 3, kPointerTimer = 5;
+    static constexpr UINT kGuardMs = 1000, kPointerMs = 50;
+
     struct Snapshot {
         Settings settings;
         BarScene scene;

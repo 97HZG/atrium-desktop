@@ -47,9 +47,14 @@ HRESULT __stdcall BarDropTarget::Drop(IDataObject* data, DWORD, POINTL pt, DWORD
     if (auto* drop = static_cast<HDROP>(GlobalLock(sm.hGlobal))) {
         UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
         for (UINT i = 0; i < count && i < 64; ++i) {
-            std::wstring p(DragQueryFileW(drop, i, nullptr, 0) + 1, L'\0');
-            p.resize(DragQueryFileW(drop, i, p.data(), UINT(p.size())));
-            paths.push_back(std::move(p));
+            if (const UINT len = DragQueryFileW(drop, i, nullptr, 0); len > 0) {
+                std::wstring p(len + 1, L'\0');
+                const UINT copied = DragQueryFileW(drop, i, p.data(), UINT(p.size()));
+                if (copied > 0) {
+                    p.resize(copied);
+                    paths.push_back(std::move(p));
+                }
+            }
         }
         GlobalUnlock(sm.hGlobal);
     }

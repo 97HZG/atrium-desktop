@@ -9,6 +9,7 @@
 
 #include "icon_image.h"
 #include "render/glass_panel.h"
+#include "ui/popup_theme.h"
 
 #include <windows.h>
 #include <d2d1_3.h>
@@ -30,22 +31,6 @@
 
 namespace atrium {
 
-// Ink and washes over the popup glass, which is the bar's clear material:
-// dark ink where the glass shows something bright, light ink elsewhere (the
-// render thread decides, WM_GLASS_INK). Text gets a soft halo, as on the bar.
-// `panel` is only painted when the glass is unavailable (its own tone).
-struct Theme {
-    bool light = false; // dark ink
-    D2D1_COLOR_F panel, border, text, subtext, faint, hover, press, accent, accentText, divider, card, cardHot, halo;
-    static Theme For(bool darkInk);
-    // Between the light (0) and the dark (1) ink, while the ink fades.
-    static Theme Mix(float darkInk);
-    // The plain stand-in panel: its tone, and the ink over it.
-    static Theme Panel();
-    // The bar's tint and transparency (ApplySettings), which decide the stand-in's tone.
-    static void SetGlass(uint32_t tint, double transparency);
-};
-
 // A piece of glass in a popup: content coordinates, DIP.
 struct ShapeDip {
     D2D1_RECT_F rect;
@@ -64,16 +49,6 @@ struct ShapeDip {
 };
 
 class Surface;
-
-// Where every popup goes (D32): kPopupGapDip inside the bar's glass on whichever
-// edge it sits on; Left aligns with the bar's start (left, or top on a side edge),
-// Right with its end, Center with the work area's middle; inside the work area.
-constexpr float kPopupGapDip = 12;
-enum class PopupAlign { Left, Right, Center };
-float PopupScale(RECT bar); // px per DIP on the bar's monitor
-RECT PopupRect(RECT bar, D2D1_SIZE_F sizeDip, PopupAlign align);
-POINT PopupAnchor(RECT bar, RECT rect);
-POINT PopupOrigin(RECT bar, RECT popup, RECT anchor);
 
 // Drawing helpers bound to one surface's device context.
 class Canvas {
@@ -225,6 +200,7 @@ public:
 private:
     friend class Canvas;
     static LRESULT CALLBACK Proc(HWND, UINT, WPARAM, LPARAM);
+    bool HandleMouse(UINT m, LPARAM& l);
     void Paint();      // the frame now, unless one is being drawn: then the one after
     void PaintFrame();
     void Present();

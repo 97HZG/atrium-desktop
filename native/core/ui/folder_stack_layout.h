@@ -95,7 +95,7 @@ inline StackPlacement FanPlacement(RECT bar, RECT entry, RECT work, float scale,
     const float ex = float(entry.left + entry.right) / 2;
     const float foot = float(down ? bar.bottom : bar.top);
     const float room = (down ? float(work.bottom) - foot : foot - float(work.top)) / scale - kStackGap - kStackMargin;
-    const size_t n = std::min(labelW.size(), size_t(std::max(0.f, (room - kStackFanIcon) / kStackFanStep + 1)));
+    const size_t n = std::min(labelW.size(), size_t(std::max(1.f, (room - kStackFanIcon) / kStackFanStep + 1)));
     float widest = 0;
     for (size_t i = 0; i < n; ++i)
         widest = std::max(widest, StackLabelWidth(labelW[i]) + kStackLabelGap);
