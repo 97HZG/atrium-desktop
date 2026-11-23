@@ -123,6 +123,8 @@ void ReadModuleSettingsJson(const json::JsonObject& o, Settings& s)
     flag(L"hideTaskbar", s.hideTaskbar);
     flag(L"genieMinimize", s.genieMinimize);
     flag(L"windowPeek", s.windowPeek);
+    flag(L"barReserve", s.barReserve);
+    flag(L"barFullscreenHide", s.barFullscreenHide);
     flag(L"hideBanners", s.hideBanners);
     flag(L"trayHost", s.trayHost);
     ReadStringArrayJson(o, L"stageExcluded", s.stageExcluded);
@@ -440,6 +442,8 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
     o.SetNamedValue(L"genieMinimize", json::JsonValue::CreateBooleanValue(genieMinimize));
     o.SetNamedValue(L"windowPeek", json::JsonValue::CreateBooleanValue(windowPeek));
+    o.SetNamedValue(L"barReserve", json::JsonValue::CreateBooleanValue(barReserve));
+    o.SetNamedValue(L"barFullscreenHide", json::JsonValue::CreateBooleanValue(barFullscreenHide));
     o.SetNamedValue(L"hideBanners", json::JsonValue::CreateBooleanValue(hideBanners));
     o.SetNamedValue(L"trayHost", json::JsonValue::CreateBooleanValue(trayHost));
     o.SetNamedValue(L"remoteVisible", json::JsonValue::CreateBooleanValue(remoteVisible));

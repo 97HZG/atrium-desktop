@@ -76,6 +76,8 @@ internal sealed class BarSettings
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public string Language { get; set; } = "auto"; // auto (follow Windows) | a locale tag: en, zh-Hans, ...
     public string AutoHide { get; set; } = "fullscreen"; // never | fullscreen (a maximized or full-screen app in front) | always
+    public bool BarReserve { get; set; } = true;        // always shown: the bar keeps its strip, maximized windows end before it
+    public bool BarFullscreenHide { get; set; } = true; // always shown: a full-screen app in front (a video, F11) has the screen
     public string BarEdge { get; set; } = "bottom"; // bottom | top | left | right
     public string StatusStyle { get; set; } = "ring"; // ring | icons (network, volume, battery as on the Windows taskbar)
     // The control centre's optional modules, in order; kControlModules in native/core/settings.h.
@@ -229,6 +231,8 @@ internal sealed class BarSettings
             ["textColor"] = TextColor,
             ["language"] = Language,
             ["autoHide"] = AutoHide,
+            ["barReserve"] = BarReserve,
+            ["barFullscreenHide"] = BarFullscreenHide,
             ["barEdge"] = BarEdge,
             ["statusStyle"] = StatusStyle,
             ["dockDisplayMode"] = DockDisplayMode,
@@ -410,6 +414,8 @@ internal sealed class BarSettings
         s.TextColor = textColor is "light" or "dark" ? textColor : "auto";
         string autoHide = Str("autoHide", f.AutoHide);
         s.AutoHide = autoHide is "never" or "always" ? autoHide : "fullscreen";
+        s.BarReserve = Flag("barReserve", f.BarReserve);
+        s.BarFullscreenHide = Flag("barFullscreenHide", f.BarFullscreenHide);
         string barEdge = Str("barEdge", f.BarEdge);
         s.BarEdge = barEdge is "top" or "left" or "right" ? barEdge : "bottom";
         string language = Str("language", f.Language);
@@ -534,7 +540,7 @@ internal sealed class BarSettings
         FolderStackLayout == o.FolderStackLayout && FolderStackMax == o.FolderStackMax &&
         FolderStacks.SequenceEqual(o.FolderStacks, StringComparer.OrdinalIgnoreCase) &&
         FolderStackFiles.SequenceEqual(o.FolderStackFiles, StringComparer.OrdinalIgnoreCase) &&
-        TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
+        TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && BarReserve == o.BarReserve && BarFullscreenHide == o.BarFullscreenHide &&
         BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && ControlModules.SequenceEqual(o.ControlModules) && NotifyTimeout == o.NotifyTimeout &&
         NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus && ImeBubble == o.ImeBubble &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && WeChatBlockOfficial == o.WeChatBlockOfficial && NotifyFeishu == o.NotifyFeishu &&

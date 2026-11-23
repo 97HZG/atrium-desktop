@@ -850,6 +850,15 @@
                                                      Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
                                     </local:SegmentTrack>
                                 </StackPanel>
+                                <!-- Only for "Visible" (autoHide never) -->
+                                <StackPanel x:Name="VisibleOptions">
+                                    <local:ToggleTile x:Name="BarReserveSwitch" Title="Keep room for windows" SwitchName="Keep room for windows"
+                                                      Toggled="OnBarReserveToggled" Flat="True"
+                                                      Note="Maximized windows end above the taskbar. Off: they fill the whole screen and the taskbar floats over them." />
+                                    <local:ToggleTile x:Name="BarFullscreenHideSwitch" Title="Hide for full-screen apps" SwitchName="Hide for full-screen apps"
+                                                      Toggled="OnBarFullscreenHideToggled" Flat="True"
+                                                      Note="A full-screen video or app (F11) has the whole screen; the taskbar comes back when it leaves full screen. Games always hide it." />
+                                </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="Position" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>

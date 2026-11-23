@@ -58,6 +58,10 @@ Require(!BarSettings.FromJson([], new()).StageMinimize, "Old files must keep min
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"genieMinimize":true}""")!.AsObject(), new());
 Require(!new BarSettings().GenieMinimize && parsed.GenieMinimize && BarSettings.FromJson(parsed.ToJson(), new()).GenieMinimize && !new BarSettings().SameAs(parsed),
     "The genie effect must be off by default, survive a round trip and mark the settings dirty.");
+var visibleOff = BarSettings.FromJson(JsonNode.Parse("""{"barReserve":false,"barFullscreenHide":false}""")!.AsObject(), new());
+Require(new BarSettings().BarReserve && new BarSettings().BarFullscreenHide && !visibleOff.BarReserve && !visibleOff.BarFullscreenHide &&
+        BarSettings.FromJson(visibleOff.ToJson(), new()) is { BarReserve: false, BarFullscreenHide: false } && !new BarSettings().SameAs(visibleOff),
+    "The always-shown bar keeps room and hides for full-screen apps by default; both off survive a round trip and mark the settings dirty.");
 var peekOff = BarSettings.FromJson(JsonNode.Parse("""{"windowPeek":false}""")!.AsObject(), new());
 Require(new BarSettings().WindowPeek && !peekOff.WindowPeek && !BarSettings.FromJson(peekOff.ToJson(), new()).WindowPeek && !new BarSettings().SameAs(peekOff),
     "Peeking at windows is on by default, and off survives a round trip and marks the settings dirty.");

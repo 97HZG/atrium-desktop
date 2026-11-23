@@ -832,6 +832,9 @@ public sealed partial class MainWindow : Window, IDisposable
         RemoteVisibleSwitch.IsOn = CurrentSettings.RemoteVisible;
         (CurrentSettings.StatusStyle == "icons" ? StatusIcons : StatusRing).IsChecked = true;
         (CurrentSettings.AutoHide switch { "never" => HideNever, "always" => HideAlways, _ => HideFullscreen }).IsChecked = true;
+        BarReserveSwitch.IsOn = CurrentSettings.BarReserve;
+        BarFullscreenHideSwitch.IsOn = CurrentSettings.BarFullscreenHide;
+        VisibleOptions.Visibility = CurrentSettings.AutoHide == "never" ? Visibility.Visible : Visibility.Collapsed;
         (CurrentSettings.BarEdge switch { "top" => EdgeTop, "left" => EdgeLeft, "right" => EdgeRight, _ => EdgeBottom }).IsChecked = true;
         StartupSwitch.IsOn = CurrentSettings.StartOnLogin;
         string currentLanguage = CurrentSettings.Language == "zh" ? "zh-Hans" : CurrentSettings.Language;
@@ -1235,6 +1238,21 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
         CurrentSettings.AutoHide = tag;
+        VisibleOptions.Visibility = tag == "never" ? Visibility.Visible : Visibility.Collapsed;
+        Changed();
+    }
+
+    private void OnBarReserveToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        CurrentSettings.BarReserve = BarReserveSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnBarFullscreenHideToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        CurrentSettings.BarFullscreenHide = BarFullscreenHideSwitch.IsOn;
         Changed();
     }
 

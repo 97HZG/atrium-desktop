@@ -37,6 +37,8 @@
 | `showDesktop` | bool | | false | 任务栏最右端的“显示桌面”：一条与分隔线同样的细线，点击等同 Win+D（再点一次恢复窗口） |
 | `textColor` | string | `auto` / `light` / `dark` | `auto` | 文字颜色；`auto` 按玻璃下方的实际亮度选择 |
 | `language` | string | `auto` / `zh-Hans` / `en` / locale tag | `auto` | 界面语言：`auto` 跟随 Windows 的显示语言（中文 → 简体中文，其余 → English）；`zh-Hans` 简体中文；`en` English；其他值对应 `locales/<tag>.json`。旧配置的 `zh` 视为 `zh-Hans`。任务栏、开始菜单、控制中心、通知、桌面小组件与设置中心一起切换，保存后立即生效 |
+| `barReserve` | bool | | true | 仅常驻（`autoHide` 为 `never`）时：为窗口留出位置，栏占住屏幕边缘的一条（应用栏），最大化的窗口停在它前面；关闭时最大化窗口铺满全屏，栏浮在窗口上方 |
+| `barFullscreenHide` | bool | | true | 仅常驻时：全屏应用（全屏视频、F11）在前时栏让开，退出全屏后回来；最大化的窗口不算全屏。全屏游戏无论如何都会让开 |
 | `autoHide` | string | `never` / `fullscreen` / `always` | `fullscreen` | 栏的显示方式：常驻；全屏时隐藏（有最大化、全屏或分屏铺满屏幕的窗口时滑出屏幕，前面再开小窗口也不出来）；一直隐藏。隐藏时，指针移到栏下方的屏幕底边栏就出现，离开后收回 |
 | `barEdge` | string | `bottom` / `top` / `left` / `right` | `bottom` | 栏停靠的屏幕边缘：底部、顶部、左侧或右侧；其他值视为 `bottom` |
 | `statusStyle` | string | `ring` / `icons` | `ring` | 状态栏的样子：Wi-Fi 外面一圈电量或音量的圆环；或者像 Windows 任务栏那样并排的网络、音量、电池三个图标（自绘，跟随字色）。点按都打开控制中心 |

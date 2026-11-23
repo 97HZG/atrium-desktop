@@ -83,6 +83,8 @@ struct Settings {
     // When the bar steps out of the way: never | fullscreen (a maximized or full-screen app is in
     // front) | always (it waits below the screen's bottom edge). The pointer there brings it up.
     std::wstring autoHide = L"fullscreen";
+    bool barReserve = true;          // always shown: the bar keeps its strip of the screen, maximized windows end before it (#40, #129)
+    bool barFullscreenHide = true;   // always shown: a full-screen app in front (a video, F11) has the screen, the bar goes (#134)
     std::wstring barEdge = L"bottom"; // bottom | top | left | right
     std::wstring statusStyle = L"ring"; // the status entry: ring (a ring round the Wi-Fi fan) | icons (network, volume, battery)
     std::vector<std::wstring> controlModules{L"stage"}; // the control centre's optional modules, in order (kControlModules)

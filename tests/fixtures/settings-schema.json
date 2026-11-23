@@ -93,6 +93,8 @@
     "hideTaskbar": {"type": "bool", "default": true},
     "genieMinimize": {"type": "bool", "default": false},
     "windowPeek": {"type": "bool", "default": true},
+    "barReserve": {"type": "bool", "default": true},
+    "barFullscreenHide": {"type": "bool", "default": true},
     "hideBanners": {"type": "bool", "default": false},
     "winKeyStart": {"type": "bool", "default": false},
     "remoteVisible": {"type": "bool", "default": false},

@@ -1042,7 +1042,7 @@ void Bar::Relayout()
     const int margin = Px(st.margin, s);
     // "Always shown": the bar keeps its strip of the screen as an app bar (as the system taskbar
     // does), so maximized windows end before it (#40). Its own strip is not part of where it sits.
-    const int reserve = visible_ && st.bar && st.autoHide == L"never" ? margin + barH : 0;
+    const int reserve = visible_ && st.bar && st.autoHide == L"never" && st.barReserve ? margin + barH : 0;
     const int ownReserve = appBar_ && appBarMonitor_ == mon && appBarEdge_ == edge_ ? appBarReserved_ : 0;
     const RECT win = PlaceBarWindow({edge_, mi.rcMonitor, mi.rcWork, winW, winH, barH, margin, insetTop, st.hideTaskbar, ownReserve});
 

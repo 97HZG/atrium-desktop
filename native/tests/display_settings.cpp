@@ -135,6 +135,10 @@ void CheckStageDragMerge()
     Require(defaults.imeBubble && Settings::FromJson(LR"({"imeBubble":false})", Settings{}, parsed) && !parsed.imeBubble &&
                 Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.imeBubble,
             "imeBubble is on by default, and off survives saving");
+    Require(defaults.barReserve && defaults.barFullscreenHide &&
+                Settings::FromJson(LR"({"barReserve":false,"barFullscreenHide":false})", Settings{}, parsed) && !parsed.barReserve &&
+                !parsed.barFullscreenHide && Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.barReserve && !parsed.barFullscreenHide,
+            "barReserve and barFullscreenHide are on by default, and off survives saving");
     Require(defaults.windowPeek && Settings::FromJson(LR"({"windowPeek":false})", Settings{}, parsed) && !parsed.windowPeek &&
                 Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.windowPeek,
             "windowPeek is on by default, and off survives saving");
