@@ -26,7 +26,7 @@ bool Launchpad::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_TIMER:
         if (w == kCloseTimer)
             Finish();
-        else if (w == kCaretTimer && !query_.empty())
+        else if (w == kCaretTimer && searchFocused_)
             surface_.Invalidate(); // the caret blinks
         return w == kCloseTimer || w == kCaretTimer;
     case WM_ACTIVATE:
@@ -82,7 +82,51 @@ bool Launchpad::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         Type(wchar_t(w));
         result = 0;
         return true;
-    case WM_IME_STARTCOMPOSITION: PlaceIme(); return false;
+    case WM_IME_SETCONTEXT:
+    case WM_IME_STARTCOMPOSITION:
+    case WM_IME_COMPOSITION:
+    case WM_IME_ENDCOMPOSITION: return ImeMessage(m, w, l, result);
+    default: return false;
+    }
+}
+
+bool Launchpad::ImeMessage(UINT m, WPARAM w, LPARAM l, LRESULT& result)
+{
+    switch (m) {
+    case WM_IME_SETCONTEXT: result = DefWindowProcW(surface_.Hwnd(), m, w, l & ~LPARAM(ISC_SHOWUICOMPOSITIONWINDOW)); return true;
+    case WM_IME_STARTCOMPOSITION:
+        searchFocused_ = true;
+        surface_.Invalidate();
+        PlaceIme();
+        result = 0;
+        return true;
+    case WM_IME_COMPOSITION:
+        if (l & GCS_COMPSTR) {
+            if (HIMC imc = ImmGetContext(surface_.Hwnd())) {
+                const LONG bytes = ImmGetCompositionStringW(imc, GCS_COMPSTR, nullptr, 0);
+                composition_.assign(bytes > 0 ? size_t(bytes) / sizeof(wchar_t) : 0, L'\0');
+                if (bytes > 0) {
+                    const LONG got = ImmGetCompositionStringW(imc, GCS_COMPSTR, composition_.data(), DWORD(bytes));
+                    composition_.resize(got > 0 ? size_t(got) / sizeof(wchar_t) : 0);
+                }
+                ImmReleaseContext(surface_.Hwnd(), imc);
+            }
+            searchFocused_ = searchFocused_ || !composition_.empty();
+        } else if (l == 0 || (l & GCS_RESULTSTR)) {
+            composition_.clear();
+        }
+        surface_.Invalidate();
+        PlaceIme();
+        if (l & GCS_RESULTSTR)
+            return false; // DefWindowProcW posts WM_CHAR for the committed text
+        result = 0;
+        return true;
+    case WM_IME_ENDCOMPOSITION:
+        composition_.clear();
+        surface_.Invalidate();
+        PlaceIme();
+        result = 0;
+        return true;
     default: return false;
     }
 }
@@ -101,6 +145,8 @@ bool Launchpad::Key(WPARAM key)
     case VK_ESCAPE:
         if (!query_.empty()) {
             query_.clear(); // a search goes first, then the folder, then Launchpad
+            composition_.clear();
+            searchFocused_ = false;
             Filter();
         } else if (folderOpen_) {
             ShowFolder(false);
@@ -134,9 +180,11 @@ void Launchpad::Type(wchar_t ch)
 {
     if (closing_ || ch < 32 || ch == 127 || query_.size() >= 64)
         return;
+    searchFocused_ = true;
     query_ += ch;
     Filter();
     surface_.Invalidate();
+    PlaceIme();
 }
 
 void Launchpad::Press(POINT pt)
@@ -151,6 +199,7 @@ void Launchpad::Press(POINT pt)
     dragMs_ = ClockMs();
     lastDragX_ = float(pt.x) / surface_.Scale();
     pressed_ = HitAt(pt);
+    searchFocused_ = pressed_ == kSearch;
     surface_.Invalidate();
 }
 
@@ -257,11 +306,14 @@ void Launchpad::PlaceIme()
         GetWindowRect(hwnd, &win);
         const RECT content = surface_.Rect();
         const D2D1_RECT_F field = SearchRect();
-        const float s = surface_.Scale(), x = field.left + 36, y = field.bottom + 4;
+        const float s = surface_.Scale(), x = caretX_ > 0 ? caretX_ : field.left + 36, y = field.bottom + 4;
+        const POINT pos{content.left - win.left + LONG(x * s), content.top - win.top + LONG(y * s)};
         COMPOSITIONFORM cf{};
         cf.dwStyle = CFS_POINT;
-        cf.ptCurrentPos = POINT{content.left - win.left + LONG(x * s), content.top - win.top + LONG(y * s)};
+        cf.ptCurrentPos = pos;
         ImmSetCompositionWindow(imc, &cf);
+        CANDIDATEFORM cand{0, CFS_CANDIDATEPOS, pos, {}};
+        ImmSetCandidateWindow(imc, &cand);
         ImmReleaseContext(hwnd, imc);
     }
 }

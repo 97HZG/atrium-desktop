@@ -64,7 +64,6 @@ constexpr float kFolderHead = 52, kFolderFoot = 24, kFolderPad = 14; // the open
 constexpr float kIndexW = 22, kHint = 52;           // the A-Z list's letters down its left side; the letter picked, large
 constexpr float kPowerW = 176, kPowerRowH = 44, kPowerPad = 12;
 constexpr float kGrip = 30; // the resize grip: the panel's top right corner
-constexpr UINT_PTR kStatusTimer = 1, kDragTimer = 2;
 constexpr double kStageMs = 260, kStaggerMs = 12, kRippleMs = 520, kPowerMs = 220;
 // The folder's card out of its tile, with a little overshoot; back into it quicker, without.
 constexpr motion::Spring kFolderOpen{0.46f, 0.72f}, kFolderClose{0.30f, 1.f};
@@ -413,6 +412,9 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     previous_ = previous;
     bar_ = bar;
     query_.clear();
+    composition_.clear();
+    searchFocused_ = false;
+    caretX_ = kSearchX + 46;
     results_.clear();
     allApps_ = scrubbing_ = false;
     page_ = 0;
@@ -454,6 +456,8 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     // Pops out of the logo.
     surface_.Show(r, true, PopupOrigin(bar_, r, logo));
     SetTimer(surface_.Hwnd(), kStatusTimer, 2000, nullptr);
+    if (const UINT blink = GetCaretBlinkTime(); blink != INFINITE)
+        SetTimer(surface_.Hwnd(), kCaretTimer, std::max(1u, blink), nullptr);
     Log(L"start: opened (%zu apps, %zu tiles, %s)", apps_.size(), tiles_.size(), catalog_.Loaded() ? L"catalog ready" : L"catalog loading");
 }
 
@@ -467,6 +471,9 @@ void StartMenu::Close(bool launched)
         EndResize();
     FinishNaming(true);
     KillTimer(surface_.Hwnd(), kStatusTimer);
+    KillTimer(surface_.Hwnd(), kCaretTimer);
+    composition_.clear();
+    searchFocused_ = false;
     catalog_.SetVisibleIcons(VisibleIconsOwner::Start, {});
     powerOpen_ = false;
     surface_.Hide();
@@ -1044,14 +1051,18 @@ void StartMenu::PaintSearch(Canvas& c, const Theme& t)
     c.Stroke(search, r, query_.empty() ? t.border : Alpha(t.accent, 0.85f), query_.empty() ? 1.f : 1.5f);
     c.Glyph(L"\uE721", D2D1::RectF(search.left + 10, search.top, search.left + 44, search.bottom), 16, t.subtext);
     D2D1_RECT_F field = D2D1::RectF(search.left + 46, search.top, search.right - 48, search.bottom);
-    if (query_.empty())
-        c.Text(Tr(L"Search apps and folders"), field, 15, t.faint);
-    else
-        c.Text(query_, field, 15, t.text);
-    if (!naming_) {
-        float caretX = field.left + std::min(c.TextWidth(query_, 15), field.right - field.left - 2) + 1;
-        c.Line(caretX, search.top + 12, caretX, search.bottom - 12, Alpha(t.accent, 0.9f), 1.5f);
+    const float maxW = field.right - field.left - 2;
+    caretX_ = field.left + std::min(c.TextWidth(query_ + composition_, 15), maxW) + 1;
+    const bool empty = query_.empty() && composition_.empty();
+    c.Text(empty ? Tr(L"Search apps and folders") : query_ + composition_, field, 15, empty ? t.faint : t.text);
+    if (!composition_.empty()) {
+        const float x0 = field.left + std::min(c.TextWidth(query_, 15), maxW);
+        if (caretX_ - 1 > x0)
+            c.Line(x0, (field.top + field.bottom) / 2 + 10, caretX_ - 1, (field.top + field.bottom) / 2 + 10, t.text, 1);
     }
+    const UINT blink = GetCaretBlinkTime();
+    if (!naming_ && searchFocused_ && (blink == INFINITE || (ULONGLONG(c.now) / std::max(1u, blink)) % 2 == 0))
+        c.Line(caretX_, search.top + 12, caretX_, search.bottom - 12, Alpha(t.accent, 0.9f), 1.5f);
     hits_.push_back({search, L"search"});
     if (!query_.empty()) {
         D2D1_RECT_F clear = D2D1::RectF(search.right - 40, search.top + 6, search.right - 8, search.bottom - 6);
@@ -2087,6 +2098,8 @@ void StartMenu::Activate(const std::wstring& id)
     } else if (id == L"allapps") {
         allApps_ = query_.empty() ? !allApps_ : true;
         query_.clear();
+        composition_.clear();
+        searchFocused_ = false;
         results_.clear();
         if (allApps_)
             list_ = AllApps();
@@ -2105,6 +2118,8 @@ void StartMenu::Activate(const std::wstring& id)
         // The folder's card itself, the grip, the search field: nothing to do on a click.
     } else if (id == L"clear") {
         query_.clear();
+        composition_.clear();
+        searchFocused_ = false;
         results_.clear();
         sel_ = -1;
         Restage();
@@ -2368,13 +2383,84 @@ void StartMenu::PlaceIme()
         POINT origin{surface_.Rect().left - win.left + OffsetXPx(), surface_.Rect().top - win.top + OffsetPx()};
         // Below the field being typed in: the search, or the folder's name.
         const D2D1_RECT_F f = FolderRect();
-        const float x = naming_ ? (f.left + f.right) / 2 - 60 : kSearchX + 46, y = naming_ ? f.top + 50 : kSearchTop + kSearchH + 4;
-        COMPOSITIONFORM cf{};
-        cf.dwStyle = CFS_POINT;
-        cf.ptCurrentPos = POINT{origin.x + LONG(x * s), origin.y + LONG(y * s)};
+        const float x = naming_ ? (f.left + f.right) / 2 - 60 : (caretX_ > 0 ? caretX_ : kSearchX + 46);
+        const float y = naming_ ? f.top + 50 : kSearchTop + kSearchH + 4;
+        const POINT pos{origin.x + LONG(x * s), origin.y + LONG(y * s)};
+        COMPOSITIONFORM cf{CFS_POINT, pos, {}};
         ImmSetCompositionWindow(imc, &cf);
+        CANDIDATEFORM cand{0, CFS_CANDIDATEPOS, pos, {}};
+        ImmSetCandidateWindow(imc, &cand);
         ImmReleaseContext(surface_.Hwnd(), imc);
     }
+}
+
+bool StartMenu::ImeMessage(UINT m, WPARAM w, LPARAM l, LRESULT& result)
+{
+    if (naming_) {
+        if (m == WM_IME_STARTCOMPOSITION)
+            PlaceIme();
+        return false;
+    }
+    switch (m) {
+    case WM_IME_SETCONTEXT: result = DefWindowProcW(surface_.Hwnd(), m, w, l & ~LPARAM(ISC_SHOWUICOMPOSITIONWINDOW)); return true;
+    case WM_IME_STARTCOMPOSITION:
+        searchFocused_ = true;
+        surface_.Invalidate();
+        PlaceIme();
+        result = 0;
+        return true;
+    case WM_IME_COMPOSITION:
+        if (l & GCS_COMPSTR) {
+            if (HIMC imc = ImmGetContext(surface_.Hwnd())) {
+                const LONG bytes = ImmGetCompositionStringW(imc, GCS_COMPSTR, nullptr, 0);
+                composition_.assign(bytes > 0 ? size_t(bytes) / sizeof(wchar_t) : 0, L'\0');
+                if (bytes > 0) {
+                    const LONG got = ImmGetCompositionStringW(imc, GCS_COMPSTR, composition_.data(), DWORD(bytes));
+                    composition_.resize(got > 0 ? size_t(got) / sizeof(wchar_t) : 0);
+                }
+                ImmReleaseContext(surface_.Hwnd(), imc);
+            }
+            searchFocused_ = searchFocused_ || !composition_.empty();
+        } else if (l == 0 || (l & GCS_RESULTSTR)) {
+            composition_.clear();
+        }
+        surface_.Invalidate();
+        PlaceIme();
+        if (l & GCS_RESULTSTR)
+            return false; // DefWindowProcW posts WM_CHAR for the committed text
+        result = 0;
+        return true;
+    case WM_IME_ENDCOMPOSITION:
+        composition_.clear();
+        surface_.Invalidate();
+        PlaceIme();
+        result = 0;
+        return true;
+    default: return false;
+    }
+}
+bool StartMenu::TimerMessage(WPARAM w)
+{
+    if (w == kStatusTimer && onStatusRequest)
+        onStatusRequest();
+    else if (w == kDragTimer)
+        DragTick();
+    else if (w == kCaretTimer && searchFocused_ && !naming_)
+        surface_.Invalidate();
+    return w == kStatusTimer || w == kDragTimer || w == kCaretTimer;
+}
+bool StartMenu::NamingChar(wchar_t ch)
+{
+    if (ch == 27)
+        FinishNaming(false);
+    else if (ch == 13)
+        FinishNaming(true);
+    else if (ch == 8 && !nameDraft_.empty())
+        nameDraft_.pop_back();
+    else if (ch >= 32 && nameDraft_.size() < 24)
+        nameDraft_ += ch;
+    surface_.Invalidate();
+    return true;
 }
 
 bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
@@ -2396,17 +2482,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             Close(false);
         }
         return false;
-    case WM_TIMER:
-        if (w == kStatusTimer) {
-            if (onStatusRequest)
-                onStatusRequest();
-            return true;
-        }
-        if (w == kDragTimer) {
-            DragTick();
-            return true;
-        }
-        return false;
+    case WM_TIMER: return TimerMessage(w);
     case WM_SETCURSOR:
         if (LOWORD(l) == HTCLIENT && (sizing_ || hover_ == L"resize")) {
             const BarEdge edge = EdgeOf(bar_);
@@ -2457,6 +2533,8 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     case WM_LBUTTONDOWN: {
         pressed_ = HitAt(pt);
+        if (pressed_ != L"clear")
+            searchFocused_ = pressed_ == L"search";
         if (powerOpen_ && pressed_ != L"power" && !pressed_.starts_with(L"pw:"))
             powerOpen_ = false; // a press elsewhere folds the power card away
         if (naming_ && pressed_ != L"ftitle")
@@ -2580,7 +2658,10 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         surface_.Invalidate();
         return true;
     }
-    case WM_IME_STARTCOMPOSITION: PlaceIme(); return false;
+    case WM_IME_SETCONTEXT:
+    case WM_IME_STARTCOMPOSITION:
+    case WM_IME_COMPOSITION:
+    case WM_IME_ENDCOMPOSITION: return ImeMessage(m, w, l, result);
     case WM_KEYDOWN:
         if (naming_)
             return w == VK_LEFT || w == VK_RIGHT || w == VK_UP || w == VK_DOWN; // the name is typed, not navigated
@@ -2609,18 +2690,8 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_CHAR: {
         wchar_t ch = wchar_t(w);
         result = 0;
-        if (naming_) {
-            if (ch == 27)
-                FinishNaming(false);
-            else if (ch == 13)
-                FinishNaming(true);
-            else if (ch == 8 && !nameDraft_.empty())
-                nameDraft_.pop_back();
-            else if (ch >= 32 && nameDraft_.size() < 24)
-                nameDraft_ += ch;
-            surface_.Invalidate();
-            return true;
-        }
+        if (naming_)
+            return NamingChar(ch);
         if (ch == 27) { // Esc: one step back at a time, then close
             if (powerOpen_) {
                 powerOpen_ = false;
@@ -2663,6 +2734,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             scroll_ = scrollTarget_ = 0;
             surface_.Invalidate();
         } else if (ch >= 32 && query_.size() < 64) {
+            searchFocused_ = true;
             CloseFolder(); // typing searches, wherever the menu was
             if (query_.empty())
                 Restage(); // the results slide in
@@ -2672,6 +2744,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             scroll_ = scrollTarget_ = 0;
             powerOpen_ = false;
             surface_.Invalidate();
+            PlaceIme();
         }
         return true;
     }

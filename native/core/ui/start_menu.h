@@ -80,6 +80,7 @@ public:
     GlassMenu* menu = nullptr;                               // a tile's menu (main's)
 
 private:
+    static constexpr UINT_PTR kStatusTimer = 1, kDragTimer = 2, kCaretTimer = 3;
     struct Hit {
         D2D1_RECT_F rect; // DIP, content coordinates
         std::wstring id;
@@ -226,6 +227,9 @@ private:
     void MoveSelection(int dx, int dy);
     void EnsureVisible();
     void PlaceIme();
+    bool ImeMessage(UINT m, WPARAM w, LPARAM l, LRESULT& result); // the search's composition, inline
+    bool TimerMessage(WPARAM w);
+    bool NamingChar(wchar_t ch); // a key typed into a folder's name
     void Restage(); // the content changed: tiles slide in again
     void LoadAccount();
     float Hover(Canvas& c, const std::wstring& id, bool on); // eased 0..1, per element
@@ -242,6 +246,9 @@ private:
     std::vector<Row> results_, list_;
     std::vector<std::pair<std::wstring, int>> visibleIcons_;
     std::wstring query_;
+    std::wstring composition_;
+    bool searchFocused_ = false;
+    float caretX_ = 0;
     bool allApps_ = false; // the A-Z list
     int page_ = 0;
     float pageShown_ = 0;               // displayed page, gliding to page_

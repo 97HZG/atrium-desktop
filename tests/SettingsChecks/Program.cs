@@ -52,6 +52,9 @@ Require(!parsed.StartStatus && parsed.StartTray && BarSettings.FromJson(parsed.T
     "The start menu's status buttons must turn off on their own and survive a round trip.");
 Require(!new BarSettings().SameAs(parsed), "The start menu's status buttons must participate in the Save/Revert dirty state.");
 Require(!BarSettings.FromJson([], new()).StageMinimize, "Old files must keep minimized windows out of Stage Manager.");
+parsed = BarSettings.FromJson(JsonNode.Parse("""{"genieMinimize":true}""")!.AsObject(), new());
+Require(!new BarSettings().GenieMinimize && parsed.GenieMinimize && BarSettings.FromJson(parsed.ToJson(), new()).GenieMinimize && !new BarSettings().SameAs(parsed),
+    "The genie effect must be off by default, survive a round trip and mark the settings dirty.");
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"stageMinimize":true}""")!.AsObject(), new());
 Require(parsed.StageMinimize && BarSettings.FromJson(parsed.ToJson(), new()).StageMinimize && !new BarSettings().SameAs(parsed),
     "Minimizing to Stage Manager must survive a round trip and mark the settings dirty.");

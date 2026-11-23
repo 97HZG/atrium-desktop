@@ -41,6 +41,7 @@
 #include "ui/glass_menu.h"
 #include "ui/window_preview.h"
 #include "ui/notifications.h"
+#include "ui/genie_minimize.h"
 #include "ui/stage_manager.h"
 #include "ui/start_menu.h"
 #include "ui/tray_panel.h"
@@ -135,6 +136,7 @@ struct App {
     std::unique_ptr<GlassMenu> menu;
     std::unique_ptr<WindowPreview> preview;
     std::unique_ptr<StageManager> stage;
+    std::unique_ptr<GenieMinimize> genie;
     std::unique_ptr<WinKey> winKey;
     std::unique_ptr<ImeWatcher> imeWatcher; // the events that may change the input method (issue #56)
     ImeWatch imeWatch;                     // what announces (a foreground change only reseeds it)
@@ -587,6 +589,7 @@ void ApplySettings(const Settings& s)
     g_app.stage->SetMinimizeToStrip(s.stageMinimize);
     g_app.stage->SetExcluded(s.stageExcluded);
     g_app.stage->SetEnabled(s.stageManager);
+    g_app.genie->SetEnabled(s.genieMinimize && s.bar);
     g_app.control->SetStage(s.stageManager, s.stageOnRight);
     g_app.widgets->SetMaterial(s.widgetMaterial == L"dusk"  ? WidgetMaterial::Dusk :
                                s.widgetMaterial == L"color" ? WidgetMaterial::Color :
@@ -1614,6 +1617,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     g_app.widgets = std::make_unique<DesktopWidgets>(instance);
     g_app.widgets->ReloadLanguage(); // cached weather labels follow the saved language
     g_app.stage = std::make_unique<StageManager>(instance, *g_app.tasks);
+    // A window minimizes into its app's icon on the bar it shows on (that bar's middle when tucked away).
+    g_app.genie = std::make_unique<GenieMinimize>(
+        instance,
+        [](HWND window) -> std::optional<RECT> {
+            std::optional<RECT> icon;
+            ForBars([&](Bar& bar) {
+                if (icon || !bar.Visible())
+                    return;
+                for (const TaskItem& item : bar.Items())
+                    if (std::ranges::find(item.windows, window) != item.windows.end()) {
+                        if (bar.Seen()) {
+                            icon = bar.EntryRect(item.key);
+                        } else {
+                            const RECT r = bar.BarRect();
+                            const LONG cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+                            icon = RECT{cx - 1, cy - 1, cx + 1, cy + 1};
+                        }
+                        return;
+                    }
+            });
+            return icon;
+        },
+        [](HWND window) { return g_app.stage && g_app.stage->OwnsMinimize(window); });
     g_app.control->onStage = SetStageManager;
     g_app.widgets->onStatusRequest = UpdateStatus;
     g_app.status = std::make_unique<SystemStatusReader>(g_app.host, WM_STATUS, WM_VOLUME);
@@ -1707,6 +1733,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     g_app.tray.reset();
     g_app.start.reset();
     g_app.menu.reset(), g_app.preview.reset();
+    g_app.genie.reset();
     g_app.stage.reset();
     Surface::SetGlassHost(nullptr);
     g_app.extras.reset(), g_app.catalog.reset(); // the Launchpad reads the catalog

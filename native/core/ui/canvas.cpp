@@ -358,6 +358,14 @@ void Canvas::ImagePerspective(const std::wstring& key, const IconImage& image, D
     }
 }
 
+void Canvas::ImageSlice(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, D2D1_RECT_F source, float opacity)
+{
+    if (ID2D1Bitmap* b = Bitmap(key, image)) {
+        const D2D1_RECT_F px = Px(r);
+        d2d_->DrawBitmap(b, &px, opacity * alpha_, D2D1_INTERPOLATION_MODE_LINEAR, &source);
+    }
+}
+
 bool Canvas::Cached(const std::wstring& key) const
 {
     auto it = s_.bitmaps_.find(key);

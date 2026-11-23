@@ -307,6 +307,19 @@ bool NotAnApp(const CatalogApp& app)
 constexpr const wchar_t* kSystemFolders[] = {L"accessibility", L"accessories",  L"administrative tools", L"maintenance",
                                              L"startup",       L"system tools", L"windows powershell",   L"windows tools"};
 
+// Beyond those, what came with the PC rather than from the user, for Launchpad's folder of Windows' own
+// apps: the start menu's folders of tools, the computer makers' and the chip makers' apps (by publisher or
+// by their folder), and the apps Windows brings along as programs.
+constexpr const wchar_t* kToolFolders[] = {L"microsoft office tools", L"windows kits"};
+constexpr const wchar_t* kMakers[] = {L"nvidia", L"intel", L"realtek", L"dolby", L"lenovo", L"dell", L"hp inc", L"hewlett",
+                                      L"asus", L"acer", L"micro-star", L"synaptics", L"waves audio", L"elan"};
+constexpr const wchar_t* kBundled[] = {L"msedge.exe", L"onedrive.exe"};
+
+bool ByMaker(const std::wstring& folded)
+{
+    return std::ranges::any_of(kMakers, [&](const wchar_t* m) { return folded.find(m) != std::wstring::npos; });
+}
+
 // Every shortcut in `dir` and its subfolders (bounded depth, skipping reparse loops).
 void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, std::wstring>>& links, int depth = 0)
 {
@@ -414,8 +427,9 @@ void StampInstalled(std::vector<CatalogApp>& apps)
         winrt::Windows::Management::Deployment::PackageManager manager;
         for (const auto& package : manager.FindPackagesForUser(L"")) {
             const auto id = package.Id();
+            const std::wstring publisher = Fold(std::wstring(id.Publisher()));
             const bool system = package.SignatureKind() == Wam::PackageSignatureKind::System ||
-                                std::wstring_view(id.Publisher()).starts_with(L"CN=Microsoft Corporation, O=Microsoft Corporation");
+                                publisher.starts_with(L"cn=microsoft corporation, o=microsoft corporation") || ByMaker(publisher);
             packages[Fold(std::wstring(id.FamilyName()))] = {package.InstalledDate().time_since_epoch().count(), system};
         }
     } catch (...) {
@@ -448,7 +462,8 @@ void StampInstalled(std::vector<CatalogApp>& apps)
             const int64_t t = Created(link);
             const std::wstring file = link.substr(link.find_last_of(L'\\') + 1), name = Fold(file.substr(0, file.size() - 4));
             const std::wstring within = Fold(link.substr(std::min(link.size(), programs.size() + 1)));
-            const bool inSystem = std::ranges::any_of(kSystemFolders, [&](const wchar_t* f) { return within.starts_with(std::wstring(f) + L"\\"); });
+            auto in = [&](const auto& folders) { return std::ranges::any_of(folders, [&](const wchar_t* f) { return within.starts_with(std::wstring(f) + L"\\"); }); };
+            const bool inSystem = in(kSystemFolders) || in(kToolFolders);
             earliest(byName, name, t);
             if (inSystem)
                 systemNames.insert(name);
@@ -472,8 +487,15 @@ void StampInstalled(std::vector<CatalogApp>& apps)
                 continue;
             }
         const std::wstring target = Fold(app.target), id = Fold(app.id);
+        const std::wstring exe = target.substr(target.find_last_of(L'\\') + 1);
+        // A maker's program: its folder under Program Files (C:\Program Files\NVIDIA Corporation\...).
+        const size_t afterRoot = target.find(L'\\', target.find(L"\\program files") + 1);
+        const std::wstring vendor = target.find(L"\\program files") == std::wstring::npos || afterRoot == std::wstring::npos
+                                        ? std::wstring()
+                                        : target.substr(afterRoot, target.find(L'\\', afterRoot + 1) - afterRoot);
         app.system = target.starts_with(windowsDir) || systemTargets.contains(target) || systemNames.contains(Fold(app.name)) ||
-                     id.starts_with(L"microsoft.windows.") || id.starts_with(L"::{");
+                     id.starts_with(L"microsoft.windows.") || id.starts_with(L"::{") || ByMaker(vendor) ||
+                     std::ranges::any_of(kBundled, [&](const wchar_t* b) { return exe == b; });
         if (IsPath(app.id) && Fold(app.id).ends_with(L".lnk")) {
             app.installed = Created(app.id);
             continue;

@@ -1,12 +1,13 @@
 // Launchpad, as on macOS: the apps the user installed (and Windows' Settings), oldest first, then one
 // folder holding Windows' own apps (the catalog's `system`), opened in place; a search finds every app.
-// All of them on one window of the bar's glass (or that
-// glass under a black veil: launchpadMaterial tint) in the middle of the display, in pages of a grid
-// (launchpad_model.h) with the page dots below and a search field above. It opens from its entry next to
-// the start logo: the glass fades in and the apps settle from a little larger, all at once when every
-// icon is read (a spinner meanwhile; they are read ahead at start), and it leaves the same way. Typing searches (by name or initials, as the start menu does); the wheel, a
-// drag or the arrows turn the pages with a spring; a click launches, a click on the empty glass or
-// Esc closes (Esc clears a search first), and so does a click outside it.
+// One window of the bar's glass (or that glass under a black veil: launchpadMaterial tint) in the middle
+// of the display, in pages of a grid (launchpad_model.h) with the page dots below and a search field
+// above. It opens from its entry next to the start logo: the glass fades in and the apps settle from a
+// little larger, all at once when every icon is read (a spinner meanwhile; they are read ahead at start),
+// and it leaves the same way. Typing goes into the search (the input method's composition inline, the
+// caret shown once the field is clicked or typed in); the wheel, a drag or the arrows turn the pages with
+// a spring; a click launches; Esc clears a search, then closes the folder, then Launchpad, as a click
+// outside it does.
 #pragma once
 
 #include "motion.h"
@@ -81,6 +82,7 @@ private:
     int HitAt(POINT pt) const;
     void SetPage(int page);
     void Launch(int index);
+    bool ImeMessage(UINT m, WPARAM w, LPARAM l, LRESULT& result);
     void PlaceIme();
 
     void Finish();          // the closing has played: the window goes, the focus goes back
@@ -95,6 +97,9 @@ private:
     std::vector<CatalogApp> tiles_, system_; // the pages, the system folder's apps
     bool folderOpen_ = false;
     std::wstring query_;
+    std::wstring composition_;
+    bool searchFocused_ = false;
+    float caretX_ = 0;
     LaunchpadGrid grid_;
     float w_ = 0, h_ = 0; // the window, DIP
     float radius_ = 24;   // the bar's popups' corner

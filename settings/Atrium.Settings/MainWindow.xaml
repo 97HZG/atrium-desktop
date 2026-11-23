@@ -652,6 +652,9 @@
                             <local:ToggleTile x:Name="HideTaskbarSwitch" Title="Hide the system taskbar" SwitchName="Hide the system taskbar"
                                               Toggled="OnHideTaskbarToggled"
                                               Note="Keep only the Atrium bar. Windows' taskbar returns when this is turned off or Atrium quits; system shortcuts such as the Windows key keep working." />
+                            <local:ToggleTile x:Name="GenieSwitch" Title="Genie effect" SwitchName="Minimize with the genie effect"
+                                              Toggled="OnGenieToggled"
+                                              Note="As on macOS, a window being minimized pours into its icon on the Atrium bar." />
                             <local:ToggleTile x:Name="HideBannersSwitch" Title="Hide system banners" SwitchName="Hide system banners"
                                               Toggled="OnHideBannersToggled"
                                               Note="Turns on Windows' Do Not Disturb; notifications still appear as Atrium cards. Restored when turned off or Atrium quits." />

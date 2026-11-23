@@ -123,6 +123,7 @@ struct Settings {
     std::wstring widgetMaterial = L"glass";
     // Windows' own shell (shell/system_chrome.h): put back when turned off or on exit.
     bool hideTaskbar = true;         // the system taskbar is hidden while Atrium runs (a new installation's default)
+    bool genieMinimize = false;      // windows minimize into their bar icon with the genie effect
     bool hideBanners = false;        // Do Not Disturb: no system banners, the notifications still become cards
     bool winKeyStart = false;        // the Windows key alone opens Atrium's start menu instead of Windows'
     bool winNumbers = false;         // Win + 1..9, 0 open the bar's apps

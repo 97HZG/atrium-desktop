@@ -45,6 +45,9 @@ void Launchpad::Open(RECT work, HWND previous)
     Split();
     folderOpen_ = false;
     query_.clear();
+    composition_.clear();
+    searchFocused_ = false;
+    caretX_ = 0;
     shown_.clear();
     Size(work);
     iconPx_ = IconPx(work);
@@ -64,7 +67,8 @@ void Launchpad::Open(RECT work, HWND previous)
     surface_.SetRadius(Radius());
     surface_.Show(rect, true, POINT{cx, cy}, false);
     PublishGlass(openedMs_);
-    SetTimer(surface_.Hwnd(), kCaretTimer, GetCaretBlinkTime(), nullptr);
+    if (const UINT blink = GetCaretBlinkTime(); blink != INFINITE)
+        SetTimer(surface_.Hwnd(), kCaretTimer, std::max(1u, blink), nullptr);
     PlaceIme();
 }
 
@@ -121,6 +125,8 @@ void Launchpad::Close(bool launched)
     closedMs_ = ClockMs();
     lastClosed_ = GetTickCount64();
     KillTimer(surface_.Hwnd(), kCaretTimer);
+    composition_.clear();
+    searchFocused_ = false;
     SetTimer(surface_.Hwnd(), kCloseTimer, UINT(kCloseMs) + 20, nullptr);
     surface_.Invalidate();
 }
@@ -303,17 +309,24 @@ void Launchpad::PaintSearch(Canvas& c, const Theme& t, float shown)
     c.Stroke(r, radius, Alpha(t.text, 0.10f));
     c.Glyph(L"", D2D1::RectF(r.left + 12, r.top, r.left + 30, r.bottom), 13, t.subtext); // Search
     const D2D1_RECT_F text = D2D1::RectF(r.left + 36, r.top, r.right - 14, r.bottom);
-    if (query_.empty()) {
+    const float maxW = text.right - text.left;
+    caretX_ = text.left + std::min(c.TextWidth(query_ + composition_, 13.5f), maxW);
+    if (query_.empty() && composition_.empty()) {
         c.Text(Tr(L"Search"), text, 13.5f, t.subtext);
     } else {
-        c.Text(query_, text, 13.5f, t.text);
+        c.Text(query_ + composition_, text, 13.5f, t.text);
+        if (!composition_.empty()) {
+            const float x0 = text.left + std::min(c.TextWidth(query_, 13.5f), maxW);
+            if (caretX_ > x0) {
+                const float y = (text.top + text.bottom) / 2 + 9;
+                c.Line(x0, y, caretX_, y, t.text, 1);
+            }
+        }
     }
     // The caret, blinking at the system's pace (kCaretTimer repaints).
-    const UINT blink = std::max(1u, GetCaretBlinkTime());
-    if (shown >= 1 && blink != INFINITE && (ULONGLONG(c.now) / blink) % 2 == 0) {
-        const float x = text.left + std::min(c.TextWidth(query_, 13.5f), text.right - text.left);
-        c.Fill(D2D1::RectF(x, r.top + 9, x + 1.5f, r.bottom - 9), 0.75f, t.text);
-    }
+    const UINT blink = GetCaretBlinkTime();
+    if (shown >= 1 && searchFocused_ && (blink == INFINITE || (ULONGLONG(c.now) / std::max(1u, blink)) % 2 == 0))
+        c.Fill(D2D1::RectF(caretX_, r.top + 9, caretX_ + 1.5f, r.bottom - 9), 0.75f, t.text);
     hits_.push_back({r, kSearch});
 }
 

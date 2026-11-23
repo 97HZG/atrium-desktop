@@ -791,6 +791,7 @@ public sealed partial class MainWindow : Window, IDisposable
         WidgetsSwitch.IsOn = CurrentSettings.Widgets;
         (CurrentSettings.WidgetsOnRight ? WidgetsRight : WidgetsLeft).IsChecked = true;
         HideTaskbarSwitch.IsOn = CurrentSettings.HideTaskbar;
+        GenieSwitch.IsOn = CurrentSettings.GenieMinimize;
         StageSwitch.IsOn = CurrentSettings.StageManager;
         (CurrentSettings.StageOnRight ? StageRight : StageLeft).IsChecked = true;
         (CurrentSettings.StageAutoHide ? StageAutoHide : StageAlways).IsChecked = true;
@@ -1021,6 +1022,13 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
         CurrentSettings.WidgetBackdrop = tag;
+        Changed();
+    }
+
+    private void OnGenieToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        CurrentSettings.GenieMinimize = GenieSwitch.IsOn;
         Changed();
     }
 

@@ -67,6 +67,8 @@ public:
     void SetBarEdge(BarEdge edge);
     void SetAutoHide(bool autoHide);
     // A window minimized on the stage goes to the strip (setting stageMinimize), on a card of its own.
+    // A window whose minimize Stage Manager animates itself (into its strip).
+    bool OwnsMinimize(HWND window) const { return minimizeToStrip_ && enabled_ && up_.contains(window); }
     void SetMinimizeToStrip(bool on);
     // EVENT_SYSTEM_MINIMIZESTART (its hook while the option is on): at once, not when the task model next reports.
     void Minimized(HWND window);
