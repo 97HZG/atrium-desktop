@@ -88,6 +88,7 @@ add_library(atrium_core_lib STATIC
     ui/launchpad_input.cpp
     ui/now_playing_card.cpp
     ui/stage_manager.cpp
+    ui/stage_drag.cpp
     ui/window_snapshot.cpp
     shell/weather.cpp
     shell/bluetooth_batteries.cpp

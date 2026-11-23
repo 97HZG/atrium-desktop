@@ -587,6 +587,7 @@ void ApplySettings(const Settings& s)
     g_app.stage->SetOnRight(s.stageOnRight);
     g_app.stage->SetAutoHide(s.stageAutoHide);
     g_app.stage->SetMinimizeToStrip(s.stageMinimize);
+    g_app.stage->SetDragMerge(s.stageDragMerge);
     g_app.stage->SetExcluded(s.stageExcluded);
     g_app.stage->SetEnabled(s.stageManager);
     g_app.genie->SetEnabled(s.genieMinimize && s.bar);

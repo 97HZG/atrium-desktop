@@ -22,6 +22,7 @@
 #include "bar_edge.h"
 #include "motion.h"
 #include "shell/task_model.h"
+#include "ui/stage_merge.h"
 #include "ui/stage_scroll.h"
 #include "ui/stage_open.h"
 #include "stage_excluded.h"
@@ -72,6 +73,9 @@ public:
     void SetMinimizeToStrip(bool on);
     // EVENT_SYSTEM_MINIMIZESTART (its hook while the option is on): at once, not when the task model next reports.
     void Minimized(HWND window);
+    // A window dragged onto a group in the strip joins it (stageDragMerge).
+    void SetDragMerge(bool on);
+    void MoveSize(HWND window, bool start) { start ? BeginDrag(window) : FinishDrag(window); } // EVENT_SYSTEM_MOVESIZESTART/END
     void SetMonitor(HMONITOR monitor, bool refresh = false);
     // The task model changed (every group, also those the bar does not show).
     void Update(const std::vector<TaskItem>& items);
@@ -127,12 +131,23 @@ private:
     struct Entry {
         Set keys;
         std::vector<HWND> windows; // front first, at most kStack
-        motion::Follow hover;
+        motion::Follow hover, drop;
         // Cards glide to their place (a spring) and come and go with a fade and a little scale.
         float y = 0, vy = 0, targetY = 0;
         float appear = 0, va = 0, targetAppear = 1;
     };
 
+    static constexpr UINT_PTR kRaiseTimer = 0x5C03;
+    static constexpr ULONGLONG kPendingMs = 1200;
+    static constexpr double kFlightMs = 400;
+
+    static bool Transient(HWND h);
+    void SyncMoveHook();
+    // A window being dragged (stage_drag.cpp): which group it is over, and what happens where it lands.
+    void BeginDrag(HWND window);
+    void StepDrag(POINT screen);
+    void FinishDrag(HWND window);
+    void CancelDrag();
     void Stage(const Set& keys, bool add, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly = nullptr);
     void Park(HWND window, const std::wstring& key);
     void Unpark(const Set& keys, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly = nullptr, bool moveBeside = true);
@@ -148,8 +163,7 @@ private:
     void KeepPicture();        // a picture of the window in front, ready for when it is minimized
     void RequestPicture(HWND window);
     void SetLarge(Flight& f);  // the flight's large picture, if the window has one
-    bool Beside(RECT& frame) const { return enabled_ && !autoHide_ && !IsRectEmpty(&rect_) && BesideRect(frame, Zone(), WorkArea(), onRight_); }
-    static bool BesideRect(RECT& frame, const RECT& zone, const RECT& wa, bool onRight);
+    bool Beside(RECT& frame) const { return enabled_ && !autoHide_ && !IsRectEmpty(&rect_) && StageBesideRect(frame, Zone(), WorkArea(), onRight_); }
     void MoveBeside(HWND window);   // the window beside the strip (minimized: where it comes back)
     void ForgetImages(const std::wstring& key, bool large)
     {
@@ -191,7 +205,7 @@ private:
             if (!IsIconic(a.window) || IsZoomed(a.window) || !GetWindowPlacement(a.window, &wp) || (wp.flags & WPF_RESTORETOMAXIMIZED))
                 continue;
             RECT frame = IsRectEmpty(&a.frame) ? wp.rcNormalPosition : a.frame, to = frame;
-            if (!BesideRect(to, a.zone, a.workArea, a.onRight))
+            if (!StageBesideRect(to, a.zone, a.workArea, a.onRight))
                 continue;
             wp.rcNormalPosition.left += to.left - frame.left;
             wp.rcNormalPosition.right += to.right - frame.right;
@@ -220,7 +234,7 @@ private:
     bool Covered();                              // a window on the stage is where the strip goes
     RECT Zone() const;                           // where the strip goes, to the screen's edge, px
     RECT WorkArea() const;
-    D2D1_RECT_F Box(const Entry& e) const; // the windows' room, content DIP
+    D2D1_RECT_F Box(const Entry& e) const { return StageBoxRect(size_.width, e.y, onRight_); } // the windows' room, content DIP
     int EntryAt(POINT pt) const;
     std::shared_ptr<const WindowPicture> PictureOf(HWND window, const std::wstring& app, std::wstring& cacheKey);
     // Where window j of a card stands at rest, strip DIP; `angle` its turn.
@@ -228,7 +242,10 @@ private:
     bool StripPose(HWND window, Pose& pose);   // at rest in the strip, flight DIP
     Pose PlacePose(const RECT& frame) const;  // a window's place on the screen, flight DIP
     D2D1_POINT_2F StripOffset() const;        // strip DIP to flight DIP
-    bool Flying(HWND window) const;
+    bool Flying(HWND window) const
+    {
+        return std::ranges::any_of(flights_, [window](const Flight& f) { return f.window == window; });
+    }
     void PaintFlights(Canvas& c);
     void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow = 1, bool image = true);
 
@@ -237,10 +254,13 @@ private:
     Surface flight_; // over the whole screen while pictures fly
     WindowSnapshots snapshots_;
     winrt::com_ptr<IVirtualDesktopManager> desktops_; // the strip shows the current virtual desktop's windows
-    bool enabled_ = false, onRight_ = false, autoHide_ = false, minimizeToStrip_ = false;
+    bool enabled_ = false, onRight_ = false, autoHide_ = false, minimizeToStrip_ = false, dragMerge_ = true;
     BarEdge barEdge_ = BarEdge::Bottom;
     std::unordered_map<HWND, RECT> up_; // the stage's windows up on this screen at the last look, and where (px)
-    HWINEVENTHOOK minimizeHook_ = nullptr;
+    HWINEVENTHOOK minimizeHook_ = nullptr, moveHook_ = nullptr;
+    HWND dragWindow_ = nullptr;
+    std::wstring dragKey_;
+    RECT dragStart_{};
     HWND front_ = nullptr;    // the stage's window in front at the last look
     ULONGLONG frontSince_ = 0; // since when (its picture waits until it has drawn itself)
     bool applied_ = false;             // the settings have said once whether it is on
@@ -268,13 +288,13 @@ private:
     RECT region_{};                    // the window region last set, client px
     RECT rect_{};                      // the strip, screen px: room for Capacity() cards
     D2D1_SIZE_F size_{};               // DIP
-    int hover_ = -1, pressed_ = -1;
+    int hover_ = -1, pressed_ = -1, dragHover_ = -1;
     StageScroll scroll_;
     size_t scrollCount_ = 0;
     bool tracking_ = false, inside_ = false;
     // Out (or on its way out) of the screen's edge; the cards slide out one after the other.
     bool shown_ = false;
-    float revealFrom_ = 0, reveal_ = 0;
+    float revealFrom_ = 0;
     double revealStart_ = 0;
     bool peek_ = false;                // shown over the stage because the pointer asked
     ULONGLONG edgeSince_ = 0, leftAt_ = 0;

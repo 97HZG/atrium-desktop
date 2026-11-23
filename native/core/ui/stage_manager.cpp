@@ -42,20 +42,20 @@ constexpr float kPictureScale = 1.25f; // pictures are taken this much larger th
 constexpr float kPictureRadius = 8;
 constexpr float kBarRoom = 90;         // the bar floats over the bottom of the work area
 constexpr int kMaxEntries = 6;
-constexpr UINT_PTR kWatchTimer = 0x5C01, kDownTimer = 0x5C02, kRaiseTimer = 0x5C03, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
+constexpr UINT_PTR kWatchTimer = 0x5C01, kDownTimer = 0x5C02, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
 constexpr UINT kWatchMs = 30, kRaiseMs = 220, kDownMs = 700;
 constexpr ULONGLONG kDesktopMs = 250; // the desktop in front this long: it was clicked
 constexpr UINT WM_STAGE_PICTURE = WM_APP + 0x5C; // a window's picture was taken
 // The pointer at the screen's edge for kEdgeMs brings the strip out; away from it for kPeekLeaveMs
 // sends it back. Whether a window covers the strip's place is looked at every kCoverMs.
-constexpr ULONGLONG kEdgeMs = 40, kPeekLeaveMs = 350, kCoverMs = 150, kPendingMs = 1200, kSettleMs = 2000;
+constexpr ULONGLONG kEdgeMs = 40, kPeekLeaveMs = 350, kCoverMs = 150, kSettleMs = 2000;
 constexpr double kRevealInMs = 380, kRevealOutMs = 210, kRevealStagger = 32;
 // A picture flies between a window's place and the strip in kFlightMs; flying back, the window comes
 // up under it as it is all but there (kRestoreAt of the flight, the last percent of the way), so that
 // it has drawn itself when the picture, landed, stays kFlightHoldMs and fades over kFlightFadeMs (an
 // app comes back from minimized with an old or empty frame for a moment). The flight layer stays
 // (letting clicks through) kFlightIdleMs after.
-constexpr double kFlightMs = 400, kFlightHoldMs = 150, kFlightFadeMs = 150, kFlightStepMs = 34;
+constexpr double kFlightHoldMs = 150, kFlightFadeMs = 150, kFlightStepMs = 34;
 constexpr float kRestoreAt = 0.86f;
 // A flight's picture turns into a large one (the window's own size and corners) on its way to the
 // window's place, so that it is the window, pixel for pixel, when it lands and fades: a smaller
@@ -96,10 +96,12 @@ namespace {
 
 bool OnMonitor(HWND h, HMONITOR m) { return MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) == m; }
 
+} // namespace
+
 // Not a window to stage: a layer over everything (a screenshot's selection, an overlay), topmost
 // without a title bar, or one covering the whole screen. It neither takes the stage, nor is put
 // away, nor is moved beside the strip; covering the screen, it sends the strip away instead.
-bool Transient(HWND h)
+bool StageManager::Transient(HWND h)
 {
     const LONG_PTR style = GetWindowLongPtrW(h, GWL_STYLE), ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
     if ((ex & WS_EX_TOPMOST) && (style & WS_CAPTION) != WS_CAPTION)
@@ -109,6 +111,8 @@ bool Transient(HWND h)
     return !IsZoomed(h) && GetWindowRect(h, &r) && GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi) && r.left <= mi.rcMonitor.left &&
            r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
 }
+
+namespace {
 
 bool Has(const std::vector<std::wstring>& set, const std::wstring& key) { return std::ranges::find(set, key) != set.end(); }
 
@@ -203,6 +207,8 @@ StageManager::~StageManager()
 {
     if (minimizeHook_)
         UnhookWinEvent(minimizeHook_);
+    if (moveHook_)
+        UnhookWinEvent(moveHook_);
     std::unique_lock lk(actionLock_);
     actionStop_ = true;
     lk.unlock();
@@ -212,12 +218,16 @@ StageManager::~StageManager()
 }
 
 namespace {
-StageManager* g_minimizing = nullptr; // the one Stage Manager, for its minimize hook
+StageManager* g_stage = nullptr; // the one Stage Manager, for its WinEvent hooks
 
-void CALLBACK OnMinimizeStart(HWINEVENTHOOK, DWORD, HWND h, LONG object, LONG, DWORD, DWORD)
+void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD event, HWND h, LONG object, LONG, DWORD, DWORD)
 {
-    if (object == OBJID_WINDOW && g_minimizing)
-        g_minimizing->Minimized(h);
+    if (object != OBJID_WINDOW || !h || !g_stage)
+        return;
+    if (event == EVENT_SYSTEM_MINIMIZESTART)
+        g_stage->Minimized(h);
+    else
+        g_stage->MoveSize(h, event == EVENT_SYSTEM_MOVESIZESTART);
 }
 } // namespace
 
@@ -282,6 +292,7 @@ void StageManager::SetEnabled(bool on)
     enabled_ = on;
     openIntent_.Cancel();
     pressed_ = -1;
+    SyncMoveHook();
     if (on) {
         stage_.clear();
         pending_.clear();
@@ -342,14 +353,29 @@ void StageManager::SetMinimizeToStrip(bool on)
     ReleaseUp();
     // Out of context, on this thread: the picture leaves the window's place as it goes down.
     if (on && !minimizeHook_) {
-        g_minimizing = this;
-        minimizeHook_ = SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART, nullptr, OnMinimizeStart, 0, 0,
-                                        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        g_stage = this;
+        minimizeHook_ =
+            SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     } else if (!on && minimizeHook_) {
         UnhookWinEvent(minimizeHook_);
         minimizeHook_ = nullptr;
     }
     Log(L"stage: minimized windows %s", on ? L"go to the strip" : L"stay minimized");
+}
+
+void StageManager::SyncMoveHook()
+{
+    const bool want = enabled_ && dragMerge_;
+    if (want && !moveHook_) {
+        g_stage = this;
+        moveHook_ =
+            SetWinEventHook(EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, nullptr, OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    } else if (!want && moveHook_) {
+        UnhookWinEvent(moveHook_);
+        moveHook_ = nullptr;
+    }
+    if (!want && (dragWindow_ || dragHover_ >= 0))
+        CancelDrag();
 }
 
 void StageManager::SetMonitor(HMONITOR monitor, bool refresh)
@@ -419,7 +445,7 @@ void StageManager::Update(const std::vector<TaskItem>& items)
     auto active = std::ranges::find_if(items_, [](const TaskItem& t) { return t.active; });
     // A window in front, on this screen, of an app not on the stage: its set takes the stage. Not
     // while a set picked in the strip is on its way to the front.
-    if (active != items_.end() && root && !IsIconic(root) && OnMonitor(root, monitor_) && !Transient(root)) {
+    if (active != items_.end() && root && root != dragWindow_ && !IsIconic(root) && OnMonitor(root, monitor_) && !Transient(root)) {
         if (pending_.empty() || Has(pending_, active->key)) {
             pending_.clear();
             if (!Has(stage_, active->key)) {
@@ -1063,25 +1089,6 @@ void StageManager::Load()
 
 // ---- beside the strip --------------------------------------------------------------------------
 
-// Always shown, the strip stays out: a window over its place moves beside it (narrower if it must).
-bool StageManager::BesideRect(RECT& frame, const RECT& zone, const RECT& wa, bool onRight)
-{
-    if (frame.bottom <= zone.top || frame.top >= zone.bottom)
-        return false;
-    if (onRight) {
-        if (frame.right <= zone.left)
-            return false;
-        OffsetRect(&frame, zone.left - frame.right, 0);
-        frame.left = std::max(frame.left, wa.left);
-    } else {
-        if (frame.left >= zone.right)
-            return false;
-        OffsetRect(&frame, zone.right - frame.left, 0);
-        frame.right = std::min(frame.right, wa.right);
-    }
-    return true;
-}
-
 // A window over the strip's place moves beside it as it takes the stage: up, at once; minimized,
 // its place to come back to (its picture lands there). Maximized windows stay as they are, under
 // the strip.
@@ -1194,6 +1201,7 @@ void StageManager::Rebuild(bool keepAnchor)
         auto old = std::ranges::find_if(entries_, [&](const Entry& o) { return o.keys == e.keys; });
         if (old != entries_.end()) {
             e.hover = old->hover;
+            e.drop = old->drop;
             e.y = old->y;
             e.vy = old->vy;
             e.appear = old->appear;
@@ -1209,6 +1217,7 @@ void StageManager::Rebuild(bool keepAnchor)
             continue;
         old.targetAppear = 0;
         old.hover = motion::Follow{};
+        old.drop = motion::Follow{};
         leaving_.push_back(std::move(old));
     }
     if (!visible)
@@ -1264,12 +1273,6 @@ void StageManager::Layout()
     LONG x = onRight_ ? x1 - w : x0;
     LONG y = y0 + std::max<LONG>(0, (y1 - y0 - h) / 2);
     rect_ = RECT{x, y, x + w, y + h};
-}
-
-D2D1_RECT_F StageManager::Box(const Entry& e) const
-{
-    const float x = onRight_ ? size_.width - kEdge - kBoxW : kEdge;
-    return D2D1::RectF(x, e.y, x + kBoxW, e.y + kBoxH);
 }
 
 float StageManager::Reveal(int index, double nowMs) const
@@ -1364,7 +1367,7 @@ bool StageManager::Covered()
     for (const TaskItem& t : items_)
         windows.insert(windows.end(), t.windows.begin(), t.windows.end());
     for (HWND h : windows) {
-        if (parked_.contains(h) || !IsWindowVisible(h) || IsIconic(h) || !OnMonitor(h, monitor_))
+        if (h == dragWindow_ || parked_.contains(h) || !IsWindowVisible(h) || IsIconic(h) || !OnMonitor(h, monitor_))
             continue;
         RECT r{}, hit{};
         if (FAILED(DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))) && !GetWindowRect(h, &r))
@@ -1410,6 +1413,7 @@ void StageManager::Watch()
     if (!enabled_ || entries_.empty()) {
         peek_ = false;
         edgeSince_ = 0;
+        StepDrag(POINT{});
         if (leaving_.empty())
             Hide();
         return;
@@ -1421,12 +1425,13 @@ void StageManager::Watch()
     GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
     // Anywhere along the edge above the bar; not while dragging (a window to snap, a selection).
     const bool dragging = (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
-    const bool atEdge =
-        !dragging && PtInRect(&mi.rcMonitor, p) && (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) && p.y < mi.rcWork.bottom;
+    const bool atEdge = (!dragging || dragWindow_) && PtInRect(&mi.rcMonitor, p) && (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) &&
+                        p.y < mi.rcWork.bottom;
     edgeSince_ = atEdge ? (edgeSince_ ? edgeSince_ : now) : 0;
     if (!autoHide_ && !Covered()) {
         peek_ = false;
         Show();
+        StepDrag(p);
         return;
     }
     if (!peek_ && edgeSince_ && now - edgeSince_ >= kEdgeMs && !FullScreenInFront(monitor_)) {
@@ -1446,6 +1451,7 @@ void StageManager::Watch()
         Show();
     else
         Hide();
+    StepDrag(p);
 }
 
 void StageManager::Show()
@@ -1461,12 +1467,12 @@ void StageManager::Show()
     revealStart_ = now;
     shown_ = true;
     if (!visible) {
-        hover_ = pressed_ = -1;
+        hover_ = pressed_ = dragHover_ = -1;
         leaving_.clear();
         for (Entry& e : entries_) {
             e.y = e.targetY, e.vy = 0;
             e.appear = e.targetAppear = 1, e.va = 0;
-            e.hover = motion::Follow{};
+            e.hover = e.drop = motion::Follow{};
         }
         region_ = RECT{};
         MONITORINFO mi{sizeof(mi)};
@@ -1488,7 +1494,7 @@ void StageManager::Hide()
     revealStart_ = now;
     shown_ = false;
     inside_ = false;
-    hover_ = pressed_ = -1;
+    hover_ = pressed_ = dragHover_ = -1;
     surface_.Invalidate(); // the cards slide back into the edge; then the window goes
 }
 
@@ -1587,11 +1593,6 @@ StageManager::Pose StageManager::PlacePose(const RECT& frame) const
     return pose;
 }
 
-bool StageManager::Flying(HWND window) const
-{
-    return std::ranges::any_of(flights_, [&](const Flight& f) { return f.window == window; });
-}
-
 void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow, bool image)
 {
     if (!p.ok || p.width <= 0 || p.height <= 0 || opacity < 0.004f)
@@ -1610,8 +1611,9 @@ void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wst
 void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
 {
     const float s = c.scale, dir = onRight_ ? -1.f : 1.f;
-    const float hv = e.hover.Step(live && index == hover_, c.now);
-    if (e.hover.moving)
+    const float hv = e.hover.Step(live && (index == hover_ || index == dragHover_), c.now);
+    const float into = e.drop.Step(live && index == dragHover_, c.now);
+    if (e.hover.moving || e.drop.moving)
         c.Continue();
     const float rv = Reveal(std::max(index, 0), c.now);
     const float opacity = e.appear * std::clamp(rv * 1.6f, 0.f, 1.f);
@@ -1620,11 +1622,16 @@ void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
         return;
     const D2D1_RECT_F box = Box(e);
     const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
-    const float k = (0.9f + 0.1f * e.appear) * (1 + 0.06f * hv) * (live && index == pressed_ ? 0.96f : 1.f);
+    const float k = (0.9f + 0.1f * e.appear) * (1 + 0.06f * hv + 0.04f * into) * (live && index == pressed_ ? 0.96f : 1.f);
     // Out of the screen's edge, turning to the eye as it comes.
     const float slide = onRight_ ? (size_.width - box.left + 24) * (1 - rv) : -(box.right + 24) * (1 - rv);
     const float angle = dir * (kTilt * (1 - kHoverTilt * hv) + kComeTilt * (1 - rv));
     c.BeginGroup(opacity, k, cx, cy, slide, 0);
+    if (into > 0.004f) {
+        const D2D1_RECT_F ring = D2D1::RectF(box.left - 10, box.top - 10, box.right + 10, box.bottom + 10);
+        c.Fill(ring, 14, D2D1::ColorF(c.theme.accent.r, c.theme.accent.g, c.theme.accent.b, 0.14f * into));
+        c.Stroke(ring, 14, D2D1::ColorF(c.theme.accent.r, c.theme.accent.g, c.theme.accent.b, 0.85f * into), 2.f);
+    }
     // Back to front: the windows behind the most recent one a step inwards, up and away.
     Pose front{};
     bool hasFront = false;
@@ -1761,17 +1768,6 @@ void StageManager::Paint(Canvas& c)
         c.Continue();
     else if (!shown_ || (entries_.empty() && leaving_.empty()))
         SetTimer(surface_.Hwnd(), kHideTimer, 1, nullptr); // back in the edge, or the last card gone: not from inside a paint
-}
-
-int StageManager::EntryAt(POINT pt) const
-{
-    float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;
-    for (size_t i = 0; i < entries_.size(); ++i) {
-        const D2D1_RECT_F r = Box(entries_[i]);
-        if (x >= r.left - 14 && x < r.right + 10 && y >= r.top - 10 && y < r.bottom + 24)
-            return int(i);
-    }
-    return -1;
 }
 
 bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)

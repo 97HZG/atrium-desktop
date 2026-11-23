@@ -122,6 +122,17 @@ void CheckSettings()
             "malformed keys retain current values");
 }
 
+void CheckStageDragMerge()
+{
+    Settings defaults, off, parsed;
+    Require(defaults.stageDragMerge, "stageDragMerge is enabled by default");
+    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.stageDragMerge, "old settings receive stageDragMerge default");
+    off.stageDragMerge = false;
+    Require(Settings::FromJson(off.ToJson(), Settings{}, parsed) && !parsed.stageDragMerge, "disabled stageDragMerge survives saving");
+    Require(Settings::FromJson(LR"({})", off, parsed) && !parsed.stageDragMerge, "partial updates retain disabled stageDragMerge");
+    Require(Settings::FromJson(LR"({"stageDragMerge":"bad"})", off, parsed) && !parsed.stageDragMerge, "malformed stageDragMerge retains fallback");
+}
+
 void CheckSettingsNormalization()
 {
     Settings parsed;
@@ -499,6 +510,7 @@ int main(int argc, char** argv)
             return 0;
         }
         CheckSettings();
+        CheckStageDragMerge();
         CheckSettingsNormalization();
         CheckExtrasSettings();
         CheckDataDirArgument();

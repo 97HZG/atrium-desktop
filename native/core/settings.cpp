@@ -115,6 +115,7 @@ void ReadModuleSettingsJson(const json::JsonObject& o, Settings& s)
     flag(L"stageOnRight", s.stageOnRight);
     flag(L"stageAutoHide", s.stageAutoHide);
     flag(L"stageMinimize", s.stageMinimize);
+    flag(L"stageDragMerge", s.stageDragMerge);
     flag(L"hideTaskbar", s.hideTaskbar);
     flag(L"genieMinimize", s.genieMinimize);
     flag(L"hideBanners", s.hideBanners);
@@ -404,6 +405,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"stageOnRight", json::JsonValue::CreateBooleanValue(stageOnRight));
     o.SetNamedValue(L"stageAutoHide", json::JsonValue::CreateBooleanValue(stageAutoHide));
     o.SetNamedValue(L"stageMinimize", json::JsonValue::CreateBooleanValue(stageMinimize));
+    o.SetNamedValue(L"stageDragMerge", json::JsonValue::CreateBooleanValue(stageDragMerge));
     strArr(L"stageExcluded", stageExcluded);
     o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
     o.SetNamedValue(L"genieMinimize", json::JsonValue::CreateBooleanValue(genieMinimize));

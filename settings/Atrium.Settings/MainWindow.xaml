@@ -1031,6 +1031,9 @@
                                 </StackPanel>
                                 <local:ToggleTile x:Name="StageMinimizeSwitch" Title="Minimize to Stage Manager" SwitchName="Minimize to Stage Manager"
                                                   Toggled="OnStageMinimizeToggled" Flat="True" />
+                                <local:ToggleTile x:Name="StageDragMergeSwitch" Title="Drag a window onto a group" SwitchName="Drag a window onto a group"
+                                                  Note="Release a window over a group in the strip to add it to that group."
+                                                  Toggled="OnStageDragMergeToggled" Flat="True" />
                             </StackPanel>
                             <StackPanel>
                                 <TextBlock Text="Actions" Style="{StaticResource SectionStyle}" />

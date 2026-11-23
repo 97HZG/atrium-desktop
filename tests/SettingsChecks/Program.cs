@@ -58,6 +58,14 @@ Require(!new BarSettings().GenieMinimize && parsed.GenieMinimize && BarSettings.
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"stageMinimize":true}""")!.AsObject(), new());
 Require(parsed.StageMinimize && BarSettings.FromJson(parsed.ToJson(), new()).StageMinimize && !new BarSettings().SameAs(parsed),
     "Minimizing to Stage Manager must survive a round trip and mark the settings dirty.");
+Require(new BarSettings().StageDragMerge && BarSettings.FromJson([], new()).StageDragMerge,
+    "Dragging onto a Stage Manager group is on by default, also for old files.");
+var dragMergeOff = BarSettings.FromJson(JsonNode.Parse("""{"stageDragMerge":false}""")!.AsObject(), new());
+Require(!dragMergeOff.StageDragMerge && !BarSettings.FromJson(dragMergeOff.ToJson(), new()).StageDragMerge &&
+        !BarSettings.FromJson([], dragMergeOff).StageDragMerge &&
+        !BarSettings.FromJson(JsonNode.Parse("""{"stageDragMerge":"bad"}""")!.AsObject(), dragMergeOff).StageDragMerge &&
+        !new BarSettings().SameAs(dragMergeOff),
+    "Turning Stage Manager drag merge off must survive round trips, partial updates, malformed values and mark settings dirty.");
 var excludedDefault = new BarSettings();
 Require(excludedDefault.StageExcluded.SequenceEqual(BarSettings.StageExcludedDefaults) &&
         excludedDefault.StageExcluded.Contains("snippingtool.exe") && excludedDefault.StageExcluded.Contains("microsoft.screensketch_") &&

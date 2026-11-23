@@ -116,6 +116,7 @@ struct Settings {
     bool stageOnRight = false;       // the strip's side; left by default (the widgets take the other side)
     bool stageAutoHide = false;      // the strip only comes out while the pointer rests on its edge of the screen
     bool stageMinimize = false;      // a window minimized on the stage goes to the strip
+    bool stageDragMerge = true;      // a window released over a group in the strip joins it
     // Apps Stage Manager leaves alone: their windows are never put away. Defaults cover the
     // screenshot tools whose own overlay/control bar must stay on screen while recording.
     std::vector<std::wstring> stageExcluded = DefaultStageExcluded();
