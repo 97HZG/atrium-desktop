@@ -164,3 +164,10 @@ add_test(NAME folder_stack_layout COMMAND folder_stack_layout_tests)
 add_executable(ime_glyph_tests ime_glyph.cpp)
 target_link_libraries(ime_glyph_tests PRIVATE atrium_core_lib)
 add_test(NAME ime_glyph COMMAND ime_glyph_tests)
+
+# The bubble's model is pure: no window, no device. The check builds only it
+# and the test, so it runs anywhere.
+add_executable(ime_bubble_tests ime_bubble.cpp ../core/ui/ime_bubble_model.cpp)
+target_include_directories(ime_bubble_tests PRIVATE ../core)
+target_compile_definitions(ime_bubble_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME ime_bubble COMMAND ime_bubble_tests)

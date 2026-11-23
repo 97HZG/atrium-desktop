@@ -70,6 +70,9 @@ public:
     const std::vector<TaskItem>& Items() const { return items_; }
     void SetVisible(bool visible);
     bool Visible() const { return visible_; }
+    // On screen now: module on and not slid away for auto-hide (the bubble
+    // announces in its place while it is).
+    bool ShownOnScreen() const { return visible_ && !slidOut_; }
     // Unread notifications, shown as a badge on the bell.
     void SetUnread(int count);
     // Network, battery and volume for the status icon.

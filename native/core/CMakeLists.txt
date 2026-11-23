@@ -89,6 +89,8 @@ add_library(atrium_core_lib STATIC
     ui/folder_stack_popup.cpp
     ui/genie_minimize.cpp
     ui/glass_menu.cpp
+    ui/ime_bubble.cpp
+    ui/ime_bubble_model.cpp
     ui/launchpad.cpp
     ui/launchpad_input.cpp
     ui/launchpad_drag.cpp
