@@ -72,7 +72,6 @@ private:
     bool enabled_ = false;
     HWINEVENTHOOK hook_ = nullptr;
     HWND front_ = nullptr, held_ = nullptr; // the window in front; the one whose animations are off
-    HWND seen_ = nullptr;                   // the foreground's root, for the log
     ULONGLONG frontSince_ = 0;
     std::unordered_map<HWND, Picture> pictures_;
     std::vector<Flight> flights_;
