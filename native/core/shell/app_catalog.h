@@ -22,6 +22,8 @@
 
 namespace atrium {
 
+struct StartPinGroup;
+
 struct CatalogApp {
     std::wstring name;    // display name
     std::wstring id;      // parsing name inside AppsFolder (AUMID or known-folder path), or a shortcut's full path
@@ -37,6 +39,7 @@ struct CatalogApp {
 struct CatalogFolder {
     std::wstring name;
     std::vector<CatalogApp> apps;
+    bool folder = true; // in StartPinGroups(): false for unnamed group (top-level tiles)
 };
 
 enum class VisibleIconsOwner { Start, Launchpad };
@@ -49,11 +52,14 @@ public:
     AppCatalog(const AppCatalog&) = delete;
     AppCatalog& operator=(const AppCatalog&) = delete;
 
-    void Refresh();                       // enumerate again (asynchronous)
+    void Refresh(bool forceLayout = false); // enumerate again (asynchronous)
     bool Loaded() const;
     std::vector<CatalogApp> Apps() const; // sorted by name (user locale)
     // Pinned to the Windows start menu (not the taskbar: those are the bar's pins).
     std::vector<CatalogApp> StartPins() const;
+    // Windows 10 start menu groups/folders (empty on Windows 11).
+    std::vector<CatalogFolder> StartPinGroups() const;
+    bool StartMenuUsesXml() const;
     // The All apps list's folders holding two apps or more (read with the apps).
     std::vector<CatalogFolder> StartFolders() const;
     IconImage Icon(const std::wstring& id, int px); // empty until loaded
@@ -89,17 +95,18 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::vector<CatalogApp> apps_, startPins_;
-    std::vector<CatalogFolder> startFolders_;
+    std::vector<CatalogFolder> startPinGroups_, startFolders_;
     // Worker only: the exported layout and the layout file's time it is from.
     std::vector<std::pair<std::wstring, std::wstring>> layout_; // key (packagedAppId | desktopAppLink), value
+    std::vector<StartPinGroup> xmlLayout_;
     FILETIME layoutTime_{};
     bool layoutLoaded_ = false;
-    bool loaded_ = false, refresh_ = false, stop_ = false;
+    bool loaded_ = false, refresh_ = false, forceLayout_ = false, stop_ = false;
     int prefetchPx_ = 0;
     void QueuePrefetch(); // under mutex_
     void PruneIcons(); // under mutex_
     bool QueueIcon(const std::pair<std::wstring, int>& key, bool prefetch);
-    void RefreshStartLayout(); // worker only
+    void RefreshStartLayout(bool force); // worker only
     std::deque<std::pair<std::wstring, int>> iconJobs_;
     struct CachedIcon {
         IconImage image;

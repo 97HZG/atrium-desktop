@@ -151,7 +151,7 @@ private:
     // The sync button: what is pinned to the Windows start menu, and the All apps list's folders
     // with their apps, join the arrangement (nothing the user arranged moves or goes).
     void OpenSyncMenu();
-    void SyncFromWindows(bool pins, bool folders);
+    void SyncFromWindows(bool pins, bool folders, bool refresh = true);
     void PinToStart(const CatalogApp& app);
     bool OnStart(const std::wstring& id) const;
     bool Hidden(const std::wstring& id) const;
@@ -243,6 +243,10 @@ private:
     int grid_ = 0, room_ = 0;   // the menu's size; the largest that fits (the window's)
     float panelW_ = 0, panelV_ = 0, mainH_ = 0, mainV_ = 0; // the panel's width and height, springing (DIP, DIP/s)
     std::vector<CatalogApp> apps_, pins_;
+    std::vector<CatalogFolder> pinGroups_;
+    struct {
+        bool on = false, pins = false, folders = false;
+    } pendingSync_;
     std::vector<Tile> tiles_;
     std::vector<Row> results_, list_;
     std::vector<std::pair<std::wstring, int>> visibleIcons_;

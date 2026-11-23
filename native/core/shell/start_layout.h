@@ -7,6 +7,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace atrium {
@@ -39,6 +40,19 @@ struct StartLayout {
 
 StartLayout LoadStartLayout();
 bool SaveStartLayout(const StartLayout& layout);
+
+struct StartPinItem {
+    enum class Kind { PackagedAppId, DesktopAppLink, DesktopAppId } kind = Kind::PackagedAppId;
+    std::wstring value;
+};
+struct StartPinGroup {
+    std::wstring name;
+    bool folder = false;
+    std::vector<StartPinItem> items;
+};
+std::vector<StartPinGroup> ParseStartLayoutXml(std::wstring_view xml);
+bool RemoveStartFolder(std::vector<StartTile>& tiles, const std::wstring& folderId);
+bool UngroupStartFolder(std::vector<StartTile>& tiles, const std::wstring& folderId);
 
 // The first letter of each word, and for each Chinese character the first
 // letter of its pinyin (the 3755 common characters of GB2312), lower case:

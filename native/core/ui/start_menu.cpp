@@ -131,8 +131,9 @@ StartTile* Find(std::vector<StartTile>& tiles, const std::wstring& id)
     return it == tiles.end() ? nullptr : &*it;
 }
 
-constexpr int kOpen = 1, kPinBar = 2, kPinStart = 3, kRemove = 4, kOutOfFolder = 5, kRename = 6, kUngroup = 7, kReset = 8, kHide = 9, kUnhide = 10,
-              kShowHidden = 11, kAdmin = 12, kLocation = 13, kSyncPins = 14, kSyncFolders = 15, kSyncBoth = 16, kSize = 17, kIcon = kSize + StartLayout::kSizes;
+constexpr int kOpen = 1, kPinBar = 2, kPinStart = 3, kRemove = 4, kOutOfFolder = 5, kRename = 6, kUngroup = 7, kRemoveFolder = 8, kReset = 9, kHide = 10,
+              kUnhide = 11, kShowHidden = 12, kAdmin = 13, kLocation = 14, kSyncPins = 15, kSyncFolders = 16, kSyncBoth = 17, kSize = 18,
+              kIcon = kSize + StartLayout::kSizes;
 
 template<class CloseFn> void FinishMenuClose(Surface& surface, GlassMenu* menu, bool& menuOpen, CloseFn&& close)
 {
@@ -441,6 +442,7 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     tilePos_.clear();
     apps_ = catalog_.Apps();
     pins_ = catalog_.StartPins();
+    pinGroups_ = catalog_.StartPinGroups();
     stale_ = false;
     Rebuild();
     catalog_.Refresh(); // new installs and pins since last time; the menu updates when ready
@@ -508,18 +510,27 @@ void StartMenu::Refresh()
     // tiles are rebuilt only when the apps themselves changed.
     auto apps = catalog_.Apps();
     auto pins = catalog_.StartPins();
+    auto pinGroups = catalog_.StartPinGroups();
     auto same = [](const std::vector<CatalogApp>& a, const std::vector<CatalogApp>& b) {
         return a.size() == b.size() &&
                std::equal(a.begin(), a.end(), b.begin(), [](const CatalogApp& x, const CatalogApp& y) { return x.id == y.id && x.name == y.name; });
     };
-    if (!same(apps, apps_) || !same(pins, pins_)) {
+    if (!same(apps, apps_) || !same(pins, pins_) || pinGroups.size() != pinGroups_.size() ||
+        !std::equal(pinGroups.begin(), pinGroups.end(), pinGroups_.begin(),
+                    [&](const CatalogFolder& x, const CatalogFolder& y) { return x.name == y.name && x.folder == y.folder && same(x.apps, y.apps); })) {
         if (drag_.on) {
             stale_ = true; // the carried tile's indices stay valid until it is put down
         } else {
             apps_ = std::move(apps);
             pins_ = std::move(pins);
+            pinGroups_ = std::move(pinGroups);
             Rebuild();
         }
+    }
+    if (pendingSync_.on && !drag_.on) {
+        auto sync = pendingSync_;
+        pendingSync_.on = false;
+        SyncFromWindows(sync.pins, sync.folders, false);
     }
     surface_.Invalidate();
 }
@@ -590,10 +601,13 @@ void StartMenu::OpenSyncMenu()
 // Pins in the Windows order, at the end; a folder of All apps as a folder of its own (one of the
 // same name already here takes the apps it lacks). An app already somewhere in the menu stays where
 // it is; hidden apps stay hidden.
-void StartMenu::SyncFromWindows(bool pins, bool folders)
+void StartMenu::SyncFromWindows(bool pins, bool folders, bool refresh)
 {
+    if (refresh && catalog_.StartMenuUsesXml())
+        pendingSync_ = {true, pins, folders}, catalog_.Refresh(true);
     pins_ = catalog_.StartPins();
-    const std::vector<CatalogFolder> windowsFolders = folders ? catalog_.StartFolders() : std::vector<CatalogFolder>{};
+    const bool win10Both = pins && folders && catalog_.StartMenuUsesXml();
+    const std::vector<CatalogFolder> windowsFolders = win10Both ? catalog_.StartPinGroups() : folders ? catalog_.StartFolders() : std::vector<CatalogFolder>{};
     size_t apps = 0, newFolders = 0;
     Arrange([&](std::vector<StartTile>& tiles) {
         auto placed = [&](const std::wstring& id) {
@@ -602,7 +616,7 @@ void StartMenu::SyncFromWindows(bool pins, bool folders)
                     return true;
             return false;
         };
-        if (pins)
+        if (pins && !win10Both)
             for (const CatalogApp& p : pins_)
                 if (!placed(p.id) && !Hidden(p.id)) {
                     tiles.push_back({p.id, p.name, {}});
@@ -613,7 +627,13 @@ void StartMenu::SyncFromWindows(bool pins, bool folders)
             for (const CatalogApp& a : f.apps)
                 if (!placed(a.id) && !Hidden(a.id) && std::ranges::none_of(missing, [&](const StartTile& m) { return m.id == a.id; }))
                     missing.push_back({a.id, a.name, {}});
-            auto same = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.Folder() && t.name == f.name; });
+            if (!f.folder || (win10Both && missing.size() == 1)) {
+                apps += missing.size();
+                tiles.insert(tiles.end(), std::make_move_iterator(missing.begin()), std::make_move_iterator(missing.end()));
+                continue;
+            }
+            const std::wstring fname = f.name.empty() ? Tr(L"New folder") : f.name;
+            auto same = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.Folder() && t.name == fname; });
             if (same != tiles.end()) {
                 apps += missing.size();
                 same->apps.insert(same->apps.end(), missing.begin(), missing.end());
@@ -622,7 +642,7 @@ void StartMenu::SyncFromWindows(bool pins, bool folders)
                 ++newFolders;
                 StartLayout ids;
                 ids.tiles = tiles;
-                tiles.push_back({ids.NewFolderId(), f.name, std::move(missing)});
+                tiles.push_back({ids.NewFolderId(), fname, std::move(missing)});
             }
         }
     });
@@ -653,7 +673,7 @@ void StartMenu::Rebuild()
             out = *it->second;
             return true;
         }
-        if (loaded && (!IsPath(t.id) || GetFileAttributesW(t.id.c_str()) == INVALID_FILE_ATTRIBUTES))
+        if (loaded && !t.id.starts_with(L"::{") && (!IsPath(t.id) || GetFileAttributesW(t.id.c_str()) == INVALID_FILE_ATTRIBUTES))
             return false;
         out = CatalogApp{t.name.empty() ? t.id : t.name, t.id, {}, {}, {}};
         return true;
@@ -661,9 +681,22 @@ void StartMenu::Rebuild()
     SyncWindowsPins();
     tiles_.clear();
     if (!layout_.custom) {
-        for (const CatalogApp& p : pins_)
-            if (!Hidden(p.id))
-                tiles_.push_back({p.id, p.name, p, {}, false});
+        unsigned long nextFolder = 1;
+        if (pinGroups_.empty())
+            for (const CatalogApp& p : pins_)
+                if (!Hidden(p.id))
+                    tiles_.push_back({p.id, p.name, p, {}, false});
+        for (const CatalogFolder& g : pinGroups_) {
+            std::vector<CatalogApp> apps;
+            for (const CatalogApp& p : g.apps)
+                if (!Hidden(p.id))
+                    apps.push_back(p);
+            if (g.folder && apps.size() >= 2)
+                tiles_.push_back({L"folder:" + std::to_wstring(nextFolder++), g.name.empty() ? Tr(L"New folder") : g.name, {}, std::move(apps), true});
+            else
+                for (const CatalogApp& p : apps)
+                    tiles_.push_back({p.id, p.name, p, {}, false});
+        }
     } else {
         for (const StartTile& t : layout_.tiles) {
             Tile tile{t.id, t.name, {}, {}, t.Folder()};
@@ -872,8 +905,13 @@ void StartMenu::Arrange(const std::function<void(std::vector<StartTile>&)>& chan
     if (!layout_.custom) {
         // The first change: the Windows pins become the menu's own.
         layout_.tiles.clear();
-        for (const Tile& t : tiles_)
-            layout_.tiles.push_back({t.key, t.name, {}});
+        for (const Tile& t : tiles_) {
+            StartTile st{t.key, t.name, {}};
+            if (t.folder)
+                for (const CatalogApp& a : t.apps)
+                    st.apps.push_back({a.id, a.name, {}});
+            layout_.tiles.push_back(std::move(st));
+        }
         layout_.custom = true;
         layout_.windowsPins.clear();
         for (const CatalogApp& p : pins_)
@@ -2196,7 +2234,7 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
             entries.push_back({Tr(L"Remove from Start"), kRemove});
         entries.push_back(Hidden(app.id) ? MenuEntry{Tr(L"Unhide"), kUnhide} : MenuEntry{Tr(L"Hide"), kHide});
     } else if (!folderKey.empty()) {
-        entries = {{Tr(L"Open"), kOpen}, {Tr(L"Rename"), kRename}, {Tr(L"Ungroup folder"), kUngroup}};
+        entries = {{Tr(L"Open"), kOpen}, {Tr(L"Rename"), kRename}, {}, {Tr(L"Ungroup folder"), kUngroup}, {Tr(L"Remove from Start"), kRemoveFolder}};
     } else if (id.empty() && !Listing() && folder_ < 0) {
         // Two choices of their own: how much the menu holds, and how large its icons are.
         const wchar_t* const kNames[] = {Tr(L"Small"), Tr(L"Medium"), Tr(L"Large"), Tr(L"Huge")};
@@ -2273,17 +2311,16 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
                 StartNaming();
                 break;
             case kUngroup:
+            case kRemoveFolder:
                 if (folder_ >= 0 && tiles_[size_t(folder_)].key == folderKey)
-                    folder_ = -1;
-                Arrange([&](std::vector<StartTile>& tiles) { // its apps take its place on the grid
-                    auto at = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.id == folderKey; });
-                    if (at == tiles.end())
-                        return;
-                    std::vector<StartTile> apps = std::move(at->apps);
-                    at = tiles.erase(at);
-                    tiles.insert(at, apps.begin(), apps.end());
+                    folder_ = -1, folderClosing_ = naming_ = false;
+                Arrange([&](std::vector<StartTile>& tiles) {
+                    if (cmd == kRemoveFolder)
+                        RemoveStartFolder(tiles, folderKey);
+                    else
+                        UngroupStartFolder(tiles, folderKey);
                 });
-                Log(L"start: folder %s ungrouped", folderKey.c_str());
+                Log(cmd == kRemoveFolder ? L"start: folder %s removed from the start menu" : L"start: folder %s ungrouped", folderKey.c_str());
                 break;
             case kSize:
             case kSize + 1:

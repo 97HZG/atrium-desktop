@@ -81,6 +81,18 @@ std::vector<CatalogApp> Enumerate()
 
 bool IsPath(const std::wstring& id) { return id.size() > 2 && id[1] == L':' && (id[2] == L'\\' || id[2] == L'/'); }
 
+std::wstring ShellTarget(const std::wstring& id) { return IsPath(id) ? id : (id.starts_with(L"::{") ? L"shell:" : L"shell:AppsFolder\\") + id; }
+
+bool IsWindows11()
+{
+    static const bool kEleven = [] {
+        OSVERSIONINFOW v{sizeof(v)};
+        auto get = reinterpret_cast<LONG(WINAPI*)(OSVERSIONINFOW*)>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
+        return get && get(&v) == 0 && v.dwBuildNumber >= 22000;
+    }();
+    return kEleven;
+}
+
 bool SameText(const std::wstring& a, const std::wstring& b)
 {
     return !a.empty() && CompareStringOrdinal(a.c_str(), int(a.size()), b.c_str(), int(b.size()), TRUE) == CSTR_EQUAL;
@@ -110,7 +122,7 @@ std::wstring ReadUtf8File(const std::wstring& path)
 // The Windows start menu's layout file (start2.bin) is encrypted; the
 // supported way to read it is Export-StartLayout, which writes JSON:
 // {"pinnedList":[{"desktopAppLink":"%APPDATA%\\...lnk"},{"packagedAppId":"...!App"},...]}.
-std::wstring ExportStartLayout(HANDLE stopEvent, bool* cancelled = nullptr)
+std::wstring ExportStartLayout(HANDLE stopEvent, bool xml, bool* cancelled = nullptr)
 {
     if (cancelled)
         *cancelled = false;
@@ -122,7 +134,7 @@ std::wstring ExportStartLayout(HANDLE stopEvent, bool* cancelled = nullptr)
     wchar_t temp[MAX_PATH] = {}, sys[MAX_PATH] = {};
     GetTempPathW(MAX_PATH, temp);
     GetSystemDirectoryW(sys, MAX_PATH);
-    std::wstring file = std::wstring(temp) + L"atrium-start-layout-" + std::to_wstring(GetCurrentProcessId()) + L".json";
+    std::wstring file = std::wstring(temp) + L"atrium-start-layout-" + std::to_wstring(GetCurrentProcessId()) + (xml ? L".xml" : L".json");
     std::wstring quoted; // a PowerShell single-quoted string
     for (wchar_t ch : file)
         quoted += ch == L'\'' ? L"''" : std::wstring(1, ch);
@@ -239,6 +251,33 @@ std::wstring ExpandFolders(const std::wstring& value)
 // when that is the same app (its AUMID, or the same target under the same
 // name); otherwise the shortcut itself, which keeps its arguments and keeps
 // two shortcuts to one program apart.
+bool ResolveDesktopAppId(const std::wstring& value, const std::vector<CatalogApp>& apps, CatalogApp& out)
+{
+    auto it = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.aumid, value) || SameText(a.id, value); });
+    if (it != apps.end()) return out = *it, true;
+    auto disp = [](const std::wstring& p) {
+        std::wstring n;
+        winrt::com_ptr<IShellItem> item;
+        PWSTR s = nullptr;
+        if (SUCCEEDED(SHCreateItemFromParsingName(p.c_str(), nullptr, IID_PPV_ARGS(item.put()))) && SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &s)) && s)
+            n = s;
+        return CoTaskMemFree(s), n;
+    };
+    if (value.starts_with(L"::{")) { std::wstring n = disp(L"shell:" + value); return out = {n.empty() ? value : n, value, {}, {}, {}}, true; }
+    std::wstring expanded;
+    if (size_t slash = value.find(L'\\'); value.starts_with(L"{") && slash != std::wstring::npos) {
+        GUID kf{}; PWSTR p = nullptr;
+        if (SUCCEEDED(CLSIDFromString(value.substr(0, slash).c_str(), &kf)) && SUCCEEDED(SHGetKnownFolderPath(kf, 0, nullptr, &p)) && p)
+            expanded = std::wstring(p) + value.substr(slash);
+        CoTaskMemFree(p);
+    }
+    if (expanded.empty()) return false;
+    if (auto bt = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.target, expanded); }); bt != apps.end()) return out = *bt, true;
+    if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES) return false;
+    std::wstring name = disp(expanded), f = expanded.substr(expanded.find_last_of(L"\\/") + 1);
+    return out = {name.empty() ? (f.size() > 4 ? f.substr(0, f.size() - 4) : f) : name, expanded, {}, expanded, {}}, true;
+}
+
 std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, std::wstring>>& layout, const std::vector<CatalogApp>& apps)
 {
     std::vector<CatalogApp> out;
@@ -253,6 +292,11 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
                 add(*it);
             else
                 Log(L"catalog: start pin %s is not installed", value.c_str());
+            continue;
+        }
+        if (key == L"desktopAppId") {
+            if (CatalogApp app; ResolveDesktopAppId(value, apps, app))
+                add(app);
             continue;
         }
         if (key != L"desktopAppLink")
@@ -291,6 +335,23 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
     return out;
 }
 
+std::vector<CatalogFolder> ResolvePinGroups(const std::vector<StartPinGroup>& groups, const std::vector<CatalogApp>& apps)
+{
+    std::vector<CatalogFolder> out;
+    std::vector<std::wstring> seen;
+    for (const StartPinGroup& g : groups) {
+        std::vector<std::pair<std::wstring, std::wstring>> pairs;
+        pairs.reserve(g.items.size());
+        for (const StartPinItem& it : g.items)
+            pairs.emplace_back(it.kind == StartPinItem::Kind::PackagedAppId ? L"packagedAppId" : it.kind == StartPinItem::Kind::DesktopAppLink ? L"desktopAppLink" : L"desktopAppId", it.value);
+        auto resolved = ResolvePins(pairs, apps);
+        std::erase_if(resolved, [&](const CatalogApp& a) { return std::ranges::any_of(seen, [&](const std::wstring& id) { return SameText(id, a.id); }) || (seen.push_back(a.id), false); });
+        if (const bool f = (g.folder || !g.name.empty()) && resolved.size() >= 2; !resolved.empty())
+            out.push_back({f ? g.name : L"", std::move(resolved), f});
+    }
+    return out;
+}
+
 // Not an app of a folder: an uninstaller ("卸载微信", "Uninstall Git", unins000.exe), or a shortcut
 // to a document ("7-Zip Help", release notes, a web page, a folder). A shortcut with no target path
 // (a packaged app, an installer's advertised shortcut) is an app.
@@ -312,8 +373,8 @@ constexpr const wchar_t* kSystemFolders[] = {L"accessibility", L"accessories",  
 // folder) and Windows' packaged helpers. Microsoft's everyday apps (Edge, Photos, Notepad, Outlook...)
 // stay with the user's, as Safari and Mail do on macOS.
 constexpr const wchar_t* kToolFolders[] = {L"microsoft office tools", L"windows kits"};
-constexpr const wchar_t* kMakers[] = {L"nvidia", L"intel", L"realtek", L"dolby", L"lenovo", L"dell", L"hp inc", L"hewlett",
-                                      L"asus", L"acer", L"micro-star", L"synaptics", L"waves audio", L"elan"};
+constexpr const wchar_t* kMakers[] = {L"nvidia", L"intel",      L"realtek", L"dolby",       L"lenovo",  L"dell",        L"hp inc",
+                                      L"hewlett", L"asus",       L"acer",    L"micro-star",  L"synaptics", L"waves audio", L"elan"};
 constexpr const wchar_t* kHelperPackages[] = {L"microsoft.windowsfeedbackhub_",     L"microsoft.gethelp_",
                                               L"microsoft.getstarted_",             L"microsoft.windows.devhome_",
                                               L"microsoftcorporationii.quickassist_", L"microsoftcorporationii.microsoftfamily_",
@@ -468,7 +529,9 @@ void StampInstalled(std::vector<CatalogApp>& apps)
             const int64_t t = Created(link);
             const std::wstring file = link.substr(link.find_last_of(L'\\') + 1), name = Fold(file.substr(0, file.size() - 4));
             const std::wstring within = Fold(link.substr(std::min(link.size(), programs.size() + 1)));
-            auto in = [&](const auto& folders) { return std::ranges::any_of(folders, [&](const wchar_t* f) { return within.starts_with(std::wstring(f) + L"\\"); }); };
+            auto in = [&](const auto& folders) {
+                return std::ranges::any_of(folders, [&](const wchar_t* f) { return within.starts_with(std::wstring(f) + L"\\"); });
+            };
             const bool inSystem = in(kSystemFolders) || in(kToolFolders);
             earliest(byName, name, t);
             if (inSystem)
@@ -554,11 +617,12 @@ AppCatalog::~AppCatalog()
         CloseHandle(stopEvent_);
 }
 
-void AppCatalog::Refresh()
+void AppCatalog::Refresh(bool forceLayout)
 {
     {
         std::lock_guard g(mutex_);
         refresh_ = true;
+        forceLayout_ |= forceLayout;
     }
     cv_.notify_all();
 }
@@ -580,6 +644,14 @@ std::vector<CatalogApp> AppCatalog::StartPins() const
     std::lock_guard g(mutex_);
     return startPins_;
 }
+
+std::vector<CatalogFolder> AppCatalog::StartPinGroups() const
+{
+    std::lock_guard g(mutex_);
+    return startPinGroups_;
+}
+
+bool AppCatalog::StartMenuUsesXml() const { return !IsWindows11(); }
 
 std::vector<CatalogFolder> AppCatalog::StartFolders() const
 {
@@ -718,30 +790,29 @@ void AppCatalog::PruneIcons()
     }
 }
 
-void AppCatalog::RefreshStartLayout()
+void AppCatalog::RefreshStartLayout(bool force)
 {
-    wchar_t local[MAX_PATH] = {};
-    GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
-    std::wstring bin = std::wstring(local) + L"\\Packages\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\LocalState\\start2.bin";
+    const bool win11 = IsWindows11();
     WIN32_FILE_ATTRIBUTE_DATA fa{};
-    bool hasBin = GetFileAttributesExW(bin.c_str(), GetFileExInfoStandard, &fa) != 0;
-    if (layoutLoaded_ && (!hasBin || CompareFileTime(&fa.ftLastWriteTime, &layoutTime_) == 0))
+    bool hasBin = false;
+    if (win11) {
+        wchar_t local[MAX_PATH] = {};
+        GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
+        std::wstring bin = std::wstring(local) + L"\\Packages\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\LocalState\\start2.bin";
+        hasBin = GetFileAttributesExW(bin.c_str(), GetFileExInfoStandard, &fa) != 0;
+    }
+    if (layoutLoaded_ && !force && (!win11 || !hasBin || CompareFileTime(&fa.ftLastWriteTime, &layoutTime_) == 0))
         return;
     ULONGLONG t1 = GetTickCount64();
     bool cancelled = false;
-    std::wstring json = ExportStartLayout(stopEvent_, &cancelled);
+    std::wstring text = ExportStartLayout(stopEvent_, !win11, &cancelled);
     if (cancelled)
         return;
-    // Only a complete export replaces the pins; otherwise the old ones stay and the next refresh retries
-    // when start2.bin exists. On Windows 10 (no start2.bin), try once so opening Start does not respawn PowerShell.
-    bool found = json.find(L"\"pinnedList\"") != std::wstring::npos;
-    if (found)
-        layout_ = JsonStringPairs(json);
-    if (found || !hasBin) {
-        layoutTime_ = fa.ftLastWriteTime;
-        layoutLoaded_ = true;
+    if (text.find(win11 ? L"\"pinnedList\"" : L"LayoutModificationTemplate") != std::wstring::npos) {
+        win11 ? (void)(layout_ = JsonStringPairs(text)) : (void)(xmlLayout_ = ParseStartLayoutXml(text));
+        layoutTime_ = fa.ftLastWriteTime, layoutLoaded_ = true;
     }
-    Log(L"catalog: start layout exported (%zu entries) in %llu ms", layout_.size(), GetTickCount64() - t1);
+    Log(L"catalog: start layout exported (%zu entries) in %llu ms", win11 ? layout_.size() : xmlLayout_.size(), GetTickCount64() - t1);
 }
 
 void AppCatalog::Worker()
@@ -749,7 +820,7 @@ void AppCatalog::Worker()
     // STA: shell item image factories of some handlers need it.
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     for (;;) {
-        bool refresh = false;
+        bool refresh = false, forceLayout = false;
         std::pair<std::wstring, int> job;
         {
             std::unique_lock g(mutex_);
@@ -764,6 +835,8 @@ void AppCatalog::Worker()
             } else {
                 refresh = true;
                 refresh_ = false;
+                forceLayout = forceLayout_;
+                forceLayout_ = false;
             }
         }
         if (refresh) {
@@ -782,9 +855,16 @@ void AppCatalog::Worker()
             Log(L"catalog: %zu apps in %llu ms", apps.size(), GetTickCount64() - t0);
             // The start menu's pins: exported again only when its layout file changed.
             std::vector<CatalogApp> pins;
+            std::vector<CatalogFolder> pinGroups;
             try {
-                RefreshStartLayout();
-                pins = ResolvePins(layout_, apps);
+                RefreshStartLayout(forceLayout);
+                pins = IsWindows11() ? ResolvePins(layout_, apps) : [&] {
+                    pinGroups = ResolvePinGroups(xmlLayout_, apps);
+                    std::vector<CatalogApp> flat;
+                    for (const CatalogFolder& g : pinGroups)
+                        flat.insert(flat.end(), g.apps.begin(), g.apps.end());
+                    return flat;
+                }();
             } catch (...) {
                 Log(L"catalog: start pins failed");
             }
@@ -798,6 +878,7 @@ void AppCatalog::Worker()
                 std::lock_guard g(mutex_);
                 apps_ = std::move(apps);
                 startPins_ = std::move(pins);
+                startPinGroups_ = std::move(pinGroups);
                 startFolders_ = std::move(folders);
                 liveIds_.clear();
                 for (const auto& app : apps_)
@@ -817,7 +898,7 @@ void AppCatalog::Worker()
             continue;
         }
         IconImage img;
-        LoadShellImage(IsPath(job.first) ? job.first : L"shell:AppsFolder\\" + job.first, job.second, img);
+        LoadShellImage(ShellTarget(job.first), job.second, img);
         {
             std::lock_guard g(mutex_);
             requested_.erase(job);
@@ -838,7 +919,7 @@ void AppCatalog::Worker()
 
 bool AppCatalog::Launch(const CatalogApp& app)
 {
-    std::wstring path = IsPath(app.id) ? app.id : L"shell:AppsFolder\\" + app.id;
+    std::wstring path = ShellTarget(app.id);
     SHELLEXECUTEINFOW sei{sizeof(sei)};
     sei.fMask = SEE_MASK_FLAG_NO_UI;
     sei.lpFile = path.c_str();
