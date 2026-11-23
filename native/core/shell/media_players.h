@@ -1,7 +1,8 @@
 // The players the now-playing card knows beyond what Windows tells of them: NetEase Cloud Music, QQ
 // Music, Spotify and Apple Music, by their media session's app (an exe, or a packaged app's AUMID).
-// NetEase and QQ Music like a track and show their desktop lyrics through their own global shortcuts
-// (their defaults: Ctrl+Alt+L and Ctrl+Alt+D, Ctrl+Alt+V and Ctrl+Alt+W); QQ Music's newer versions
+// NetEase likes a track through its own global shortcut (its default: Ctrl+Alt+L), its heart read from its
+// own records; QQ Music keeps its likes where nothing can read them, so the card offers none for it. Both show
+// their desktop lyrics by their shortcuts (Ctrl+Alt+D, Ctrl+Alt+W); QQ Music's newer versions
 // accept a position only on their own command line (/seekto); Apple Music writes the album into the
 // artist ("Artist — Album"). Spotify tells Windows all there is.
 #pragma once
@@ -32,7 +33,7 @@ inline MediaPlayer PlayerOf(std::wstring appId)
     return MediaPlayer::Other;
 }
 
-inline bool PlayerLikes(MediaPlayer p) { return p == MediaPlayer::Netease || p == MediaPlayer::QqMusic; }
+inline bool PlayerLikes(MediaPlayer p) { return p == MediaPlayer::Netease; }
 inline bool PlayerShowsLyrics(MediaPlayer p) { return p == MediaPlayer::Netease || p == MediaPlayer::QqMusic; }
 
 // Apple Music's "Artist — Album" in the artist: the artist alone, and the album when it has none.

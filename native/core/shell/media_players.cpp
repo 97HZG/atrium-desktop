@@ -51,7 +51,6 @@ bool LikeTrack(MediaPlayer p)
 {
     switch (p) {
     case MediaPlayer::Netease: return SendChord('L');
-    case MediaPlayer::QqMusic: return SendChord('V');
     default: return false;
     }
 }
