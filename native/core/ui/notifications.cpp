@@ -952,6 +952,10 @@ void Notifications::Paint(Mode mode, Canvas& c)
         if (!column && expanded_ && shown.size() > 1)
             button(L"collapse", Tr(L"Collapse"));
     }
+    // Every card faded out (the last one closing): no glass, rather than no shapes, which would be the whole
+    // window's glass for the frames until the window goes.
+    if (shapes.empty())
+        shapes.push_back({D2D1::RectF(w / 2, listTop, w / 2 + 1, listTop + 1), 0, 1.f});
     v.surface->SetShapes(shapes, moving);
     v.lastPaint = c.now;
 
