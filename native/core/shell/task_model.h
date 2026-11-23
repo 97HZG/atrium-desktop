@@ -25,6 +25,7 @@ struct TaskItem {
     std::vector<HWND> windows; // visible app windows of this group, most recently active first
     bool active = false;       // one of `windows` is the foreground window
     bool attention = false;    // a window is flashing (FlashWindowEx / HSHELL_FLASH)
+    int badge = 0;             // > 0: unread count from window title (or injected by host)
     uint64_t iconVersion = 0;  // changes when the icon should be fetched again
     bool multipleWindows = false;
 };

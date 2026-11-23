@@ -50,12 +50,13 @@ bool IsOfficialWeChatRow(const std::wstring& chat);
 WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackText = {});
 std::vector<Notice> DiffWeChatRows(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool baseline, bool blockOfficial,
                                    std::map<std::wstring, WeChatChatState>& states);
+int SumWeChatUnread(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool blockOfficial);
 
 class WeChatSource {
 public:
     // Posts `msg` to `notify` with a heap-allocated Notice* in lParam (the
-    // receiver deletes it).
-    WeChatSource(HWND notify, UINT msg);
+    // receiver deletes it), and `badgeMsg` (if non-zero) when Unread() changes.
+    WeChatSource(HWND notify, UINT msg, UINT badgeMsg = 0);
     ~WeChatSource();
     WeChatSource(const WeChatSource&) = delete;
     WeChatSource& operator=(const WeChatSource&) = delete;
@@ -67,16 +68,21 @@ public:
     }
     // The chat list reads (a shown window's, or the rows held from it).
     bool Reading() const { return reading_; }
-    // wechatBlockOfficial: no cards for the official accounts' rows.
+    int Unread() const { return unread_; }
+    // wechatBlockOfficial: no cards or badge count for the official accounts' rows.
     void SetBlockOfficial(bool on) { blockOfficial_ = on; }
+    void SetPostCards(bool on) { postCards_ = on; }
 
 private:
     void Run();
     HWND notify_;
     UINT msg_;
+    UINT badgeMsg_ = 0;
     std::atomic<bool> stop_{false};
     std::atomic<bool> reading_{false};
     std::atomic<bool> blockOfficial_{false};
+    std::atomic<bool> postCards_{true};
+    std::atomic<int> unread_{0};
     std::atomic<bool> wakePending_{false};
     HANDLE wake_ = nullptr;
     std::thread thread_;

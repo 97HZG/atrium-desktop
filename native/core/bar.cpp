@@ -856,7 +856,7 @@ void Bar::SetItems(std::vector<TaskItem> items)
         std::wstring sig;
         for (const auto& t : v)
             sig += t.key + L"|" + std::to_wstring(!t.windows.empty()) + std::to_wstring(t.active) + std::to_wstring(t.attention) + L"|" +
-                   std::to_wstring(t.iconVersion) + L"\n";
+                   std::to_wstring(t.badge) + L"|" + std::to_wstring(t.iconVersion) + L"\n";
         return sig;
     };
     bool same = visible(items) == visible(allItems_);
@@ -1171,6 +1171,7 @@ void Bar::Relayout()
         it.running = !t.windows.empty();
         it.active = t.active;
         it.attention = t.attention;
+        it.badge = st.barBadges ? t.badge : 0;
         if (auto b = bounces_.find(t.key); b != bounces_.end()) {
             it.bounceMs = b->second;
         }

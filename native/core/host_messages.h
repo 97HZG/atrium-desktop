@@ -21,5 +21,6 @@ constexpr UINT WM_UPDATE_READY = WM_APP + 11;
 constexpr UINT WM_WIN_KEY = WM_APP + 12;      // Windows key alone (0, winKeyStart) or Win + 1..9, 0 (1..10, winNumbers)
 constexpr UINT WM_USB = WM_APP + 13;          // the device worker has queued removal notices
 constexpr UINT WM_IME_STATE = WM_APP + 20;    // the input method may have changed (ImeWatcher)
+constexpr UINT WM_BADGES = WM_APP + 21;       // an app's unread badge count changed (WeChatSource)
 
 } // namespace atrium

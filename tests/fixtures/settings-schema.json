@@ -75,6 +75,7 @@
     "notifyDingTalk": {"type": "bool", "default": true},
     "attentionLight": {"type": "bool", "default": true},
     "attentionBounce": {"type": "bool", "default": false},
+    "barBadges": {"type": "bool", "default": true},
     "bar": {"type": "bool", "default": true},
     "widgets": {"type": "bool", "default": true},
     "widgetsOnRight": {"type": "bool", "default": false},

@@ -105,6 +105,16 @@ void CheckWeChatDiff()
     Require(DiffWeChatRows({{L"big", {L"Big", L"m1", 99}}}, true, false, s).empty(), "99+ same");
     auto sat = DiffWeChatRows({{L"big", {L"Big", L"m2", 99}}}, true, false, s);
     Require(sat.size() == 1 && sat[0].unread && sat[0].body == L"m2", "99+ new summary");
+
+    std::vector<std::pair<std::wstring, WeChatRow>> rows{
+        {L"a", {L"Alice", L"hi", 3, false, false, false}},
+        {L"m", {L"Muted", L"hi", 5, true, false, false}},
+        {L"c", {L"Collapsed", L"hi", 4, false, true, false}},
+        {L"o", {L"公众号", L"news", 2, false, false, true}},
+    };
+    Require(SumWeChatUnread(rows, false) == 5, "sum excludes muted and collapsed");
+    Require(SumWeChatUnread(rows, true) == 3, "sum excludes official when blocked");
+    Require(SumWeChatUnread({}, true) == 0, "empty rows sum to 0");
 }
 
 } // namespace

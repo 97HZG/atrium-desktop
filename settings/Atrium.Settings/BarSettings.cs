@@ -107,6 +107,7 @@ internal sealed class BarSettings
     public bool NotifyDingTalk { get; set; } = true;   // DingTalk's messages (likewise)
     public bool AttentionLight { get; set; } = true;   // an app asking for attention: its icon lit white on the bar
     public bool AttentionBounce { get; set; }          // its icon hops a few times
+    public bool BarBadges { get; set; } = true;        // unread count badges on taskbar icons
     public bool Bar { get; set; } = true;              // the glass bar module (off: Windows' taskbar and banners)
     public bool Widgets { get; set; } = true;          // desktop widgets (their layout is the core's widgets.json)
     public bool WidgetsOnRight { get; set; }
@@ -256,6 +257,7 @@ internal sealed class BarSettings
             ["notifyDingTalk"] = NotifyDingTalk,
             ["attentionLight"] = AttentionLight,
             ["attentionBounce"] = AttentionBounce,
+            ["barBadges"] = BarBadges,
             ["bar"] = Bar,
             ["widgets"] = Widgets,
             ["widgetsOnRight"] = WidgetsOnRight,
@@ -375,6 +377,7 @@ internal sealed class BarSettings
         s.NotifyDingTalk = Flag("notifyDingTalk", f.NotifyDingTalk);
         s.AttentionLight = Flag("attentionLight", f.AttentionLight);
         s.AttentionBounce = Flag("attentionBounce", f.AttentionBounce);
+        s.BarBadges = Flag("barBadges", f.BarBadges);
         s.Bar = Flag("bar", f.Bar);
         s.Widgets = Flag("widgets", f.Widgets);
         s.WidgetsOnRight = Flag("widgetsOnRight", f.WidgetsOnRight);
@@ -545,7 +548,7 @@ internal sealed class BarSettings
         NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus && ImeBubble == o.ImeBubble &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && WeChatBlockOfficial == o.WeChatBlockOfficial && NotifyFeishu == o.NotifyFeishu &&
         NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk &&
-        AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && Bar == o.Bar && Widgets == o.Widgets &&
+        AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && BarBadges == o.BarBadges && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
         StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize && StageDragMerge == o.StageDragMerge && StageCloseButton == o.StageCloseButton && StageAvoid == o.StageAvoid &&
         StageExcluded.SequenceEqual(o.StageExcluded, StringComparer.OrdinalIgnoreCase) && WidgetMaterial == o.WidgetMaterial &&

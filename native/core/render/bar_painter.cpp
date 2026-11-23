@@ -54,6 +54,31 @@ D2D1_POINT_2F VectorToArea(const EdgeFrame& frame, float du, float dv)
     return {du * m._11 + dv * m._12, du * m._21 + dv * m._22};
 }
 
+void DrawAppBadge(ID2D1DeviceContext2* d2d, IDWriteFactory3* dwrite, IDWriteTextFormat* f, ID2D1SolidColorBrush* brush, const D2D1_RECT_F& iconArea, float s,
+                  float size, int count, float appear)
+{
+    const float h = std::max(13.f * s, size * 0.44f);
+    const std::wstring n = count >= 100 ? L"99+" : std::to_wstring(count);
+    float w = h;
+    if (count >= 10) {
+        winrt::com_ptr<IDWriteTextLayout> layout;
+        if (SUCCEEDED(dwrite->CreateTextLayout(n.c_str(), UINT32(n.size()), f, 200.f, h, layout.put()))) {
+            DWRITE_TEXT_METRICS tm{};
+            if (SUCCEEDED(layout->GetMetrics(&tm)))
+                w = std::max(h, tm.width + h * 0.50f);
+        }
+    }
+    const float right = iconArea.right + h * 0.20f, top = iconArea.top - h * 0.30f;
+    const D2D1_RECT_F badge = D2D1::RectF(right - w, top, right, top + h);
+    const D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(badge, h / 2, h / 2);
+    brush->SetColor(D2D1::ColorF(0xFF3B30, appear));
+    d2d->FillRoundedRectangle(rr, brush);
+    brush->SetColor(D2D1::ColorF(0, 0, 0, 0.18f * appear));
+    d2d->DrawRoundedRectangle(rr, brush, 0.75f * s);
+    brush->SetColor(D2D1::ColorF(1, 1, 1, appear));
+    DrawUiText(d2d, dwrite, n, f, badge, brush);
+}
+
 } // namespace
 
 BarPainter::BarPainter(ID2D1DeviceContext2* d2d, IDWriteFactory3* dwrite)
@@ -599,16 +624,22 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         brush->SetColor(c);
         FillContinuousRect(d2d, iconArea, size * 0.22f, brush);
     }
-    // Count badge (unread notifications): a small accent disc on the icon's corner.
+    // Count badge (unread notifications): #notify keeps its blue accent disc; app icons get a red badge at top-right.
     if (it.badge > 0) {
-        float d = std::max(9.f * s, size * 0.46f);
-        float bxr = iconArea.right - d * 0.35f, by = iconArea.top + d * 0.15f;
-        brush->SetColor(D2D1::ColorF(0.04f, 0.52f, 1.0f, 1.0f));
-        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bxr, by), d / 2, d / 2), brush);
-        std::wstring n = it.badge > 9 ? L"9+" : std::to_wstring(it.badge);
-        if (IDWriteTextFormat* f = Format(d * 0.62f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {
-            brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
-            DrawUiText(d2d, dwrite_.get(), n, f, D2D1::RectF(bxr - d, by - d / 2, bxr + d, by + d / 2), brush);
+        if (it.key == L"#notify") {
+            float d = std::max(9.f * s, size * 0.46f);
+            float bxr = iconArea.right - d * 0.35f, by = iconArea.top + d * 0.15f;
+            brush->SetColor(D2D1::ColorF(0.04f, 0.52f, 1.0f, 1.0f));
+            d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bxr, by), d / 2, d / 2), brush);
+            std::wstring n = it.badge > 9 ? L"9+" : std::to_wstring(it.badge);
+            if (IDWriteTextFormat* f = Format(d * 0.62f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {
+                brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
+                DrawUiText(d2d, dwrite_.get(), n, f, D2D1::RectF(bxr - d, by - d / 2, bxr + d, by + d / 2), brush);
+            }
+        } else {
+            const float h = std::max(13.f * s, size * 0.44f);
+            if (IDWriteTextFormat* f = Format(h * 0.64f, DWRITE_FONT_WEIGHT_SEMI_BOLD))
+                DrawAppBadge(d2d, dwrite_.get(), f, brush, iconArea, s, size, it.badge, m.appear);
         }
     }
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());

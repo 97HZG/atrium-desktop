@@ -165,4 +165,44 @@ inline bool ImagesVisuallyDifferent(const IconImage& a, const IconImage& b)
     return avgDiff > kThreshold;
 }
 
+// Browser web apps and mail/chat clients that put a leading "(N) " or "(99+) " unread count in their window title.
+inline bool IsBadgeTitleApp(bool webApp, const std::wstring& exePath, const std::wstring& aumid)
+{
+    if (webApp)
+        return true;
+    const std::wstring stem = Lower(FileStem(exePath));
+    for (const wchar_t* name :
+         {L"discord", L"slack", L"telegram", L"thunderbird", L"outlook", L"olk", L"teams", L"ms-teams", L"element", L"signal", L"whatsapp"})
+        if (stem == name)
+            return true;
+    const std::wstring id = Lower(aumid);
+    if (!id.empty()) {
+        for (const wchar_t* pkg : {L"discord", L"slack", L"telegram", L"thunderbird", L"outlook", L"msteams", L"element", L"signal", L"whatsapp"})
+            if (id.find(pkg) != std::wstring::npos)
+                return true;
+    }
+    return false;
+}
+
+inline int ParseTitleBadge(const std::wstring& title, bool webApp, const std::wstring& exePath, const std::wstring& aumid)
+{
+    if (!IsBadgeTitleApp(webApp, exePath, aumid) || title.size() < 4 || title[0] != L'(')
+        return 0;
+    const size_t close = title.find(L')', 1);
+    if (close == std::wstring::npos || close + 1 >= title.size() || title[close + 1] != L' ')
+        return 0;
+    const std::wstring inner = title.substr(1, close - 1);
+    if (inner == L"99+")
+        return 100;
+    if (inner.empty() || inner.size() > 3 || inner[0] == L'0')
+        return 0;
+    int value = 0;
+    for (wchar_t c : inner) {
+        if (c < L'0' || c > L'9')
+            return 0;
+        value = value * 10 + (c - L'0');
+    }
+    return value;
+}
+
 } // namespace atrium

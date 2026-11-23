@@ -573,6 +573,8 @@ void PostMessengerCard(Messenger m)
     g_app.notes->Post(std::move(n));
 }
 
+std::vector<TaskItem> BarItems();
+
 // Applies settings to the bar and the task model.
 void ApplySettings(const Settings& s)
 {
@@ -595,6 +597,7 @@ void ApplySettings(const Settings& s)
         if (g_app.ime)
             g_app.ime->Cancel(); // a bubble already on screen goes with the setting, not when its life ends
     }
+    const bool badgesChanged = g_app.displaySettings.barBadges != s.barBadges;
     g_app.desktopDisplay = s.desktopDisplay;
     g_app.displaySettings = s;
     // Popups share the bar's material and corner radius (concentric inside).
@@ -622,12 +625,19 @@ void ApplySettings(const Settings& s)
         g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
     else if (!(s.bar && toasts) && g_app.listener)
         g_app.listener.reset();
-    if (s.bar && s.notifyWeChat && !g_app.wechat)
-        g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE);
-    else if (!(s.bar && s.notifyWeChat) && g_app.wechat)
+    const bool needWeChat = s.bar && (s.notifyWeChat || s.barBadges);
+    if (needWeChat && !g_app.wechat)
+        g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE, WM_BADGES);
+    else if (!needWeChat && g_app.wechat)
         g_app.wechat.reset();
-    if (g_app.wechat)
+    if (g_app.wechat) {
         g_app.wechat->SetBlockOfficial(s.wechatBlockOfficial);
+        g_app.wechat->SetPostCards(s.notifyWeChat);
+    }
+    if (badgesChanged && g_app.tasks && g_app.bar) {
+        const std::vector<TaskItem> items = BarItems();
+        ForBars([&](Bar& bar) { bar.SetItems(items); });
+    }
     if (s.bar && s.notifyFeishu && !g_app.feishu)
         g_app.feishu = std::make_unique<FeishuSource>(g_app.host, WM_NOTICE);
     else if (!(s.bar && s.notifyFeishu) && g_app.feishu)
@@ -1136,18 +1146,29 @@ void ConfigureBar(Bar& bar)
 std::vector<TaskItem> BarItems()
 {
     std::vector<TaskItem> items = g_app.tasks->Snapshot();
+    const bool badgesOn = g_app.displaySettings.barBadges;
+    if (!badgesOn) {
+        for (TaskItem& t : items)
+            t.badge = 0;
+    }
     const std::vector<std::wstring> flashing = g_app.tray ? g_app.tray->Flashing() : std::vector<std::wstring>{};
-    if (flashing.empty())
+    const int wechatUnread = (badgesOn && g_app.wechat) ? g_app.wechat->Unread() : 0;
+    if (flashing.empty() && wechatUnread <= 0)
         return items;
     for (TaskItem& t : items) {
-        if (t.attention)
+        const bool needFlash = !t.attention && !flashing.empty();
+        const bool needWeChat = wechatUnread > 0;
+        if (!needFlash && !needWeChat)
             continue;
         std::wstring exe = g_app.tasks->FileLocation(t.key);
         if (exe.empty())
             continue;
         exe = AppExecutable(exe);
         CharLowerBuffW(exe.data(), DWORD(exe.size()));
-        t.attention = std::ranges::find(flashing, exe) != flashing.end();
+        if (needFlash)
+            t.attention = std::ranges::find(flashing, exe) != flashing.end();
+        if (needWeChat && MessengerOfProgram(exe) == Messenger::WeChat)
+            t.badge = std::max(t.badge, wechatUnread);
     }
     return items;
 }
@@ -1305,6 +1326,12 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 if (n->unread)
                     g_app.alerts.Noticed(messenger, GetTickCount64()); // its flash needs no plain card
             }
+        }
+        return 0;
+    case WM_BADGES:
+        if (g_app.displaySettings.barBadges && g_app.tasks && g_app.bar) {
+            const std::vector<TaskItem> items = BarItems();
+            ForBars([&](Bar& bar) { bar.SetItems(items); });
         }
         return 0;
     case WM_CATALOG:

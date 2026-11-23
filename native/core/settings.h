@@ -114,6 +114,7 @@ struct Settings {
     // An app asking for attention (a new message: its window or tray icon flashing) on the bar.
     bool attentionLight = true;      // its icon's plate lit white until it is opened
     bool attentionBounce = false;    // its icon hops a few times
+    bool barBadges = true;           // unread count badges on taskbar icons
     // Three independent modules: the bar (with its popups and Atrium's notification cards), the
     // desktop widgets and Stage Manager. Any of them may run alone.
     bool bar = true;                 // the glass bar; off: Windows' own taskbar and banners stay in charge

@@ -2,6 +2,7 @@
 #include "shell/jump_list.h"
 #include "shell/lunar.h"
 #include "shell/start_layout.h"
+#include "shell/task_rules.h"
 #include "shell/weather.h"
 #include <cstdio>
 #include <cstring>
@@ -93,10 +94,23 @@ void TestJumpListAndStart(int& f)
                  !atrium::UngroupStartFolder(ft, L"folder:9") && atrium::UngroupStartFolder(ft, L"folder:2") && ft.size() == 2 && ft[1].id == L"d",
           "folder ops");
 }
+void TestTitleBadges(int& f)
+{
+    using atrium::ParseTitleBadge;
+    Check(f, ParseTitleBadge(L"(3) Inbox", true, L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"") == 3, "web app title badge");
+    Check(f, ParseTitleBadge(L"(99+) Discord", false, L"C:\\Users\\x\\AppData\\Local\\Discord\\Discord.exe", L"") == 100, "99+ discord");
+    Check(f, ParseTitleBadge(L"(12) Slack", false, L"slack.exe", L"") == 12, "slack badge");
+    Check(f, ParseTitleBadge(L"(5) Mail", false, L"olk.exe", L"") == 5, "new outlook badge");
+    Check(f, ParseTitleBadge(L"(2) Chat", false, L"", L"MSTeams_8wekyb3d8bbwe!MSTeams") == 2, "ms teams aumid badge");
+    Check(f, ParseTitleBadge(L"(2026) Report", true, L"chrome.exe", L"") == 0, "reject 4-digit year");
+    Check(f, ParseTitleBadge(L"file (2).pdf", true, L"chrome.exe", L"") == 0, "reject non-leading count");
+    Check(f, ParseTitleBadge(L"(0) x", true, L"chrome.exe", L"") == 0, "reject zero count");
+    Check(f, ParseTitleBadge(L"(3) Inbox", false, L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"") == 0, "reject plain browser window");
+}
 } // namespace
 int main()
 {
     int f = 0;
-    TestWeather(f), TestLunar(f), TestJumpListAndStart(f);
+    TestWeather(f), TestLunar(f), TestJumpListAndStart(f), TestTitleBadges(f);
     return f ? 1 : 0;
 }

@@ -108,12 +108,12 @@ Require(new BarSettings().TrayHost && BarSettings.FromJson([], new()).TrayHost, 
 {
     var old = BarSettings.FromJson([], new());
     var chosen = BarSettings.FromJson(
-        JsonNode.Parse("""{"attentionLight":false,"attentionBounce":true,"startCentered":true,"startWithBar":true}""")!.AsObject(), new());
-    Require(old.AttentionLight && !old.AttentionBounce && !old.StartCentered && !old.StartWithBar,
-        "Old files light apps asking for attention, without hops, the start menu at the left, alone.");
-    Require(!chosen.AttentionLight && chosen.AttentionBounce && chosen.StartCentered && chosen.StartWithBar && !chosen.SameAs(old) &&
+        JsonNode.Parse("""{"attentionLight":false,"attentionBounce":true,"barBadges":false,"startCentered":true,"startWithBar":true}""")!.AsObject(), new());
+    Require(old.AttentionLight && !old.AttentionBounce && old.BarBadges && !old.StartCentered && !old.StartWithBar,
+        "Old files light apps asking for attention, without hops, with unread badges, the start menu at the left, alone.");
+    Require(!chosen.AttentionLight && chosen.AttentionBounce && !chosen.BarBadges && chosen.StartCentered && chosen.StartWithBar && !chosen.SameAs(old) &&
             BarSettings.FromJson(JsonNode.Parse(chosen.ToJson().ToJsonString())!.AsObject(), new()).SameAs(chosen),
-        "The attention and start menu choices are read, compared and saved.");
+        "The attention, badge and start menu choices are read, compared and saved.");
 }
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"trayHost":false}""")!.AsObject(), new());
 Require(!parsed.TrayHost && !BarSettings.FromJson(parsed.ToJson(), new()).TrayHost && !new BarSettings().SameAs(parsed),

@@ -992,6 +992,9 @@
                                 <local:ToggleTile x:Name="AttentionLightSwitch" Title="Highlight new messages" SwitchName="Highlight apps with new messages"
                                                   Toggled="OnBarContentToggled" Flat="True"
                                                   Note="An app with a new message has its icon lit white until it is opened; hidden while the pointer is on it." />
+                                <local:ToggleTile x:Name="BarBadgesSwitch" Title="Unread badges" SwitchName="Show unread badges on taskbar icons"
+                                                  Toggled="OnBarContentToggled" Flat="True"
+                                                  Note="Show the number of unread messages on taskbar icons (WeChat, web apps and mail apps that put it in their window title)." />
                                 <local:ToggleTile x:Name="AttentionBounceSwitch" Title="Bounce on new messages" SwitchName="Bounce apps with new messages"
                                                   Toggled="OnBarContentToggled" Flat="True" Note="An app with a new message hops a few times on the taskbar." />
                             </StackPanel>

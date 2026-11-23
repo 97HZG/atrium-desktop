@@ -556,7 +556,7 @@ struct IconKeyHash {
 bool Same(const TaskItem& a, const TaskItem& b)
 {
     return a.key == b.key && a.name == b.name && a.pinned == b.pinned && a.pinIndex == b.pinIndex && a.windows == b.windows && a.active == b.active &&
-           a.attention == b.attention && a.iconVersion == b.iconVersion;
+           a.attention == b.attention && a.badge == b.badge && a.iconVersion == b.iconVersion;
 }
 
 struct ScanRec {
@@ -956,6 +956,7 @@ struct TaskModel::Impl {
                 t.active = true;
             if (attention.contains(r->hwnd))
                 t.attention = true;
+            t.badge = std::max(t.badge, ParseTitleBadge(r->title, r->info.webApp, r->info.exePath, r->info.aumid));
             Meta& m = newMeta[key];
             if (m.exePath.empty())
                 m.exePath = r->info.exePath;

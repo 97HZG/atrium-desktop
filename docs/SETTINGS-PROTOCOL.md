@@ -85,6 +85,7 @@
 | `notifyDingTalk` | bool | | true | 钉钉的消息：同上，“钉钉 · 新消息” |
 | `attentionLight` | bool | | true | 应用请求注意（窗口或托盘图标闪烁，例如新消息）时，任务栏图标底板亮白色、运行圆点变白，直到切到该应用；指针停在该图标上或放大波及它时暂时隐藏 |
 | `attentionBounce` | bool | | false | 应用开始请求注意时，任务栏图标跳动三下（与启动时的跳动相同）；指针停在该图标上时不跳 |
+| `barBadges` | bool | | true | 在任务栏图标右上角显示未读消息角标（微信、网页应用及在标题中给出未读数的邮件和聊天软件） |
 | `bar` | bool | | true | 玻璃任务栏模块：关闭时栏的窗口隐藏，开始菜单、托盘、控制中心、日历与通知中心随之关闭，通知来源停止接收（Windows 自己的横幅照常出现），`hideTaskbar` 与 `hideBanners` 不再生效；渲染线程继续为小组件与菜单绘制玻璃。与 `widgets`、`stageManager` 互不依赖 |
 | `widgets` | bool | | true | 桌面小组件；布局由 Core 存于 `widgets.json`（D35）。中号时钟和中号数字时钟的世界时钟城市可在小组件右键菜单“更改城市…”里逐个换，存为该小组件的 `cities`（城市名数组，按显示顺序；没有这一项时用北京、东京、伦敦、纽约，数字时钟用后三个） |
 | `widgetsOnRight` | bool | | false | 小组件逻辑网格从右侧排布；切换时镜像现有列，不改写 `widgets.json` |

@@ -250,12 +250,24 @@ std::vector<Notice> DiffWeChatRows(const std::vector<std::pair<std::wstring, WeC
     return events;
 }
 
+int SumWeChatUnread(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool blockOfficial)
+{
+    int total = 0;
+    for (const auto& [key, r] : rows) {
+        if (!r.muted && !r.collapsed && !(blockOfficial && r.official) && r.unread > 0)
+            total += r.unread;
+    }
+    return total;
+}
+
 namespace {
 
-void UpdateUnread(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool baseline, bool blockOfficial, const std::wstring& exe, HWND notify,
-                  UINT msg, std::map<std::wstring, WeChatChatState>& states)
+void UpdateUnread(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool baseline, bool blockOfficial, bool postCards, const std::wstring& exe,
+                  HWND notify, UINT msg, std::map<std::wstring, WeChatChatState>& states)
 {
     for (Notice& ev : DiffWeChatRows(rows, baseline, blockOfficial, states)) {
+        if (!postCards)
+            continue;
         auto n = std::make_unique<Notice>(std::move(ev));
         if (n->unread) {
             n->app = Tr(L"WeChat");
@@ -460,7 +472,11 @@ WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackT
     return r;
 }
 
-WeChatSource::WeChatSource(HWND notify, UINT msg) : notify_(notify), msg_(msg), wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr))
+WeChatSource::WeChatSource(HWND notify, UINT msg, UINT badgeMsg)
+    : notify_(notify),
+      msg_(msg),
+      badgeMsg_(badgeMsg),
+      wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr))
 {
     thread_ = std::thread([this] { Run(); });
 }
@@ -567,6 +583,8 @@ void WeChatSource::Run()
                     held.clear();
                     states.clear();
                     baseline = false; // after a restart its list is a new baseline
+                    if (unread_.exchange(0) != 0 && badgeMsg_)
+                        PostMessageW(notify_, badgeMsg_, 0, 0);
                     WaitForUiaWake(wake_, 6000);
                     continue;
                 }
@@ -597,7 +615,10 @@ void WeChatSource::Run()
                         Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());
                     state = fromHeld ? 3 : 2;
                     reading_ = true;
-                    UpdateUnread(rows, baseline, blockOfficial_, exe, notify_, msg_, states);
+                    UpdateUnread(rows, baseline, blockOfficial_, postCards_, exe, notify_, msg_, states);
+                    const int total = SumWeChatUnread(rows, blockOfficial_);
+                    if (unread_.exchange(total) != total && badgeMsg_)
+                        PostMessageW(notify_, badgeMsg_, WPARAM(total), 0);
                     baseline = true;
                 } else {
                     reading_ = false;

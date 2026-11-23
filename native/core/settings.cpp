@@ -110,6 +110,7 @@ void ReadModuleSettingsJson(const json::JsonObject& o, Settings& s)
     flag(L"notifyDingTalk", s.notifyDingTalk);
     flag(L"attentionLight", s.attentionLight);
     flag(L"attentionBounce", s.attentionBounce);
+    flag(L"barBadges", s.barBadges);
     flag(L"bar", s.bar);
     flag(L"widgets", s.widgets);
     flag(L"widgetsOnRight", s.widgetsOnRight);
@@ -426,6 +427,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"notifyDingTalk", json::JsonValue::CreateBooleanValue(notifyDingTalk));
     o.SetNamedValue(L"attentionLight", json::JsonValue::CreateBooleanValue(attentionLight));
     o.SetNamedValue(L"attentionBounce", json::JsonValue::CreateBooleanValue(attentionBounce));
+    o.SetNamedValue(L"barBadges", json::JsonValue::CreateBooleanValue(barBadges));
     o.SetNamedValue(L"bar", json::JsonValue::CreateBooleanValue(bar));
     o.SetNamedValue(L"widgets", json::JsonValue::CreateBooleanValue(widgets));
     o.SetNamedValue(L"widgetsOnRight", json::JsonValue::CreateBooleanValue(widgetsOnRight));

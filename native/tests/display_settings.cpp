@@ -78,7 +78,14 @@ void CheckSettings()
     }
     settings.showClockSeconds = true;
     Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.showClockSeconds, "clock seconds survive saving");
-    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.showClockSeconds && parsed.showClock, "old settings keep the clock at minutes");
+    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.showClockSeconds && parsed.showClock && parsed.barBadges,
+            "old settings keep the clock at minutes and unread badges on");
+    {
+        Settings noBadges;
+        noBadges.barBadges = false;
+        Require(Settings::FromJson(noBadges.ToJson(), Settings{}, parsed) && !parsed.barBadges, "barBadges false survives round trip");
+        Require(Settings::FromJson(LR"({"barBadges":"bad"})", noBadges, parsed) && !parsed.barBadges, "malformed barBadges retains current value");
+    }
     Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.magnifyNear, "icons do not magnify above the bar unless chosen");
     Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.remoteVisible, "Atrium stays out of the screen's capture unless chosen");
     {
@@ -288,6 +295,7 @@ void CheckTaskDistribution()
     pinned.pinned = true;
     pinned.windows = {first};
     pinned.active = pinned.attention = true;
+    pinned.badge = 5;
     shared.key = L"shared";
     shared.windows = {first, second};
     shared.active = true;
@@ -299,7 +307,8 @@ void CheckTaskDistribution()
     auto main = TaskItemsForDisplay(items, L"primaryAndWindow", true, primary, first, monitorOf);
     Require(main.size() == 3 && main[1].windows.size() == 2, "primary taskbar includes every app");
     auto local = TaskItemsForDisplay(items, L"primaryAndWindow", false, external, first, monitorOf);
-    Require(local.size() == 3 && local[0].windows.empty() && !local[0].active && !local[0].attention, "remote pins stay without running or active indicators");
+    Require(local.size() == 3 && local[0].windows.empty() && !local[0].active && !local[0].attention && local[0].badge == 5,
+            "remote pins stay without running or active indicators, keeping their badge");
     Require(local[1].windows == std::vector<HWND>{second} && !local[1].active, "window previews only include local windows");
     local = TaskItemsForDisplay(items, L"window", true, primary, first, monitorOf);
     Require(local.size() == 2 && local[1].windows == std::vector<HWND>{first} && local[1].active, "window-only mode also filters the primary taskbar");

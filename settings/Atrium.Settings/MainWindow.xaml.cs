@@ -790,6 +790,7 @@ public sealed partial class MainWindow : Window, IDisposable
         DesktopSwitch.IsOn = CurrentSettings.ShowDesktop;
         AttentionLightSwitch.IsOn = CurrentSettings.AttentionLight;
         AttentionBounceSwitch.IsOn = CurrentSettings.AttentionBounce;
+        BarBadgesSwitch.IsOn = CurrentSettings.BarBadges;
         AutoWidthSwitch.IsOn = CurrentSettings.AutoWidth;
         HoverRiseSwitch.IsOn = CurrentSettings.HoverRise;
         RiseNearSwitch.IsOn = CurrentSettings.RiseNear;
@@ -935,6 +936,7 @@ public sealed partial class MainWindow : Window, IDisposable
         CurrentSettings.StartWithBar = StartWithBarSwitch.IsOn;
         CurrentSettings.AttentionLight = AttentionLightSwitch.IsOn;
         CurrentSettings.AttentionBounce = AttentionBounceSwitch.IsOn;
+        CurrentSettings.BarBadges = BarBadgesSwitch.IsOn;
         Changed();
     }
 
