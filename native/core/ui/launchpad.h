@@ -140,6 +140,7 @@ private:
     int wheel_ = 0;          // wheel notches not yet turned into a page
     bool tracking_ = false;
     bool menuOpen_ = false; // an app's menu is up: the focus going to it does not close Launchpad
+    bool stale_ = false;    // the catalog changed while an app was lifted
     HWND previous_ = nullptr;
     double openedMs_ = 0, closedMs_ = 0, lastPaint_ = 0;
     bool closing_ = false, launched_ = false;

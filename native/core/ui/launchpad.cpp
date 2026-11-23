@@ -44,6 +44,7 @@ void Launchpad::Open(RECT work, HWND previous)
     previous_ = previous;
     order_ = LoadLaunchpadOrder();
     lifted_ = -1;
+    stale_ = false;
     tilePos_.clear();
     apps_ = LaunchableApps();
     Split();
@@ -170,11 +171,20 @@ void Launchpad::Refresh()
 {
     if (!surface_.Visible() || closing_)
         return;
-    apps_ = LaunchableApps();
-    Split();
-    if (!query_.empty())
-        Filter();
-    page_ = std::min(page_, Pages() - 1);
+    if (lifted_ >= 0) {
+        stale_ = true;
+        return;
+    }
+    auto apps = LaunchableApps();
+    const bool changed = apps.size() != apps_.size() || !std::equal(apps.begin(), apps.end(), apps_.begin(),
+                                                                    [](const CatalogApp& a, const CatalogApp& b) { return a.id == b.id && a.name == b.name; });
+    if (changed) {
+        apps_ = std::move(apps);
+        Split();
+        if (!query_.empty())
+            Filter();
+        page_ = std::min(page_, Pages() - 1);
+    }
     surface_.Invalidate();
 }
 
@@ -195,8 +205,9 @@ void Launchpad::Split()
     tiles_.clear();
     system_.clear();
     for (const CatalogApp& app : apps_) {
-        const bool settings = CompareStringOrdinal(app.aumid.c_str(), -1, L"windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel",
-                                                   -1, TRUE) == CSTR_EQUAL;
+        const bool settings =
+            CompareStringOrdinal(app.aumid.c_str(), -1, L"windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel", -1, TRUE) ==
+            CSTR_EQUAL;
         (app.system && !settings ? system_ : tiles_).push_back(app);
     }
     if (!system_.empty())
@@ -210,7 +221,13 @@ void Launchpad::ShowFolder(bool open)
     sel_ = hover_ = pressed_ = -1;
     hoverAnim_.clear();
     revealedMs_ = ClockMs(); // its apps settle in as the pages' did
-    page_ = open ? 0 : Pages() - 1; // closed: back to the page holding the folder
+    if (open) {
+        page_ = 0;
+    } else {
+        auto it = std::ranges::find(tiles_, std::wstring_view(kFolderId), &CatalogApp::id);
+        const int idx = it != tiles_.end() ? int(it - tiles_.begin()) : int(tiles_.size()) - 1;
+        page_ = std::clamp(idx / std::max(1, grid_.perPage), 0, Pages() - 1);
+    }
     pageShown_ = float(page_);
     pageSpeed_ = 0;
     surface_.Invalidate();
@@ -413,7 +430,8 @@ void Launchpad::PaintFolder(Canvas& c, const Theme& t, D2D1_RECT_F r)
     const float s = r.right - r.left, pad = s * 0.13f, gap = s * 0.05f, mini = (s - 2 * pad - 2 * gap) / 3;
     c.Fill(r, s * 0.24f, Alpha(t.hover, 1.6f));
     for (size_t i = 0; i < system_.size() && i < 9; ++i) {
-        const float x = r.left + pad + float(i % 3) * (mini + gap), y = r.top + pad + float(i / 3) * (mini + gap);
+        const int col = int(i % 3), row = int(i / 3);
+        const float x = r.left + pad + float(col) * (mini + gap), y = r.top + pad + float(row) * (mini + gap);
         PaintIcon(c, t, system_[i].id, D2D1::RectF(x, y, x + mini, y + mini));
     }
 }

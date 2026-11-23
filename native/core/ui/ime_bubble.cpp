@@ -12,10 +12,10 @@
 
 namespace atrium {
 
-ImeBubble::ImeBubble(HINSTANCE instance) : bubble_(instance, L"Atrium IME Bubble", false, 0)
+ImeBubble::ImeBubble(HINSTANCE instance) : bubble_(instance, L"Atrium IME Bubble", false, 0, false, true)
 {
     bubble_.paint = [this](Canvas& c) { Paint(c); };
-    bubble_.message = [this](UINT m, WPARAM w, LPARAM, LRESULT& result) {
+    bubble_.message = [this](UINT m, WPARAM w, LPARAM, LRESULT&) {
         if (m == WM_TIMER && w == kEndTimer) {
             const double now = ClockMs();
             if (!model_.Step(now).active)
@@ -24,10 +24,7 @@ ImeBubble::ImeBubble(HINSTANCE instance) : bubble_(instance, L"Atrium IME Bubble
                 ArmEndTimer(now); // a merge pushed the pop back after the timer was armed
             return true;
         }
-        if (m != WM_NCHITTEST)
-            return false;
-        result = HTTRANSPARENT;
-        return true;
+        return false;
     };
 }
 
@@ -80,54 +77,28 @@ void ImeBubble::Stop()
     bubble_.Hide(false); // the content is already transparent; no second animation
 }
 
-void ImeBubble::Paint(Canvas& c)
+D2D1_RECT_F ImeBubble::PublishShapes(const ImeBubbleModel::Frame& f, float r, bool steady)
 {
-    const auto f = model_.Step(c.now);
-    if (!f.active) { // done: every piece of glass gone; the end timer hides the window
-        // A 1x1 faded shape, not an empty rectangle: the glass renderer
-        // reads a degenerate shape as "the whole window" and would flash
-        // a panel-sized rectangle.
-        std::vector<ShapeDip> gone{ShapeDip{D2D1::RectF(0, 0, 1, 1), 0}};
-        gone[0].fade = 1;
-        bubble_.SetShapes(gone);
-        return;
-    }
-    // The bubble as one circle, then the burst as two fusing pieces — the
-    // foam drops and the mist behind them. Only shapes with real geometry
-    // are published: an empty one would be read as the whole window by the
-    // glass renderer (the square flash), and the groups never fade as a
-    // whole anyway (each drop dies by thinning its own radius to zero).
-    const float r = ImeBubbleModel::kRadius * f.scale;
-    // A still, whole skin — no newcomer, no wobble, no burst yet: its glass
-    // is published rounded to whole DIPs, so the frames of the slow float
-    // are byte-identical and the bar's render thread skips that glass
-    // Present. Frames that merge, wobble or burst are never rounded.
     const float wob = std::abs(f.wob);
-    const bool steady = f.lobeCount == 0 && f.beadCount == 0 && f.opacity >= 1 && wob < 0.04f;
     std::vector<ShapeDip> shapes;
     shapes.reserve(3);
     ShapeDip main{};
     const auto budget = ImeBubbleModel::MeltFor(f.lobeCount, wob > 0.04f);
     if (budget.lobes > 0 || budget.skinParts == 2) {
-        // The merge, as one liquid body: the skin squashed wider by its
-        // wobble (two melt-fused lobes), the newcomers swallowed into it —
-        // the glass renderer's melt keeps them a single blob throughout.
         auto part = [](float px, float py, float rad) {
             ShapeDip::Part p;
             p.rect = D2D1::RectF(px - rad, py - rad, px + rad, py + rad);
-            std::fill(std::begin(p.radii), std::end(p.radii), rad);
+            std::ranges::fill(p.radii, rad);
             return p;
         };
         std::vector<ShapeDip::Part> parts;
         if (budget.skinParts == 2) {
-            const float d = r * 0.42f * wob;        // stretch across the impact
-            const float rr = r * (1 - 0.10f * wob); // and thin along it
+            const float d = r * 0.42f * wob, rr = r * (1 - 0.10f * wob);
             parts.push_back(part(f.cx - d, f.cy, rr));
             parts.push_back(part(f.cx + d, f.cy, rr));
         } else {
             parts.push_back(part(f.cx, f.cy, r));
         }
-        // The newest newcomers are the ones with room in the melt budget.
         for (int i = f.lobeCount - budget.lobes; i < f.lobeCount; ++i)
             if (f.lobes[i].r > 0.5f)
                 parts.push_back(part(f.lobes[i].x, f.lobes[i].y, f.lobes[i].r));
@@ -139,39 +110,28 @@ void ImeBubble::Paint(Canvas& c)
             main.rect.bottom = std::max(main.rect.bottom, p.rect.bottom);
         }
         main.parts = std::move(parts);
-        main.melt = 12; // a liquid neck, not separate beads
+        main.melt = 12;
         main.radius = r;
     } else {
-        const float rr = steady ? std::round(r) : r;
-        const float cx = steady ? std::round(f.cx) : f.cx;
-        const float cy = steady ? std::round(f.cy) : f.cy;
+        const float rr = steady ? std::round(r) : r, cx = steady ? std::round(f.cx) : f.cx, cy = steady ? std::round(f.cy) : f.cy;
         main.rect = D2D1::RectF(cx - rr, cy - rr, cx + rr, cy + rr);
         main.radius = rr;
     }
     main.fade = 1 - f.opacity;
     const D2D1_RECT_F mainRect = main.rect;
     shapes.push_back(std::move(main));
-    // The burst's drops, foam first and the mist behind it. The glass
-    // renderer melts at most kMaxMeltParts (6) parts per shape and drops
-    // the rest without a word, so a bubble whose swarm is larger than that
-    // (a merged one throws up to kMaxBeads drops) would show only its first
-    // six — and a small bubble then looks exactly as full as a big one.
-    // Every full group of drops is published as its own melt shape, so the
-    // whole swarm is drawn, and the count finally reads.
     std::vector<ShapeDip::Part> foamParts, mistParts;
     foamParts.reserve(size_t(f.foamCount));
     mistParts.reserve(size_t(f.beadCount - f.foamCount));
     for (int i = 0; i < f.beadCount; ++i) {
         const auto& bead = f.beads[i];
         if (bead.r < 0.35f)
-            continue; // dissolved: it thinned away, it did not blink off
+            continue;
         ShapeDip::Part part;
         part.rect = D2D1::RectF(bead.x - bead.r, bead.y - bead.r, bead.x + bead.r, bead.y + bead.r);
-        std::fill(std::begin(part.radii), std::end(part.radii), bead.r);
+        std::ranges::fill(part.radii, bead.r);
         (i < f.foamCount ? foamParts : mistParts).push_back(part);
     }
-    // One melt shape per group of at most kMaxMeltParts drops, its rectangle
-    // the union of the group it carries (ChunksFor gives the count).
     auto publish = [&](const std::vector<ShapeDip::Part>& parts, float melt) {
         for (int done = 0; done < ImeBubbleModel::ChunksFor(int(parts.size())); ++done) {
             const int first = done * ImeBubbleModel::kMaxMeltParts;
@@ -187,13 +147,30 @@ void ImeBubble::Paint(Canvas& c)
                 shape.rect.bottom = std::max(shape.rect.bottom, p.bottom);
             }
             shape.melt = melt;
-            shape.fade = 0;
             shapes.push_back(std::move(shape));
         }
     };
-    publish(foamParts, 2.5f + (f.grow - 1) * 2); // a larger bubble fuses a larger foam
+    publish(foamParts, 2.5f + (f.grow - 1) * 2);
     publish(mistParts, 1.5f);
-    bubble_.SetShapes(shapes, !steady); // a still skin publishes once, not on every frame
+    bubble_.SetShapes(shapes, !steady);
+    return mainRect;
+}
+
+void ImeBubble::Paint(Canvas& c)
+{
+    const auto f = model_.Step(c.now);
+    if (!f.active) { // done: every piece of glass gone; the end timer hides the window
+        // A 1x1 faded shape, not an empty rectangle: the glass renderer
+        // reads a degenerate shape as "the whole window" and would flash
+        // a panel-sized rectangle.
+        std::vector<ShapeDip> gone{ShapeDip{D2D1::RectF(0, 0, 1, 1), 0}};
+        gone[0].fade = 1;
+        bubble_.SetShapes(gone);
+        return;
+    }
+    const float r = ImeBubbleModel::kRadius * f.scale;
+    const bool steady = f.lobeCount == 0 && f.beadCount == 0 && f.opacity >= 1 && std::abs(f.wob) < 0.04f;
+    const D2D1_RECT_F mainRect = PublishShapes(f, r, steady);
 
     // The letter, over the glass — or a plain stand-in while the glass is on its way.
     const auto theme = c.panel ? Theme::Panel() : c.theme;

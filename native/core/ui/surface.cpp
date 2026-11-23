@@ -75,9 +75,10 @@ std::shared_ptr<Surface::Shared> Surface::SharedDevice()
     return s;
 }
 
-Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip, bool desktopLayer)
+Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip, bool desktopLayer, bool clickThrough)
     : activatable_(activatable),
       desktopLayer_(desktopLayer),
+      clickThrough_(clickThrough),
       insetDip_(insetDip)
 {
     static bool registered = false;
@@ -90,8 +91,11 @@ Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, flo
         RegisterClassExW(&wc);
         registered = true;
     }
-    DWORD ex = WS_EX_TOOLWINDOW | (desktopLayer ? 0 : WS_EX_TOPMOST) | WS_EX_NOREDIRECTIONBITMAP | (activatable ? 0 : WS_EX_NOACTIVATE);
+    DWORD ex = WS_EX_TOOLWINDOW | (desktopLayer ? 0 : WS_EX_TOPMOST) | WS_EX_NOREDIRECTIONBITMAP | (activatable ? 0 : WS_EX_NOACTIVATE) |
+               (clickThrough ? (WS_EX_TRANSPARENT | WS_EX_LAYERED) : 0);
     hwnd_ = CreateWindowExW(ex, kClass, title, WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, this);
+    if (clickThrough)
+        SetLayeredWindowAttributes(hwnd_, 0, 255, LWA_ALPHA);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     // The glass below the content samples the screen: the window must not be
     // in what it samples (Desktop Duplication always leaves it out; other
@@ -298,6 +302,8 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
     auto* self = reinterpret_cast<Surface*>(GetWindowLongPtrW(h, GWLP_USERDATA));
     if (!self)
         return DefWindowProcW(h, m, w, l);
+    if (self->clickThrough_ && m == WM_NCHITTEST)
+        return HTTRANSPARENT;
     switch (m) {
     case WM_TIMER:
         if (w == kHideTimer) {

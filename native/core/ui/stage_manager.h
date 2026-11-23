@@ -148,11 +148,15 @@ private:
         D2D1_POINT_2F closeAt{-1e6f, -1e6f}; // its close button, content DIP, as last painted
     };
 
-    static constexpr UINT_PTR kRaiseTimer = 0x5C03;
+    static constexpr UINT_PTR kRaiseTimer = 0x5C03, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
     static constexpr ULONGLONG kPendingMs = 1200;
     static constexpr double kFlightMs = 400;
+    static constexpr float kBoxW = 172, kBoxH = 112, kTilt = 22;
 
     static bool Transient(HWND h);
+    static void SetTransitions(HWND h, bool on);
+    static std::wstring AppKeyOf(const std::wstring& key);
+    static bool HasKey(const Set& set, const std::wstring& key);
     void SyncMoveHook();
     // A window being dragged (stage_drag.cpp): which group it is over, and what happens where it lands.
     void BeginDrag(HWND window);
@@ -240,12 +244,17 @@ private:
 
     // The strip.
     void Rebuild(bool keepAnchor = true);
+    std::vector<Entry> BuildStripEntries() const;
     void Layout();
     void Show();
     void Hide();
     void Paint(Canvas& c);
     void PaintEntry(Canvas& c, Entry& e, int index, bool live);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
+    bool OnTimerMessage(WPARAM w);
+    void ProcessOpenIntent();
+    void SyncUpTransitions(const std::unordered_map<HWND, RECT>& up);
+    void FlyAdopted(const std::vector<HWND>& flyIn);
     bool Animate(double nowMs);                  // steps the cards; true while any moves
     float Reveal(int index, double nowMs) const; // how far a card is out of the screen's edge, 0..1
     void UpdateRegion(bool moving);              // clicks around the cards reach what is under them
@@ -276,7 +285,9 @@ private:
             return std::ranges::find(stage_, t.key) != stage_.end() && std::ranges::find(t.windows, window) != t.windows.end();
         });
     }
+    bool StepFlight(Canvas& c, Flight& f);
     void PaintFlights(Canvas& c);
+    void PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_RECT_F box, float slide, float k, float hv, int index, bool live);
     void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow = 1, bool image = true);
 
     TaskModel& tasks_;

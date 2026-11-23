@@ -1036,6 +1036,8 @@ void ControlCenter::SetBrightnessAsync(int percent)
 
 void ControlCenter::Activate(const std::wstring& id)
 {
+    if (ActivateSubpage(id))
+        return;
     if (id == L"wifi") {
         if (radios_.wifiPresent)
             SetRadioAsync(false, !radios_.wifiOn);
@@ -1075,21 +1077,6 @@ void ControlCenter::Activate(const std::wstring& id)
     } else if (id == L"castscan") {
         finder_.Start(surface_.Hwnd(), WM_CC_DISPLAYS);
         surface_.Invalidate();
-    } else if (id.starts_with(L"disp:")) {
-        size_t i = size_t(std::stoul(id.substr(5)));
-        if (i >= displays_.size() || !connecting_.empty() || displays_[i].id == projecting_)
-            return;
-        connecting_ = displays_[i].id;
-        CastOp(connecting_);
-        surface_.Invalidate();
-    } else if (id == L"castoff") {
-        CastOp({});
-    } else if (id.starts_with(L"mode:")) {
-        const ProjectionMode modes[4] = {ProjectionMode::Internal, ProjectionMode::Clone, ProjectionMode::Extend, ProjectionMode::External};
-        ProjectionMode m = modes[std::clamp(int(std::stoul(id.substr(5))), 0, 3)];
-        // The screens change under the panel: it closes, as Win+P's does.
-        Close();
-        fastWorker_.Post(L"sm", [m] { SetProjectionMode(m); });
     } else if (id == L"castproject") {
         Close();
         OpenUri(L"ms-settings:project");
@@ -1099,46 +1086,12 @@ void ControlCenter::Activate(const std::wstring& id)
     } else if (id == L"sound-page") {
         ShowPage(Page::Sound);
         ReadAudio(true);
-    } else if (id.starts_with(L"out:")) {
-        size_t i = size_t(std::stoul(id.substr(4)));
-        if (i >= outputs_.size() || outputs_[i].isDefault)
-            return;
-        for (size_t k = 0; k < outputs_.size(); ++k)
-            outputs_[k].isDefault = k == i; // at once; the next reading confirms it
-        outputIntent_ = outputs_[i].id;
-        ++audioGen_;
-        WriteOutput();
-        surface_.Invalidate();
-    } else if (id.starts_with(L"amute:")) {
-        size_t i = size_t(std::stoul(id.substr(6)));
-        if (i < apps_.size()) {
-            apps_[i].muted = !apps_[i].muted;
-            ++audioGen_;
-            fastWorker_.Post(L"am:" + apps_[i].key, [key = apps_[i].key, m = apps_[i].muted] { SetAppMute(key, m); });
-            surface_.Invalidate();
-        }
     } else if (id == L"soundsettings") {
         Close();
         OpenUri(L"ms-settings:sound");
     } else if (id == L"mixer") {
         Close();
         OpenUri(L"ms-settings:apps-volume");
-    } else if (id == L"disconnect") {
-        WifiOp(std::nullopt, 1500);
-    } else if (id.starts_with(L"net:")) {
-        size_t i = size_t(std::stoul(id.substr(4)));
-        if (i >= networks_.size() || networks_[i].connected)
-            return;
-        WifiNetwork n = networks_[i];
-        if (n.profile.empty()) {
-            // A new network: Windows asks for its password.
-            Close();
-            OpenUri(L"ms-availablenetworks:");
-            return;
-        }
-        WifiOp(n, 4000);
-        scanning_ = true;
-        surface_.Invalidate();
     } else if (id == L"netsettings") {
         Close();
         OpenUri(L"ms-settings:network");
@@ -1193,6 +1146,63 @@ void ControlCenter::OnProjected()
     surface_.Invalidate();
 }
 
+void ControlCenter::OnRadiosResult()
+{
+    auto r = TakeResult(radioSlot_);
+    radioBusy_ = false;
+    if (!r || r->gen != radioGen_ || radioWriteBusy_) {
+        if (radioPending_ && !radioWriteBusy_)
+            ReadRadios(radioDevices_);
+        return;
+    }
+    radios_ = r->radios;
+    radiosRead_ = true;
+    if (r->devicesRead) {
+        devices_ = std::move(r->devices);
+        devicesRead_ = true;
+    }
+    if (r->brightness != -3) {
+        brightRead_ = true;
+        if (dragging_ != L"bright" && !brightBusy_)
+            brightness_ = r->brightness;
+    }
+    surface_.Invalidate();
+    if (radioPending_ && !radioWriteBusy_)
+        ReadRadios(radioDevices_);
+}
+
+void ControlCenter::OnAudioResult()
+{
+    auto r = TakeResult(audioSlot_);
+    audioBusy_ = false;
+    if (audioPending_ && !outputWriteBusy_)
+        ReadAudio(audioIcons_);
+    if (!r || r->gen != audioGen_ || outputWriteBusy_ || !surface_.Visible())
+        return;
+    if (!dragging_.empty() && dragging_ != L"slider")
+        return; // an app's slider is held: keep what it shows
+    bool missing = false;
+    for (AudioApp& a : r->apps) {
+        if (!a.icon.Empty())
+            continue;
+        auto old = std::ranges::find_if(apps_, [&](const AudioApp& o) { return o.key == a.key; });
+        if (old != apps_.end() && !old->icon.Empty())
+            a.icon = old->icon;
+        else if (!r->icons && !a.path.empty() && !iconTried_.contains(a.key))
+            missing = true;
+        if (r->icons && iconTried_.size() > 256)
+            iconTried_.clear();
+        if (r->icons)
+            iconTried_.insert(a.key);
+    }
+    outputs_ = std::move(r->outputs);
+    apps_ = std::move(r->apps);
+    audioRead_ = true;
+    if (missing)
+        ReadAudio(true);
+    surface_.Invalidate();
+}
+
 bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
 {
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
@@ -1235,61 +1245,8 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
                 ReadAudio(true);
         }
         return true;
-    case WM_CC_RADIOS: {
-        auto r = TakeResult(radioSlot_);
-        radioBusy_ = false;
-        if (!r || r->gen != radioGen_ || radioWriteBusy_) {
-            if (radioPending_ && !radioWriteBusy_)
-                ReadRadios(radioDevices_);
-            return true;
-        }
-        radios_ = r->radios;
-        radiosRead_ = true;
-        if (r->devicesRead) {
-            devices_ = std::move(r->devices);
-            devicesRead_ = true;
-        }
-        if (r->brightness != -3) {
-            brightRead_ = true;
-            if (dragging_ != L"bright" && !brightBusy_)
-                brightness_ = r->brightness;
-        }
-        surface_.Invalidate();
-        if (radioPending_ && !radioWriteBusy_)
-            ReadRadios(radioDevices_);
-        return true;
-    }
-    case WM_CC_AUDIO: {
-        auto r = TakeResult(audioSlot_);
-        audioBusy_ = false;
-        if (audioPending_ && !outputWriteBusy_)
-            ReadAudio(audioIcons_);
-        if (!r || r->gen != audioGen_ || outputWriteBusy_ || !surface_.Visible())
-            return true;
-        if (!dragging_.empty() && dragging_ != L"slider")
-            return true; // an app's slider is held: keep what it shows
-        bool missing = false;
-        for (AudioApp& a : r->apps) {
-            if (!a.icon.Empty())
-                continue;
-            auto old = std::ranges::find_if(apps_, [&](const AudioApp& o) { return o.key == a.key; });
-            if (old != apps_.end() && !old->icon.Empty())
-                a.icon = old->icon;
-            else if (!r->icons && !a.path.empty() && !iconTried_.contains(a.key))
-                missing = true;
-            if (r->icons && iconTried_.size() > 256)
-                iconTried_.clear();
-            if (r->icons)
-                iconTried_.insert(a.key);
-        }
-        outputs_ = std::move(r->outputs);
-        apps_ = std::move(r->apps);
-        audioRead_ = true;
-        if (missing)
-            ReadAudio(true);
-        surface_.Invalidate();
-        return true;
-    }
+    case WM_CC_RADIOS: OnRadiosResult(); return true;
+    case WM_CC_AUDIO: OnAudioResult(); return true;
     case WM_CC_DISPLAYS: {
         displays_ = finder_.Displays();
         surface_.Invalidate();

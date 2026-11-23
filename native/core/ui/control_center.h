@@ -166,6 +166,9 @@ private:
         });
     }
     void OnProjected();
+    void OnRadiosResult();
+    void OnAudioResult();
+    bool ActivateSubpage(const std::wstring& id);
     bool OnAsync(UINT m, WPARAM w, LPARAM l)
     {
         if (m == WM_APP + 0x59 && (ProjectionMode(w) != mode_ || int(l) != monitors_)) {

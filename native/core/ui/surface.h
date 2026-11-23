@@ -123,7 +123,7 @@ public:
     void EndBlur(float radius);
     // What is drawn between the two fades along the line `from` to `to` (DIP): `stops` give the
     // opacity (their colour's alpha) at positions 0..1 of it. May sit inside a blur.
-    void BeginFade(D2D1_POINT_2F from, D2D1_POINT_2F to, std::span<const D2D1_GRADIENT_STOP> stops);
+    void BeginFade(D2D1_POINT_2F from, D2D1_POINT_2F to, std::span<const D2D1_GRADIENT_STOP> stops, D2D1_RECT_F contentBounds = D2D1::InfiniteRect());
     void EndFade();
     // Apply the analytic glass outline to the content already drawn.
     void MaskRounded(D2D1_RECT_F r, float radius);
@@ -148,7 +148,7 @@ public:
     // paint: draws the content (DIP coordinates, the window is width x height DIP).
     // message: window messages before default handling; return true if handled (result in `result`).
     // insetDip: the margin around the content for the glass's shadow.
-    Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip = 12, bool desktopLayer = false);
+    Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip = 12, bool desktopLayer = false, bool clickThrough = false);
     ~Surface();
     Surface(const Surface&) = delete;
     Surface& operator=(const Surface&) = delete;
@@ -234,6 +234,7 @@ private:
     HWND hwnd_ = nullptr;
     bool activatable_;
     bool desktopLayer_ = false;
+    bool clickThrough_ = false;
     bool glassless_ = false;
     float insetDip_;
     bool visible_ = false;

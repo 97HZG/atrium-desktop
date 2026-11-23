@@ -84,6 +84,7 @@ add_library(atrium_core_lib STATIC
     ui/popup_theme.cpp
     ui/canvas.cpp
     ui/start_menu.cpp
+    ui/start_menu_menus.cpp
     ui/notifications.cpp
     ui/tray_panel.cpp
     ui/calendar_panel.cpp
@@ -102,6 +103,7 @@ add_library(atrium_core_lib STATIC
     ui/stage_manager.cpp
     ui/stage_drag.cpp
     ui/stage_close.cpp
+    ui/stage_paint.cpp
     ui/window_snapshot.cpp
     shell/weather.cpp
     shell/bluetooth_batteries.cpp

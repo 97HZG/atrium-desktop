@@ -37,7 +37,7 @@ constexpr ModuleSpec kSpecs[] = {
 
 const ModuleSpec* Spec(const std::wstring& id)
 {
-    const auto it = std::ranges::find_if(kSpecs, [&](const ModuleSpec& s) { return id == s.id; });
+    const auto* const it = std::ranges::find_if(kSpecs, [&](const ModuleSpec& s) { return id == s.id; });
     return it == std::end(kSpecs) ? nullptr : &*it;
 }
 
@@ -64,6 +64,17 @@ bool SetSwitch(const std::wstring& id, bool on)
     return id == L"hotspot" && SetMobileHotspot(on);
 }
 
+std::wstring ModuleStateText(bool stage, bool wide, bool stageOn, bool stageRight, bool known, const std::optional<bool>& on)
+{
+    if (stage && wide)
+        return stageOn ? (stageRight ? Tr(L"On · recent apps on the right") : Tr(L"On · recent apps on the left")) : Tr(L"Off");
+    if (!known)
+        return L"…";
+    if (!on)
+        return Tr(L"Unavailable");
+    return *on ? Tr(L"On") : Tr(L"Off");
+}
+
 } // namespace
 
 void ControlCenter::SetModules(std::vector<std::wstring> ids)
@@ -76,14 +87,19 @@ void ControlCenter::SetModules(std::vector<std::wstring> ids)
         Close(); // its size changes: the next opening lays it out anew
 }
 
-float ControlCenter::ModulesHeight() const { return float((modules_.size() + 1) / 2) * (kModuleH + kGap); }
+float ControlCenter::ModulesHeight() const
+{
+    const size_t rows = (modules_.size() + 1) / 2;
+    return float(rows) * (kModuleH + kGap);
+}
 
 std::vector<D2D1_RECT_F> ControlCenter::ModuleRects() const
 {
     const float colW = (kW - kGap) / 2;
     std::vector<D2D1_RECT_F> rects;
     for (size_t i = 0; i < modules_.size(); ++i) {
-        const float top = kTopH + kGap + float(i / 2) * (kModuleH + kGap);
+        const size_t row = i / 2;
+        const float top = kTopH + kGap + float(row) * (kModuleH + kGap);
         const bool alone = i + 1 == modules_.size() && i % 2 == 0;
         const float left = i % 2 ? colW + kGap : 0;
         rects.push_back(D2D1::RectF(left, top, alone ? kW : left + colW, top + kModuleH));
@@ -115,11 +131,7 @@ void ControlCenter::PaintModules(Canvas& c, const Theme& t)
         c.halo = false;
         c.Glyph(spec.glyph, D2D1::RectF(cx - 14, cy - 14, cx + 14, cy + 14), 14, lit ? D2D1::ColorF(1, 1, 1, 0.98f) : known && !on ? t.faint : t.text);
         c.halo = halo;
-        const std::wstring state = stage && wide ? (stageOn_ ? (stageRight_ ? Tr(L"On · recent apps on the right") : Tr(L"On · recent apps on the left")) : Tr(L"Off")) :
-                                   !known ? std::wstring(L"…") :
-                                   !on    ? Tr(L"Unavailable") :
-                                   *on    ? Tr(L"On") :
-                                            Tr(L"Off");
+        const std::wstring state = ModuleStateText(stage, wide, stageOn_, stageRight_, known, on);
         c.Text(Tr(spec.title), D2D1::RectF(cx + 28, cy - 18, r.right - kPad, cy), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         c.Text(state, D2D1::RectF(cx + 28, cy, r.right - kPad, cy + 18), 11.5f, t.subtext);
         if (live)
@@ -179,6 +191,72 @@ void ControlCenter::TakeModules()
     }
     if (surface_.Visible())
         surface_.Invalidate();
+}
+
+bool ControlCenter::ActivateSubpage(const std::wstring& id)
+{
+    if (id.starts_with(L"disp:")) {
+        size_t i = size_t(std::stoul(id.substr(5)));
+        if (i < displays_.size() && connecting_.empty() && displays_[i].id != projecting_) {
+            connecting_ = displays_[i].id;
+            CastOp(connecting_);
+            surface_.Invalidate();
+        }
+        return true;
+    }
+    if (id == L"castoff") {
+        CastOp({});
+        return true;
+    }
+    if (id.starts_with(L"mode:")) {
+        const ProjectionMode modes[4] = {ProjectionMode::Internal, ProjectionMode::Clone, ProjectionMode::Extend, ProjectionMode::External};
+        ProjectionMode m = modes[std::clamp(int(std::stoul(id.substr(5))), 0, 3)];
+        Close();
+        fastWorker_.Post(L"sm", [m] { SetProjectionMode(m); });
+        return true;
+    }
+    if (id.starts_with(L"out:")) {
+        size_t i = size_t(std::stoul(id.substr(4)));
+        if (i < outputs_.size() && !outputs_[i].isDefault) {
+            for (size_t k = 0; k < outputs_.size(); ++k)
+                outputs_[k].isDefault = k == i;
+            outputIntent_ = outputs_[i].id;
+            ++audioGen_;
+            WriteOutput();
+            surface_.Invalidate();
+        }
+        return true;
+    }
+    if (id.starts_with(L"amute:")) {
+        size_t i = size_t(std::stoul(id.substr(6)));
+        if (i < apps_.size()) {
+            apps_[i].muted = !apps_[i].muted;
+            ++audioGen_;
+            fastWorker_.Post(L"am:" + apps_[i].key, [key = apps_[i].key, m = apps_[i].muted] { SetAppMute(key, m); });
+            surface_.Invalidate();
+        }
+        return true;
+    }
+    if (id == L"disconnect") {
+        WifiOp(std::nullopt, 1500);
+        return true;
+    }
+    if (id.starts_with(L"net:")) {
+        size_t i = size_t(std::stoul(id.substr(4)));
+        if (i >= networks_.size() || networks_[i].connected)
+            return true;
+        WifiNetwork n = networks_[i];
+        if (n.profile.empty()) {
+            Close();
+            ShellExecuteW(nullptr, L"open", L"ms-availablenetworks:", nullptr, nullptr, SW_SHOWNORMAL);
+        } else {
+            WifiOp(n, 4000);
+            scanning_ = true;
+            surface_.Invalidate();
+        }
+        return true;
+    }
+    return false;
 }
 
 } // namespace atrium
