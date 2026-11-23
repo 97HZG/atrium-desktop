@@ -60,6 +60,9 @@ Require(parsed.StageMinimize && BarSettings.FromJson(parsed.ToJson(), new()).Sta
     "Minimizing to Stage Manager must survive a round trip and mark the settings dirty.");
 Require(new BarSettings().StageDragMerge && BarSettings.FromJson([], new()).StageDragMerge,
     "Dragging onto a Stage Manager group is on by default, also for old files.");
+var avoidOff = BarSettings.FromJson(JsonNode.Parse("""{"stageAvoid":false}""")!.AsObject(), new());
+Require(new BarSettings().StageAvoid && !avoidOff.StageAvoid && !BarSettings.FromJson(avoidOff.ToJson(), new()).StageAvoid && !new BarSettings().SameAs(avoidOff),
+    "Windows avoiding the Stage Manager strip is on by default, and off survives a round trip.");
 var closeOff = BarSettings.FromJson(JsonNode.Parse("""{"stageCloseButton":false}""")!.AsObject(), new());
 Require(new BarSettings().StageCloseButton && !closeOff.StageCloseButton && !BarSettings.FromJson(closeOff.ToJson(), new()).StageCloseButton &&
         !new BarSettings().SameAs(closeOff),

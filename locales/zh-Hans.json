@@ -789,7 +789,7 @@
   "Tray button": "托盘按钮",
   "Minimize to Stage Manager": "窗口最小化到台前调度",
   "Drag a window onto a card": "拖动窗口到卡片上一起打开",
-  "Release a window over a group in the strip to add it to that group.": "把窗口拖到侧边的分组上松开，即可并入该分组。",
+  "Release a window over a card in the strip: the card's windows come onto the stage with it.": "把窗口拖到侧边的卡片上松开，卡片上的窗口会和它一起放到前台。",
   "Excluded from Stage Manager": "不参与台前调度的应用",
   "One app per line: an executable name (for example wechat.exe), a package id prefix, or a complete app key. Their windows are never put away by Stage Manager. The Windows Snipping Tool is listed by default; add other screenshot tools whose controls must stay on screen while recording.": "每行一个应用：可写可执行文件名（例如 wechat.exe）、包名前缀或完整应用标识。它们的窗口永远不会被台前调度收起。默认只包含 Windows 系统截图工具；可自行添加其他需要留在屏幕上的截图工具。",
   "Notifications button": "通知按钮",
@@ -1009,6 +1009,8 @@
   "Full-screen": "全屏",
   "Display mode": "显示方式",
   "Close button on the cards": "卡片上的关闭按钮",
+  "Windows avoid the strip": "窗口避开台前调度",
+  "A window coming to the front over the cards moves beside them. Off, it stays where it is and the cards step aside.": "窗口到前面时如果挡住侧边卡片，会移到卡片旁边。关闭后窗口位置不变，由卡片让开。",
   "A cross at the top right of a group in the strip closes its windows.": "指针停在侧边的一组窗口上时，右上角出现叉号，点它关闭这一组的窗口。"
  }
 }

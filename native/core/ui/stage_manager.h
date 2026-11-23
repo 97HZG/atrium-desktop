@@ -15,7 +15,7 @@
 // all back.
 //
 // Only the selected desktop display is managed. Always shown, a window taking the stage over the
-// strip's place moves beside it (so that the strip stays out); the strip steps aside while a window
+// strip's place moves beside it (so that the strip stays out; stageAvoid off, it stays where it is); the strip steps aside while a window
 // covers its place anyway (maximized, or put there), and comes out over it while the pointer rests on
 // that edge. Auto-hidden, it only comes out that way.
 #pragma once
@@ -77,6 +77,7 @@ public:
     void Minimized(HWND window);
     // A window dragged onto a group in the strip joins it (stageDragMerge).
     void SetDragMerge(bool on);
+    void SetAvoid(bool on) { avoid_ = on; } // stageAvoid: a window taking the stage over the strip moves beside it
     void SetCloseButton(bool on); // stageCloseButton: a card under the pointer shows a cross that closes its windows
     // A window coming back from the strip will fill this monitor (maximized): the bar may go at once.
     std::function<void(HMONITOR)> onCoverSoon;
@@ -175,7 +176,7 @@ private:
     void KeepPicture();        // a picture of the window in front, ready for when it is minimized
     void RequestPicture(HWND window);
     void SetLarge(Flight& f);  // the flight's large picture, if the window has one
-    bool Beside(RECT& frame) const { return enabled_ && !autoHide_ && !IsRectEmpty(&rect_) && StageBesideRect(frame, Zone(), WorkArea(), onRight_); }
+    bool Beside(RECT& frame) const { return enabled_ && avoid_ && !autoHide_ && !IsRectEmpty(&rect_) && StageBesideRect(frame, Zone(), WorkArea(), onRight_); }
     void MoveBeside(HWND window);   // the window beside the strip (minimized: where it comes back)
     void ForgetImages(const std::wstring& key, bool large)
     {
@@ -266,7 +267,7 @@ private:
     Surface flight_; // over the whole screen while pictures fly
     WindowSnapshots snapshots_;
     winrt::com_ptr<IVirtualDesktopManager> desktops_; // the strip shows the current virtual desktop's windows
-    bool enabled_ = false, onRight_ = false, autoHide_ = false, minimizeToStrip_ = false, dragMerge_ = true, closeButton_ = true;
+    bool enabled_ = false, onRight_ = false, autoHide_ = false, minimizeToStrip_ = false, dragMerge_ = true, closeButton_ = true, avoid_ = true;
     int closeHot_ = -1, closePressed_ = -1; // the card whose close button is under the pointer, pressed
     BarEdge barEdge_ = BarEdge::Bottom;
     std::unordered_map<HWND, RECT> up_; // the stage's windows up on this screen at the last look, and where (px)

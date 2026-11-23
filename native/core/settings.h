@@ -123,6 +123,7 @@ struct Settings {
     bool stageAutoHide = false;      // the strip only comes out while the pointer rests on its edge of the screen
     bool stageMinimize = false;      // a window minimized on the stage goes to the strip
     bool stageDragMerge = true;      // a window released over a group in the strip joins it
+    bool stageAvoid = true;          // always shown, a window taking the stage over the strip moves beside it
     bool stageCloseButton = true;    // a card in the strip shows a close button (its top right) under the pointer
     // Apps Stage Manager leaves alone: their windows are never put away. Defaults cover the
     // screenshot tools whose own overlay/control bar must stay on screen while recording.
