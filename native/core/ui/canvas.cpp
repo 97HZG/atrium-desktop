@@ -358,12 +358,27 @@ void Canvas::ImagePerspective(const std::wstring& key, const IconImage& image, D
     }
 }
 
-void Canvas::ImageSlice(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, D2D1_RECT_F source, float opacity)
+void Canvas::ImageQuad(const std::wstring& key, const IconImage& image, D2D1_RECT_F source, const std::array<D2D1_POINT_2F, 4>& quad, float opacity)
 {
-    if (ID2D1Bitmap* b = Bitmap(key, image)) {
-        const D2D1_RECT_F px = Px(r);
-        d2d_->DrawBitmap(b, &px, opacity * alpha_, D2D1_INTERPOLATION_MODE_LINEAR, &source);
-    }
+    ID2D1Bitmap* b = Bitmap(key, image);
+    if (!b)
+        return;
+    // The projective map of the unit square onto the quad (Heckbert), its corners in px.
+    std::array<D2D1_POINT_2F, 4> p{};
+    for (size_t i = 0; i < 4; ++i)
+        p[i] = D2D1::Point2F(quad[i].x * scale, quad[i].y * scale);
+    const float dx1 = p[1].x - p[2].x, dx2 = p[3].x - p[2].x, dx3 = p[0].x - p[1].x + p[2].x - p[3].x;
+    const float dy1 = p[1].y - p[2].y, dy2 = p[3].y - p[2].y, dy3 = p[0].y - p[1].y + p[2].y - p[3].y;
+    const float det = dx1 * dy2 - dx2 * dy1;
+    const float g = std::abs(det) < 1e-6f ? 0.f : (dx3 * dy2 - dx2 * dy3) / det, h = std::abs(det) < 1e-6f ? 0.f : (dx1 * dy3 - dx3 * dy1) / det;
+    const float a = p[1].x - p[0].x + g * p[1].x, bx = p[3].x - p[0].x + h * p[3].x, d = p[1].y - p[0].y + g * p[1].y, e = p[3].y - p[0].y + h * p[3].y;
+    // The source drawn at its own size at the origin, then mapped (row vectors: x' = x m11 + y m21 + m41).
+    const float w = source.right - source.left, ht = source.bottom - source.top;
+    if (w <= 0 || ht <= 0)
+        return;
+    const D2D1::Matrix4x4F m(a / w, d / w, 0, g / w, bx / ht, e / ht, 0, h / ht, 0, 0, 1, 0, p[0].x, p[0].y, 0, 1);
+    const D2D1_RECT_F dest = D2D1::RectF(0, 0, w, ht);
+    d2d_->DrawBitmap(b, &dest, opacity * alpha_, D2D1_INTERPOLATION_MODE_LINEAR, &source, &m);
 }
 
 bool Canvas::Cached(const std::wstring& key) const

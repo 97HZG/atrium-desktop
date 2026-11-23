@@ -6,6 +6,7 @@
 #include <dwmapi.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 
@@ -21,7 +22,7 @@ constexpr ULONGLONG kNearMs = 1500;      // the picture's age while the pointer 
 constexpr ULONGLONG kFarMs = 20000;      // elsewhere: PrintWindow makes the app draw itself whole
 constexpr int kLargeMax = 1600;          // the picture, at most this many px either way
 constexpr double kFlightMs = 560;
-constexpr int kRows = 96;                // the picture poured as this many slices
+constexpr int kRows = 64;                // the picture poured as this many slices
 
 GenieMinimize* g_genie = nullptr; // the one effect, for its hook
 
@@ -238,23 +239,29 @@ void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t)
     const float pw = float(pic.width), ph = float(pic.height), pad = float(kPicturePad);
     for (int i = 0; i < kRows; ++i) {
         const float v0 = float(i) / kRows, v1 = float(i + 1) / kRows;
-        const float p0 = along(v0), p1 = along(v1);
-        if (p1 - p0 < 0.02f)
+        const float p0 = along(v0), p1 = along(v1) + 0.5f; // a hair over the next: no seams
+        if (p1 - p0 < 0.55f)
             continue;
-        float lo = 0, hi = 0;
-        sides((p0 + p1) / 2, lo, hi);
-        // Back to the screen; the slice's source rows (far side v = 0) in the picture.
-        D2D1_RECT_F dst{}, src{};
+        float lo0 = 0, hi0 = 0, lo1 = 0, hi1 = 0;
+        sides(p0, lo0, hi0);
+        sides(p1, lo1, hi1);
+        // Back to the screen: the slice's corners for its source's top left, top right, bottom right, bottom
+        // left; its source rows (far side v = 0) in the picture.
         const float s0 = sign > 0 ? v0 : 1 - v1, s1 = sign > 0 ? v1 : 1 - v0;
-        const float e0 = sign * (sign > 0 ? p0 : p1), e1 = sign * (sign > 0 ? p1 : p0);
+        const float y0 = sign * p0, y1 = sign * p1; // the far end and the near end, on the screen's axis
+        std::array<D2D1_POINT_2F, 4> quad{};
+        D2D1_RECT_F src{};
         if (vertical) {
-            dst = D2D1::RectF(lo, e0, hi, e1 + 0.6f); // a hair over the next: no seams
+            // The source's top is the slice's far end when the icon is below, its near end when above.
+            quad = sign > 0 ? std::array{D2D1::Point2F(lo0, y0), D2D1::Point2F(hi0, y0), D2D1::Point2F(hi1, y1), D2D1::Point2F(lo1, y1)}
+                            : std::array{D2D1::Point2F(lo1, y1), D2D1::Point2F(hi1, y1), D2D1::Point2F(hi0, y0), D2D1::Point2F(lo0, y0)};
             src = D2D1::RectF(pad, pad + s0 * ph, pad + pw, pad + s1 * ph);
         } else {
-            dst = D2D1::RectF(e0, lo, e1 + 0.6f, hi);
+            quad = sign > 0 ? std::array{D2D1::Point2F(y0, lo0), D2D1::Point2F(y1, lo1), D2D1::Point2F(y1, hi1), D2D1::Point2F(y0, hi0)}
+                            : std::array{D2D1::Point2F(y1, lo1), D2D1::Point2F(y0, lo0), D2D1::Point2F(y0, hi0), D2D1::Point2F(y1, hi1)};
             src = D2D1::RectF(pad + s0 * pw, pad, pad + s1 * pw, pad + ph);
         }
-        c.ImageSlice(f.key, image, dst, src, opacity);
+        c.ImageQuad(f.key, image, src, quad, opacity);
     }
 }
 
