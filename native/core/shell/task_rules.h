@@ -11,8 +11,60 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace atrium {
+
+// A window still minimized when Atrium's restore timed out: it restores itself when it reads the
+// command, and is brought to front only then (#84).
+struct PendingRestore {
+    HWND window = nullptr;
+    ULONGLONG deadlineMs = 0;
+};
+
+enum class WindowShow { Gone, Minimized, Shown };
+
+// The windows that came back meanwhile; those gone, hidden or past their time are dropped.
+template <class ShowOf>
+std::vector<HWND> TakeRestored(std::vector<PendingRestore>& pending, ULONGLONG nowMs, ShowOf showOf)
+{
+    std::vector<HWND> restored;
+    std::erase_if(pending, [&](const PendingRestore& p) {
+        const WindowShow show = showOf(p.window);
+        if (show == WindowShow::Shown)
+            restored.push_back(p.window);
+        return show != WindowShow::Minimized || nowMs >= p.deadlineMs;
+    });
+    return restored;
+}
+
+struct HiddenWindow {
+    RECT rect{};
+    DWORD style = 0, exStyle = 0;
+    bool owned = false;
+};
+
+// The main window of an app that shows none, restored as a last resort (#147): an unowned window of
+// a window's size, captioned before uncaptioned, then the largest. -1 when none is one.
+inline int PickHiddenMainWindow(const std::vector<HiddenWindow>& windows)
+{
+    int best = -1;
+    bool bestCaptioned = false;
+    int64_t bestArea = 0;
+    for (int i = 0; i < int(windows.size()); ++i) {
+        const HiddenWindow& w = windows[size_t(i)];
+        const int64_t width = int64_t{w.rect.right} - w.rect.left, height = int64_t{w.rect.bottom} - w.rect.top;
+        if (w.owned || (w.exStyle & WS_EX_TOOLWINDOW) || width < 200 || height < 150)
+            continue;
+        const bool captioned = (w.style & WS_CAPTION) == WS_CAPTION;
+        if (best < 0 || captioned > bestCaptioned || (captioned == bestCaptioned && width * height > bestArea)) {
+            best = i;
+            bestCaptioned = captioned;
+            bestArea = width * height;
+        }
+    }
+    return best;
+}
 
 inline std::wstring Lower(std::wstring s)
 {

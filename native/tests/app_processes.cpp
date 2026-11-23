@@ -248,6 +248,33 @@ void CheckTaskRules()
     Require(!ImagesVisuallyDifferent(empty, empty), "two empty images compare safe and equal");
     Require(ImagesVisuallyDifferent(empty, badge32), "empty vs valid image is safe");
 }
+
+void CheckPendingRestores()
+{
+    const HWND a = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x1001)), b = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x1002)),
+               c = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x1003));
+    std::vector<PendingRestore> pending{{a, 2000}, {b, 2000}, {c, 3000}};
+    auto ready = TakeRestored(pending, 1000, [&](HWND h) { return h == a ? WindowShow::Shown : h == b ? WindowShow::Gone : WindowShow::Minimized; });
+    Require(ready.size() == 1 && ready[0] == a && pending.size() == 1 && pending[0].window == c, "a restored window is taken, a gone one dropped");
+    ready = TakeRestored(pending, 3000, [](HWND) { return WindowShow::Minimized; });
+    Require(ready.empty() && pending.empty(), "a window still minimized at its deadline is dropped, not activated");
+}
+
+void CheckHiddenMainWindow()
+{
+    Require(PickHiddenMainWindow({}) == -1, "no hidden window, none picked");
+    Require(PickHiddenMainWindow({{{0, 0, 1200, 800}, WS_OVERLAPPEDWINDOW, 0, true},
+                                  {{0, 0, 1200, 800}, WS_OVERLAPPEDWINDOW, WS_EX_TOOLWINDOW, false},
+                                  {{100, 100, 299, 300}, WS_OVERLAPPEDWINDOW, 0, false},
+                                  {{100, 100, 400, 249}, WS_OVERLAPPEDWINDOW, 0, false}}) == -1,
+            "owned, tool and small windows are never the main one");
+    Require(PickHiddenMainWindow({{{0, 0, 1920, 1080}, WS_POPUP, 0, false},
+                                  {{0, 0, 400, 300}, WS_OVERLAPPEDWINDOW, 0, false},
+                                  {{152, 152, 2880, 1591}, WS_CAPTION | WS_THICKFRAME, 0, false}}) == 2,
+            "the largest captioned window comes before a larger uncaptioned one");
+    Require(PickHiddenMainWindow({{{0, 0, 300, 200}, WS_POPUP, 0, false}, {{0, 0, 1280, 800}, WS_POPUP, 0, false}}) == 1,
+            "among uncaptioned windows the largest");
+}
 } // namespace
 
 int wmain(int argc, wchar_t** argv)
@@ -271,6 +298,8 @@ int wmain(int argc, wchar_t** argv)
         CheckSharedFolders();
         CheckTermination(self);
         CheckTaskRules();
+        CheckPendingRestores();
+        CheckHiddenMainWindow();
         std::cout << "PASS: application termination, taskbar rules, and process isolation\n";
         return 0;
     } catch (const std::exception& error) {

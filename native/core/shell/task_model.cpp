@@ -46,7 +46,8 @@ namespace {
 TaskModel::WindowStep g_minimizing, g_restoring; // SetWindowSteps
 
 constexpr UINT_PTR kTimerId = 0xA701;     // >= 0xA700: clear of the host's own timers
-constexpr UINT kCoalesceMs = 30;
+constexpr UINT_PTR kRestoreTimerId = 0xA702;
+constexpr UINT kCoalesceMs = 30, kRestorePollMs = 50, kRestoreWaitMs = 2000;
 constexpr UINT kWindowIconTimeoutMs = 100; // WM_GETICON on a possibly hung window
 constexpr ULONGLONG kRetryFailedIconMs = 10000;
 
@@ -573,9 +574,9 @@ struct TaskModel::Impl {
     std::function<bool(const std::wstring&)> openExisting;
     std::function<void(HWND)> onFlash;
     ComScope com;
-    UINT shellHookMsg = 0, readyMsg = 0;
+    UINT shellHookMsg = 0, readyMsg = 0, restoreMsg = 0;
     std::vector<HWINEVENTHOOK> hooks;
-    bool shellHooked = false, timerArmed = false, dirty = true, notify = false, showRunning = true;
+    bool shellHooked = false, timerArmed = false, restoreTimerArmed = false, dirty = true, notify = false, showRunning = true;
 
     // UI-thread state.
     std::vector<Pin> pins;
@@ -592,6 +593,7 @@ struct TaskModel::Impl {
     std::unordered_map<std::wstring, std::wstring> names;
     std::unordered_set<std::wstring> namesRequested;
     std::unordered_map<std::wstring, uint64_t> iconVersion;
+    std::vector<PendingRestore> pendingRestores;
 
     // Shared with the worker.
     std::mutex mutex, fallbackMutex;
@@ -608,7 +610,11 @@ struct TaskModel::Impl {
     struct LaunchPlan {
         std::wstring file, args, dir;
     };
-    std::optional<std::pair<LaunchPlan, std::wstring>> fallbackPending;
+    struct FallbackJob {
+        std::optional<LaunchPlan> plan; // set when a tray click should fall back to Exec after 3 s
+        std::wstring exe;
+    };
+    std::optional<FallbackJob> fallbackPending;
     uint64_t fallbackGen = 0;
 
     static Impl* g_self;
@@ -621,6 +627,7 @@ struct TaskModel::Impl {
           openExisting(std::move(opener)),
           shellHookMsg(RegisterWindowMessageW(L"SHELLHOOK")),
           readyMsg(RegisterWindowMessageW(L"Atrium.TaskModel.Ready")),
+          restoreMsg(RegisterWindowMessageW(L"Atrium.TaskModel.PendingRestore")),
           shellHooked(RegisterShellHookWindow(window) != FALSE)
     {
         g_self = this;
@@ -656,6 +663,8 @@ struct TaskModel::Impl {
             DeregisterShellHookWindow(ui);
         if (timerArmed)
             KillTimer(ui, kTimerId);
+        if (restoreTimerArmed)
+            KillTimer(ui, kRestoreTimerId);
         {
             std::scoped_lock g(mutex, fallbackMutex);
             stop = fallbackStop = true;
@@ -684,6 +693,8 @@ struct TaskModel::Impl {
 
     void OnEvent(DWORD event, HWND hwnd)
     {
+        if (!pendingRestores.empty() && (event == EVENT_SYSTEM_MINIMIZEEND || event == EVENT_SYSTEM_FOREGROUND))
+            ProcessPendingRestores();
         if (event == EVENT_SYSTEM_FOREGROUND) {
             NoteForeground(hwnd);
         } else if (event == EVENT_OBJECT_DESTROY) {
@@ -741,12 +752,20 @@ struct TaskModel::Impl {
                 Tick();
                 return true;
             }
+            if (msg == WM_TIMER && wp == kRestoreTimerId) {
+                ProcessPendingRestores();
+                return true;
+            }
             if (shellHookMsg && msg == shellHookMsg) {
                 OnShellHook(wp, reinterpret_cast<HWND>(lp));
                 return true;
             }
             if (readyMsg && msg == readyMsg) {
                 OnReady();
+                return true;
+            }
+            if (restoreMsg && msg == restoreMsg) {
+                DeferActivate(reinterpret_cast<HWND>(lp));
                 return true;
             }
         } catch (const std::exception& e) {
@@ -1301,6 +1320,7 @@ struct TaskModel::Impl {
             Log(L"tasks: launch of %s failed (%lu)", file.c_str(), GetLastError());
             return false;
         }
+        Log(L"tasks: started %s", file.c_str());
         return true;
     }
 
@@ -1330,6 +1350,35 @@ struct TaskModel::Impl {
         return look.found;
     }
 
+    static HWND FindHiddenMainWindow(const std::wstring& exe)
+    {
+        struct Look {
+            const std::wstring* exe;
+            std::vector<HWND> hwnds;
+            std::vector<HiddenWindow> candidates;
+        } look{&exe};
+        EnumWindows(
+            [](HWND h, LPARAM l) -> BOOL {
+                auto& k = *reinterpret_cast<Look*>(l);
+                const DWORD ex = static_cast<DWORD>(GetWindowLongW(h, GWL_EXSTYLE));
+                const bool owned = GetWindow(h, GW_OWNER) != nullptr;
+                if (IsWindowVisible(h) || owned || (ex & WS_EX_TOOLWINDOW))
+                    return TRUE;
+                DWORD pid = 0;
+                GetWindowThreadProcessId(h, &pid);
+                winrt::handle p(pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr);
+                RECT r{};
+                if (!p || _wcsicmp(ImagePath(p.get()).c_str(), k.exe->c_str()) != 0 || !GetWindowRect(h, &r))
+                    return TRUE;
+                k.hwnds.push_back(h);
+                k.candidates.push_back({r, static_cast<DWORD>(GetWindowLongW(h, GWL_STYLE)), ex, owned});
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&look));
+        const int index = PickHiddenMainWindow(look.candidates);
+        return index >= 0 ? look.hwnds[index] : nullptr;
+    }
+
     // Whether a process of this program runs (with a window or without, in the tray).
     static bool Runs(const std::wstring& exe)
     {
@@ -1348,32 +1397,59 @@ struct TaskModel::Impl {
         return found;
     }
 
+    void QueueFallback(std::optional<LaunchPlan> plan, std::wstring exe)
+    {
+        {
+            std::lock_guard g(fallbackMutex);
+            ++fallbackGen;
+            fallbackPending.emplace(FallbackJob{std::move(plan), std::move(exe)});
+        }
+        fallbackCv.notify_all();
+    }
+
+    bool WaitForWindow(std::unique_lock<std::mutex>& lk, const std::wstring& exe, uint64_t gen, int polls)
+    {
+        for (int i = 0; i < polls; ++i) {
+            if (fallbackCv.wait_for(lk, std::chrono::milliseconds(100), [&] { return fallbackStop || fallbackGen != gen; }))
+                return true;
+            lk.unlock();
+            const bool shown = ShowsWindow(exe);
+            lk.lock();
+            if (shown || fallbackStop || fallbackGen != gen)
+                return true;
+        }
+        return false;
+    }
+
     void FallbackMain()
     {
         for (std::unique_lock lk(fallbackMutex);;) {
             fallbackCv.wait(lk, [&] { return fallbackStop || fallbackPending.has_value(); });
             if (fallbackStop)
                 return;
-            const auto [plan, exe] = std::move(*fallbackPending);
+            const FallbackJob job = std::move(*fallbackPending);
             const uint64_t gen = fallbackGen;
             fallbackPending.reset();
-            for (int i = 0;; ++i) {
-                if (i == 30) {
-                    lk.unlock();
-                    Log(L"tasks: %s showed no window from its tray icon: started", PathFindFileNameW(exe.c_str()));
-                    const ComScope fallbackCom(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-                    Exec(plan.file, plan.args, plan.dir);
-                    lk.lock();
-                    break;
-                }
-                if (fallbackCv.wait_for(lk, std::chrono::milliseconds(100), [&] { return fallbackStop || fallbackGen != gen; }))
-                    break;
+            if (job.plan) {
+                if (WaitForWindow(lk, job.exe, gen, 30))
+                    continue;
                 lk.unlock();
-                const bool shown = ShowsWindow(exe);
+                Log(L"tasks: %s showed no window from its tray icon: started", PathFindFileNameW(job.exe.c_str()));
+                const ComScope fallbackCom(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+                const bool started = Exec(job.plan->file, job.plan->args, job.plan->dir);
                 lk.lock();
-                if (shown || fallbackStop || fallbackGen != gen)
-                    break;
+                if (!started || fallbackStop || fallbackGen != gen)
+                    continue;
             }
+            if (WaitForWindow(lk, job.exe, gen, 15))
+                continue;
+            lk.unlock();
+            if (HWND h = FindHiddenMainWindow(job.exe)) {
+                Log(L"tasks: %s showed no window after launch: restoring hidden window", PathFindFileNameW(job.exe.c_str()));
+                ShowWindowAsync(h, IsIconic(h) ? SW_RESTORE : SW_SHOW);
+                Raise(h);
+            }
+            lk.lock();
         }
     }
 
@@ -1393,14 +1469,8 @@ struct TaskModel::Impl {
                 // (a single-instance app then shows its window) instead of the click doing nothing (#15).
                 // Never a chat app: WeChat, QQ and the like run several accounts side by side, and
                 // starting one again opens another one's login window.
-                if (auto plan = PlanFor(key); plan && MessengerOfProgram(m->second.exePath) == Messenger::None) {
-                    {
-                        std::lock_guard g(fallbackMutex);
-                        ++fallbackGen;
-                        fallbackPending.emplace(*plan, m->second.exePath);
-                    }
-                    fallbackCv.notify_all();
-                }
+                if (auto plan = PlanFor(key); plan && MessengerOfProgram(m->second.exePath) == Messenger::None)
+                    QueueFallback(*plan, m->second.exePath);
                 return;
             }
             // A chat app running in the tray whose icon could not be clicked (not listed yet, the
@@ -1410,8 +1480,11 @@ struct TaskModel::Impl {
                 return;
             }
         }
-        if (auto plan = PlanFor(key))
-            Exec(plan->file, plan->args, plan->dir);
+        if (auto plan = PlanFor(key); plan && Exec(plan->file, plan->args, plan->dir)) {
+            auto m = meta.find(key);
+            if (m != meta.end() && !m->second.exePath.empty() && MessengerOfProgram(m->second.exePath) == Messenger::None)
+                QueueFallback(std::nullopt, m->second.exePath);
+        }
     }
 
     // How `key` is started: its pin's shortcut or program (a packaged program by its app id),
@@ -1460,13 +1533,15 @@ struct TaskModel::Impl {
 
     // A hung window never reads the command: Windows carries it out. A slow one still reads it after
     // the timeout, and a second restore would take a maximized window back to its normal size (#84).
-    static void SysCommand(HWND h, WPARAM command)
+    static bool SysCommand(HWND h, WPARAM command)
     {
         DWORD_PTR ignored = 0;
-        if (IsHungAppWindow(h))
+        if (IsHungAppWindow(h)) {
             ShowWindowAsync(h, command == SC_RESTORE ? SW_RESTORE : SW_MINIMIZE);
-        else
-            SendMessageTimeoutW(h, WM_SYSCOMMAND, command, 0, SMTO_ABORTIFHUNG, 500, &ignored);
+            return true;
+        }
+        SendMessageTimeoutW(h, WM_SYSCOMMAND, command, 0, SMTO_ABORTIFHUNG, 500, &ignored);
+        return false;
     }
 
     static void Minimize(HWND h)
@@ -1485,10 +1560,48 @@ struct TaskModel::Impl {
         Raise(h);
     }
 
+    void DeferActivate(HWND h)
+    {
+        std::erase_if(pendingRestores, [h](const PendingRestore& p) { return p.window == h; });
+        pendingRestores.push_back({h, GetTickCount64() + kRestoreWaitMs});
+        ProcessPendingRestores();
+    }
+
+    void ProcessPendingRestores()
+    {
+        const auto ready = TakeRestored(pendingRestores, GetTickCount64(), [](HWND h) {
+            if (!IsWindow(h) || !IsWindowVisible(h))
+                return WindowShow::Gone;
+            return IsIconic(h) ? WindowShow::Minimized : WindowShow::Shown;
+        });
+        if (pendingRestores.empty() && restoreTimerArmed) {
+            KillTimer(ui, kRestoreTimerId);
+            restoreTimerArmed = false;
+        } else if (!pendingRestores.empty() && !restoreTimerArmed && SetTimer(ui, kRestoreTimerId, kRestorePollMs, nullptr)) {
+            restoreTimerArmed = true;
+        }
+        for (HWND h : ready)
+            Raise(h);
+    }
+
     static void Raise(HWND h)
     {
-        if (IsIconic(h))
-            SysCommand(h, SC_RESTORE);
+        Impl* self = g_self;
+        const bool onUi = self && GetWindowThreadProcessId(self->ui, nullptr) == GetCurrentThreadId();
+        if (IsIconic(h)) {
+            if (onUi && std::ranges::any_of(self->pendingRestores, [h](const PendingRestore& p) { return p.window == h; })) {
+                self->DeferActivate(h);
+                return;
+            }
+            const bool hung = SysCommand(h, SC_RESTORE);
+            if (!hung && IsIconic(h)) {
+                if (onUi)
+                    self->DeferActivate(h);
+                else if (self && self->restoreMsg)
+                    PostMessageW(self->ui, self->restoreMsg, 0, reinterpret_cast<LPARAM>(h));
+                return;
+            }
+        }
         HWND target = GetLastActivePopup(h);
         if (!target || target == h || !IsWindowVisible(target))
             target = h;
@@ -1496,7 +1609,7 @@ struct TaskModel::Impl {
             HWND fg = GetForegroundWindow();
             return fg == target || fg == h || (fg && GetAncestor(fg, GA_ROOTOWNER) == h);
         };
-        if (SetForegroundWindow(target) && isFront())
+        if (isFront() || (SetForegroundWindow(target) && isFront()))
             return;
         // Foreground lock refused: the bar never takes activation itself, so on
         // Windows 11 this is the normal case. SwitchToThisWindow
