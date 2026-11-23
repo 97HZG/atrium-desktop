@@ -65,6 +65,7 @@ add_library(atrium_core_lib STATIC
     shell/projection.cpp
     shell/quick_links.cpp
     shell/quick_toggles.cpp
+    shell/games.cpp
     shell/displays.cpp
     shell/tray_host.cpp
     shell/tray_model.cpp

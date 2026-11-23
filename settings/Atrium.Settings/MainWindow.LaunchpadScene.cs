@@ -73,16 +73,19 @@ public sealed partial class MainWindow
         protected override Size PopupSize => new(CW, CH);
         protected override Vector2 Anchor => new((float)(Bar!.LaunchX >= 0 ? Bar.LaunchX + Bar.P / 2 : Bar.StartX + Bar.P / 2), (float)PopupBottom);
         private bool Tint => M.CurrentSettings.LaunchpadMaterial == "tint";
+        private bool Full => M.CurrentSettings.LaunchpadLayout == "fullscreen";
         protected override void Ink(int piece, bool dark) => _ink.Set((_glassDark = dark) && !Tint);
         protected override void Entered() => _opened = double.MaxValue;
         protected override void PoppedIn() => _opened = Now;
 
-        // In the middle of the stage above the bar, as the window is in the middle of the screen.
+        // In the middle of the stage above the bar, as the window is in the middle of the screen; full screen,
+        // the glass over all of the stage and the apps in its middle.
         protected override (GlassTile[] Tiles, object State) Pieces()
         {
             double w = CW * S, h = CH * S;
             double left = (W - w) / 2, top = Math.Max(12, (PopupBottom - h) / 2);
-            return (new[] { new GlassTile(left, top, w, h, Math.Max(Radius, MinRadius) * S) }, new Frame(left, top));
+            var glass = Full ? new GlassTile(0, 0, W, H, 0) : new GlassTile(left, top, w, h, Math.Max(Radius, MinRadius) * S);
+            return (new[] { glass }, new Frame(left, top));
         }
 
         protected override bool Arrange(object state, double dt)
@@ -91,8 +94,9 @@ public sealed partial class MainWindow
             PlaceMarks(f.Left, f.Top);
             _ink.Set(_glassDark && !Tint);
             _veil.Visibility = Tint ? Visibility.Visible : Visibility.Collapsed;
-            _veil.CornerRadius = new CornerRadius(Math.Max(Radius, MinRadius));
-            Put(_veil, 0, 0, CW, CH);
+            _veil.CornerRadius = new CornerRadius(Full ? 0 : Math.Max(Radius, MinRadius));
+            if (Full) Put(_veil, -f.Left / S, -f.Top / S, W / S, H / S);
+            else Put(_veil, 0, 0, CW, CH);
             Put(_search, (CW - SearchW) / 2, SearchTop, SearchW, SearchH);
             Box(_searchGlyph, (CW - SearchW) / 2 + 10, SearchTop, 20, SearchH);
             Box(_hint, (CW - SearchW) / 2 + 34, SearchTop, SearchW - 48, SearchH);

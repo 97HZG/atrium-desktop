@@ -23,7 +23,8 @@ internal sealed partial class BarFace
     private readonly Canvas _launchpad = new() { IsHitTestVisible = false, Width = 1, Height = 1 }, _music = new() { IsHitTestVisible = false };
     private readonly Rectangle[] _bars = new Rectangle[5];
     private readonly Path _folder = Folder(FrontFolder), _folderBack = Folder(BackFolder);
-    private readonly Rectangle[] _apps = [new(), new(), new(), new(), new(), new(), new(), new(), new()];
+    private readonly Path _apps = new() { IsHitTestVisible = false };
+    private double _appsStroke = -1; // the stroke _apps' outline was laid out for
     private readonly SolidColorBrush _extrasInkBrush = new(), _folderBrush = new(), _folderBackBrush = new();
     private readonly ScaleTransform _launchpadScale = new(), _folderScale = new(), _folderBackScale = new();
 
@@ -32,17 +33,8 @@ internal sealed partial class BarFace
         _launchpad.RenderTransform = _launchpadScale;
         _folder.RenderTransform = _folderScale;
         _folderBack.RenderTransform = _folderBackScale;
-        // DrawLaunchpad in a unit square: nine squares of 0.30 in outline, three by three, gaps of 0.05.
-        for (int i = 0; i < _apps.Length; i++)
-        {
-            _apps[i].IsHitTestVisible = false;
-            _apps[i].Width = _apps[i].Height = 0.30;
-            _apps[i].RadiusX = _apps[i].RadiusY = 0.09;
-            _apps[i].Stroke = _extrasInkBrush;
-            Canvas.SetLeft(_apps[i], i % 3 * 0.35);
-            Canvas.SetTop(_apps[i], i / 3 * 0.35);
-            _launchpad.Children.Add(_apps[i]);
-        }
+        _apps.Stroke = _extrasInkBrush;
+        _launchpad.Children.Add(_apps);
         for (int i = 0; i < _bars.Length; i++)
         {
             _bars[i] = new Rectangle { IsHitTestVisible = false, Fill = _extrasInkBrush };
@@ -61,14 +53,19 @@ internal sealed partial class BarFace
         _launchpad.Visibility = Visibility.Collapsed;
         if (l.LaunchX >= 0)
         {
-            // 86 % of the icon square, a stroke of 6.5 % of it.
+            // 80 % of the icon square (the Windows logo's size), a stroke of 6.5 % of it.
             var (x, y, size) = item(l.LaunchX);
-            double s = size * 0.90;
+            double s = size * 0.80;
             if (s > 0)
             {
                 _launchpad.Visibility = Visibility.Visible;
                 double thickness = Math.Max(1, s * 0.065) / s;
-                foreach (var a in _apps) a.StrokeThickness = thickness;
+                if (thickness != _appsStroke)
+                {
+                    _apps.Data = (Geometry)XamlBindingHelper.ConvertValue(typeof(Geometry), LaunchpadMarkup(thickness));
+                    _appsStroke = thickness;
+                }
+                _apps.StrokeThickness = thickness;
                 _launchpadScale.ScaleX = _launchpadScale.ScaleY = s;
                 Canvas.SetLeft(_launchpad, x + (size - s) / 2);
                 Canvas.SetTop(_launchpad, y + (size - s) / 2);
@@ -114,6 +111,28 @@ internal sealed partial class BarFace
                 }
             }
         }
+    }
+
+    // DrawLaunchpad in a unit square: four squares in outline, the whole's four corners sharp, the others round.
+    private static string LaunchpadMarkup(double stroke)
+    {
+        const double Gap = 0.12, Pane = (1 - Gap) / 2;
+        double round = Pane * 0.32 - stroke / 2;
+        var markup = new System.Text.StringBuilder("F0");
+        string P(double v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+        for (int i = 0; i < 4; i++)
+        {
+            int col = i % 2, row = i / 2, sharp = row == 0 ? col : 3 - col;
+            double x0 = col * (Pane + Gap) + stroke / 2, y0 = row * (Pane + Gap) + stroke / 2, x1 = x0 + Pane - stroke, y1 = y0 + Pane - stroke;
+            double[] r = [round, round, round, round];
+            r[sharp] = 0;
+            string Arc(double radius, double x, double y) => radius > 0 ? $" A{P(radius)},{P(radius)} 0 0 1 {P(x)},{P(y)}" : "";
+            markup.Append($" M{P(x0 + r[0])},{P(y0)} L{P(x1 - r[1])},{P(y0)}").Append(Arc(r[1], x1, y0 + r[1]))
+                  .Append($" L{P(x1)},{P(y1 - r[2])}").Append(Arc(r[2], x1 - r[2], y1))
+                  .Append($" L{P(x0 + r[3])},{P(y1)}").Append(Arc(r[3], x0, y1 - r[3]))
+                  .Append($" L{P(x0)},{P(y0 + r[0])}").Append(Arc(r[0], x0 + r[0], y0)).Append(" Z");
+        }
+        return markup.ToString();
     }
 
     private static Path Folder(string markup) => new()

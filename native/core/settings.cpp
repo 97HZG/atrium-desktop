@@ -160,6 +160,7 @@ void ReadExtrasSettingsJson(const json::JsonObject& o, Settings& s)
     };
     flag(L"showLaunchpad", s.showLaunchpad);
     str(L"launchpadMaterial", s.launchpadMaterial);
+    str(L"launchpadLayout", s.launchpadLayout);
     flag(L"showNowPlaying", s.showNowPlaying);
     flag(L"nowPlayingShowPaused", s.nowPlayingShowPaused);
     str(L"nowPlayingMotion", s.nowPlayingMotion);
@@ -304,6 +305,8 @@ void Settings::Clamp()
         nowPlayingMotion = L"normal";
     if (launchpadMaterial != L"tint")
         launchpadMaterial = L"bar";
+    if (launchpadLayout != L"fullscreen")
+        launchpadLayout = L"window";
     if (nowPlayingRhythm != L"loop")
         nowPlayingRhythm = L"live";
     if (nowPlayingAppMode != L"allow" && nowPlayingAppMode != L"block")
@@ -371,6 +374,7 @@ std::wstring Settings::ToJson() const
     };
     o.SetNamedValue(L"showLaunchpad", json::JsonValue::CreateBooleanValue(showLaunchpad));
     o.SetNamedValue(L"launchpadMaterial", json::JsonValue::CreateStringValue(launchpadMaterial));
+    o.SetNamedValue(L"launchpadLayout", json::JsonValue::CreateStringValue(launchpadLayout));
     o.SetNamedValue(L"showNowPlaying", json::JsonValue::CreateBooleanValue(showNowPlaying));
     o.SetNamedValue(L"nowPlayingShowPaused", json::JsonValue::CreateBooleanValue(nowPlayingShowPaused));
     o.SetNamedValue(L"nowPlayingMotion", json::JsonValue::CreateStringValue(nowPlayingMotion));

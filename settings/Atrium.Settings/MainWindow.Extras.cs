@@ -22,7 +22,7 @@ public sealed partial class MainWindow
     private Canvas? _npCanvas, _stCanvas, _lpCanvas;
     private ModuleScene? _npScene, _stScene, _lpScene;
     private ToggleTile? _launchpadSwitch, _npSwitch, _npPausedSwitch, _stSwitch;
-    private SegmentTrack? _lpMaterial, _npMotion, _npRhythm, _stLayout, _stMax;
+    private SegmentTrack? _lpLayout, _lpMaterial, _npMotion, _npRhythm, _stLayout, _stMax;
     private StackPanel? _stList, _stFileList;
     private TextBlock? _stCount, _stFileCount;
     private bool _pickingStack;
@@ -71,7 +71,9 @@ public sealed partial class MainWindow
             "An entry next to the start logo opens every app, page by page, in one large window of glass, as on macOS.", (s, on) => s.ShowLaunchpad = on);
         _lpMaterial = Segments("launchpadmaterial", [("Follow the taskbar", "bar"), ("Original color", "tint")],
             tag => CurrentSettings.LaunchpadMaterial = tag);
-        _lpSide = Side("Launchpad", _launchpadSwitch, Row("Material", _lpMaterial));
+        _lpLayout = Segments("launchpadlayout", [("Windowed", "window"), ("Full-screen", "fullscreen")],
+            tag => CurrentSettings.LaunchpadLayout = tag);
+        _lpSide = Side("Launchpad", _launchpadSwitch, Row("Display mode", _lpLayout), Row("Material", _lpMaterial));
         InspectorStack.Children.Add(_npSide);
         InspectorStack.Children.Add(_stSide);
         InspectorStack.Children.Add(_lpSide);
@@ -262,6 +264,7 @@ public sealed partial class MainWindow
         _loading = true;
         var s = CurrentSettings;
         _launchpadSwitch?.IsOn = s.ShowLaunchpad;
+        Check(_lpLayout, s.LaunchpadLayout == "fullscreen" ? "fullscreen" : "window");
         Check(_lpMaterial, s.LaunchpadMaterial == "tint" ? "tint" : "bar");
         _npSwitch?.IsOn = s.ShowNowPlaying;
         _npPausedSwitch?.IsOn = s.NowPlayingShowPaused;

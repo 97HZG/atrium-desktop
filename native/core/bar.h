@@ -77,6 +77,10 @@ public:
     // An auto-hidden bar comes up (the Windows key's start menu, startWithBar); it goes again as
     // when the pointer brought it, once nothing keeps it shown.
     void Reveal();
+    // Over a game in front (only the Windows key brings the bar there): up without taking the focus from
+    // the game, a moment for the pointer to reach it, then gone again when the pointer is not on it.
+    // False: it was up already.
+    bool RevealOverGame();
     // Screen rectangle of an entry ("#start", "#notify", an app key); empty if not shown.
     RECT EntryRect(const std::wstring& key) const;
     // Screen rectangle of the glass shape.

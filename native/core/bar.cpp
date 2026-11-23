@@ -1323,6 +1323,18 @@ void Bar::Reveal()
     UpdateAutoHide();
 }
 
+bool Bar::RevealOverGame()
+{
+    if (!visible_ || !tucked_)
+        return false;
+    const ULONGLONG now = GetTickCount64();
+    revealed_ = true;
+    leftAt_ = now;
+    summonGraceUntil_ = now + 2500;
+    UpdateAutoHide(); // raised without activation (Raise)
+    return true;
+}
+
 void Bar::UpdateAutoHide()
 {
     bool tuck = covered_ && !revealed_ && visible_;

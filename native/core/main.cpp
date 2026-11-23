@@ -31,6 +31,7 @@
 #include "shell/usb_volume.h"
 #include "shell/shell_verbs.h"
 #include "shell/jump_list.h"
+#include "shell/games.h"
 #include "shell/quick_links.h"
 #include "shell/win_key.h"
 #include "shell/feishu_source.h"
@@ -598,6 +599,7 @@ void ApplySettings(const Settings& s)
     g_app.stage->SetMinimizeToStrip(s.stageMinimize);
     g_app.stage->SetDragMerge(s.stageDragMerge);
     g_app.stage->SetExcluded(s.stageExcluded);
+    SetUserGames(s.stageExcluded);
     g_app.stage->SetEnabled(s.stageManager);
     g_app.genie->SetEnabled(s.genieMinimize && s.bar);
     g_app.control->SetStage(s.stageManager, s.stageOnRight);
@@ -1145,9 +1147,12 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             ForegroundAttach attach(fg);
             AllowSetForegroundWindow(ASFW_ANY);
             bar->ActivateIndex(int(w) - 1);
-        } else if (g_app.start->Visible())
+        } else if (g_app.start->Visible()) {
             g_app.start->Close(false);
-        else {
+        } else if (const RECT r = bar->BarRect(); GameInFront(MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST)) && bar->RevealOverGame()) {
+            // Over a game the key only brings the bar up, the game keeping the focus; a second press opens the menu.
+            Log(L"winkey: the bar over a game");
+        } else {
             // The keyboard's: whatever was in front gets the focus back when it closes. The key
             // never reached a window of ours, so the foreground lock holds: share the foreground
             // thread's input state for the moment the menu takes the focus (as the tray does).

@@ -4,6 +4,7 @@
 #include "bar.h"
 
 #include "log.h"
+#include "shell/games.h"
 #include "shell/shell_taskbar.h"
 
 #include <dwmapi.h>
@@ -182,7 +183,8 @@ void Bar::UpdateCover()
 {
     // Apply the hide mode independently on each display.
     const std::wstring& mode = settings_.autoHide;
-    bool covered = mode == L"always" || (mode != L"never" && MonitorCoveredByApp());
+    // A game in front always has the screen to itself, whatever the hide mode.
+    bool covered = mode == L"always" || (mode != L"never" && MonitorCoveredByApp()) || GameInFront(hmonitor_);
     if (covered == covered_)
         return;
     covered_ = covered;

@@ -185,7 +185,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
             !modules.SameAs(modulesDefault),
         "Control centre modules must keep known ids once, in order, and survive a round trip.");
     var extrasDefault = new BarSettings();
-    Require(extrasDefault.ShowLaunchpad && extrasDefault.LaunchpadMaterial == "bar" && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
+    Require(extrasDefault.ShowLaunchpad && extrasDefault.LaunchpadMaterial == "bar" && extrasDefault.LaunchpadLayout == "window" && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
             extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingRhythm == "live" && extrasDefault.NowPlayingAppMode == "all" &&
             extrasDefault.NowPlayingApps.Count == 0 &&
             !extrasDefault.ShowFolderStacks && extrasDefault.FolderStackLayout == "fan" &&
@@ -195,6 +195,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
     {
         ShowLaunchpad = false,
         LaunchpadMaterial = "tint",
+        LaunchpadLayout = "fullscreen",
         ShowNowPlaying = false,
         NowPlayingShowPaused = false,
         NowPlayingMotion = "vivid",
@@ -211,7 +212,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
         "Extras settings must survive a round trip.");
     foreach (var edit in new Action<BarSettings>[]
     {
-        s => s.ShowLaunchpad = false, s => s.LaunchpadMaterial = "tint", s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
+        s => s.ShowLaunchpad = false, s => s.LaunchpadMaterial = "tint", s => s.LaunchpadLayout = "fullscreen", s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
         s => s.NowPlayingMotion = "subtle", s => s.NowPlayingRhythm = "loop", s => s.NowPlayingAppMode = "allow",
         s => s.NowPlayingApps = ["a.exe"],
         s => s.ShowFolderStacks = true, s => s.FolderStackLayout = "column",

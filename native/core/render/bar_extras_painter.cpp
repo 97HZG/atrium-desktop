@@ -16,6 +16,25 @@ D2D1_RECT_F Square(D2D1_RECT_F r, float k)
     return D2D1::RectF(cx - w / 2, cy - w / 2, cx + w / 2, cy + w / 2);
 }
 
+// A closed rectangle with its own radius at each corner: top left, top right, bottom right, bottom left.
+void AddRoundedSquare(ID2D1GeometrySink* sink, D2D1_RECT_F r, const float (&radii)[4])
+{
+    const auto arc = [&](float x, float y, float radius) {
+        if (radius > 0)
+            sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(x, y), D2D1::SizeF(radius, radius), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+    };
+    sink->BeginFigure(D2D1::Point2F(r.left + radii[0], r.top), D2D1_FIGURE_BEGIN_HOLLOW);
+    sink->AddLine(D2D1::Point2F(r.right - radii[1], r.top));
+    arc(r.right, r.top + radii[1], radii[1]);
+    sink->AddLine(D2D1::Point2F(r.right, r.bottom - radii[2]));
+    arc(r.right - radii[2], r.bottom, radii[2]);
+    sink->AddLine(D2D1::Point2F(r.left + radii[3], r.bottom));
+    arc(r.left, r.bottom - radii[3], radii[3]);
+    sink->AddLine(D2D1::Point2F(r.left, r.top + radii[0]));
+    arc(r.left + radii[0], r.top, radii[0]);
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+}
+
 } // namespace
 
 bool BarExtrasPainter::Draw(const std::wstring& key, ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink, float opacity,
@@ -67,15 +86,31 @@ void BarExtrasPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float o
 
 void BarExtrasPainter::DrawLaunchpad(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)
 {
-    // Nine small apps, three by three, in outline: squares of 0.30 with gaps of 0.05.
-    const D2D1_RECT_F box = Square(r, 0.90f);
-    const float s = box.right - box.left, tile = s * 0.30f, step = s * 0.35f, stroke = std::max(1.f, s * 0.065f);
-    const float corner = tile * 0.3f - stroke / 2;
-    brush->SetColor(ink);
-    for (int i = 0; i < 9; ++i) {
-        const float x = box.left + float(i % 3) * step + stroke / 2, y = box.top + float(i / 3) * step + stroke / 2;
-        d2d->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y, x + tile - stroke, y + tile - stroke), corner, corner), brush, stroke);
+    // Four squares in outline, as large as the Windows logo: the four corners of the whole are sharp, every
+    // other corner round.
+    const D2D1_RECT_F box = Square(r, 0.80f);
+    const float s = box.right - box.left, stroke = std::max(1.f, s * 0.065f), gap = s * 0.12f, pane = (s - gap) / 2;
+    const float round = pane * 0.32f - stroke / 2;
+    winrt::com_ptr<ID2D1Factory> factory;
+    d2d->GetFactory(factory.put());
+    winrt::com_ptr<ID2D1PathGeometry> path;
+    winrt::com_ptr<ID2D1GeometrySink> sink;
+    if (!factory || FAILED(factory->CreatePathGeometry(path.put())) || FAILED(path->Open(sink.put())))
+        return;
+    for (int i = 0; i < 4; ++i) {
+        const int col = i % 2, row = i / 2;
+        const float x0 = box.left + float(col) * (pane + gap) + stroke / 2, y0 = box.top + float(row) * (pane + gap) + stroke / 2;
+        const float x1 = x0 + pane - stroke, y1 = y0 + pane - stroke;
+        // Top left, top right, bottom right, bottom left: the one at the whole's corner is sharp.
+        const int sharp = row == 0 ? col : 3 - col;
+        float radii[4] = {round, round, round, round};
+        radii[sharp] = 0;
+        AddRoundedSquare(sink.get(), D2D1::RectF(x0, y0, x1, y1), radii);
     }
+    if (FAILED(sink->Close()))
+        return;
+    brush->SetColor(ink);
+    d2d->DrawGeometry(path.get(), brush, stroke);
 }
 
 void BarExtrasPainter::DrawMusic(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, const MusicBars& bars, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink)

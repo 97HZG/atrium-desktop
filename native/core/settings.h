@@ -64,6 +64,7 @@ struct Settings {
     bool showRunning = true;
     bool showLaunchpad = true;       // the Launchpad entry next to the start logo
     std::wstring launchpadMaterial = L"bar"; // bar: the bar's glass | tint: the glass under a black veil
+    std::wstring launchpadLayout = L"window"; // window: a window in the middle | fullscreen: the whole screen, as macOS
     bool showNowPlaying = true;      // the now-playing entry (visible while a player has a media session)
     bool nowPlayingShowPaused = true;
     std::wstring nowPlayingMotion = L"normal"; // off | subtle | normal | vivid

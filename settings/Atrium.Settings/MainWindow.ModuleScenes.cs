@@ -412,30 +412,87 @@ public sealed partial class MainWindow
         }
 
         private List<string> Modules => M.CurrentSettings.ControlModules;
-        private double ModulesH => (Modules.Count + 1) / 2 * (ModuleH + CGap); // ControlCenter::ModulesHeight
-        private double MainH => TopH + CGap + ModulesH + SliderH + CGap + SliderH; // ControlCenter::MainHeight
+        private static double ModulesHeight(int count) => (count + 1) / 2 * (ModuleH + CGap); // ControlCenter::ModulesHeight
+        // ControlCenter::MainHeight, with the modules' rows as they glide.
+        private double MainH => TopH + CGap + Math.Max(0, _modH) + SliderH + CGap + SliderH;
         protected override bool IsOpen => M.CurrentSettings.ShowStatus;
-        protected override Size PopupSize => new(CW, MainH);
+        // As tall as it gets (every module): the scene keeps its scale as modules come and go.
+        protected override Size PopupSize => new(CW, TopH + CGap + ModulesHeight(BarSettings.ControlModuleIds.Length) + SliderH + CGap + SliderH);
         protected override Vector2 Anchor => new((float)(Bar!.StatusX >= 0 ? Bar.StatusX + (Bar.P + Bar.StatusExtra) / 2 : BarRight), (float)PopupBottom);
 
-        // ControlCenter::MainShapes: connections; battery over casting; brightness; sound; then ModuleRects, two
-        // to a row under the casting (one alone in its row takes it whole).
+        // The modules in motion: a module added grows out of its place, one taken away shrinks into it, the
+        // others glide to their new places and the panel grows or shrinks with its rows (motion::kPop).
+        private sealed class ModuleMotion { public double X, Y, W, Vx, Vy, Vw, Grow, GrowV; public bool Leaving; }
+        private static readonly Spring ModuleSpring = new(0.36, 0.62);
+        private readonly Dictionary<string, ModuleMotion> _moving = [];
+        private readonly List<string> _drawn = []; // the modules drawn, leaving ones included, in order
+        private double _modH = -1, _modV;
+
+        // ControlCenter::ModuleRects: two to a row under the casting, one alone in its row takes it whole.
+        private static Rect[] ModuleTargets(int n)
+        {
+            double col = (CW - CGap) / 2;
+            return [.. Enumerable.Range(0, n).Select(i => new Rect(i % 2 == 1 ? col + CGap : 0, TopH + CGap + i / 2 * (ModuleH + CGap),
+                                                                   i + 1 == n && i % 2 == 0 ? CW : col, ModuleH))];
+        }
+
+        protected override bool Step(double dt)
+        {
+            var targets = ModuleTargets(Modules.Count);
+            bool first = _modH < 0, moving = false;
+            for (int i = 0; i < Modules.Count; i++)
+            {
+                if (_moving.TryGetValue(Modules[i], out var m)) { m.Leaving = false; continue; }
+                var t = targets[i];
+                _moving[Modules[i]] = new ModuleMotion { X = t.X, Y = t.Y, W = t.Width, Grow = first ? 1 : 0 };
+            }
+            foreach (var (id, m) in _moving) m.Leaving = !Modules.Contains(id);
+            _drawn.Clear();
+            _drawn.AddRange(Modules);
+            _drawn.AddRange(_moving.Keys.Where(id => !Modules.Contains(id)));
+            double s = dt / 1000;
+            foreach (var (id, m) in _moving)
+            {
+                int i = Modules.IndexOf(id);
+                if (i >= 0)
+                {
+                    ModuleSpring.Step(ref m.X, ref m.Vx, targets[i].X, s);
+                    ModuleSpring.Step(ref m.Y, ref m.Vy, targets[i].Y, s);
+                    ModuleSpring.Step(ref m.W, ref m.Vw, targets[i].Width, s);
+                }
+                ModuleSpring.Step(ref m.Grow, ref m.GrowV, m.Leaving ? 0 : 1, s);
+                moving |= Math.Abs(m.GrowV) > 0.002 || Math.Abs(m.Vx) + Math.Abs(m.Vy) + Math.Abs(m.Vw) > 0.05 ||
+                          Math.Abs(m.Grow - (m.Leaving ? 0 : 1)) > 0.002 || (i >= 0 && Math.Abs(m.X - targets[i].X) + Math.Abs(m.Y - targets[i].Y) + Math.Abs(m.W - targets[i].Width) > 0.05);
+            }
+            foreach (string id in _moving.Where(kv => kv.Value.Leaving && kv.Value.Grow < 0.02).Select(kv => kv.Key).ToList()) _moving.Remove(id);
+            double goal = ModulesHeight(Modules.Count);
+            if (first) _modH = goal;
+            ModuleSpring.Step(ref _modH, ref _modV, goal, s);
+            if (Math.Abs(_modH - goal) < 0.05 && Math.Abs(_modV) < 0.05) (_modH, _modV) = (goal, 0);
+            else moving = true;
+            return moving;
+        }
+
+        // A module's glass now: its place, grown by its share.
+        private Rect ModuleNow(string id)
+        {
+            if (!_moving.TryGetValue(id, out var m)) return Rect.Empty;
+            double g = Math.Clamp(m.Grow, 0, 1.08), w = m.W * g, h = ModuleH * g;
+            return new Rect(m.X + (m.W - w) / 2, m.Y + (ModuleH - h) / 2, Math.Max(0.01, w), Math.Max(0.01, h));
+        }
+
+        // ControlCenter::MainShapes: connections; battery over casting; brightness; sound; then the modules.
         private Rect[] Shapes
         {
             get
             {
-                double col = (CW - CGap) / 2, sliders = TopH + CGap + ModulesH;
+                double col = (CW - CGap) / 2, sliders = TopH + CGap + Math.Max(0, _modH);
                 var shapes = new List<Rect>
                 {
                     new(0, 0, col, TopH), new(col + CGap, 0, col, (TopH - CGap) / 2), new(col + CGap, (TopH - CGap) / 2 + CGap, col, (TopH - CGap) / 2),
                     new(0, sliders, CW, SliderH), new(0, sliders + SliderH + CGap, CW, SliderH),
                 };
-                int n = Modules.Count;
-                for (int i = 0; i < n; i++)
-                {
-                    double top = TopH + CGap + i / 2 * (ModuleH + CGap), left = i % 2 == 1 ? col + CGap : 0;
-                    shapes.Add(new Rect(left, top, i + 1 == n && i % 2 == 0 ? CW : col, ModuleH));
-                }
+                shapes.AddRange(_drawn.Select(ModuleNow).Where(r => !r.IsEmpty && r.Width > 1));
                 return [.. shapes];
             }
         }
@@ -452,6 +509,9 @@ public sealed partial class MainWindow
         {
             (_start, _volumeUntil, _brightUntil, _volumeMix, _brightMix, _speed) = (Environment.TickCount64, 0, 0, 0, 0, 0);
             (_fill, _volume, _brightness, _lastReal) = (-1, 40, 45, null);
+            (_modH, _modV) = (-1, 0); // the modules as they are, without a glide
+            _moving.Clear();
+            Step(0);
             if (!M._scenesPaused) _tick.Start();
         }
 
@@ -592,16 +652,18 @@ public sealed partial class MainWindow
         // system's switches are shown as they would be with nothing read yet: off.
         private void ArrangeModules()
         {
-            var shapes = Shapes;
+            var shown = _drawn.Where(id => ModuleNow(id) is { IsEmpty: false, Width: > 1 }).ToList();
             for (int i = 0; i < _tiles.Length; i++)
             {
                 var tile = _tiles[i];
-                bool shown = i < Modules.Count;
-                foreach (var e in new UIElement[] { tile.Disc, tile.Glyph, tile.Title, tile.Sub }) e.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
-                if (!shown) continue;
-                string id = Modules[i];
-                var r = shapes[5 + i];
+                bool visible = i < shown.Count;
+                foreach (var e in new UIElement[] { tile.Disc, tile.Glyph, tile.Title, tile.Sub }) e.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+                if (!visible) continue;
+                string id = shown[i];
+                var r = ModuleNow(id);
                 var ink = _inks[5 + i];
+                double fade = Math.Clamp((_moving[id].Grow - 0.35) / 0.65, 0, 1);
+                foreach (var e in new UIElement[] { tile.Disc, tile.Glyph, tile.Title, tile.Sub }) e.Opacity = fade;
                 bool stage = id == "stage", on = stage && M.CurrentSettings.StageManager, wide = r.Width > CW / 2;
                 double cx = r.X + 32, cy = r.Y + r.Height / 2;
                 Put(tile.Disc, cx - 18, cy - 18, 36, 36);
@@ -613,8 +675,8 @@ public sealed partial class MainWindow
                 tile.Sub.Text = !on ? Loc.T("Off")
                     : !wide ? Loc.T("On")
                     : Loc.T(M.CurrentSettings.StageOnRight ? "On · recent apps on the right" : "On · recent apps on the left");
-                Box(tile.Title, cx + 28, cy - 18, r.Right - Pad - cx - 28, 18);
-                Box(tile.Sub, cx + 28, cy, r.Right - Pad - cx - 28, 18);
+                Box(tile.Title, cx + 28, cy - 18, Math.Max(0, r.Right - Pad - cx - 28), 18);
+                Box(tile.Sub, cx + 28, cy, Math.Max(0, r.Right - Pad - cx - 28), 18);
             }
         }
 

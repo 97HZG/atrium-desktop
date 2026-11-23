@@ -61,6 +61,7 @@ internal sealed class BarSettings
     public bool ShowRunning { get; set; } = true;
     public bool ShowLaunchpad { get; set; } = true;
     public string LaunchpadMaterial { get; set; } = "bar"; // bar | tint
+    public string LaunchpadLayout { get; set; } = "window"; // window | fullscreen
     public bool ShowNowPlaying { get; set; } = true;
     public bool NowPlayingShowPaused { get; set; } = true;
     public string NowPlayingMotion { get; set; } = "normal"; // off | subtle | normal | vivid
@@ -211,6 +212,7 @@ internal sealed class BarSettings
             ["showRunning"] = ShowRunning,
             ["showLaunchpad"] = ShowLaunchpad,
             ["launchpadMaterial"] = LaunchpadMaterial,
+            ["launchpadLayout"] = LaunchpadLayout,
             ["showNowPlaying"] = ShowNowPlaying,
             ["nowPlayingShowPaused"] = NowPlayingShowPaused,
             ["nowPlayingMotion"] = NowPlayingMotion,
@@ -483,6 +485,7 @@ internal sealed class BarSettings
         string Str(string k, string d) => o?[k] is JsonValue v && v.TryGetValue(out string? t) && t != null ? t : d;
         s.ShowLaunchpad = Flag("showLaunchpad", f.ShowLaunchpad);
         s.LaunchpadMaterial = Str("launchpadMaterial", f.LaunchpadMaterial) == "tint" ? "tint" : "bar";
+        s.LaunchpadLayout = Str("launchpadLayout", f.LaunchpadLayout) == "fullscreen" ? "fullscreen" : "window";
         s.ShowNowPlaying = Flag("showNowPlaying", f.ShowNowPlaying);
         s.NowPlayingShowPaused = Flag("nowPlayingShowPaused", f.NowPlayingShowPaused);
         string motion = Str("nowPlayingMotion", f.NowPlayingMotion);
@@ -508,7 +511,7 @@ internal sealed class BarSettings
         ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus &&
         StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
-        ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad && LaunchpadMaterial == o.LaunchpadMaterial && ShowNowPlaying == o.ShowNowPlaying &&
+        ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad && LaunchpadMaterial == o.LaunchpadMaterial && LaunchpadLayout == o.LaunchpadLayout && ShowNowPlaying == o.ShowNowPlaying &&
         NowPlayingShowPaused == o.NowPlayingShowPaused && NowPlayingMotion == o.NowPlayingMotion && NowPlayingRhythm == o.NowPlayingRhythm &&
         NowPlayingAppMode == o.NowPlayingAppMode && NowPlayingApps.SequenceEqual(o.NowPlayingApps, StringComparer.OrdinalIgnoreCase) &&
         ShowFolderStacks == o.ShowFolderStacks &&

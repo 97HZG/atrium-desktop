@@ -1,7 +1,8 @@
 // Launchpad, as on macOS: the apps the user installed (and Windows' Settings), oldest first, then one
 // folder holding Windows' own apps (the catalog's `system`), opened in place; a search finds every app.
 // One window of the bar's glass (or that glass under a black veil: launchpadMaterial tint) in the middle
-// of the display, in pages of a grid (launchpad_model.h) with the page dots below and a search field
+// of the display (or over the whole monitor, launchpadLayout fullscreen, where a click on the empty glass
+// closes it), in pages of a grid (launchpad_model.h) with the page dots below and a search field
 // above. It opens from its entry next to the start logo: the glass fades in and the apps settle from a
 // little larger, all at once when every icon is read (a spinner meanwhile; they are read ahead at start),
 // and it leaves the same way. Typing goes into the search (the input method's composition inline, the
@@ -33,6 +34,7 @@ public:
     void Open(RECT work, HWND previous);
     void SetRadius(float dip) { radius_ = dip; }
     void SetTint(bool tint) { tint_ = tint; }
+    void SetFullscreen(bool on) { full_ = on; } // launchpadLayout fullscreen: the whole monitor, as macOS's
     void Close(bool launched);
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
@@ -68,6 +70,7 @@ private:
     D2D1_RECT_F SearchRect() const;
     float OpenAmount(double now) const; // 0 hidden .. 1 open, through the opening and the closing
     void Size(RECT work);               // w_, h_ and grid_ for a window on `work`
+    static RECT Monitor(RECT work);     // the monitor `work` is on (fullscreen)
     std::vector<CatalogApp> LaunchableApps() const;
     float Radius() const;
 
@@ -104,6 +107,7 @@ private:
     float w_ = 0, h_ = 0; // the window, DIP
     float radius_ = 24;   // the bar's popups' corner
     bool tint_ = false;   // launchpadMaterial tint: a black veil over the glass, light ink
+    bool full_ = false;   // launchpadLayout fullscreen
     int iconPx_ = 0;      // the icons' size on the display it opened on
     bool loading_ = false;  // icons still being read: a spinner instead of the apps
     double revealedMs_ = 0; // when the apps began to settle in

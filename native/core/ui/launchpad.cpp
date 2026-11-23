@@ -54,7 +54,7 @@ void Launchpad::Open(RECT work, HWND previous)
     const float s = PopupScale(work);
     const LONG cx = (work.left + work.right) / 2, cy = (work.top + work.bottom) / 2;
     const LONG halfW = std::lround(w_ * s / 2), halfH = std::lround(h_ * s / 2);
-    const RECT rect{cx - halfW, cy - halfH, cx + halfW, cy + halfH};
+    const RECT rect = full_ ? Monitor(work) : RECT{cx - halfW, cy - halfH, cx + halfW, cy + halfH};
     page_ = 0;
     pageShown_ = pageSpeed_ = 0;
     sel_ = hover_ = pressed_ = -1;
@@ -75,10 +75,24 @@ void Launchpad::Open(RECT work, HWND previous)
 void Launchpad::Size(RECT work)
 {
     const float s = PopupScale(work);
+    if (full_) { // the monitor, the bar's included
+        const RECT m = Monitor(work);
+        w_ = float(m.right - m.left) / s;
+        h_ = float(m.bottom - m.top) / s;
+        grid_ = ComputeLaunchpadGrid(w_, h_, true);
+        return;
+    }
     const float workW = float(work.right - work.left) / s, workH = float(work.bottom - work.top) / s;
     w_ = std::min(std::clamp(workW * 0.62f, kMinW, kMaxW), workW - 2 * kClear);
     h_ = std::min(std::clamp(workH * 0.66f, kMinH, kMaxH), workH - 2 * kClear);
     grid_ = ComputeLaunchpadGrid(w_, h_);
+}
+
+RECT Launchpad::Monitor(RECT work)
+{
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromRect(&work, MONITOR_DEFAULTTONEAREST), &mi);
+    return mi.rcMonitor;
 }
 
 std::vector<CatalogApp> Launchpad::LaunchableApps() const
@@ -215,7 +229,7 @@ D2D1_RECT_F Launchpad::Cell(int slot) const
 
 D2D1_RECT_F Launchpad::SearchRect() const { return D2D1::RectF(w_ / 2 - kSearchW / 2, kSearchTop, w_ / 2 + kSearchW / 2, kSearchTop + kSearchH); }
 
-float Launchpad::Radius() const { return std::max(radius_, kMinRadius); }
+float Launchpad::Radius() const { return full_ ? 0.f : std::max(radius_, kMinRadius); }
 
 // The window's glass, fading with the opening and the closing.
 void Launchpad::PublishGlass(double now)

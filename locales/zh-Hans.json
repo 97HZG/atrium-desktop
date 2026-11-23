@@ -1002,6 +1002,9 @@
   "Windows and apps in dark colours": "系统和应用使用深色",
   "Share this PC's internet": "共享这台电脑的网络",
   "Remove {0} from the control centre": "从控制中心移除{0}",
-  "Add {0} to the control centre": "将{0}添加到控制中心"
+  "Add {0} to the control centre": "将{0}添加到控制中心",
+  "Windowed": "窗口",
+  "Full-screen": "全屏",
+  "Display mode": "显示方式"
  }
 }

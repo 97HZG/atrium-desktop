@@ -126,6 +126,7 @@ void ExtrasHost::Apply(const Settings& s, float radius)
         stacks_.Close();
     launchpadOn_ = s.showLaunchpad;
     launchpad_.SetTint(s.launchpadMaterial == L"tint");
+    launchpad_.SetFullscreen(s.launchpadLayout == L"fullscreen");
     if (!launchpadOn_)
         launchpad_.Close(false);
     PrewarmLaunchpad();

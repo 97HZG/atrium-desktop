@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "shell/games.h"
 
 #include <dwmapi.h>
 
@@ -162,7 +163,7 @@ void GenieMinimize::Watch()
     DWORD pid = 0;
     if (root)
         GetWindowThreadProcessId(root, &pid);
-    if (pid == GetCurrentProcessId() || !Minimizable(root) || (skip_ && skip_(root)))
+    if (pid == GetCurrentProcessId() || !Minimizable(root) || (skip_ && skip_(root)) || IsGameWindow(root))
         root = nullptr;
     const ULONGLONG now = GetTickCount64();
     if (root != front_) {

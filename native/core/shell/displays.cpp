@@ -1,4 +1,5 @@
 #include "displays.h"
+#include "shell/games.h"
 #include "shell/task_model.h"
 
 #include <shellapi.h>
@@ -115,6 +116,8 @@ bool AtDisplayEdge(BarEdge edge, POINT pointer, const RECT& bounds) { return AtD
 
 bool FullScreenInFront(HMONITOR monitor)
 {
+    if (GameInFront(monitor)) // a game maximized or borderless counts as full screen
+        return true;
     HWND fg = GetForegroundWindow();
     HWND root = fg ? GetAncestor(fg, GA_ROOT) : nullptr;
     // No foreground for a moment (it is changing hands): the top app window on this screen.

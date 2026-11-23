@@ -4,6 +4,7 @@
 #include "log.h"
 #include "settings.h"
 #include "shell/displays.h"
+#include "shell/games.h"
 
 #include <dwmapi.h>
 #include <windowsx.h>
@@ -399,7 +400,8 @@ void StageManager::Update(const std::vector<TaskItem>& items)
     items_.clear();
     excludedWindows_.clear();
     for (const TaskItem& t : items) {
-        if (StageAppExcluded(excluded_, t.key)) {
+        // Games too: their windows stay on the screen, whatever opens.
+        if (StageAppExcluded(excluded_, t.key) || std::ranges::any_of(t.windows, IsGameWindow)) {
             // Never put away, but still a window the strip keeps out of the way of.
             excludedWindows_.insert(excludedWindows_.end(), t.windows.begin(), t.windows.end());
             continue;

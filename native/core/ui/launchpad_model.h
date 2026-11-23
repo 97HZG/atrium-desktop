@@ -33,15 +33,20 @@ struct LaunchpadSlice {
     size_t end = 0;
 };
 
-inline LaunchpadGrid ComputeLaunchpadGrid(float widthDip, float heightDip)
+// fullscreen: the whole screen, as macOS's: seven by five, larger icons, room for the bar below.
+inline LaunchpadGrid ComputeLaunchpadGrid(float widthDip, float heightDip, bool fullscreen = false)
 {
-    constexpr float kTopReserve = 96.0f;
-    constexpr float kBottomReserve = 64.0f;
-    constexpr float kMaxCellW = 168.0f;
-    constexpr float kMaxCellH = 144.0f;
+    const float kTopReserve = fullscreen ? 120.0f : 96.0f;
+    const float kBottomReserve = fullscreen ? 140.0f : 64.0f;
+    const float kMaxCellW = fullscreen ? 240.0f : 168.0f;
+    const float kMaxCellH = fullscreen ? 184.0f : 144.0f;
 
     LaunchpadGrid grid;
-    if (widthDip >= 1200.0f && heightDip >= 720.0f) {
+    if (fullscreen) {
+        grid.cols = 7;
+        grid.rows = 5;
+        grid.iconDip = std::clamp(std::min(widthDip / 7.0f * 0.42f, (heightDip - kTopReserve - kBottomReserve) / 5.0f * 0.6f), 64.0f, 104.0f);
+    } else if (widthDip >= 1200.0f && heightDip >= 720.0f) {
         grid.cols = 7;
         grid.rows = 5;
         grid.iconDip = 64.0f;
@@ -56,7 +61,7 @@ inline LaunchpadGrid ComputeLaunchpadGrid(float widthDip, float heightDip)
     }
     grid.perPage = grid.cols * grid.rows;
 
-    const float sideMargin = std::clamp(widthDip * 0.06f, 16.0f, 96.0f);
+    const float sideMargin = fullscreen ? widthDip * 0.1f : std::clamp(widthDip * 0.06f, 16.0f, 96.0f);
     const float availW = std::max(1.0f, widthDip - 2.0f * sideMargin);
     const float availH = std::max(1.0f, heightDip - kTopReserve - kBottomReserve);
 

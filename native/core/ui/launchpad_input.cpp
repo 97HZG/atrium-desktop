@@ -249,6 +249,8 @@ void Launchpad::Release(POINT pt)
         SetPage(-2 - was);
     else if (was == kGlass && at == kGlass && folderOpen_ && query_.empty())
         ShowFolder(false); // the empty glass around a folder's apps closes the folder
+    else if (was == kGlass && at == kGlass && full_)
+        Close(false); // all of the screen: its empty glass is the outside
     surface_.Invalidate();
 }
 

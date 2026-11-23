@@ -52,6 +52,7 @@
 | `showRunning` | bool | | true | 显示未固定但正在运行的应用 |
 | `showLaunchpad` | bool | | true | 开始徽标旁的启动台入口 |
 | `launchpadMaterial` | string | `bar` / `tint` | `bar` | 启动台的材质：跟随任务栏的玻璃，或玻璃上加一层黑色蒙版（原色） |
+| `launchpadLayout` | string | `window` / `fullscreen` | `window` | 启动台的样子：屏幕中间的一个窗口；或像 macOS 那样铺满整个屏幕（跟随任务栏时是一层模糊桌面的玻璃，原色时再加黑色蒙版），图标更大 |
 | `showNowPlaying` | bool | | true | 任务栏正在播放媒体入口（仅在存在媒体会话时出现） |
 | `nowPlayingShowPaused` | bool | | true | 媒体会话暂停时是否在任务栏保留正在播放入口 |
 | `nowPlayingMotion` | string | `off` / `subtle` / `normal` / `vivid` | `normal` | 正在播放入口五根竖杠的波形动效幅度 |
