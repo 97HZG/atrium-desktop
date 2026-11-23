@@ -4,6 +4,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "win32_path.h"
 
 #include <windowsx.h>
 
@@ -28,6 +29,21 @@ std::wstring TitleOf(HWND h)
     wchar_t buf[256] = {};
     int n = InternalGetWindowText(h, buf, 256);
     return std::wstring(buf, size_t(std::max(n, 0)));
+}
+
+void LogThumbFailure(std::unordered_set<HWND>& logged, HWND window, const wchar_t* op, HRESULT hr, SIZE source)
+{
+    if (!logged.insert(window).second)
+        return;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    const std::wstring exe = pid ? ProcessImagePath(pid) : L"";
+    wchar_t cls[96] = {};
+    GetClassNameW(window, cls, int(std::size(cls)));
+    RECT win{};
+    GetWindowRect(window, &win);
+    Log(L"preview: %s failed for %p hr=0x%08X source=%ldx%ld exe=%s class=%s size=%ldx%ld", op, window, unsigned(hr), source.cx, source.cy,
+        exe.empty() ? L"?" : exe.c_str(), cls[0] ? cls : L"?", win.right - win.left, win.bottom - win.top);
 }
 
 } // namespace
@@ -90,11 +106,24 @@ void WindowPreview::SetWindows(const std::vector<HWND>& windows)
         return;
     }
     for (Card& c : cards_) {
-        if (!c.thumb && FAILED(DwmRegisterThumbnail(surface_.Hwnd(), c.window, &c.thumb)))
-            c.thumb = nullptr;
+        if (!c.thumb) {
+            if (const HRESULT hr = DwmRegisterThumbnail(surface_.Hwnd(), c.window, &c.thumb); FAILED(hr)) {
+                c.thumb = nullptr;
+                LogThumbFailure(loggedFailures_, c.window, L"DwmRegisterThumbnail", hr, {});
+            }
+        }
         c.source = SIZE{1, 1};
-        if (c.thumb)
-            DwmQueryThumbnailSourceSize(c.thumb, &c.source);
+        if (c.thumb) {
+            SIZE source{};
+            const HRESULT hr = DwmQueryThumbnailSourceSize(c.thumb, &source);
+            if (ValidThumbnailSource(hr, source)) {
+                c.source = source;
+            } else {
+                DwmUnregisterThumbnail(c.thumb);
+                c.thumb = nullptr;
+                LogThumbFailure(loggedFailures_, c.window, L"DwmQueryThumbnailSourceSize", hr, source);
+            }
+        }
         // The window as it looks: without the invisible resize borders around it.
         RECT win{}, frame{};
         GetWindowRect(c.window, &win);

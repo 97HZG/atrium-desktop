@@ -1,5 +1,8 @@
 #include "ui/window_snapshot.h"
 
+#include "log.h"
+#include "win32_path.h"
+
 #include <dwmapi.h>
 
 #include <algorithm>
@@ -144,10 +147,26 @@ float CornerRadius(HWND window)
 
 bool CanPrintWindow(HWND window) { return IsWindow(window) && !IsIconic(window) && IsWindowVisible(window) && !IsHungAppWindow(window); }
 
-WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, int largeMax, WindowPicture* large)
+void LogCaptureFailure(std::unordered_set<HWND>& logged, HWND window, const wchar_t* reason, int w, int h, DWORD err = 0)
 {
-    if (!CanPrintWindow(window))
+    if (!logged.insert(window).second)
+        return;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    const std::wstring exe = pid ? ProcessImagePath(pid) : L"";
+    wchar_t cls[96] = {};
+    GetClassNameW(window, cls, int(std::size(cls)));
+    Log(L"snapshot: %s for %p err=%lu exe=%s class=%s size=%dx%d", reason, window, err, exe.empty() ? L"?" : exe.c_str(), cls[0] ? cls : L"?", w, h);
+}
+
+WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, int largeMax, WindowPicture* large, std::unordered_set<HWND>& logged)
+{
+    if (!CanPrintWindow(window)) {
+        RECT win{};
+        GetWindowRect(window, &win);
+        LogCaptureFailure(logged, window, L"CanPrintWindow false", win.right - win.left, win.bottom - win.top);
         return {};
+    }
     RECT win{}, frame{};
     if (!GetWindowRect(window, &win) || win.right <= win.left || win.bottom <= win.top)
         return {};
@@ -176,7 +195,13 @@ WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, in
     }
     HGDIOBJ old = SelectObject(dc, dib);
     // PW_RENDERFULLCONTENT: what DWM shows, also of windows drawn with the GPU.
-    const bool printed = CanPrintWindow(window) && PrintWindow(window, dc, 2) != FALSE;
+    bool printed = false;
+    if (!CanPrintWindow(window))
+        LogCaptureFailure(logged, window, L"CanPrintWindow false", ww, wh);
+    else if (!PrintWindow(window, dc, 2))
+        LogCaptureFailure(logged, window, L"PrintWindow FALSE", ww, wh, GetLastError());
+    else
+        printed = true;
     GdiFlush();
     WindowPicture result;
     if (printed) {
@@ -187,7 +212,9 @@ WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, in
         const uint8_t* src = static_cast<const uint8_t*>(bits) + (size_t(part.top) * ww + part.left) * 4;
         // Nothing came (some windows cannot be printed), or one plain colour (a window that has not
         // drawn itself yet): no picture.
-        if (pw > 0 && ph > 0 && !Blank(src, pw, ph, ww * 4)) {
+        if (pw > 0 && ph > 0 && Blank(src, pw, ph, ww * 4)) {
+            LogCaptureFailure(logged, window, L"Blank", pw, ph);
+        } else if (pw > 0 && ph > 0) {
             const float f = std::min({1.f, float(maxWidth) / float(pw), float(maxHeight) / float(ph)});
             const int tw = std::max(1, int(std::lround(pw * f))), th = std::max(1, int(std::lround(ph * f)));
             result = Finish(Shrink(src, pw, ph, ww * 4, tw, th), tw, th, radius);
@@ -277,6 +304,7 @@ void WindowSnapshots::Worker()
 {
     // Physical px of every monitor, as the window's own picture is.
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    std::unordered_set<HWND> loggedFailures;
     for (;;) {
         Job job{};
         {
@@ -287,7 +315,7 @@ void WindowSnapshots::Worker()
             job = queue_.front();
             queue_.pop_front();
         }
-        WindowPicture large, p = Capture(job.window, job.maxWidth, job.maxHeight, job.radius, job.largeMax, &large);
+        WindowPicture large, p = Capture(job.window, job.maxWidth, job.maxHeight, job.radius, job.largeMax, &large, loggedFailures);
         std::lock_guard g(lock_);
         pending_.erase(job.window);
         if (stop_ || !notify_)

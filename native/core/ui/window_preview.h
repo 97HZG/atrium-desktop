@@ -14,9 +14,13 @@
 
 #include <map>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace atrium {
+
+// True when DwmQueryThumbnailSourceSize succeeded and returned a non-empty source size.
+inline bool ValidThumbnailSource(HRESULT hr, SIZE source) { return SUCCEEDED(hr) && source.cx > 0 && source.cy > 0; }
 
 class WindowPreview {
 public:
@@ -70,6 +74,7 @@ private:
     bool tracking_ = false, inside_ = false;
     float thumbAlpha_ = 0; // the pictures fade in once the glass has popped out
     double fadeStart_ = 0;
+    std::unordered_set<HWND> loggedFailures_;
 };
 
 } // namespace atrium

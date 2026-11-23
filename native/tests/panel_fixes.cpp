@@ -1,5 +1,6 @@
 #include "ui/calendar_panel.h"
 #include "ui/tray_panel.h"
+#include "ui/window_preview.h"
 
 #include <iostream>
 
@@ -30,6 +31,11 @@ int main()
     check(!TrayFollowCancelled(120, 100, 90, false, a, {504, 904}, d200, false), "DPI-scaled double-click rect allows 4 px");
     check(!TrayFollowCancelled(120, 100, 90, true, a, {1200, 20}, d96, false), "synthetic pointer in flight ignores cursor distance");
     check(!TrayFollowCancelled(120, 100, 90, true, a, {1200, 20}, d96, true), "the fallback's own button press does not cancel it");
+    check(ValidThumbnailSource(S_OK, {1280, 800}), "valid thumbnail source size");
+    check(!ValidThumbnailSource(S_OK, {0, 0}) && !ValidThumbnailSource(S_OK, {0, 800}) && !ValidThumbnailSource(S_OK, {1280, 0}),
+          "zero thumbnail source size is rejected");
+    check(!ValidThumbnailSource(S_OK, {-1, 800}), "negative thumbnail source size is rejected");
+    check(!ValidThumbnailSource(E_FAIL, {1280, 800}), "failed DwmQueryThumbnailSourceSize is rejected");
     if (fail)
         return 1;
     std::cout << "PASS: panel_fixes\n";
