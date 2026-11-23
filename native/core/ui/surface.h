@@ -174,6 +174,8 @@ public:
     // clicks, which elsewhere reach the windows below; an empty rectangle: the whole window. A
     // popup whose pieces change size inside a window that does not (the start menu).
     void SetRegion(D2D1_RECT_F dip);
+    // Nothing of the window on screen or taking clicks until SetRegion again: a layer kept ready, out of the way.
+    void SetRegionNone();
     // Keep backing buffers stable during a resize; {0,0} releases the reserve.
     // Input bounds and glass shape keep their actual size.
     void ReserveResize(D2D1_SIZE_F sizeDip);
@@ -256,6 +258,7 @@ private:
     RECT presentedWindow_{}; // last content frame, used only to protect in-flight pixels from clipping
     RECT inputRegion_{};
     D2D1_RECT_F region_{}; // SetRegion
+    bool regionNone_ = false; // SetRegionNone
     float scale_ = 1;
     float radius_ = 20;
     D2D1_SIZE_F resizeReserve_{};

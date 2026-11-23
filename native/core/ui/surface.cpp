@@ -401,6 +401,13 @@ void Surface::ApplyPlacement()
 void Surface::SetRegion(D2D1_RECT_F dip)
 {
     region_ = dip;
+    regionNone_ = false;
+    ApplyRegion();
+}
+
+void Surface::SetRegionNone()
+{
+    regionNone_ = true;
     ApplyRegion();
 }
 
@@ -409,14 +416,16 @@ void Surface::ApplyRegion()
     if (desktopLayer_)
         return; // its own region (ApplyPlacement)
     RECT r{};
-    if (region_.right > region_.left && region_.bottom > region_.top) {
+    if (regionNone_) {
+        r = RECT{-1, -1, -1, -1}; // apart from the whole window's empty rectangle
+    } else if (region_.right > region_.left && region_.bottom > region_.top) {
         const int inset = InsetPx();
         r = RECT{LONG(std::floor(region_.left * scale_)), LONG(std::floor(region_.top * scale_)), LONG(std::ceil(region_.right * scale_)) + 2 * inset,
                  LONG(std::ceil(region_.bottom * scale_)) + 2 * inset};
     }
     if (EqualRect(&r, &inputRegion_))
         return;
-    HRGN shape = IsRectEmpty(&r) ? nullptr : CreateRectRgn(r.left, r.top, r.right, r.bottom);
+    HRGN shape = regionNone_ ? CreateRectRgn(0, 0, 0, 0) : IsRectEmpty(&r) ? nullptr : CreateRectRgn(r.left, r.top, r.right, r.bottom);
     if (SetWindowRgn(hwnd_, shape, FALSE))
         inputRegion_ = r; // Windows owns the region after success
     else if (shape)

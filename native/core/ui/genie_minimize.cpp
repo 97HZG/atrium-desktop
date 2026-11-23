@@ -70,16 +70,10 @@ GenieMinimize::GenieMinimize(HINSTANCE instance, std::function<std::optional<REC
     : surface_(instance, L"Atrium Genie", false, 0), snapshots_(surface_.Hwnd(), WM_GENIE_PICTURE), target_(std::move(target)), skip_(std::move(skip))
 {
     surface_.SetGlassless(true);
-    // Over everything and never in the way: clicks go through to the windows below.
-    const HWND h = surface_.Hwnd();
-    (void)h; // EXPERIMENT
-
+    surface_.SetRegionNone(); // over everything and out of the way until something pours
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM, LRESULT&) {
         if (m == WM_TIMER && w == kWatchTimer) {
-            static int watches = 0;
-            if (++watches % 20 == 1)
-                Log(L"genie: watch %d", watches);
             Watch();
         } else if (m == WM_TIMER && w == kIdleTimer) {
             KillTimer(surface_.Hwnd(), kIdleTimer);
@@ -114,8 +108,7 @@ void GenieMinimize::SetEnabled(bool on)
         g_genie = this;
         hook_ = SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART, nullptr, OnMinimizeStart, 0, 0,
                                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-        const UINT_PTR timer = SetTimer(surface_.Hwnd(), kWatchTimer, kWatchMs, nullptr);
-        Log(L"genie: watching %p (timer %d, hook %p)", surface_.Hwnd(), int(timer != 0), hook_);
+        SetTimer(surface_.Hwnd(), kWatchTimer, kWatchMs, nullptr);
     } else {
         if (hook_)
             UnhookWinEvent(hook_);
@@ -280,6 +273,15 @@ void GenieMinimize::Launch(Flight f)
     f.key = L"genie|" + std::to_wstring(++flightGen_);
     Arm(f.from);
     flights_.push_back(std::move(f));
+    // On screen (and in the way of clicks) only where the flights go, while they do.
+    const RECT origin = surface_.Rect();
+    const float s = surface_.Scale();
+    D2D1_RECT_F area = D2D1::RectF(1e9f, 1e9f, -1e9f, -1e9f);
+    for (const Flight& g : flights_)
+        for (const RECT& r : {g.from, g.to})
+            area = D2D1::RectF(std::min(area.left, float(r.left - origin.left) / s), std::min(area.top, float(r.top - origin.top) / s),
+                               std::max(area.right, float(r.right - origin.left) / s), std::max(area.bottom, float(r.bottom - origin.top) / s));
+    surface_.SetRegion(area);
     surface_.Invalidate();
 }
 
@@ -304,10 +306,12 @@ void GenieMinimize::Paint(Canvas& c)
             ++it;
         }
     }
-    if (!flights_.empty())
+    if (!flights_.empty()) {
         c.Continue();
-    else
+    } else {
+        surface_.SetRegionNone();
         SetTimer(surface_.Hwnd(), kIdleTimer, kIdleMs, nullptr);
+    }
 }
 
 // One flight's frame: into the icon over kFlightMs; out of it the same way backwards, then the picture held
