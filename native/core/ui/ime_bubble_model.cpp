@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace atrium {
 
@@ -55,10 +56,10 @@ double ImeBubbleModel::AbsorbMs() const { return double(kLobeRiseMs + kLobeAttac
 double ImeBubbleModel::TouchMs() const { return std::min(RiseEndMs() + kLobeAttachMs, AbsorbMs() - 1); }
 double ImeBubbleModel::TouchFrac() const { return TouchMs() / AbsorbMs(); }
 
-float ImeBubbleModel::softBounce(double ms, float rebound)
+float ImeBubbleModel::SoftBounce(double ms, float rebound)
 {
     const double r = std::clamp(double(rebound), 0.02, 0.6);
-    const double k = std::max(2.0, -16.0 * std::log(r) / 3.14159265358979323846);
+    const double k = std::max(2.0, -16.0 * std::log(r) / std::numbers::pi);
     const double t = ms / 1000;
     return 1 - float(std::exp(-k * t) * std::cos(16 * t));
 }
@@ -104,12 +105,6 @@ ImeBubbleModel::Frame ImeBubbleModel::Step(double now)
     if (t < 0 || now >= EndMs())
         return {};
     const double popRel = popAt_ - since_; // where the pop sits in the life
-    // The newcomer's absorb and its two stage boundaries, from the constants:
-    // [0, uRise) the slow rise, [uRise, uAttach) the fast approach into the
-    // rim, [uAttach, 1) the swallow.
-    const double absorb = AbsorbMs();
-    const double uRise = RiseEndMs() / absorb;
-    const double uAttach = TouchFrac();
     Frame f;
     f.active = f.animating = true;
     // The merges as one elastic body: every newcomer whose touch has come
@@ -121,7 +116,7 @@ ImeBubbleModel::Frame ImeBubbleModel::Step(double now)
         const double sinceTouch = now - (l.launch + TouchMs());
         if (sinceTouch < 0)
             continue;
-        grow += (ScaleAt(l.step) - ScaleAt(l.step - 1)) * softBounce(sinceTouch, kRebound);
+        grow += (ScaleAt(l.step) - ScaleAt(l.step - 1)) * SoftBounce(sinceTouch, kRebound);
         if (sinceTouch < kWobbleMs)
             wob += WobbleAt(sinceTouch, l.amp, l.freq);
     }
@@ -131,9 +126,9 @@ ImeBubbleModel::Frame ImeBubbleModel::Step(double now)
     // The centre: up from below during the emerge, then the float carries
     // it a little past its rest, upwards. How far below it is born is
     // kFirstBirthDip.
-    float rise = kFirstBirthDip * float(1 - ease(t / kEmergeMs));
+    float rise = kFirstBirthDip * float(1 - Ease(t / kEmergeMs));
     if (t > kEmergeMs)
-        rise -= kFloatRise * easeInOut(float((t - kEmergeMs) / kFloatMs));
+        rise -= kFloatRise * EaseInOut(float((t - kEmergeMs) / kFloatMs));
     f.cy = kCyRest + rise;
     // The size: a springy swell in, a breath while floating, the pressure
     // before the burst — which swells once more, this time for real, and
@@ -142,11 +137,33 @@ ImeBubbleModel::Frame ImeBubbleModel::Step(double now)
     if (t < kEmergeMs)
         phase = 0.5f + 0.5f * motion::EaseOutBack(float(t / kEmergeMs), 1.70158f);
     else if (t < popRel)
-        phase = 1 + 0.012f * float(std::sin(6.2831853f * float((t - kEmergeMs) / kFloatMs)));
+        phase = 1 + 0.012f * std::sin(6.2831853f * float((t - kEmergeMs) / kFloatMs));
     else if (t - popRel < kSwellMs)
-        phase = 1 + (swellPeak_ - 1) * ease(float(t - popRel) / kSwellMs);
+        phase = 1 + (swellPeak_ - 1) * Ease(float(t - popRel) / kSwellMs);
     else
-        phase = swellPeak_ + (burstScale_ - swellPeak_) * ease(float((t - popRel - kSwellMs) / 110));
+        phase = swellPeak_ + (burstScale_ - swellPeak_) * Ease(float((t - popRel - kSwellMs) / 110));
+    const float dip = StepLobes(now, grow, f);
+    phase *= 1 - kCompression * std::min(dip, 1.f);
+    f.scale = grow * phase;
+    if (t < popRel)
+        f.opacity = t < 220 ? Ease(float(t) / 220) : 1;
+    else {
+        const float tb = float((t - popRel - kSwellMs) / 1000); // s since the skin gave way
+        f.opacity = 1 - Ease(tb * 1000 / 120);
+        f.cy -= 3 * Ease(tb * 1000 / 120);
+        Tear(tb, grow, f);
+    }
+    return f;
+}
+
+float ImeBubbleModel::StepLobes(double now, float grow, Frame& f) const
+{
+    // The newcomer's absorb and its two stage boundaries, from the constants:
+    // [0, uRise) the slow rise, [uRise, uAttach) the fast approach into the
+    // rim, [uAttach, 1) the swallow.
+    const double absorb = AbsorbMs();
+    const double uRise = RiseEndMs() / absorb;
+    const double uAttach = TouchFrac();
     // The newcomers, oldest first: each rises from the emerge line as a
     // bubble of its own, touches the skin and is swallowed. A rapid run
     // shows them side by side — a frame carries the newest ones — and where
@@ -189,35 +206,25 @@ ImeBubbleModel::Frame ImeBubbleModel::Step(double now)
         LobeFrame& lobe = f.lobes[f.lobeCount++];
         lobe.u = u;
         if (u < float(uRise)) { // the slow rise: off-screen up to the hover
-            const float e = easeInOut(u / float(uRise));
+            const float e = EaseInOut(u / float(uRise));
             lobe.x = startX + (hx - startX) * e;
             lobe.y = startY + (hy - startY) * e;
             lobe.r = rStart + (rTouch * 0.8f - rStart) * e;
         } else if (u < float(uAttach)) { // the fast approach: the hover into the rim
-            const float e = easeIn((u - float(uRise)) / float(uAttach - uRise));
+            const float e = EaseIn((u - float(uRise)) / float(uAttach - uRise));
             lobe.x = hx + (tx - hx) * e;
             lobe.y = hy + (ty - hy) * e;
             lobe.r = rTouch * 0.8f + (rTouch - rTouch * 0.8f) * e;
         } else { // the swallow: into the middle, shrinking away
-            const float e = ease((u - float(uAttach)) / float(1 - uAttach));
+            const float e = Ease((u - float(uAttach)) / float(1 - uAttach));
             lobe.x = tx + (kCx - tx) * e;
             lobe.y = ty + (f.cy - ty) * e;
             lobe.r = rTouch * (1 - 0.96f * e);
         }
         const float d = (u - float(uAttach)) / float(kDipSpan);
-        dip += float(std::exp(-d * d)); // the hit compresses the skin
+        dip += std::exp(-d * d); // the hit compresses the skin
     }
-    phase *= 1 - kCompression * std::min(dip, 1.f);
-    f.scale = grow * phase;
-    if (t < popRel)
-        f.opacity = t < 220 ? ease(float(t) / 220) : 1;
-    else {
-        const float tb = float((t - popRel - kSwellMs) / 1000); // s since the skin gave way
-        f.opacity = 1 - ease(tb * 1000 / 120);
-        f.cy -= 3 * ease(tb * 1000 / 120);
-        Tear(tb, grow, f);
-    }
-    return f;
+    return dip;
 }
 
 void ImeBubbleModel::PlanBurst()
@@ -262,7 +269,7 @@ void ImeBubbleModel::Tear(float tb, float grow, Frame& f)
         const auto& b = beads_[i];
         const float ms = tb * 1000;
         const float u = std::clamp(ms / b.life, 0.f, 1.f); // its own lifetime, 0..1
-        const float rad = b.deg * (3.1415926f / 180);
+        const float rad = b.deg * (std::numbers::pi_v<float> / 180);
         // The swarm scatters a touch wider sideways than along the pop's own
         // vertical: a drop flying level (or at any angle off straight up)
         // carries this extra reach, while the jet at the top keeps its own
@@ -271,32 +278,32 @@ void ImeBubbleModel::Tear(float tb, float grow, Frame& f)
         const float dirSpread = 1 + 0.20f * (1 - std::abs(std::sin(rad)));
         const float away = rSkin + b.speed * dirSpread * size * travel; // drops leave from the rim, not the middle
         const float wob = std::sin(6.2831853f * b.wobbleHz * tb + b.phase) * b.wobbleAmp * float(1.0 - u);
-        f.beads[i].x = bx + float(std::cos(rad) * away - std::sin(rad) * wob);
-        f.beads[i].y = by + float(std::sin(rad) * away + std::cos(rad) * wob) + kDroop * std::max(0.f, tb - b.droopAfter) * std::max(0.f, tb - b.droopAfter);
+        f.beads[i].x = bx + std::cos(rad) * away - std::sin(rad) * wob;
+        f.beads[i].y = by + std::sin(rad) * away + std::cos(rad) * wob + kDroop * std::max(0.f, tb - b.droopAfter) * std::max(0.f, tb - b.droopAfter);
         // It thins away to nothing over its own life — never blinks off.
         f.beads[i].r = u >= 1 ? 0 : b.r0 * grow * (1 - u * u);
         // And its last sparkle: the final 30 % of its life.
         const float g = (u - 0.70f) / 0.30f;
-        f.beads[i].glint = (u >= 0.70f && u < 1) ? std::sin(3.1415926f * std::clamp(g, 0.f, 1.f)) : 0.f;
+        f.beads[i].glint = (u >= 0.70f && u < 1) ? std::sin(std::numbers::pi_v<float> * std::clamp(g, 0.f, 1.f)) : 0.f;
     }
     // The foam lives longer than the mist dissolving behind it.
-    f.beadOpacity = 1 - ease(tb * 1000 / 420);
-    f.mistOpacity = 1 - ease(tb * 1000 / 300);
+    f.beadOpacity = 1 - Ease(tb * 1000 / 420);
+    f.mistOpacity = 1 - Ease(tb * 1000 / 300);
 }
 
-float ImeBubbleModel::ease(double t)
+float ImeBubbleModel::Ease(double t)
 {
     const float p = float(std::clamp(t, 0.0, 1.0));
     return 1 - (1 - p) * (1 - p) * (1 - p);
 }
 
-float ImeBubbleModel::easeIn(double t)
+float ImeBubbleModel::EaseIn(double t)
 {
     const float p = float(std::clamp(t, 0.0, 1.0));
     return p * p * p;
 }
 
-float ImeBubbleModel::easeInOut(double t)
+float ImeBubbleModel::EaseInOut(double t)
 {
     const float p = float(std::clamp(t, 0.0, 1.0));
     return p < 0.5f ? 2 * p * p : 1 - float(std::pow(-2 * p + 2, 2)) / 2;
@@ -304,7 +311,7 @@ float ImeBubbleModel::easeInOut(double t)
 
 float ImeBubbleModel::WobbleAt(double ms, float amp, float freqHz)
 {
-    return amp * float(std::exp(-ms / 260.0)) * float(std::sin(6.2831853f * freqHz * float(ms / 1000)));
+    return amp * float(std::exp(-ms / 260.0)) * std::sin(6.2831853f * freqHz * float(ms / 1000));
 }
 
 float ImeBubbleModel::U(float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng_); }

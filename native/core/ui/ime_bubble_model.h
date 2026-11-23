@@ -122,7 +122,7 @@ public:
     // rebound is how far the first swing passes its target (0.31: about 31 %,
     // the old feel); the decay follows from it, so 0.31 gives the old
     // exp(-6 t) cos(16 t). Used both for the size and tested as the feel.
-    static float softBounce(double ms, float rebound);
+    static float SoftBounce(double ms, float rebound);
     // One newcomer's own liquid rhythm, `ms` after its touch: a decaying sine
     // at its own pace and strength. The frame's wobble is the sum of these,
     // and the feel is tested as this closed form.
@@ -151,8 +151,8 @@ public:
         bool active = false, animating = false;
     };
 
-    bool active() const { return active_; }
-    int fusions() const { return fusions_; }
+    bool Active() const { return active_; }
+    int Fusions() const { return fusions_; }
     // The bubble is out there and has not begun to burst: a newer state can
     // still merge into it.
     bool Mergeable(double now) const;
@@ -188,11 +188,13 @@ private:
 
     void PlanBurst();
     void Tear(float tb, float grow, Frame& f);
+    // Updates active newcomer lobes for `now` and returns the combined hit dip.
+    float StepLobes(double now, float grow, Frame& f) const;
 
-    static float ease(double t);
+    static float Ease(double t);
     // Accelerating: still at first, quickest at the end (the rush into the rim).
-    static float easeIn(double t);
-    static float easeInOut(double t);
+    static float EaseIn(double t);
+    static float EaseInOut(double t);
 
     float U(float a, float b);
 

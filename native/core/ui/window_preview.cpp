@@ -363,61 +363,89 @@ int WindowPreview::CardAt(POINT pt) const
     return -1;
 }
 
-bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
+bool WindowPreview::InClose(int index, POINT pt) const
 {
-    POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
-    auto inClose = [&](int i) {
-        if (i < 0)
-            return false;
-        float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;
-        const D2D1_RECT_F& r = cards_[size_t(i)].close;
-        return x >= r.left - 2 && x < r.right + 2 && y >= r.top - 2 && y < r.bottom + 2;
-    };
-    switch (m) {
-    case WM_TIMER:
-        if (w == kLeaveTimer) {
-            KillTimer(surface_.Hwnd(), kLeaveTimer);
-            if (!inside_)
-                Close();
-            return true;
-        }
-        if (w == kFadeTimer) {
-            thumbAlpha_ = float(std::clamp((ClockMs() - fadeStart_) / kFadeMs, 0.0, 1.0));
-            thumbAlpha_ = 1 - (1 - thumbAlpha_) * (1 - thumbAlpha_) * (1 - thumbAlpha_); // ease out
-            UpdateThumbs();
-            if (thumbAlpha_ >= 0.999f)
-                KillTimer(surface_.Hwnd(), kFadeTimer);
-            return true;
-        }
-        if (w == kPeekTimer) {
-            KillTimer(surface_.Hwnd(), kPeekTimer);
-            if (hover_ >= 0)
-                peek_.Show(cards_[size_t(hover_)].window);
-            return true;
-        }
+    if (index < 0)
         return false;
-    case WM_MOUSEMOVE: {
-        if (!tracking_) {
-            TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
-            tracking_ = TrackMouseEvent(&tme) != FALSE;
-        }
-        inside_ = true;
+    const float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;
+    const D2D1_RECT_F& r = cards_[size_t(index)].close;
+    return x >= r.left - 2 && x < r.right + 2 && y >= r.top - 2 && y < r.bottom + 2;
+}
+
+bool WindowPreview::OnTimer(WPARAM timerId)
+{
+    if (timerId == kLeaveTimer) {
         KillTimer(surface_.Hwnd(), kLeaveTimer);
-        int i = CardAt(pt);
-        bool c = inClose(i);
-        if (i != hover_ && peekOn_) {
-            // Onto another picture: a peek at it once the pointer rests; off the pictures: none.
-            if (i < 0)
-                peek_.Hide();
-            SetTimer(surface_.Hwnd(), kPeekTimer, peek_.Window() ? 0 : kPeekMs, nullptr);
-        }
-        if (i != hover_ || c != overClose_) {
-            hover_ = i;
-            overClose_ = c;
-            surface_.Invalidate();
-        }
+        if (!inside_)
+            Close();
         return true;
     }
+    if (timerId == kFadeTimer) {
+        thumbAlpha_ = float(std::clamp((ClockMs() - fadeStart_) / kFadeMs, 0.0, 1.0));
+        thumbAlpha_ = 1 - (1 - thumbAlpha_) * (1 - thumbAlpha_) * (1 - thumbAlpha_); // ease out
+        UpdateThumbs();
+        if (thumbAlpha_ >= 0.999f)
+            KillTimer(surface_.Hwnd(), kFadeTimer);
+        return true;
+    }
+    if (timerId == kPeekTimer) {
+        KillTimer(surface_.Hwnd(), kPeekTimer);
+        if (hover_ >= 0)
+            peek_.Show(cards_[size_t(hover_)].window);
+        return true;
+    }
+    return false;
+}
+
+void WindowPreview::OnMouseMove(POINT pt)
+{
+    if (!tracking_) {
+        TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
+        tracking_ = TrackMouseEvent(&tme) != FALSE;
+    }
+    inside_ = true;
+    KillTimer(surface_.Hwnd(), kLeaveTimer);
+    const int i = CardAt(pt);
+    const bool c = InClose(i, pt);
+    if (i != hover_ && peekOn_) {
+        // Onto another picture: a peek at it once the pointer rests; off the pictures: none.
+        if (i < 0)
+            peek_.Hide();
+        SetTimer(surface_.Hwnd(), kPeekTimer, peek_.Window() ? 0 : kPeekMs, nullptr);
+    }
+    if (i != hover_ || c != overClose_) {
+        hover_ = i;
+        overClose_ = c;
+        surface_.Invalidate();
+    }
+}
+
+void WindowPreview::OnButtonUp(UINT message, POINT pt)
+{
+    const int i = CardAt(pt);
+    const bool same = i >= 0 && i == pressed_;
+    pressed_ = -1;
+    surface_.Invalidate();
+    if (!same)
+        return;
+    HWND target = cards_[size_t(i)].window;
+    if (message == WM_MBUTTONUP || InClose(i, pt)) {
+        // Queue the same command as a native close button. The task model
+        // retires the card only after the window actually closes or hides.
+        if (TaskModel::CloseWindow(target))
+            Log(L"preview: requested window close for %s (%p)", key_.c_str(), target);
+        return;
+    }
+    Close();
+    TaskModel::ActivateWindow(target);
+}
+
+bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
+{
+    const POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+    switch (m) {
+    case WM_TIMER: return OnTimer(w);
+    case WM_MOUSEMOVE: OnMouseMove(pt); return true;
     case WM_MOUSELEAVE:
         KillTimer(surface_.Hwnd(), kPeekTimer);
         peek_.Hide();
@@ -434,25 +462,7 @@ bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         surface_.Invalidate();
         return true;
     case WM_LBUTTONUP:
-    case WM_MBUTTONUP: {
-        int i = CardAt(pt);
-        bool same = i >= 0 && i == pressed_;
-        pressed_ = -1;
-        surface_.Invalidate();
-        if (!same)
-            return true;
-        HWND target = cards_[size_t(i)].window;
-        if (m == WM_MBUTTONUP || inClose(i)) {
-            // Queue the same command as a native close button. The task model
-            // retires the card only after the window actually closes or hides.
-            if (TaskModel::CloseWindow(target))
-                Log(L"preview: requested window close for %s (%p)", key_.c_str(), target);
-            return true;
-        }
-        Close();
-        TaskModel::ActivateWindow(target);
-        return true;
-    }
+    case WM_MBUTTONUP: OnButtonUp(m, pt); return true;
     default: break;
     }
     (void)result;
