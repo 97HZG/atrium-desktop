@@ -513,7 +513,10 @@ void PostMessengerCard(Messenger m)
         return;
     if (HWND fg = GetForegroundWindow(); fg && MessengerOfProgram(ProgramOf(fg)) == m)
         return; // the app is in front: the user sees the message there
+    if (m == Messenger::WeChat && g_app.wechat && g_app.wechat->Reading())
+        return; // its chat list brings the card, with the text (a flash comes first, and again)
     const MessengerInfo& info = InfoOf(m);
+    Log(L"notify: %s flashed with no card: a plain one", info.key);
     const std::wstring& program = g_app.messengerProgram[size_t(m)];
     Notice n;
     n.source = info.key;
@@ -1329,10 +1332,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (w == kMessengerTimer) {
             KillTimer(h, kMessengerTimer);
             bool waiting = false;
-            for (Messenger due : g_app.alerts.Due(GetTickCount64(), &waiting)) {
-                Log(L"notify: %s flashed with no card: a plain one", InfoOf(due).key);
+            for (Messenger due : g_app.alerts.Due(GetTickCount64(), &waiting))
                 PostMessengerCard(due);
-            }
             if (waiting)
                 SetTimer(h, kMessengerTimer, 500, nullptr);
             return 0;

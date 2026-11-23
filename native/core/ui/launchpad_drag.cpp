@@ -1,4 +1,4 @@
-// Launchpad's arranging: an app held a moment lifts and follows the pointer, the others glide to make
+// Launchpad's arranging: an app pressed and moved (as in the start menu) lifts and follows the pointer, the others glide to make
 // room, the page turns while it waits at the sheet's side, and where it is let go it stays (launchpad.json).
 #include "ui/launchpad.h"
 
@@ -36,7 +36,6 @@ void Launchpad::ApplyOrder()
 
 void Launchpad::Lift()
 {
-    KillTimer(surface_.Hwnd(), kHoldTimer);
     if (!down_ || dragging_ || pressed_ < 0 || !Arranging() || pressed_ >= int(tiles_.size()))
         return;
     lifted_ = pressed_;

@@ -45,7 +45,7 @@ public:
     HWND Hwnd() const { return surface_.Hwnd(); }
 
 private:
-    static constexpr UINT_PTR kCloseTimer = 0x4C50, kCaretTimer = 0x4C51, kHoldTimer = 0x4C52, kEdgeTimer = 0x4C53;
+    static constexpr UINT_PTR kCloseTimer = 0x4C50, kCaretTimer = 0x4C51, kEdgeTimer = 0x4C53;
     static constexpr int kSearch = -1, kGlass = -1000; // what HitAt finds besides a tile (its index) and page dot n (-2 - n)
     struct Hit {
         D2D1_RECT_F rect;
@@ -87,7 +87,8 @@ private:
     void SetPage(int page);
     void Launch(int index);
     bool ImeMessage(UINT m, WPARAM w, LPARAM l, LRESULT& result);
-    // Arranging (launchpad_drag.cpp): held a moment on an app, it lifts and follows the pointer; the others
+    // Arranging (launchpad_drag.cpp): pressed and moved, an app lifts and follows the pointer (as a start menu
+    // tile does); the others
     // make room, the page turns at the sheet's sides, and the order is kept (shell/launchpad_order.h).
     bool Arranging() const { return query_.empty() && !folderOpen_; }
     void Lift();
@@ -125,7 +126,7 @@ private:
     int page_ = 0;
     float pageShown_ = 0, pageSpeed_ = 0; // the page on screen (fractional while it glides), pages/s
     int sel_ = -1, hover_ = -1, pressed_ = -1;
-    // A press: on a tile or the glass; dragged sideways past a few DIP, it turns the pages.
+    // A press: on a tile (moved, it lifts) or the glass (dragged sideways past a few DIP, it turns the pages).
     bool down_ = false, dragging_ = false;
     POINT downPt_{};
     float dragFrom_ = 0;     // pageShown_ when the drag began

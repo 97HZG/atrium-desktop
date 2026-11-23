@@ -10,7 +10,9 @@
 // is changed, no accessibility switches are turned on (D29).
 // Closed to the tray, the window's rows drop out of the tree; the rows held from
 // when it was last shown still read, so cards keep coming. Before the window was
-// ever shown, WeChat's flash for a message brings a plain card (shell/messengers.h).
+// ever shown, WeChat's flash for a message brings a plain card (shell/messengers.h);
+// while the list reads, its cards are the only ones (a flash comes before the list
+// shows the message, and WeChat flashes again while messages stay unread).
 #pragma once
 
 #include "notice.h"
@@ -45,12 +47,15 @@ public:
     WeChatSource& operator=(const WeChatSource&) = delete;
     // WeChat flashed for a message: read its chat list now.
     void Wake() { SetEvent(wake_); }
+    // The chat list reads (a shown window's, or the rows held from it).
+    bool Reading() const { return reading_; }
 
 private:
     void Run();
     HWND notify_;
     UINT msg_;
     std::atomic<bool> stop_{false};
+    std::atomic<bool> reading_{false};
     HANDLE wake_ = nullptr;
     std::thread thread_;
 };

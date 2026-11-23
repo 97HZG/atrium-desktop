@@ -2,7 +2,8 @@
 // at the side of the screen, each on a card of its own (two windows of one app are two cards),
 // standing at an angle in perspective, with its shadow and its app's icon, nothing behind them. A
 // click there swaps the sets; Shift and a click brings a set onto the stage beside the one there,
-// and the windows on the stage together go back to the strip as one set, to come back together. Activating a window any other way (the bar, Alt+Tab, a
+// and the windows on the stage go back to the strip each on a card of its own (a window dragged onto a
+// card joins its set, and they come back together). Activating a window any other way (the bar, Alt+Tab, a
 // notification) changes the stage too.
 //
 // Waiting windows are minimized without activation: Windows' own state, so nothing is lost if

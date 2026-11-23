@@ -462,6 +462,7 @@ void WeChatSource::Run()
         if (now != state)
             Log(L"wechat: %s", text);
         state = now;
+        reading_ = false;
     };
     std::vector<std::pair<DWORD, std::wstring>> procs;
     ULONGLONG listed = 0;
@@ -528,6 +529,7 @@ void WeChatSource::Run()
                     if (state < 2 || (state == 3 && !fromHeld))
                         Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());
                     state = fromHeld ? 3 : 2;
+                    reading_ = true;
                     UpdateUnread(rows, baseline, exe, notify_, msg_, states);
                     baseline = true;
                 }
@@ -540,6 +542,7 @@ void WeChatSource::Run()
             }
         }
     }
+    reading_ = false;
     held.clear();
     cells = nullptr;
     cache = nullptr;

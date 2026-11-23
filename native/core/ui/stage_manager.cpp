@@ -474,14 +474,13 @@ StageManager::Set StageManager::SetOf(const std::wstring& key) const
 
 // `keys` take the stage (or join it: add). Their windows that were put away come back, `front` in
 // front; then every other app's windows on this screen go to the strip: the apps that were on the
-// stage as one set, at the top.
+// stage at the top, each on a card of its own (only a drag puts windows together in one set).
 void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly)
 {
     Unpark(keys, front, activate, fly);
     if (!add) {
         openIntent_.Cancel(); // a different stage supersedes an app launch still waiting for a window
-        Set left; // the stage's apps that had windows up
-        std::vector<Set> others;
+        std::vector<Set> left, others; // the stage's windows that were up; the rest
         for (const TaskItem& t : items_) {
             if (Has(keys, t.key))
                 continue;
@@ -496,10 +495,7 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, c
                 }
             if (!any)
                 continue;
-            if (Has(stage_, t.key))
-                left.push_back(t.key);
-            else
-                others.push_back(Set{t.key});
+            (Has(stage_, t.key) ? left : others).push_back(Set{t.key});
         }
         // The most recently used first: the windows nearest the top of the screen's stack.
         std::unordered_map<HWND, int> depth;
@@ -514,9 +510,9 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, c
                         best = std::min(best, d->second);
             return best;
         };
+        std::ranges::stable_sort(left, [&](const Set& a, const Set& b) { return nearest(a) < nearest(b); });
         std::ranges::stable_sort(others, [&](const Set& a, const Set& b) { return nearest(a) < nearest(b); });
-        if (!left.empty())
-            others.insert(others.begin(), left);
+        others.insert(others.begin(), left.begin(), left.end());
         // An app is in one set only: the newest.
         for (const Set& set : others)
             for (const std::wstring& k : set)
@@ -905,7 +901,8 @@ bool StageManager::AdoptMinimized()
             std::erase(old, k);
     }
     std::erase_if(recent_, [](const Set& set) { return set.empty(); });
-    recent_.insert(recent_.begin(), gone);
+    for (const std::wstring& k : gone)
+        recent_.insert(recent_.begin(), Set{k}); // each on a card of its own
     // Their pictures fly from where the windows were into the strip, as a window put away does.
     for (HWND h : flyIn) {
         std::wstring key;
@@ -1083,8 +1080,8 @@ void StageManager::Load()
                     if ((p.key == key || (key.find(L'|') == std::wstring::npos && AppOf(p.key) == key)) && !Has(set, p.key))
                         set.push_back(p.key);
             }
-            if (!set.empty())
-                recent_.push_back(std::move(set));
+            for (const std::wstring& k : set) // each on a card of its own (an earlier version kept the stage's windows together)
+                recent_.push_back(Set{k});
         }
     // Apps only known from their windows: each a set of its own.
     for (const auto& [h, p] : parked_)
@@ -1398,7 +1395,7 @@ bool StageManager::Covered()
 // and goes once the pointer has left it.
 void StageManager::Watch()
 {
-    // A click on the desktop clears the stage: its windows go to the strip together, as one set.
+    // A click on the desktop clears the stage: its windows go to the strip, each on a card of its own.
     if (enabled_) {
         HWND fg = GetForegroundWindow();
         wchar_t cls[16] = {};
@@ -1411,6 +1408,12 @@ void StageManager::Watch()
         else if (!desktopSince_)
             desktopSince_ = at;
         const bool desktop = atDesktop && at - desktopSince_ >= kDesktopMs;
+        // A window minimized on the stage goes to the strip even when nothing else told of it: its
+        // minimize can come before it is down, and the task model may see no change (its picture
+        // flies instead of a minimize animation, so missed, it would just vanish).
+        if (minimizeToStrip_ && std::ranges::any_of(up_, [this](const auto& u) { return !parked_.contains(u.first) && IsIconic(u.first); }) &&
+            AdoptMinimized())
+            Rebuild();
         // A window just minimized hands the foreground to the desktop: it goes to the strip first.
         if (desktop && !onDesktop_ && AdoptMinimized())
             Rebuild();
