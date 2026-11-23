@@ -77,6 +77,9 @@ GenieMinimize::GenieMinimize(HINSTANCE instance, std::function<std::optional<REC
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM, LRESULT&) {
         if (m == WM_TIMER && w == kWatchTimer) {
+            static int watches = 0;
+            if (++watches % 20 == 1)
+                Log(L"genie: watch %d", watches);
             Watch();
         } else if (m == WM_TIMER && w == kIdleTimer) {
             KillTimer(surface_.Hwnd(), kIdleTimer);
@@ -111,7 +114,8 @@ void GenieMinimize::SetEnabled(bool on)
         g_genie = this;
         hook_ = SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART, nullptr, OnMinimizeStart, 0, 0,
                                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-        SetTimer(surface_.Hwnd(), kWatchTimer, kWatchMs, nullptr);
+        const UINT_PTR timer = SetTimer(surface_.Hwnd(), kWatchTimer, kWatchMs, nullptr);
+        Log(L"genie: watching %p (timer %d, hook %p)", surface_.Hwnd(), int(timer != 0), hook_);
     } else {
         if (hook_)
             UnhookWinEvent(hook_);
