@@ -142,6 +142,17 @@ void ExtrasHost::ConfigureBar(Bar& bar)
     bar.onTuckChanged = [this] { UpdateSampling(); };
 }
 
+void ExtrasHost::OnBarRetiring(const Bar* bar)
+{
+    if (!bar || lastBar_ != bar)
+        return;
+    lastBar_ = nullptr;
+    launchpad_.Close(false);
+    card_.Close();
+    stacks_.Close();
+    UpdateSampling();
+}
+
 void ExtrasHost::UpdateSampling()
 {
     if (!media_)

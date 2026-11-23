@@ -34,34 +34,15 @@ namespace atrium {
 namespace {
 
 constexpr UINT WM_BAR_CAPTURE = WM_APP + 0x70; // wParam 1: Atrium may show in screenshots (render thread -> UI thread)
-constexpr UINT WM_BAR_LAYOUT = WM_APP + 0x71; // defer DPI relayout until SetWindowPos returns
 
 // DCompositionWaitForCompositorClock (Windows 11): waits for the next composed frame or a handle;
 // WAIT_OBJECT_0 + count is the clock. Looked up at run time (absent before build 22000).
 using WaitClockFn = DWORD(WINAPI*)(UINT, const HANDLE*, DWORD);
 const WaitClockFn kWaitForCompositorClock = reinterpret_cast<WaitClockFn>(GetProcAddress(LoadLibraryW(L"dcomp.dll"), "DCompositionWaitForCompositorClock"));
 
-// Another app bar or the taskbar moved (ABN_POSCHANGED and the like).
-UINT AppBarNotice()
-{
-    static const UINT kNotice = RegisterWindowMessageW(L"Atrium.AppBar");
-    return kNotice;
-}
-
 constexpr wchar_t kVisualClass[] = L"AtriumBarVisual";
 constexpr wchar_t kInputClass[] = L"AtriumBarInput";
-constexpr double kInsetDip = 14; // room for the drop shadow around the shape
-constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
-constexpr UINT_PTR kTooltipTimer = 1, kFileHoverTimer = 2;
-constexpr UINT kTooltipDelayMs = 450, kPreviewSwapMs = 60, kFileHoverDelayMs = 600;
-constexpr float kTooltipFont = 12.5f, kTooltipPadX = 12, kTooltipPadY = 6, kTooltipMinH = 28;
-constexpr float kTooltipTailH = 5, kTooltipTailHalfW = 12, kTooltipTailInset = 8;
-constexpr UINT_PTR kSlideTimer = 4;   // the slide out is over: hide the windows
-constexpr UINT_PTR kDisplayTimer = 6; // the shared Dock's cross-display gesture
-constexpr UINT_PTR kCoverTimer = 7;   // windows moved on this monitor: look at what covers it, once for a burst
-constexpr UINT_PTR kNearTimer = 8;    // the pointer coming down onto the bar (hoverRise)
-constexpr UINT kNearMs = 16, kCoverMs = 50;
-constexpr DWORD kLeaveMs = 500;       // a revealed bar goes down this long after the pointer left it
+constexpr DWORD kStaleMs = 2000; // present at least this often (echo filter cap)
 
 std::map<HWINEVENTHOOK, Bar*> g_guards; // each display has its own stacking guard
 struct CaptureWindows {
@@ -80,8 +61,6 @@ void ApplyCapturePolicies()
     }
     Surface::SetCaptureVisible(visible);
 }
-
-int Px(double dip, float scale) { return int(std::lround(dip * scale)); }
 
 // Ink over the glass (mean sRGB luminance of what it shows, 0..1): black and
 // white text read equally well near 0.46, so dark ink from 0.50 up and light
@@ -108,8 +87,30 @@ GlassParams ParamsFor(const Settings& s, float scale)
     p.shadow = float(s.shadow);
     p.lightX = -0.6f;
     p.lightY = -0.8f;
-    p.inset = float(kInsetDip * scale);
+    p.inset = float(Bar::kInsetDip * scale);
     return p;
+}
+
+std::vector<int> BuildDragOrder(int n, bool& dragging, std::wstring& dragKey, int& dragInsert, const std::vector<TaskItem>& items, int& dragIndex)
+{
+    std::vector<int> order(size_t(std::max(n, 0)));
+    for (int i = 0; i < n; ++i)
+        order[size_t(i)] = i;
+    dragIndex = -1;
+    if (!dragging)
+        return order;
+    for (int i = 0; i < n; ++i)
+        if (items[size_t(i)].key == dragKey)
+            dragIndex = i;
+    if (dragIndex < 0) {
+        dragging = false; // the app went away mid-drag
+        dragKey.clear();
+        return order;
+    }
+    dragInsert = std::clamp(dragInsert, 0, n - 1);
+    order.erase(order.begin() + dragIndex);
+    order.insert(order.begin() + dragInsert, dragIndex);
+    return order;
 }
 
 // The popups' glass: exactly the bar's material (D26), one set of parameters
@@ -220,6 +221,14 @@ void RegisterClasses(HINSTANCE instance)
 
 void RefreshCaptureExclusion() { ApplyCapturePolicies(); }
 
+UINT Bar::AppBarNotice()
+{
+    static const UINT kNotice = RegisterWindowMessageW(L"Atrium.AppBar");
+    return kNotice;
+}
+
+int Bar::Px(double dip, float scale) { return int(std::lround(dip * scale)); }
+
 Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display)
     : debugCapturable_(debugCapturable),
       displayOverride_(std::move(display)),
@@ -291,12 +300,7 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, std::wstring display)
 
 Bar::~Bar()
 {
-    UpdateAppBar(nullptr, RECT{}, 0);
-    for (HWINEVENTHOOK h : hooks_)
-        if (h) {
-            UnhookWinEvent(h);
-            g_guards.erase(h);
-        }
+    DetachInput();
     SetEvent(quit_);
     if (render_.joinable())
         render_.join();
@@ -312,6 +316,27 @@ Bar::~Bar()
         CloseHandle(h);
     if (oleReady_)
         OleUninitialize();
+}
+
+void Bar::DetachInput()
+{
+    for (HWINEVENTHOOK& h : hooks_) {
+        if (h) {
+            UnhookWinEvent(h);
+            g_guards.erase(h);
+            h = nullptr;
+        }
+    }
+    if (input_) {
+        for (UINT_PTR id : {kTooltipTimer, kFileHoverTimer, kGuardTimer, kSlideTimer, kPointerTimer, kDisplayTimer, kCoverTimer, kNearTimer})
+            KillTimer(input_, id);
+        if (GetCapture() == input_)
+            ReleaseCapture();
+    }
+    if (tooltip_)
+        tooltip_->Hide(false);
+    if (appBar_)
+        UpdateAppBar(nullptr, RECT{}, 0);
 }
 
 bool Bar::StopRendering(DWORD timeoutMs)
@@ -350,33 +375,6 @@ LRESULT CALLBACK Bar::VisualProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     }
     return DefWindowProcW(h, m, w, l);
-}
-
-LRESULT CALLBACK Bar::InputProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
-    auto* self = reinterpret_cast<Bar*>(GetWindowLongPtrW(h, GWLP_USERDATA));
-    return self ? self->OnInput(h, m, w, l) : DefWindowProcW(h, m, w, l);
-}
-
-POINT Bar::LayoutPoint(POINT client) const
-{
-    RECT cr{};
-    GetClientRect(input_, &cr);
-    return EdgeFrame{edge_, cr}.FromArea(client);
-}
-
-RECT Bar::EdgeZone() const
-{
-    const EdgeFrame f{edge_, window_};
-    return f.ToArea(RECT{LONG(scene_.bar.left), 0, LONG(scene_.bar.right), std::max<LONG>(0, f.FromArea(monitor_).bottom)});
-}
-
-std::wstring Bar::HitTest(POINT pt) const
-{
-    for (const auto& hit : hits_)
-        if (PtInRect(&hit.rect, pt))
-            return hit.key;
-    return {};
 }
 
 // The bar's strip of the screen while it is always shown (`reserve` px on `edge_` of
@@ -431,321 +429,6 @@ void Bar::UpdateAppBar(HMONITOR monitor, RECT bounds, int reserve)
             mi.rcMonitor.bottom, mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom);
     }
     Log(L"bar: keeps %d px of the screen's %s edge (always shown)", appBarReserved_, settings_.barEdge.c_str());
-}
-
-LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
-{
-    POINT pt = LayoutPoint({GET_X_LPARAM(l), GET_Y_LPARAM(l)});
-    if (m == AppBarNotice() && AppBarNotice()) {
-        if (w == ABN_POSCHANGED) { // another app bar or the taskbar moved: claim the strip again
-            appBarWant_ = RECT{};
-            Relayout();
-        }
-        return 0;
-    }
-    switch (m) {
-    case WM_BAR_LAYOUT:
-        layoutPending_ = false;
-        Relayout();
-        return 0;
-    case WM_MOUSEACTIVATE: {
-        onInteract();
-        // Never take focus from the user's app, except for the logo and the
-        // bell: the start menu and the notification list need the keyboard,
-        // and only the foreground process may hand the foreground to its own window.
-        POINT cur;
-        GetCursorPos(&cur);
-        ScreenToClient(h, &cur);
-        cur = LayoutPoint(cur);
-        const std::wstring hit = HitTest(cur);
-        if ((hit == kStartKey || hit == kNotifyKey || hit == kLaunchpadKey) && HIWORD(l) == WM_LBUTTONDOWN) {
-            previousForeground_ = GetForegroundWindow();
-            if (previousForeground_ == input_ || previousForeground_ == visual_)
-                previousForeground_ = nullptr;
-            return MA_ACTIVATE;
-        }
-        return MA_NOACTIVATE;
-    }
-    case WM_CLOSE:
-        if (onCloseRequest)
-            onCloseRequest();
-        return 0;
-    case WM_MOUSEMOVE: {
-        onInteract();
-        if (dragging_) {
-            UpdateDrag(pt);
-            return 0;
-        }
-        // A press on an app that moves past the system drag threshold starts a drag.
-        if (pressedLeft_ && !pressed_.empty() && !IsEntry(pressed_) && (w & MK_LBUTTON) &&
-            (std::abs(pt.x - pressPt_.x) > GetSystemMetrics(SM_CXDRAG) || std::abs(pt.y - pressPt_.y) > GetSystemMetrics(SM_CYDRAG))) {
-            BeginDrag(pt);
-            return 0;
-        }
-        // Remember brief visits; only the current cursor samples determine approach or retreat above it.
-        if (float(pt.y) >= scene_.bar.top)
-            near_.Update(scene_.bar, {float(pt.x), float(pt.y)}, scale_, settings_.nearEnter, settings_.nearLeave);
-        if (!tracking_) {
-            TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, h, 0};
-            tracking_ = TrackMouseEvent(&tme) != FALSE;
-            SetRegion(true); // magnified icons reach above the shape
-        }
-        std::wstring hover = HitTest(pt);
-        bool magnify = scene_.magnify > 1.001f;
-        // Of the pointer's height only its side of the glass's top edge matters to the wave.
-        const bool crossed = (scene_.pointerY < scene_.bar.top) != (float(pt.y) < scene_.bar.top);
-        if (hover != scene_.hoverKey || (magnify && (scene_.pointerX != float(pt.x) || crossed))) {
-            if (hover != scene_.hoverKey) {
-                scene_.hoverKey = hover;
-                // With a preview up, the next app's windows follow the pointer without the tooltip's delay.
-                bool quick = previewShown_ || (previewOpen && previewOpen());
-                HideTooltip();
-                if (!hover.empty())
-                    SetTimer(h, kTooltipTimer, quick ? kPreviewSwapMs : kTooltipDelayMs, nullptr);
-            }
-            scene_.pointerX = float(pt.x);
-            WatchNear(false); // current cursor Y and near flags belong to this same snapshot
-            Publish();
-        } else if (magnify && float(pt.y) < scene_.bar.top) {
-            WatchNear(); // above the glass a move straight up may end the early response: published if it did
-        }
-        return 0;
-    }
-    case WM_TIMER:
-        if (w == kDisplayTimer) {
-            WatchDisplays();
-            return 0;
-        } else if (w == kCoverTimer) {
-            KillTimer(h, kCoverTimer);
-            coverPending_ = false;
-            UpdateCover();
-            return 0;
-        } else if (w == kTooltipTimer) {
-            KillTimer(h, kTooltipTimer);
-            if (pressed_.empty() && !dragging_)
-                ShowTooltip();
-            return 0;
-        } else if (w == kFileHoverTimer) {
-            KillTimer(h, kFileHoverTimer);
-            if (!fileHoverKey_.empty() && !IsEntry(fileHoverKey_) && onFileDragHover)
-                onFileDragHover(fileHoverKey_);
-            return 0;
-        } else if (w == kGuardTimer) {
-            GuardStacking(nullptr);
-            return 0;
-        } else if (w == kSlideTimer) {
-            KillTimer(h, kSlideTimer);
-            if (tucked_ && !slidOut_) {
-                slidOut_ = true;
-                Relayout(); // hides the windows; the render thread rests
-                WatchNear(); // nothing to answer now: let it fall back
-            }
-            return 0;
-        }
-        if (w == kPointerTimer) {
-            WatchPointer();
-            return 0;
-        }
-        if (w == kNearTimer) {
-            WatchNear();
-            return 0;
-        }
-        break;
-    case WM_MOUSELEAVE:
-        tracking_ = false;
-        HideTooltip();
-        if (!dragging_) {
-            SetRegion(false);
-            scene_.hoverKey.clear(), scene_.pressedKey.clear(), scene_.pointerX = scene_.pointerY = -1;
-            pressed_.clear(), pressedLeft_ = false;
-            Publish();
-        }
-        return 0;
-    case WM_LBUTTONDOWN:
-    case WM_MBUTTONDOWN:
-        HideTooltip();
-        if (onPreviewClose)
-            onPreviewClose(); // a press on the bar: the preview gives way
-        pressed_ = HitTest(pt);
-        pressedLeft_ = m == WM_LBUTTONDOWN;
-        pressPt_ = pt;
-        scene_.pressedKey = pressed_;
-        if (m == WM_LBUTTONDOWN) { // the glass gives way under the press
-            scene_.rippleX = float(pt.x);
-            scene_.rippleY = float(pt.y);
-            scene_.rippleMs = ClockMs();
-        }
-        SetCapture(h);
-        Publish();
-        return 0;
-    case WM_LBUTTONUP:
-    case WM_MBUTTONUP: {
-        if (dragging_) {
-            // Dropped well above or below the bar: cancel, like the system taskbar.
-            int mid = int((scene_.bar.top + scene_.bar.bottom) / 2);
-            EndDrag(std::abs(pt.y - mid) <= int(scene_.bar.bottom - scene_.bar.top));
-            ReleaseCapture();
-            POINT cur;
-            GetCursorPos(&cur);
-            if (WindowFromPoint(cur) != input_) { // released off the bar: no hover is left
-                tracking_ = false;
-                SetRegion(false);
-                scene_.hoverKey.clear();
-                scene_.pointerX = scene_.pointerY = -1;
-                Publish();
-            }
-            return 0;
-        }
-        std::wstring key = HitTest(pt);
-        bool same = !pressed_.empty() && key == pressed_;
-        pressed_.clear();
-        pressedLeft_ = false;
-        scene_.pressedKey.clear();
-        ReleaseCapture();
-        Publish();
-        if (!same)
-            return 0;
-        // Shift+click starts a new instance, as on the Windows taskbar.
-        bool launch = m == WM_MBUTTONUP || (w & MK_SHIFT);
-        if (IsEntry(key)) {
-            if (m == WM_LBUTTONUP)
-                ClickEntry(key);
-        } else if (launch ? bool(onLaunch) : bool(onActivate)) {
-            // Starting an app (or another instance) hops its icon, as in the macOS Dock.
-            auto t = std::ranges::find_if(items_, [&](const TaskItem& i) { return i.key == key; });
-            if (t != items_.end() && (launch || t->windows.empty()))
-                Bounce(key);
-            (launch ? onLaunch : onActivate)(key);
-        }
-        return 0;
-    }
-    case WM_CAPTURECHANGED:
-        if (reinterpret_cast<HWND>(l) != h && dragging_) {
-            EndDrag(false); // capture taken away (e.g. a system menu opened)
-            SetRegion(false);
-        } else if (reinterpret_cast<HWND>(l) != h && (!pressed_.empty() || pressedLeft_)) {
-            pressed_.clear();
-            pressedLeft_ = false;
-            scene_.pressedKey.clear();
-            Publish();
-        }
-        return 0;
-    case WM_MOUSEWHEEL: { // over the status icon: the volume
-        onInteract();
-        POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
-        ScreenToClient(h, &p);
-        const int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
-        const std::wstring over = notches ? HitTest(LayoutPoint(p)) : std::wstring();
-        if (over == kStatusKey && onStatusWheel)
-            onStatusWheel(notches);
-        return 0;
-    }
-    case WM_RBUTTONUP: {
-        onInteract();
-        if (dragging_)
-            return 0;
-        std::wstring key = HitTest(pt);
-        // Menus open on the inner side of the bar (beyond icons the pointer magnified), without the tooltip.
-        HideTooltip();
-        KillTimer(h, kTooltipTimer);
-        POINT screen = EdgeFrame{edge_, window_}.ToArea(POINT{pt.x, 0});
-        if (!key.empty() && !IsEntry(key) && onItemMenu)
-            onItemMenu(key, screen);
-        else if (key == kStartKey && onStartMenu) // the logo: Windows' Start button menu (Win+X)
-            onStartMenu(screen);
-        else if (onContextMenu)
-            onContextMenu(screen);
-        return 0;
-    }
-    default: break;
-    }
-    return DefWindowProcW(h, m, w, l);
-}
-
-void Bar::BeginDrag(POINT pt)
-{
-    int from = -1;
-    for (int i = 0; i < int(scene_.items.size()); ++i)
-        if (scene_.items[size_t(i)].key == pressed_)
-            from = i;
-    if (from < 0)
-        return;
-    const auto& plate = scene_.items[size_t(from)].plate;
-    dragging_ = true;
-    dragKey_ = pressed_;
-    dragInsert_ = from;
-    grabDx_ = pressPt_.x - int((plate.left + plate.right) / 2);
-    dragX_ = pt.x;
-    scene_.pressedKey.clear();
-    HideTooltip();
-    Relayout();
-}
-
-void Bar::UpdateDrag(POINT pt)
-{
-    dragX_ = pt.x;
-    // Insertion point: the slot whose centre is nearest to the dragged plate's.
-    float centre = float(pt.x - grabDx_);
-    int slot = int(std::lround((centre - float(appsLeft_) - float(plate_) / 2) / float(pitch_)));
-    dragInsert_ = std::clamp(slot, 0, std::max(shown_ - 1, 0));
-    Relayout();
-}
-
-void Bar::EndDrag(bool commit)
-{
-    if (!dragging_)
-        return;
-    dragging_ = false;
-    std::wstring key = dragKey_;
-    dragKey_.clear(), pressed_.clear(), pressedLeft_ = false, scene_.pressedKey.clear();
-    int from = -1;
-    for (int i = 0; i < shown_ && i < int(items_.size()); ++i)
-        if (items_[size_t(i)].key == key)
-            from = i;
-    bool moved = commit && from >= 0 && dragInsert_ >= 0 && dragInsert_ != from && dragInsert_ < int(items_.size());
-    if (moved) {
-        // Show the new order right away; the model confirms it a moment later
-        // with the same order, which then needs no relayout.
-        TaskItem t = std::move(items_[size_t(from)]);
-        items_.erase(items_.begin() + from);
-        items_.insert(items_.begin() + dragInsert_, std::move(t));
-        auto shared = std::ranges::find_if(allItems_, [&](const TaskItem& item) { return item.key == key; });
-        TaskItem movedItem = std::move(*shared);
-        allItems_.erase(shared);
-        const std::wstring before = dragInsert_ + 1 < int(items_.size()) ? items_[size_t(dragInsert_) + 1].key : L"";
-        auto insertion = std::ranges::find_if(allItems_, [&](const TaskItem& item) { return item.key == before; });
-        allItems_.insert(insertion, std::move(movedItem));
-    }
-    scene_.hoverKey = moved ? key : scene_.hoverKey;
-    Relayout(); // the dropped icon slides from the pointer into its slot
-    if (moved && onReorder)
-        onReorder(key, dragInsert_);
-}
-
-std::wstring Bar::FileDragOver(POINT screen)
-{
-    onInteract();
-    ScreenToClient(input_, &screen);
-    std::wstring key = HitTest(LayoutPoint(screen));
-    if (IsEntry(key))
-        key.clear();
-    if (key != fileHoverKey_) {
-        fileHoverKey_ = key;
-        scene_.hoverKey = key;
-        KillTimer(input_, kFileHoverTimer);
-        if (!key.empty())
-            SetTimer(input_, kFileHoverTimer, kFileHoverDelayMs, nullptr);
-        Publish();
-    }
-    return key;
-}
-
-void Bar::FileDragLeave()
-{
-    KillTimer(input_, kFileHoverTimer);
-    fileHoverKey_.clear();
-    scene_.hoverKey.clear();
-    Publish();
 }
 
 void Bar::ReadDisplays()
@@ -1034,7 +717,9 @@ void Bar::Relayout()
     const int insetX = side + (roomW - barW) / 2;
     const int lift = std::max(int(std::ceil(float(icon) * (mag - 1))), int(std::ceil(float(icon) * 0.55f)));
     const int glassRise = st.hoverRise ? int(std::ceil(float(icon) * (mag - 1))) : 0;
-    const int rise = std::max(glassRise, lift - (barH - icon) / 2 + Px(6, s));
+    const float badgeH = std::max(13.f * s, float(icon) * 0.44f);
+    const int badgeHeadroom = int(std::ceil((badgeH * 0.30f + 1.5f * s) * mag));
+    const int rise = std::max(glassRise, lift - (barH - icon) / 2 + std::max(Px(6, s), badgeHeadroom));
     // Keep shadow room above the raised glass, including at maximum magnification.
     const int insetTop = std::max(inset + glassRise, rise);
 
@@ -1048,23 +733,8 @@ void Bar::Relayout()
 
     // Display order: during a drag the dragged app leaves its slot and the
     // others close up around the insertion point.
-    std::vector<int> order(size_t(std::max(n, 0)));
-    for (int i = 0; i < n; ++i)
-        order[size_t(i)] = i;
     int dragIndex = -1;
-    if (dragging_) {
-        for (int i = 0; i < n; ++i)
-            if (items_[size_t(i)].key == dragKey_)
-                dragIndex = i;
-        if (dragIndex < 0) {
-            dragging_ = false; // the app went away mid-drag
-            dragKey_.clear();
-        } else {
-            dragInsert_ = std::clamp(dragInsert_, 0, n - 1);
-            order.erase(order.begin() + dragIndex);
-            order.insert(order.begin() + dragInsert_, dragIndex);
-        }
-    }
+    const std::vector<int> order = BuildDragOrder(n, dragging_, dragKey_, dragInsert_, items_, dragIndex);
 
     // Launch feedback is one 480 ms hop.
     const double now = ClockMs();
@@ -1382,74 +1052,6 @@ void Bar::UpdateAutoHide()
     Raise();
 }
 
-void Bar::WatchPointer()
-{
-    if (!covered_) {
-        KillTimer(input_, kPointerTimer);
-        return;
-    }
-    POINT p{};
-    GetCursorPos(&p);
-    RECT zone = EdgeZone();
-    if (!revealed_) {
-        // The screen's edge, along the bar.
-        if (AtDisplayEdge(edge_, p, monitor_) && PtInRect(&zone, p) && !FullScreenInFront(hmonitor_)) {
-            revealed_ = true;
-            leftAt_ = 0;
-            UpdateAutoHide();
-        }
-        return;
-    }
-    const ULONGLONG now = GetTickCount64();
-    if (PtInRect(&zone, p) || dragging_ || (keepShown && keepShown()) || now < summonGraceUntil_) {
-        leftAt_ = 0;
-        return;
-    }
-    if (!leftAt_)
-        leftAt_ = now;
-    else if (now - leftAt_ >= kLeaveMs) {
-        revealed_ = false;
-        leftAt_ = 0;
-        UpdateAutoHide();
-    }
-}
-
-// The pointer just above a visible bar: the hover wave answers it before the pointer
-// arrives — the glass rises to it (hoverRise and riseNear) and/or the icons magnify
-// (magnifyNear), each on its own. Moves and timer ticks use the same current cursor
-// sample, so its Y and near flags reach the render thread together.
-void Bar::WatchNear(bool publish)
-{
-    const bool available = visible_ && !tucked_ && !slidOut_;
-    const bool watching = available && scene_.magnify > 1.001f && (scene_.earlyRise || scene_.earlyMagnify);
-    POINT p{};
-    if ((watching || scene_.pointerX >= 0) && (!GetCursorPos(&p) || !ScreenToClient(input_, &p)))
-        return;
-    p = LayoutPoint(p);
-    const bool changed = near_.Sample(scene_, {float(p.x), float(p.y)}, settings_.nearEnter, settings_.nearLeave, available);
-    nearX_ = scene_.nearX, nearRise_ = scene_.nearRise, nearMagnify_ = scene_.nearMagnify;
-    if (changed && publish)
-        Publish();
-}
-
-// Watched while the bar is on screen and something answers the pointer above it; a tick
-// steps aside for a tucked bar by itself.
-void Bar::UpdateNearWatch()
-{
-    const bool wanted = settings_.magnify > 1.001f && ((settings_.hoverRise && settings_.riseNear) || settings_.magnifyNear);
-    if (visible_ && !tucked_ && !slidOut_ && wanted)
-        SetTimer(input_, kNearTimer, kNearMs, nullptr);
-    else {
-        KillTimer(input_, kNearTimer);
-        near_.Reset();
-        if (nearX_ >= 0 || nearRise_ || nearMagnify_) {
-            nearX_ = scene_.nearX = -1;
-            nearRise_ = nearMagnify_ = scene_.nearRise = scene_.nearMagnify = false;
-            Publish();
-        }
-    }
-}
-
 void Bar::SetStatus(const SystemStatus& status)
 {
     if (status == status_)
@@ -1476,107 +1078,6 @@ void Bar::SetUnread(int count)
         return;
     unread_ = count;
     Relayout();
-}
-
-void Bar::ShowTooltip()
-{
-    const std::wstring& key = scene_.hoverKey;
-    auto hit = std::ranges::find_if(hits_, [&](const Hit& h) { return h.key == key; });
-    const int rise = scene_.magnify > 1.001f ? rise_ : 0;
-    const POINT tip =
-        hit != hits_.end() ? EdgeFrame{edge_, window_}.ToArea(POINT{(hit->rect.left + hit->rect.right) / 2, int(scene_.bar.top) - rise}) : POINT{};
-    // An app with windows: its windows, previewed, instead of the tooltip (as the Windows taskbar).
-    if (onPreview && hit != hits_.end() && !IsEntry(key)) {
-        auto item = std::ranges::find_if(items_, [&](const TaskItem& t) { return t.key == key; });
-        if (item != items_.end() && !item->windows.empty()) {
-            tooltip_->Hide(false);
-            previewShown_ = true;
-            onPreview(key, item->windows, tip);
-            return;
-        }
-    }
-    if (previewShown_) { // its last window went: back to the tooltip
-        previewShown_ = false;
-        if (onPreviewClose)
-            onPreviewClose();
-    }
-    std::wstring text = TooltipText(key);
-    if (hit == hits_.end() || text.empty()) {
-        tooltip_->Hide(false);
-        return;
-    }
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(hmonitor_, &mi);
-    int margin = Px(8, scale_);
-    const float maxTextW = std::min(320.f, float(mi.rcWork.right - mi.rcWork.left - 2 * margin) / scale_ - 2 * kTooltipPadX);
-    winrt::com_ptr<IDWriteTextFormat> format;
-    winrt::com_ptr<IDWriteTextLayout> layout;
-    // UiTextFormat/UiTextLayout take physical pixels: the tooltip's size is
-    // DIP, so measure at the monitor's scale and divide the metrics back.
-    if (FAILED(UiTextFormat(dwrite_.get(), kTooltipFont * scale_, DWRITE_FONT_WEIGHT_MEDIUM, format.put())))
-        return;
-    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    if (FAILED(UiTextLayout(dwrite_.get(), text, format.get(), maxTextW * scale_, 1000 * scale_, layout.put())))
-        return;
-    DWRITE_TEXT_METRICS metrics{};
-    layout->GetMetrics(&metrics);
-    tooltipText_ = std::move(text);
-    tooltipSize_ = D2D1::SizeF(std::min(maxTextW, std::ceil(metrics.widthIncludingTrailingWhitespace / scale_)) + 2 * kTooltipPadX,
-                               std::max(kTooltipMinH, std::ceil(metrics.height / scale_) + 2 * kTooltipPadY));
-    int w = Px(tooltipSize_.width, scale_), h = Px(tooltipSize_.height, scale_);
-    int minX = int(mi.rcWork.left) + margin, maxX = std::max(minX, int(mi.rcWork.right) - margin - w);
-    int minY = int(mi.rcWork.top) + margin, maxY = std::max(minY, int(mi.rcWork.bottom) - margin - h);
-    int left = std::clamp(int(tip.x) - w / 2, minX, maxX), top = std::clamp(int(tip.y) - h / 2, minY, maxY);
-    if (edge_ == BarEdge::Bottom)
-        top = std::max(minY, int(tip.y) - h - margin);
-    else if (edge_ == BarEdge::Top)
-        top = std::min(maxY, int(tip.y) + margin);
-    else if (edge_ == BarEdge::Left)
-        left = std::min(maxX, int(tip.x) + margin);
-    else
-        left = std::max(minX, int(tip.x) - w - margin);
-    const bool tail = edge_ == BarEdge::Bottom;
-    RECT rect{left, top, left + w, top + h + (tail ? Px(kTooltipTailH, scale_) : 0)};
-    const float radius = std::min(16.f, tooltipSize_.height / 2);
-    tooltip_->SetRadius(radius);
-    if (tail) {
-        tooltipTailX_ = std::clamp(float(tip.x - left) / scale_, 0.f, tooltipSize_.width);
-        ShapeDip label{D2D1::RectF(0, 0, tooltipSize_.width, tooltipSize_.height), radius};
-        label.tailX = tooltipTailX_, label.tailHalfWidth = kTooltipTailHalfW, label.tailHeight = kTooltipTailH, label.tailInset = kTooltipTailInset;
-        tooltip_->SetShapes({label});
-    } else {
-        tooltip_->SetShapes({});
-    }
-    POINT anchor{tip.x, rect.bottom}; // it grows out of the side facing the icon
-    switch (edge_) {
-    case BarEdge::Top: anchor.y = rect.top; break;
-    case BarEdge::Left: anchor = {rect.left, tip.y}; break;
-    case BarEdge::Right: anchor = {rect.right, tip.y}; break;
-    case BarEdge::Bottom: break;
-    }
-    if (tooltip_->Visible()) {
-        tooltip_->Move(rect);
-        tooltip_->Invalidate();
-    } else {
-        tooltip_->Show(rect, false, anchor);
-    }
-}
-
-void Bar::HideTooltip()
-{
-    KillTimer(input_, kTooltipTimer);
-    if (previewShown_) {
-        previewShown_ = false;
-        if (onPreviewLeave)
-            onPreviewLeave();
-    }
-    tooltip_->Hide();
-}
-
-void Bar::UpdateTooltips()
-{
-    if (tooltip_->Visible() || previewShown_)
-        ShowTooltip(); // e.g. the window count changed while hovering
 }
 
 void Bar::Publish(bool bar)
@@ -1747,6 +1248,44 @@ void UpdatePanelInkGrid(const Readback& rb, const Settings& settings, float pane
         current = grid;
         inkOwed = true;
     }
+}
+
+void LogRenderMinuteStats(unsigned& frames, unsigned& presents, unsigned& skipped, std::vector<double>& workMs, std::vector<double>& presentMs,
+                          std::vector<double>& panelsMs, ULONGLONG& statsStart)
+{
+    auto pct = [](std::vector<double>& v, double q) {
+        std::ranges::sort(v);
+        return v.empty() ? 0.0 : v[std::min(v.size() - 1, size_t(q * double(v.size())))];
+    };
+    const double w50 = pct(workMs, 0.5), w95 = pct(workMs, 0.95), p95 = pct(presentMs, 0.95), pan95 = pct(panelsMs, 0.95);
+    PROCESS_MEMORY_COUNTERS_EX mem{sizeof(mem)};
+    GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&mem), sizeof(mem));
+    Log(L"render: last minute %u frames, %u presents, %u echoes skipped; work p50 %.2f ms, p95 %.2f ms, max %.2f ms; "
+        L"presenting p95 %.2f ms; popups and widgets p95 %.2f ms, max %.2f ms; private %zu MB",
+        frames, presents, skipped, w50, w95, workMs.empty() ? 0.0 : workMs.back(), p95, pan95, panelsMs.empty() ? 0.0 : panelsMs.back(),
+        size_t(mem.PrivateUsage >> 20));
+    frames = presents = skipped = 0;
+    workMs.clear(), presentMs.clear(), panelsMs.clear();
+    statsStart = GetTickCount64();
+}
+
+GlassParams BarFrameParams(const Settings& settings, float scale, const BarFrame& bf, BarEdge edge, RECT window)
+{
+    GlassParams params = ParamsFor(settings, scale);
+    params.radius = std::min(params.radius, std::min(bf.shape.right - bf.shape.left, bf.shape.bottom - bf.shape.top) / 2);
+    params.shapeL = bf.shape.left;
+    params.shapeT = bf.shape.top;
+    params.shapeR = bf.shape.right;
+    params.shapeB = bf.shape.bottom;
+    params.rippleX = bf.rippleX;
+    params.rippleY = bf.rippleY;
+    params.rippleR = bf.rippleR;
+    params.rippleA = bf.rippleA;
+    params.waveX = bf.waveX;
+    params.waveWidth = bf.waveWidth;
+    params.waveHeight = bf.waveHeight;
+    params.fromArea = EdgeFrame{edge, D2D1::RectF(0, 0, float(window.right - window.left), float(window.bottom - window.top))}.FromAreaMatrix();
+    return params;
 }
 
 } // namespace
@@ -2193,22 +1732,8 @@ Bar::SessionEnd Bar::RenderSession()
         }
         if (w == WAIT_OBJECT_0)
             return SessionEnd::Exit;
-        if (GetTickCount64() - statsStart >= 60000) {
-            auto pct = [](std::vector<double>& v, double q) {
-                std::ranges::sort(v);
-                return v.empty() ? 0.0 : v[std::min(v.size() - 1, size_t(q * double(v.size())))];
-            };
-            const double w50 = pct(workMs, 0.5), w95 = pct(workMs, 0.95), p95 = pct(presentMs, 0.95), pan95 = pct(panelsMs, 0.95);
-            PROCESS_MEMORY_COUNTERS_EX mem{sizeof(mem)};
-            GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&mem), sizeof(mem));
-            Log(L"render: last minute %u frames, %u presents, %u echoes skipped; work p50 %.2f ms, p95 %.2f ms, max %.2f ms; "
-                L"presenting p95 %.2f ms; popups and widgets p95 %.2f ms, max %.2f ms; private %zu MB",
-                frames, presents, skipped, w50, w95, workMs.empty() ? 0.0 : workMs.back(), p95, pan95, panelsMs.empty() ? 0.0 : panelsMs.back(),
-                size_t(mem.PrivateUsage >> 20));
-            frames = presents = skipped = 0;
-            workMs.clear(), presentMs.clear(), panelsMs.clear();
-            statsStart = GetTickCount64();
-        }
+        if (GetTickCount64() - statsStart >= 60000)
+            LogRenderMinuteStats(frames, presents, skipped, workMs, presentMs, panelsMs, statsStart);
         LARGE_INTEGER t0;
         QueryPerformanceCounter(&t0);
         auto elapsedMs = [&] {
@@ -2354,6 +1879,7 @@ Bar::SessionEnd Bar::RenderSession()
             ClockStrings(time, date, snap.settings.showClockSeconds);
         std::wstring textKey = time + L"|" + date;
         const double nowMs = ClockMs();
+        const bool wasAnimating = animating;
         animating = painter.Animate(snap.scene, nowMs);
         animating |= painter.UpdateDotInk(snap.scene, dotBackdrop, snap.settings, nowMs);
         clockInk.Target(dark ? 1.f : 0.f, nowMs);
@@ -2361,8 +1887,8 @@ Bar::SessionEnd Bar::RenderSession()
         animating |= clockInk.Moving(nowMs) || appsInk.Moving(nowMs);
         const Ink inks{clockInk.Value(nowMs), appsInk.Value(nowMs)};
         ULONGLONG now = GetTickCount64();
-        bool force = snap.generation != drawnGeneration || textKey != drawnText || dark != drawnDark || darkIcons != drawnDarkIcons || animating || barOwed ||
-                     now - lastPresent > kStaleMs;
+        bool force = snap.generation != drawnGeneration || textKey != drawnText || dark != drawnDark || darkIcons != drawnDarkIcons || animating ||
+                     wasAnimating || barOwed || now - lastPresent > kStaleMs;
         if (!changed && !force) {
             ++skipped; // echo of our own present, or nothing new under the glass
             if (hadBackdrop)
@@ -2374,23 +1900,7 @@ Bar::SessionEnd Bar::RenderSession()
             continue;
         }
         barOwed = false;
-        GlassParams params = ParamsFor(snap.settings, snap.scale);
-        const BarFrame& bf = painter.Frame();
-        params.radius = std::min(params.radius, std::min(bf.shape.right - bf.shape.left, bf.shape.bottom - bf.shape.top) / 2);
-        params.shapeL = bf.shape.left;
-        params.shapeT = bf.shape.top;
-        params.shapeR = bf.shape.right;
-        params.shapeB = bf.shape.bottom;
-        params.rippleX = bf.rippleX;
-        params.rippleY = bf.rippleY;
-        params.rippleR = bf.rippleR;
-        params.rippleA = bf.rippleA;
-        params.waveX = bf.waveX;
-        params.waveWidth = bf.waveWidth;
-        params.waveHeight = bf.waveHeight;
-        params.fromArea =
-            EdgeFrame{snap.scene.edge, D2D1::RectF(0, 0, float(snap.window.right - snap.window.left), float(snap.window.bottom - snap.window.top))}
-                .FromAreaMatrix();
+        const GlassParams params = BarFrameParams(snap.settings, snap.scale, painter.Frame(), snap.scene.edge, snap.window);
         bool ok = renderer.Present(params, [&](ID2D1DeviceContext2* d2d) {
             painter.Draw(d2d, snap.scene, inks, time, date, std::to_wstring(snap.generation) + textKey + (dark ? L"d" : L"l") + (darkIcons ? L"d" : L"l"),
                          animating);

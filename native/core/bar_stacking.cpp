@@ -8,6 +8,7 @@
 #include "shell/shell_taskbar.h"
 
 #include <dwmapi.h>
+#include <shellapi.h>
 
 #include <cwchar>
 #include <iterator>
@@ -128,6 +129,19 @@ TrayAction GuardTrayTaskbar(HWND visual, HWND input, HWND tray, bool trayOver, b
     return TrayAction::None;
 }
 
+bool ExclusiveD3dInFront(HMONITOR monitor)
+{
+    HWND fg = GetForegroundWindow();
+    HWND root = fg ? GetAncestor(fg, GA_ROOT) : nullptr;
+    if (!root || IsIconic(root) || MonitorFromWindow(root, MONITOR_DEFAULTTONULL) != monitor)
+        return false;
+    DWORD pid = 0;
+    if (!GetWindowThreadProcessId(root, &pid) || pid == GetCurrentProcessId())
+        return false;
+    QUERY_USER_NOTIFICATION_STATE state{};
+    return SUCCEEDED(SHQueryUserNotificationState(&state)) && state == QUNS_RUNNING_D3D_FULL_SCREEN;
+}
+
 } // namespace
 
 // Focus may be on another screen; use this monitor's app Z-order instead.
@@ -183,10 +197,23 @@ void Bar::UpdateCover()
 {
     // Apply the hide mode independently on each display.
     const std::wstring& mode = settings_.autoHide;
-    // A game in front always has the screen to itself, whatever the hide mode.
+    const bool allowFullscreenHide = mode != L"never" || settings_.barFullscreenHide;
     const bool expected = mode != L"never" && GetTickCount64() < expectCoverUntil_;
-    bool covered = mode == L"always" || (mode != L"never" && MonitorCoveredByApp()) || GameInFront(hmonitor_) || expected ||
-                   (mode == L"never" && settings_.barFullscreenHide && FullScreenInFront(hmonitor_));
+    bool knownFullScreen = false;
+    bool covered = false;
+    if (!allowFullscreenHide) {
+        // Respect autoHide == "never" + barFullscreenHide == false for non-exclusive windows/games;
+        // exclusive D3D fullscreen still owns the display.
+        knownFullScreen = ExclusiveD3dInFront(hmonitor_);
+        covered = knownFullScreen;
+    } else if (mode == L"never") {
+        knownFullScreen = FullScreenInFront(hmonitor_);
+        covered = knownFullScreen;
+    } else {
+        const bool game = GameInFront(hmonitor_);
+        knownFullScreen = game;
+        covered = mode == L"always" || MonitorCoveredByApp() || game || expected;
+    }
     if (covered == covered_)
         return;
     covered_ = covered;
@@ -194,7 +221,7 @@ void Bar::UpdateCover()
     POINT p{};
     GetCursorPos(&p);
     RECT zone = EdgeZone();
-    revealed_ = covered && !slidOut_ && PtInRect(&zone, p) && !FullScreenInFront(hmonitor_);
+    revealed_ = covered && !slidOut_ && PtInRect(&zone, p) && !(knownFullScreen || FullScreenInFront(hmonitor_));
     leftAt_ = 0;
     if (mode == L"fullscreen")
         Log(L"bar: monitor %p %s", hmonitor_, covered ? L"covered by its top app: auto-hide" : L"not covered by its top app");
@@ -267,6 +294,19 @@ void Bar::GuardStacking(const wchar_t* why)
         Log(L"bar: raised over %s (%s)", cls, why ? why : L"check");
         lastCover_ = cover;
     }
+}
+
+bool ExclusiveD3dInFront(HMONITOR monitor)
+{
+    HWND fg = GetForegroundWindow();
+    HWND root = fg ? GetAncestor(fg, GA_ROOT) : nullptr;
+    if (!root || IsIconic(root) || MonitorFromWindow(root, MONITOR_DEFAULTTONULL) != monitor)
+        return false;
+    DWORD pid = 0;
+    if (!GetWindowThreadProcessId(root, &pid) || pid == GetCurrentProcessId())
+        return false;
+    QUERY_USER_NOTIFICATION_STATE state{};
+    return SUCCEEDED(SHQueryUserNotificationState(&state)) && state == QUNS_RUNNING_D3D_FULL_SCREEN;
 }
 
 } // namespace atrium

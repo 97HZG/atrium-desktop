@@ -27,9 +27,11 @@ atrium_shader(backdrop_edge.hlsl ps_5_0 PS g_BackdropEdgePS backdrop_edge_ps.h)
 add_custom_target(atrium_shaders DEPENDS ${shader_headers})
 
 add_library(atrium_core_lib STATIC
+    app_menus.cpp
     bar.cpp
     bar_drop.cpp
     bar_entries.cpp
+    bar_input.cpp
     bar_stacking.cpp
     desktop_helpers.cpp
     extras_host.cpp
@@ -109,6 +111,7 @@ add_library(atrium_core_lib STATIC
     shell/notification_listener.cpp
     shell/usb_volume.cpp
     render/bar_painter.cpp
+    render/bar_item_painter.cpp
     render/bar_extras_painter.cpp
     render/ime_glyph.cpp
     render/hover_wave.cpp

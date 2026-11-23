@@ -120,6 +120,7 @@ bool FullScreenInFront(HMONITOR monitor)
         return true;
     HWND fg = GetForegroundWindow();
     HWND root = fg ? GetAncestor(fg, GA_ROOT) : nullptr;
+    const bool hadForeground = root != nullptr;
     // No foreground for a moment (it is changing hands): the top app window on this screen.
     for (HWND w = root ? nullptr : GetTopWindow(nullptr); w; w = GetWindow(w, GW_HWNDNEXT)) {
         const LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
@@ -132,19 +133,23 @@ bool FullScreenInFront(HMONITOR monitor)
         }
     }
     DWORD pid = 0;
-    if (!root || !GetWindowThreadProcessId(root, &pid) || pid == GetCurrentProcessId() || MonitorFromWindow(root, MONITOR_DEFAULTTONULL) != monitor)
+    if (!root || IsIconic(root) || !GetWindowThreadProcessId(root, &pid) || pid == GetCurrentProcessId() ||
+        MonitorFromWindow(root, MONITOR_DEFAULTTONULL) != monitor)
         return false;
     wchar_t cls[64] = {};
     GetClassNameW(root, cls, 64);
     if (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") || !wcscmp(cls, L"Shell_TrayWnd") || !wcscmp(cls, L"Shell_SecondaryTrayWnd"))
         return false;
-    QUERY_USER_NOTIFICATION_STATE state{};
-    if (SUCCEEDED(SHQueryUserNotificationState(&state)) && state == QUNS_RUNNING_D3D_FULL_SCREEN)
-        return true;
+    // GameInFront already queried SHQueryUserNotificationState when fg was non-iconic on this monitor.
+    if (!hadForeground) {
+        QUERY_USER_NOTIFICATION_STATE state{};
+        if (SUCCEEDED(SHQueryUserNotificationState(&state)) && state == QUNS_RUNNING_D3D_FULL_SCREEN)
+            return true;
+    }
     // Maximized fills only the work area (all of it when Windows' taskbar is hidden).
     MONITORINFO mi{sizeof(mi)};
     RECT r{};
-    if (IsZoomed(root) || IsIconic(root) || !GetMonitorInfoW(monitor, &mi) || !GetWindowRect(root, &r))
+    if (IsZoomed(root) || !GetMonitorInfoW(monitor, &mi) || !GetWindowRect(root, &r))
         return false;
     return r.left <= mi.rcMonitor.left && r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
 }
@@ -167,9 +172,10 @@ std::vector<TaskItem> TaskItemsForDisplay(const std::vector<TaskItem>& items, co
         return result;
     // Keep pins, but restrict running dots, previews and active state to this display.
     for (TaskItem& item : result) {
+        const bool hadWindows = !item.windows.empty();
         std::erase_if(item.windows, [&](HWND window) { return monitorOf(window) != monitor; });
         item.active = std::ranges::find(item.windows, foreground) != item.windows.end();
-        if (item.windows.empty())
+        if (hadWindows && item.windows.empty())
             item.attention = false;
     }
     std::erase_if(result, [](const TaskItem& item) { return !item.pinned && item.windows.empty(); });

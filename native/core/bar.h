@@ -101,6 +101,10 @@ public:
     // Stops the render thread, pumping this (UI) thread's messages meanwhile, before the popups and
     // widgets it draws for go. False if it did not stop within `timeoutMs` (a stuck driver call).
     bool StopRendering(DWORD timeoutMs);
+    // Unhooks stacking WinEvent hooks, kills input timers, and tears down any AppBar registration
+    // before retiring/draining a bar.
+    void DetachInput();
+    static constexpr double kInsetDip = 14;
 
     std::function<IconImage(const std::wstring& key, int px)> iconProvider;
     std::function<void(const std::wstring& key)> onActivate;  // left click on an app
@@ -147,8 +151,14 @@ public:
     std::function<void()> onTuckChanged = [] {};  // auto-hide tucked the bar away or brought it up
 
 private:
-    static constexpr UINT_PTR kGuardTimer = 3, kPointerTimer = 5;
-    static constexpr UINT kGuardMs = 1000, kPointerMs = 50;
+    static constexpr UINT WM_BAR_LAYOUT = WM_APP + 0x71; // defer DPI relayout until SetWindowPos returns
+    static constexpr UINT_PTR kTooltipTimer = 1, kFileHoverTimer = 2, kGuardTimer = 3, kSlideTimer = 4, kPointerTimer = 5, kDisplayTimer = 6, kCoverTimer = 7,
+                              kNearTimer = 8;
+    static constexpr UINT kGuardMs = 1000, kPointerMs = 50, kNearMs = 16, kCoverMs = 50;
+    static constexpr UINT kTooltipDelayMs = 450, kPreviewSwapMs = 60, kFileHoverDelayMs = 600;
+    static constexpr DWORD kLeaveMs = 500;
+    static constexpr float kTooltipFont = 12.5f, kTooltipPadX = 12, kTooltipPadY = 6, kTooltipMinH = 28;
+    static constexpr float kTooltipTailH = 5, kTooltipTailHalfW = 12, kTooltipTailInset = 8;
 
     struct Snapshot {
         Settings settings;
@@ -177,7 +187,16 @@ private:
 
     static LRESULT CALLBACK VisualProc(HWND, UINT, WPARAM, LPARAM);
     static LRESULT CALLBACK InputProc(HWND, UINT, WPARAM, LPARAM);
+    static UINT AppBarNotice();
+    static int Px(double dip, float scale);
     LRESULT OnInput(HWND h, UINT m, WPARAM w, LPARAM l);
+    LRESULT HandleMouseActivate(HWND h, LPARAM l);
+    void HandleMouseMove(HWND h, WPARAM w, POINT pt);
+    bool HandleInputTimer(HWND h, WPARAM w);
+    void HandleButtonUp(UINT m, WPARAM w, POINT pt);
+    void HandleCaptureChanged(HWND h, LPARAM l);
+    void HandleMouseWheel(HWND h, WPARAM w, LPARAM l);
+    void HandleRightButtonUp(HWND h, POINT pt);
     void ReadDisplays();
     HMONITOR ResolveRelayoutMonitor(MONITORINFO& mi);
     void Bounce(const std::wstring& key);

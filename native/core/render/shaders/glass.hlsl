@@ -22,8 +22,8 @@ cbuffer GlassParams : register(b0)
     float Rotate;      // radians, clockwise about the shape's centre (a tilted capsule)
     float4 Shape;       // the glass shape in window px: left, top, right, bottom
     float4 Ripple;      // press ripple: centre x, y (window px), ring radius, strength (0 = none)
-    float4 PartRect[6]; // melting parts (PartCount > 0): rectangles in window px, left, top, right, bottom
-    float4 PartRadii[6]; // their corner radii: top left, top right, bottom right, bottom left
+    float4 PartRect[10]; // melting parts (PartCount > 0): rectangles in window px, left, top, right, bottom
+    float4 PartRadii[10]; // their corner radii: top left, top right, bottom right, bottom left
     float PartCount;
     float Melt;        // width of the smooth union in px
     float PartMix;     // 0: the parts, 1: the rounded rectangle Shape (the parts' union has seams inside where they meet)
@@ -178,7 +178,7 @@ float ShapeDistance(float2 px, bool edge, bool basic)
     if (!basic && PartCount > 0.5) {
         float card = d;
         d = 1e6;
-        [unroll] for (int i = 0; i < 6; ++i)
+        [unroll] for (int i = 0; i < 10; ++i)
         {
             if (float(i) < PartCount) {
                 float4 pr = PartRect[i];

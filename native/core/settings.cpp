@@ -241,15 +241,16 @@ std::wstring FolderDedupeKey(std::wstring path)
     return FoldCase(path);
 }
 
-void NormalizeFolderStacks(std::vector<std::wstring>& list, size_t maxCount)
+void NormalizeFolderStacks(std::vector<std::wstring>& list, size_t maxCount, bool stripTrailingSlashes = true)
 {
     NormalizeStringList(list);
     std::vector<std::wstring> deduped;
     deduped.reserve(std::min(list.size(), maxCount));
     std::unordered_set<std::wstring> seen;
     for (auto& entry : list) {
-        while (!entry.empty() && IsFolderSlash(entry.back()) && !IsFolderRootSlash(entry))
-            entry.pop_back();
+        if (stripTrailingSlashes)
+            while (!entry.empty() && IsFolderSlash(entry.back()) && !IsFolderRootSlash(entry))
+                entry.pop_back();
         if (entry.empty())
             continue;
         if (seen.insert(FolderDedupeKey(entry)).second) {
@@ -259,6 +260,157 @@ void NormalizeFolderStacks(std::vector<std::wstring>& list, size_t maxCount)
         }
     }
     list = std::move(deduped);
+}
+
+void WriteStringArrayJson(const json::JsonObject& o, const wchar_t* key, const std::vector<std::wstring>& list)
+{
+    json::JsonArray a;
+    for (const std::wstring& item : list)
+        a.Append(json::JsonValue::CreateStringValue(item));
+    o.SetNamedValue(key, a);
+}
+
+void WriteBarJson(const json::JsonObject& o, const Settings& s)
+{
+    auto num = [&](const wchar_t* k, double v) { o.SetNamedValue(k, json::JsonValue::CreateNumberValue(v)); };
+    auto flag = [&](const wchar_t* k, bool v) { o.SetNamedValue(k, json::JsonValue::CreateBooleanValue(v)); };
+    auto str = [&](const wchar_t* k, const std::wstring& v) { o.SetNamedValue(k, json::JsonValue::CreateStringValue(v)); };
+    wchar_t tintText[8];
+    swprintf_s(tintText, L"#%06X", s.tint);
+    num(L"version", Settings::kVersion);
+    str(L"preset", s.preset);
+    num(L"transparency", s.transparency);
+    num(L"cornerRadius", s.cornerRadius);
+    num(L"blur", s.blur);
+    num(L"refraction", s.refraction);
+    num(L"edge", s.edge);
+    num(L"dispersion", s.dispersion);
+    num(L"highlight", s.highlight);
+    num(L"shadow", s.shadow);
+    str(L"tint", tintText);
+    num(L"width", s.width);
+    num(L"height", s.height);
+    num(L"margin", s.margin);
+    num(L"iconSize", s.iconSize);
+    num(L"magnify", s.magnify);
+    flag(L"hoverRise", s.hoverRise);
+    flag(L"riseNear", s.riseNear);
+    flag(L"magnifyNear", s.magnifyNear);
+    flag(L"startTray", s.startTray);
+    flag(L"startStatus", s.startStatus);
+    flag(L"startCentered", s.startCentered);
+    flag(L"startWithBar", s.startWithBar);
+    if (!s.startSize.empty())
+        str(L"startSize", s.startSize);
+    if (!s.startIcon.empty())
+        str(L"startIcon", s.startIcon);
+    flag(L"showClock", s.showClock);
+    flag(L"showClockSeconds", s.showClockSeconds);
+    flag(L"showTray", s.showTray);
+    flag(L"showStatus", s.showStatus);
+    flag(L"showNotifications", s.showNotifications);
+    flag(L"showDesktop", s.showDesktop);
+    flag(L"autoWidth", s.autoWidth);
+    flag(L"showRunning", s.showRunning);
+}
+
+void WriteExtrasJson(const json::JsonObject& o, const Settings& s)
+{
+    auto flag = [&](const wchar_t* k, bool v) { o.SetNamedValue(k, json::JsonValue::CreateBooleanValue(v)); };
+    auto str = [&](const wchar_t* k, const std::wstring& v) { o.SetNamedValue(k, json::JsonValue::CreateStringValue(v)); };
+    flag(L"showLaunchpad", s.showLaunchpad);
+    str(L"launchpadMaterial", s.launchpadMaterial);
+    str(L"launchpadLayout", s.launchpadLayout);
+    flag(L"showNowPlaying", s.showNowPlaying);
+    flag(L"nowPlayingShowPaused", s.nowPlayingShowPaused);
+    str(L"nowPlayingMotion", s.nowPlayingMotion);
+    str(L"nowPlayingRhythm", s.nowPlayingRhythm);
+    str(L"nowPlayingAppMode", s.nowPlayingAppMode);
+    WriteStringArrayJson(o, L"nowPlayingApps", s.nowPlayingApps);
+    flag(L"showFolderStacks", s.showFolderStacks);
+    str(L"folderStackLayout", s.folderStackLayout);
+    o.SetNamedValue(L"folderStackMax", json::JsonValue::CreateNumberValue(s.folderStackMax));
+    WriteStringArrayJson(o, L"folderStacks", s.folderStacks);
+    WriteStringArrayJson(o, L"folderStackFiles", s.folderStackFiles);
+}
+
+void WriteSystemJson(const json::JsonObject& o, const Settings& s)
+{
+    auto num = [&](const wchar_t* k, double v) { o.SetNamedValue(k, json::JsonValue::CreateNumberValue(v)); };
+    auto flag = [&](const wchar_t* k, bool v) { o.SetNamedValue(k, json::JsonValue::CreateBooleanValue(v)); };
+    auto str = [&](const wchar_t* k, const std::wstring& v) { o.SetNamedValue(k, json::JsonValue::CreateStringValue(v)); };
+    str(L"language", s.language);
+    str(L"textColor", s.textColor);
+    str(L"autoHide", s.autoHide);
+    str(L"barEdge", s.barEdge);
+    str(L"statusStyle", s.statusStyle);
+    WriteStringArrayJson(o, L"controlModules", s.controlModules);
+    str(L"dockDisplayMode", s.dockDisplayMode);
+    num(L"dockDisplayDelay", s.dockDisplayDelay);
+    str(L"dockDisplay", s.dockDisplay);
+    str(L"desktopDisplay", s.desktopDisplay);
+    str(L"taskbarApps", s.taskbarApps);
+    flag(L"taskbarRightPrimaryOnly", s.taskbarRightPrimaryOnly);
+    flag(L"windowsContextMenu", s.windowsContextMenu);
+    num(L"notifyTimeout", s.notifyTimeout);
+    num(L"nearEnter", s.nearEnter);
+    num(L"nearLeave", s.nearLeave);
+    str(L"notifyPlacement", s.notifyPlacement);
+    flag(L"notifyHideBody", s.notifyHideBody);
+    flag(L"imeStatus", s.imeStatus);
+    flag(L"imeBubble", s.imeBubble);
+    flag(L"notifyListener", s.notifyListener);
+    flag(L"notifyWeChat", s.notifyWeChat);
+    flag(L"wechatBlockOfficial", s.wechatBlockOfficial);
+    flag(L"notifyFeishu", s.notifyFeishu);
+    flag(L"notifyQQ", s.notifyQQ);
+    flag(L"notifyWeCom", s.notifyWeCom);
+    flag(L"notifyDingTalk", s.notifyDingTalk);
+    flag(L"attentionLight", s.attentionLight);
+    flag(L"attentionBounce", s.attentionBounce);
+    flag(L"barBadges", s.barBadges);
+    flag(L"bar", s.bar);
+    flag(L"widgets", s.widgets);
+    flag(L"widgetsOnRight", s.widgetsOnRight);
+    str(L"widgetBackdrop", s.widgetBackdrop);
+    str(L"widgetMaterial", s.widgetMaterial);
+    flag(L"stageManager", s.stageManager);
+    flag(L"stageOnRight", s.stageOnRight);
+    flag(L"stageAutoHide", s.stageAutoHide);
+    flag(L"stageMinimize", s.stageMinimize);
+    flag(L"stageDragMerge", s.stageDragMerge);
+    flag(L"stageAvoid", s.stageAvoid);
+    flag(L"stageCloseButton", s.stageCloseButton);
+    WriteStringArrayJson(o, L"stageExcluded", s.stageExcluded);
+    flag(L"hideTaskbar", s.hideTaskbar);
+    flag(L"genieMinimize", s.genieMinimize);
+    flag(L"windowPeek", s.windowPeek);
+    flag(L"barReserve", s.barReserve);
+    flag(L"barFullscreenHide", s.barFullscreenHide);
+    flag(L"hideBanners", s.hideBanners);
+    flag(L"trayHost", s.trayHost);
+    flag(L"remoteVisible", s.remoteVisible);
+    flag(L"winKeyStart", s.winKeyStart);
+    flag(L"winNumbers", s.winNumbers);
+    flag(L"startOnLogin", s.startOnLogin);
+}
+
+void WritePinsJson(const json::JsonObject& o, const std::optional<std::vector<PinnedApp>>& pins)
+{
+    if (!pins)
+        return;
+    json::JsonArray a;
+    for (const auto& p : *pins) {
+        json::JsonObject e;
+        e.SetNamedValue(L"name", json::JsonValue::CreateStringValue(p.name));
+        e.SetNamedValue(L"path", json::JsonValue::CreateStringValue(p.path));
+        e.SetNamedValue(L"args", json::JsonValue::CreateStringValue(p.args));
+        e.SetNamedValue(L"aumid", json::JsonValue::CreateStringValue(p.aumid));
+        if (p.multipleWindows)
+            e.SetNamedValue(L"multipleWindows", json::JsonValue::CreateBooleanValue(*p.multipleWindows));
+        a.Append(e);
+    }
+    o.SetNamedValue(L"pins", a);
 }
 
 } // namespace
@@ -328,8 +480,8 @@ void Settings::Clamp()
     folderStackMax = std::clamp(folderStackMax, 4, 24);
     NormalizeStringList(stageExcluded);
     NormalizeStringList(nowPlayingApps, 64);
-    NormalizeFolderStacks(folderStacks, 32);
-    NormalizeStringList(folderStackFiles, 32);
+    NormalizeFolderStacks(folderStacks, 32, true);
+    NormalizeFolderStacks(folderStackFiles, 32, false);
     NormalizeControlModules(controlModules);
     if (pins && pins->size() > 64)
         pins->resize(64);
@@ -340,132 +492,10 @@ void Settings::Clamp()
 std::wstring Settings::ToJson() const
 {
     json::JsonObject o;
-    auto num = [&](const wchar_t* k, double v) { o.SetNamedValue(k, json::JsonValue::CreateNumberValue(v)); };
-    wchar_t tintText[8];
-    swprintf_s(tintText, L"#%06X", tint);
-    num(L"version", kVersion);
-    o.SetNamedValue(L"preset", json::JsonValue::CreateStringValue(preset));
-    num(L"transparency", transparency);
-    num(L"cornerRadius", cornerRadius);
-    num(L"blur", blur);
-    num(L"refraction", refraction);
-    num(L"edge", edge);
-    num(L"dispersion", dispersion);
-    num(L"highlight", highlight);
-    num(L"shadow", shadow);
-    o.SetNamedValue(L"tint", json::JsonValue::CreateStringValue(tintText));
-    num(L"width", width);
-    num(L"height", height);
-    num(L"margin", margin);
-    num(L"iconSize", iconSize);
-    num(L"magnify", magnify);
-    o.SetNamedValue(L"hoverRise", json::JsonValue::CreateBooleanValue(hoverRise));
-    o.SetNamedValue(L"riseNear", json::JsonValue::CreateBooleanValue(riseNear));
-    o.SetNamedValue(L"magnifyNear", json::JsonValue::CreateBooleanValue(magnifyNear));
-    o.SetNamedValue(L"startTray", json::JsonValue::CreateBooleanValue(startTray));
-    o.SetNamedValue(L"startStatus", json::JsonValue::CreateBooleanValue(startStatus));
-    o.SetNamedValue(L"startCentered", json::JsonValue::CreateBooleanValue(startCentered));
-    o.SetNamedValue(L"startWithBar", json::JsonValue::CreateBooleanValue(startWithBar));
-    if (!startSize.empty())
-        o.SetNamedValue(L"startSize", json::JsonValue::CreateStringValue(startSize));
-    if (!startIcon.empty())
-        o.SetNamedValue(L"startIcon", json::JsonValue::CreateStringValue(startIcon));
-    o.SetNamedValue(L"showClock", json::JsonValue::CreateBooleanValue(showClock));
-    o.SetNamedValue(L"showClockSeconds", json::JsonValue::CreateBooleanValue(showClockSeconds));
-    o.SetNamedValue(L"showTray", json::JsonValue::CreateBooleanValue(showTray));
-    o.SetNamedValue(L"showStatus", json::JsonValue::CreateBooleanValue(showStatus));
-    o.SetNamedValue(L"showNotifications", json::JsonValue::CreateBooleanValue(showNotifications));
-    o.SetNamedValue(L"showDesktop", json::JsonValue::CreateBooleanValue(showDesktop));
-    o.SetNamedValue(L"autoWidth", json::JsonValue::CreateBooleanValue(autoWidth));
-    o.SetNamedValue(L"showRunning", json::JsonValue::CreateBooleanValue(showRunning));
-    auto strArr = [&](const wchar_t* k, const std::vector<std::wstring>& list) {
-        json::JsonArray a;
-        for (const std::wstring& item : list)
-            a.Append(json::JsonValue::CreateStringValue(item));
-        o.SetNamedValue(k, a);
-    };
-    o.SetNamedValue(L"showLaunchpad", json::JsonValue::CreateBooleanValue(showLaunchpad));
-    o.SetNamedValue(L"launchpadMaterial", json::JsonValue::CreateStringValue(launchpadMaterial));
-    o.SetNamedValue(L"launchpadLayout", json::JsonValue::CreateStringValue(launchpadLayout));
-    o.SetNamedValue(L"showNowPlaying", json::JsonValue::CreateBooleanValue(showNowPlaying));
-    o.SetNamedValue(L"nowPlayingShowPaused", json::JsonValue::CreateBooleanValue(nowPlayingShowPaused));
-    o.SetNamedValue(L"nowPlayingMotion", json::JsonValue::CreateStringValue(nowPlayingMotion));
-    o.SetNamedValue(L"nowPlayingRhythm", json::JsonValue::CreateStringValue(nowPlayingRhythm));
-    o.SetNamedValue(L"nowPlayingAppMode", json::JsonValue::CreateStringValue(nowPlayingAppMode));
-    strArr(L"nowPlayingApps", nowPlayingApps);
-    o.SetNamedValue(L"showFolderStacks", json::JsonValue::CreateBooleanValue(showFolderStacks));
-    o.SetNamedValue(L"folderStackLayout", json::JsonValue::CreateStringValue(folderStackLayout));
-    num(L"folderStackMax", folderStackMax);
-    strArr(L"folderStacks", folderStacks);
-    strArr(L"folderStackFiles", folderStackFiles);
-    o.SetNamedValue(L"language", json::JsonValue::CreateStringValue(language));
-    o.SetNamedValue(L"textColor", json::JsonValue::CreateStringValue(textColor));
-    o.SetNamedValue(L"autoHide", json::JsonValue::CreateStringValue(autoHide));
-    o.SetNamedValue(L"barEdge", json::JsonValue::CreateStringValue(barEdge));
-    o.SetNamedValue(L"statusStyle", json::JsonValue::CreateStringValue(statusStyle));
-    strArr(L"controlModules", controlModules);
-    o.SetNamedValue(L"dockDisplayMode", json::JsonValue::CreateStringValue(dockDisplayMode));
-    num(L"dockDisplayDelay", dockDisplayDelay);
-    o.SetNamedValue(L"dockDisplay", json::JsonValue::CreateStringValue(dockDisplay));
-    o.SetNamedValue(L"desktopDisplay", json::JsonValue::CreateStringValue(desktopDisplay));
-    o.SetNamedValue(L"taskbarApps", json::JsonValue::CreateStringValue(taskbarApps));
-    o.SetNamedValue(L"taskbarRightPrimaryOnly", json::JsonValue::CreateBooleanValue(taskbarRightPrimaryOnly));
-    o.SetNamedValue(L"windowsContextMenu", json::JsonValue::CreateBooleanValue(windowsContextMenu));
-    num(L"notifyTimeout", notifyTimeout);
-    num(L"nearEnter", nearEnter);
-    num(L"nearLeave", nearLeave);
-    o.SetNamedValue(L"notifyPlacement", json::JsonValue::CreateStringValue(notifyPlacement));
-    o.SetNamedValue(L"notifyHideBody", json::JsonValue::CreateBooleanValue(notifyHideBody));
-    o.SetNamedValue(L"imeStatus", json::JsonValue::CreateBooleanValue(imeStatus));
-    o.SetNamedValue(L"imeBubble", json::JsonValue::CreateBooleanValue(imeBubble));
-    o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
-    o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
-    o.SetNamedValue(L"wechatBlockOfficial", json::JsonValue::CreateBooleanValue(wechatBlockOfficial));
-    o.SetNamedValue(L"notifyFeishu", json::JsonValue::CreateBooleanValue(notifyFeishu));
-    o.SetNamedValue(L"notifyQQ", json::JsonValue::CreateBooleanValue(notifyQQ));
-    o.SetNamedValue(L"notifyWeCom", json::JsonValue::CreateBooleanValue(notifyWeCom));
-    o.SetNamedValue(L"notifyDingTalk", json::JsonValue::CreateBooleanValue(notifyDingTalk));
-    o.SetNamedValue(L"attentionLight", json::JsonValue::CreateBooleanValue(attentionLight));
-    o.SetNamedValue(L"attentionBounce", json::JsonValue::CreateBooleanValue(attentionBounce));
-    o.SetNamedValue(L"barBadges", json::JsonValue::CreateBooleanValue(barBadges));
-    o.SetNamedValue(L"bar", json::JsonValue::CreateBooleanValue(bar));
-    o.SetNamedValue(L"widgets", json::JsonValue::CreateBooleanValue(widgets));
-    o.SetNamedValue(L"widgetsOnRight", json::JsonValue::CreateBooleanValue(widgetsOnRight));
-    o.SetNamedValue(L"widgetBackdrop", json::JsonValue::CreateStringValue(widgetBackdrop));
-    o.SetNamedValue(L"widgetMaterial", json::JsonValue::CreateStringValue(widgetMaterial));
-    o.SetNamedValue(L"stageManager", json::JsonValue::CreateBooleanValue(stageManager));
-    o.SetNamedValue(L"stageOnRight", json::JsonValue::CreateBooleanValue(stageOnRight));
-    o.SetNamedValue(L"stageAutoHide", json::JsonValue::CreateBooleanValue(stageAutoHide));
-    o.SetNamedValue(L"stageMinimize", json::JsonValue::CreateBooleanValue(stageMinimize));
-    o.SetNamedValue(L"stageDragMerge", json::JsonValue::CreateBooleanValue(stageDragMerge));
-    o.SetNamedValue(L"stageAvoid", json::JsonValue::CreateBooleanValue(stageAvoid));
-    o.SetNamedValue(L"stageCloseButton", json::JsonValue::CreateBooleanValue(stageCloseButton));
-    strArr(L"stageExcluded", stageExcluded);
-    o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
-    o.SetNamedValue(L"genieMinimize", json::JsonValue::CreateBooleanValue(genieMinimize));
-    o.SetNamedValue(L"windowPeek", json::JsonValue::CreateBooleanValue(windowPeek));
-    o.SetNamedValue(L"barReserve", json::JsonValue::CreateBooleanValue(barReserve));
-    o.SetNamedValue(L"barFullscreenHide", json::JsonValue::CreateBooleanValue(barFullscreenHide));
-    o.SetNamedValue(L"hideBanners", json::JsonValue::CreateBooleanValue(hideBanners));
-    o.SetNamedValue(L"trayHost", json::JsonValue::CreateBooleanValue(trayHost));
-    o.SetNamedValue(L"remoteVisible", json::JsonValue::CreateBooleanValue(remoteVisible));
-    o.SetNamedValue(L"winKeyStart", json::JsonValue::CreateBooleanValue(winKeyStart));
-    o.SetNamedValue(L"winNumbers", json::JsonValue::CreateBooleanValue(winNumbers));
-    o.SetNamedValue(L"startOnLogin", json::JsonValue::CreateBooleanValue(startOnLogin));
-    if (pins) {
-        json::JsonArray a;
-        for (const auto& p : *pins) {
-            json::JsonObject e;
-            e.SetNamedValue(L"name", json::JsonValue::CreateStringValue(p.name));
-            e.SetNamedValue(L"path", json::JsonValue::CreateStringValue(p.path));
-            e.SetNamedValue(L"args", json::JsonValue::CreateStringValue(p.args));
-            e.SetNamedValue(L"aumid", json::JsonValue::CreateStringValue(p.aumid));
-            if (p.multipleWindows)
-                e.SetNamedValue(L"multipleWindows", json::JsonValue::CreateBooleanValue(*p.multipleWindows));
-            a.Append(e);
-        }
-        o.SetNamedValue(L"pins", a);
-    }
+    WriteBarJson(o, *this);
+    WriteExtrasJson(o, *this);
+    WriteSystemJson(o, *this);
+    WritePinsJson(o, pins);
     return std::wstring(o.Stringify());
 }
 

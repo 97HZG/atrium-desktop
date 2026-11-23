@@ -38,6 +38,7 @@ public:
     // The settings as applied; radius: the popups' corner (the bar's, as the other popups get it).
     void Apply(const Settings& s, float radius);
     void ConfigureBar(Bar& bar);
+    void OnBarRetiring(const Bar* bar);
     void OnCatalogChanged();
     void ClosePopups();
     bool AnyPopupVisible() const;
