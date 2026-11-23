@@ -129,16 +129,35 @@ struct ScopedPidl {
     ScopedPidl& operator=(const ScopedPidl&) = delete;
 };
 
+bool IsImageFile(const std::wstring& path)
+{
+    const size_t dot = path.find_last_of(L'.');
+    const size_t slash = path.find_last_of(L"\\/");
+    if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash))
+        return false;
+    const wchar_t* ext = path.c_str() + dot;
+    static constexpr const wchar_t* kImageExts[] = {
+        L".png", L".jpg", L".jpeg", L".bmp", L".gif", L".webp", L".ico", L".tif", L".tiff", L".heic", L".avif",
+    };
+    return std::ranges::any_of(kImageExts, [ext](const wchar_t* e) { return _wcsicmp(ext, e) == 0; });
+}
+
 StackFolder ResolveEntry(const std::wstring& path, int iconPx, bool isFile)
 {
     StackFolder entry;
     entry.path = path;
-    entry.isFile = isFile;
-    const std::wstring fallback = isFile ? FileNameStem(path) : FallbackFolderName(path);
     if (IsRemotePath(path)) {
+        entry.isFile = isFile;
+        const std::wstring fallback = isFile ? FileNameStem(path) : FallbackFolderName(path);
         entry.name = fallback.empty() ? path : fallback;
         return entry;
     }
+
+    const DWORD attrs = GetFileAttributesW(path.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES)
+        isFile = (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    entry.isFile = isFile;
+    const std::wstring fallback = isFile ? FileNameStem(path) : FallbackFolderName(path);
 
     winrt::com_ptr<IShellItem> item;
     if (FAILED(SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(item.put()))) || !item) {
@@ -158,7 +177,8 @@ StackFolder ResolveEntry(const std::wstring& path, int iconPx, bool isFile)
         CoTaskMemFree(display);
     }
 
-    LoadShellImage(path, iconPx, entry.icon, false);
+    if (!isFile || !IsImageFile(path) || !LoadShellImage(path, iconPx, entry.icon, true))
+        LoadShellImage(path, iconPx, entry.icon, false);
     return entry;
 }
 

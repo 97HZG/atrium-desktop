@@ -70,7 +70,7 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
     if (key == kMusicKey)
         return musicTip_.empty() ? std::wstring(Tr(L"Now Playing")) : musicTip_;
     if (key == kStacksKey)
-        return Tr(L"Folder Stacks");
+        return Tr(L"File Stacks");
     if (key == kNotifyKey)
         return unread_ ? TrFormat(L"%d unread notifications", int(unread_)) : Tr(L"Notifications");
     if (key == kTrayKey)

@@ -83,7 +83,7 @@ public sealed partial class MainWindow : Window, IDisposable
     [
         Loc.T("Material"), Loc.T("Shape"), Loc.T("Taskbar"), Loc.T("Notifications"), Loc.T("Widgets"),
         Loc.T("Stage Manager"), Loc.T("Displays"), Loc.T("System"), Loc.T("Design language"), Loc.T("About"),
-        Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), Loc.T("Input method"), Loc.T("Now Playing"), Loc.T("Folder Stacks"),
+        Loc.T("Start menu"), Loc.T("Tray"), Loc.T("Status bar"), Loc.T("Time"), Loc.T("Input method"), Loc.T("Now Playing"), Loc.T("File Stacks"),
         Loc.T("Launchpad"),
     ];
     private readonly CoreClient _client = new();

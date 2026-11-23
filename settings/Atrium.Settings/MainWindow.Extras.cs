@@ -1,7 +1,9 @@
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage.Pickers;
 using Windows.UI;
 
@@ -81,7 +83,7 @@ public sealed partial class MainWindow
         _npSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_npSide.Visibility == Visibility.Visible) LoadExtras(); });
         _stSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_stSide.Visibility == Visibility.Visible) LoadExtras(); });
         AddNavItem(NowPlayingPage, "", "Now Playing", "12");
-        AddNavItem(StacksPage, "", "Folder Stacks", "10"); // the bar's order: the stack sits left of the tray
+        AddNavItem(StacksPage, "", "File Stacks", "10"); // the bar's order: the stack sits left of the tray
         _lpSide.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => { if (_lpSide.Visibility == Visibility.Visible) LoadExtras(); });
         // The bar's order, left to right: the start menu, Launchpad, the stack, then the tray's side.
         AddNavItem(LaunchpadPage, "\uF0E2", "Launchpad", "10");
@@ -141,13 +143,13 @@ public sealed partial class MainWindow
 
     private StackPanel BuildStacksSide()
     {
-        _stSwitch = Toggle("Show on the taskbar", "Show folder stacks",
+        _stSwitch = Toggle("Show on the taskbar", "Show file stacks",
             "Left of the tray: a click fans out the folders added here, a click on one opens it.", (s, on) => s.ShowFolderStacks = on);
         _stLayout = Segments("stacklayout", [("Fan", "fan"), ("List", "column")], tag => CurrentSettings.FolderStackLayout = tag);
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
         _stMax = Segments("stackmax", [.. StackMaxima.Select(n => (n.ToString(System.Globalization.CultureInfo.CurrentCulture), n.ToString(invariant)))],
             tag => CurrentSettings.FolderStackMax = int.Parse(tag, System.Globalization.CultureInfo.InvariantCulture));
-        return Side("Folder Stacks", _stSwitch, Row("Opens as", _stLayout), Row("Shows at most", _stMax));
+        return Side("File Stacks", _stSwitch, Row("Opens as", _stLayout), Row("Shows at most", _stMax));
     }
 
     // The folders and files, under the picture as the taskbar's pinned apps are under theirs: a
@@ -322,6 +324,72 @@ public sealed partial class MainWindow
         for (int i = 0; i < items.Count; i++) list.Children.Add(StackRow(i, items[i], items.Count, isFile));
     }
 
+    internal static bool IsStackFile(string path, bool defaultIsFile)
+    {
+        if (File.Exists(path)) return true;
+        if (Directory.Exists(path)) return false;
+        return defaultIsFile;
+    }
+
+    internal static string StackItemName(string path, bool isFile)
+    {
+        if (isFile)
+        {
+            string stem = Path.GetFileNameWithoutExtension(path);
+            if (stem.Length > 0) return stem;
+            string file = Path.GetFileName(path);
+            return file.Length > 0 ? file : path;
+        }
+        string trimmed = path.TrimEnd('\\', '/');
+        string name = Path.GetFileName(trimmed);
+        return name.Length > 0 ? name : (trimmed.Length > 0 ? trimmed : path);
+    }
+
+    internal void SetStackItemIcon(string path, bool isFile, Image picture, TextBlock glyph)
+    {
+        glyph.Text = isFile ? "\U0001F4C4" : "\U0001F4C1";
+        if (!isFile || path.Length == 0)
+        {
+            picture.Tag = null;
+            picture.Visibility = Visibility.Collapsed;
+            glyph.Visibility = Visibility.Visible;
+            return;
+        }
+        picture.Tag = path;
+        if (_iconCache.TryGetValue(path, out var cached))
+        {
+            picture.Source = cached;
+            picture.Visibility = Visibility.Visible;
+            glyph.Visibility = Visibility.Collapsed;
+            return;
+        }
+        picture.Visibility = Visibility.Collapsed;
+        glyph.Visibility = Visibility.Visible;
+        _ = LoadStackFileIconAsync(path, picture, glyph);
+    }
+
+    private async Task LoadStackFileIconAsync(string path, Image picture, TextBlock glyph)
+    {
+        if (!_iconCache.TryGetValue(path, out var source))
+        {
+            var img = await ShellIcons.LoadAsync(path, 96);
+            if (img != null)
+            {
+                var bmp = new WriteableBitmap(img.Width, img.Height);
+                using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(img.Bgra, 0, img.Bgra.Length);
+                bmp.Invalidate();
+                source = bmp;
+                _iconCache[path] = source;
+            }
+        }
+        if (source != null && picture.Tag as string == path)
+        {
+            picture.Source = source;
+            picture.Visibility = Visibility.Visible;
+            glyph.Visibility = Visibility.Collapsed;
+        }
+    }
+
     // A folder or file as a pinned app's row: its icon, its name over its path, and up, down and remove.
     private Grid StackRow(int index, string path, int count, bool isFile)
     {
@@ -330,17 +398,18 @@ public sealed partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var icon = new TextBlock
+        bool showAsFile = IsStackFile(path, isFile);
+        var symbol = new TextBlock
         {
-            Text = isFile ? "\U0001F4C4" : "\U0001F4C1",
             FontFamily = new FontFamily("Segoe UI Emoji"),
             FontSize = 28,
-            Width = 40,
             TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        string name = isFile ? Path.GetFileNameWithoutExtension(path) : Path.GetFileName(path.TrimEnd('\\', '/'));
-        if (name.Length == 0 && isFile) name = Path.GetFileName(path);
+        var picture = new Image { Width = 32, Height = 32, Stretch = Stretch.Uniform, Visibility = Visibility.Collapsed };
+        var icon = new Grid { Width = 40, Height = 40, VerticalAlignment = VerticalAlignment.Center, Children = { symbol, picture } };
+        SetStackItemIcon(path, showAsFile, picture, symbol);
+        string name = StackItemName(path, showAsFile);
         var text = new StackPanel
         {
             VerticalAlignment = VerticalAlignment.Center,

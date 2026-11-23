@@ -155,32 +155,38 @@ public sealed partial class MainWindow
         private const double ColumnW = 264, RowH = 44, ColumnPad = 8, ColumnIcon = 26;
         private const double OpenMs = 340, StaggerMs = 22, Tilt = 0.6;
         private readonly PanelInk _ink = new();
-        private readonly List<(TextBlock Icon, TextBlock Name, Border Plate)> _items = [];
+        private readonly List<(Grid Icon, TextBlock Glyph, Image Picture, TextBlock Name, Border Plate)> _items = [];
         private double _opened = double.MaxValue;
 
+        private sealed record StackItem(string Name, string Path, bool IsFile);
+
         // The names the frame was laid out for: the folders may change before it shows.
-        private sealed record Frame(double Left, double Top, double W, double H, bool Fan, string[] Names, double[] LabelW);
+        private sealed record Frame(double Left, double Top, double W, double H, bool Fan, StackItem[] Items, double[] LabelW);
 
         public StacksScene(MainWindow m, Border stage, Canvas root) : base(m, stage, root) { }
 
-        private string[] Names()
+        private StackItem[] Items()
         {
             var folders = M.CurrentSettings.FolderStacks;
             var files = M.CurrentSettings.FolderStackFiles;
-            var items = folders.Select(p =>
-            {
-                string trimmed = p.TrimEnd('\\', '/');
-                string n = System.IO.Path.GetFileName(trimmed);
-                return n.Length > 0 ? n : (trimmed.Length > 0 ? trimmed : p);
-            }).Concat(files.Select(p =>
-            {
-                string n = System.IO.Path.GetFileNameWithoutExtension(p);
-                return n.Length > 0 ? n : p;
-            }));
-            string[] names = folders.Count > 0 || files.Count > 0
-                ? [.. items]
-                : [Loc.T("Desktop"), Loc.T("Downloads"), Loc.T("Documents"), Loc.T("Pictures"), Loc.T("Music")];
-            return [.. names.Take(Math.Clamp(M.CurrentSettings.FolderStackMax, 4, 24)).Take(7)];
+            var configured = folders.Select(p => (Path: p, DefaultIsFile: false))
+                .Concat(files.Select(p => (Path: p, DefaultIsFile: true)))
+                .Select(entry =>
+                {
+                    bool isFile = IsStackFile(entry.Path, entry.DefaultIsFile);
+                    return new StackItem(StackItemName(entry.Path, isFile), entry.Path, isFile);
+                });
+            StackItem[] items = folders.Count > 0 || files.Count > 0
+                ? [.. configured]
+                :
+                [
+                    new(Loc.T("Desktop"), "", false),
+                    new(Loc.T("Downloads"), "", false),
+                    new(Loc.T("Documents"), "", false),
+                    new(Loc.T("Pictures"), "", false),
+                    new(Loc.T("Music"), "", false),
+                ];
+            return [.. items.Take(Math.Clamp(M.CurrentSettings.FolderStackMax, 4, 24)).Take(7)];
         }
 
         private bool Fan => M.CurrentSettings.FolderStackLayout != "column";
@@ -204,19 +210,19 @@ public sealed partial class MainWindow
 
         protected override (GlassTile[] Tiles, object State) Pieces()
         {
-            string[] names = Names();
+            var items = Items();
             double ax = Anchor.X, foot = PopupBottom + Gap * S;
             if (!Fan)
             {
-                double w = ColumnW * S, h = (2 * ColumnPad + names.Length * RowH) * S;
+                double w = ColumnW * S, h = (2 * ColumnPad + items.Length * RowH) * S;
                 double left = Math.Clamp(ax - w / 2, 16, Math.Max(16, W - 16 - w));
                 return (new[] { new GlassTile(left, PopupBottom - h, w, h, Math.Min(Radius, 22) * S) },
-                    new Frame(left, PopupBottom - h, w, h, false, names, []));
+                    new Frame(left, PopupBottom - h, w, h, false, items, []));
             }
             // The names' capsules, each its own piece of glass, flying out with their folders.
-            double[] widths = [.. names.Select(LabelWidth)];
+            double[] widths = [.. items.Select(item => LabelWidth(item.Name))];
             var tiles = new List<GlassTile>();
-            for (int i = 0; i < names.Length; i++)
+            for (int i = 0; i < items.Length; i++)
             {
                 double e = Unfold(i), rise = Gap + Icon / 2 + i * StepY, turn = Turn(rise), reach = (Icon / 2 + LabelGap + widths[i] / 2) * S;
                 double lx = ax + Lean(rise) * S - Math.Cos(turn) * reach, ly = foot - rise * S - Math.Sin(turn) * reach;
@@ -228,7 +234,7 @@ public sealed partial class MainWindow
                         LabelH / 2 * S, turn * 180 / Math.PI * Math.Min(1, e)));
                 }
             }
-            return ([.. tiles], new Frame(ax, foot, 0, 0, true, names, widths));
+            return ([.. tiles], new Frame(ax, foot, 0, 0, true, items, widths));
         }
 
         // Turned about its centre; the transform kept from frame to frame.
@@ -245,56 +251,66 @@ public sealed partial class MainWindow
         protected override bool Arrange(object state, double dt)
         {
             var f = (Frame)state;
-            string[] names = f.Names;
-            while (_items.Count < names.Length)
+            var items = f.Items;
+            while (_items.Count < items.Length)
             {
-                var icon = new TextBlock
+                var glyph = new TextBlock
                 {
                     Text = "\U0001F4C1",
                     FontFamily = new FontFamily("Segoe UI Emoji"),
                     TextAlignment = TextAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
                     IsHitTestVisible = false,
                 };
+                var picture = new Image { Stretch = Stretch.Uniform, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+                var icon = new Grid { IsHitTestVisible = false, Children = { glyph, picture } };
                 var name = Words(13, _ink.Text, false, TextAlignment.Center);
                 var plate = Plate(_ink.Hover, 10);
                 Marks.Children.Add(plate);
                 Marks.Children.Add(icon);
                 Marks.Children.Add(name);
-                _items.Add((icon, name, plate));
+                _items.Add((icon, glyph, picture, name, plate));
             }
             for (int i = 0; i < _items.Count; i++)
             {
-                bool shown = i < names.Length;
+                bool shown = i < items.Length;
                 _items[i].Icon.Visibility = _items[i].Name.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
                 _items[i].Plate.Visibility = Visibility.Collapsed;
-                if (shown) _items[i].Name.Text = names[i];
+                if (shown && !Equals(_items[i].Icon.Tag, items[i]))
+                {
+                    _items[i].Icon.Tag = items[i];
+                    _items[i].Name.Text = items[i].Name;
+                    M.SetStackItemIcon(items[i].Path, items[i].IsFile, _items[i].Picture, _items[i].Glyph);
+                }
             }
             if (!f.Fan)
             {
                 PlaceMarks(f.Left, f.Top);
                 foreach (var item in _items) item.Name.RenderTransform = item.Icon.RenderTransform = null;
-                for (int i = 0; i < names.Length; i++)
+                for (int i = 0; i < items.Length; i++)
                 {
                     // Over a bottom bar the first folder is the lowest row.
-                    double y = ColumnPad + (names.Length - 1 - i) * RowH, e = Motion.EaseOut((Now - _opened - 14 * i) / 240);
-                    _items[i].Icon.FontSize = ColumnIcon * 0.8;
-                    Box(_items[i].Icon, ColumnPad + 10, y + 6 * (1 - Math.Clamp(e, 0, 1)), ColumnIcon, RowH);
+                    double y = ColumnPad + (items.Length - 1 - i) * RowH, e = Motion.EaseOut((Now - _opened - 14 * i) / 240);
+                    _items[i].Glyph.FontSize = ColumnIcon * 0.8;
+                    _items[i].Picture.Width = _items[i].Picture.Height = ColumnIcon;
+                    Put(_items[i].Icon, ColumnPad + 10, y + 6 * (1 - Math.Clamp(e, 0, 1)), ColumnIcon, RowH);
                     _items[i].Name.TextAlignment = TextAlignment.Left;
                     Box(_items[i].Name, ColumnPad + 10 + ColumnIcon + 12, y + 6 * (1 - Math.Clamp(e, 0, 1)), ColumnW - 2 * ColumnPad - ColumnIcon - 34, RowH);
                     _items[i].Icon.Opacity = _items[i].Name.Opacity = Math.Clamp(e, 0, 1);
                 }
-                return _opened != double.MaxValue && Now - _opened < 240 + 14 * names.Length;
+                return _opened != double.MaxValue && Now - _opened < 240 + 14 * items.Length;
             }
             PlaceMarks(0, 0, 1); // the fan is laid out in the stage's own units
             bool moving = false;
-            for (int i = 0; i < names.Length; i++)
+            for (int i = 0; i < items.Length; i++)
             {
                 double e = Unfold(i), rise = Gap + Icon / 2 + i * StepY;
                 moving |= e < 1 || _opened == double.MaxValue;
                 double cx = f.Left + Lean(rise) * S, cy = f.Top - rise * S;
                 double x = f.Left + (cx - f.Left) * e, y = f.Top + (cy - f.Top) * e, k = 0.35 + 0.65 * Math.Min(e, 1);
-                _items[i].Icon.FontSize = Icon * 0.78 * S * k;
-                Box(_items[i].Icon, x - Icon / 2 * S, y - Icon / 2 * S, Icon * S, Icon * S);
+                _items[i].Glyph.FontSize = Icon * 0.78 * S * k;
+                _items[i].Picture.Width = _items[i].Picture.Height = Icon * S * k;
+                Put(_items[i].Icon, x - Icon / 2 * S, y - Icon / 2 * S, Icon * S, Icon * S);
                 Turned(_items[i].Icon, Turn(rise) * 180 / Math.PI * Math.Min(1, e));
                 double lw = f.LabelW[i] * S, turn = Turn(rise), reach = Icon / 2 * S + LabelGap * S + lw / 2;
                 double lcx = cx - Math.Cos(turn) * reach, lcy = cy - Math.Sin(turn) * reach;
