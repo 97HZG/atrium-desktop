@@ -1,5 +1,5 @@
-// Launchpad's input: the pointer (a press launches, a sideways drag turns the pages, a press on the
-// empty glass closes), the wheel, the keys and typing.
+// Launchpad's input: the pointer (a press launches, a sideways drag turns the pages, a press held on an
+// app lifts it to be moved (launchpad_drag.cpp), a press on the empty glass closes), the wheel, the keys and typing.
 #include "ui/launchpad.h"
 
 #include "clock.h"
@@ -14,8 +14,9 @@ namespace atrium {
 
 namespace {
 
-constexpr float kDragStart = 8;                                 // DIP sideways before a press turns the pages
-constexpr float kRubber = 0.35f;                                // past the first or last page, the sheet follows this much
+constexpr float kDragStart = 8; // DIP sideways before a press turns the pages
+constexpr float kRubber = 0.35f; // past the first or last page, the sheet follows this much
+constexpr UINT kHoldMs = 350;    // a press held this long on an app lifts it to be moved
 
 } // namespace
 
@@ -28,7 +29,11 @@ bool Launchpad::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             Finish();
         else if (w == kCaretTimer && searchFocused_)
             surface_.Invalidate(); // the caret blinks
-        return w == kCloseTimer || w == kCaretTimer;
+        else if (w == kHoldTimer)
+            Lift();
+        else if (w == kEdgeTimer)
+            TurnAtEdge();
+        return w == kCloseTimer || w == kCaretTimer || w == kHoldTimer || w == kEdgeTimer;
     case WM_ACTIVATE:
         if (LOWORD(w) == WA_INACTIVE)
             Close(false);
@@ -69,6 +74,7 @@ bool Launchpad::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     case WM_CAPTURECHANGED:
         if (reinterpret_cast<HWND>(l) != surface_.Hwnd() && (down_ || dragging_ || pressed_ != -1)) {
+            DropLifted();
             down_ = dragging_ = false;
             pressed_ = -1;
             page_ = std::clamp(int(std::lround(pageShown_)), 0, Pages() - 1);
@@ -200,15 +206,22 @@ void Launchpad::Press(POINT pt)
     lastDragX_ = float(pt.x) / surface_.Scale();
     pressed_ = HitAt(pt);
     searchFocused_ = pressed_ == kSearch;
+    if (pressed_ >= 0 && Arranging())
+        SetTimer(surface_.Hwnd(), kHoldTimer, kHoldMs, nullptr); // held there: it lifts (Lift)
     surface_.Invalidate();
 }
 
 void Launchpad::Drag(POINT pt)
 {
+    if (lifted_ >= 0) {
+        MoveLifted(pt);
+        return;
+    }
     const float s = surface_.Scale(), x = float(pt.x) / s, dx = float(pt.x - downPt_.x) / s;
     if (!dragging_ && std::abs(dx) < kDragStart)
         return;
     if (!dragging_) {
+        KillTimer(surface_.Hwnd(), kHoldTimer); // moved before it lifted: the pages turn
         dragging_ = true;
         pressed_ = -1; // a drag launches nothing and closes nothing
     }
@@ -231,6 +244,11 @@ void Launchpad::Release(POINT pt)
     if (!down_)
         return;
     down_ = false;
+    KillTimer(surface_.Hwnd(), kHoldTimer);
+    if (lifted_ >= 0) {
+        DropLifted();
+        return;
+    }
     const int was = pressed_;
     pressed_ = -1;
     if (dragging_) {

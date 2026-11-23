@@ -112,6 +112,7 @@ internal sealed class BarSettings
     public bool StageAutoHide { get; set; }            // the strip only comes out while the pointer rests on its edge
     public bool StageMinimize { get; set; }            // a window minimized on the stage goes to the strip (off unless chosen)
     public bool StageDragMerge { get; set; } = true;   // a window released over a group in the strip joins it
+    public bool StageCloseButton { get; set; } = true; // a card in the strip shows a close button under the pointer
     // Apps Stage Manager leaves alone; the default is the Windows Snipping Tool, whose overlay
     // and control bar must stay on screen while recording. Other tools can be added.
     // Keep in step with DefaultStageExcluded() in native/core/stage_excluded.h.
@@ -254,6 +255,7 @@ internal sealed class BarSettings
             ["stageAutoHide"] = StageAutoHide,
             ["stageMinimize"] = StageMinimize,
             ["stageDragMerge"] = StageDragMerge,
+            ["stageCloseButton"] = StageCloseButton,
             ["widgetMaterial"] = WidgetMaterial,
             ["hideTaskbar"] = HideTaskbar,
             ["genieMinimize"] = GenieMinimize,
@@ -369,6 +371,7 @@ internal sealed class BarSettings
         s.StageAutoHide = Flag("stageAutoHide", f.StageAutoHide);
         s.StageMinimize = Flag("stageMinimize", f.StageMinimize);
         s.StageDragMerge = Flag("stageDragMerge", f.StageDragMerge);
+        s.StageCloseButton = Flag("stageCloseButton", f.StageCloseButton);
         s.StageExcluded = ReadStringArray(o, "stageExcluded", f.StageExcluded);
         ReadExtrasJson(o, s, f);
         string widgetMaterial = Str("widgetMaterial", f.WidgetMaterial);
@@ -525,7 +528,7 @@ internal sealed class BarSettings
         NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk &&
         AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
-        StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize && StageDragMerge == o.StageDragMerge &&
+        StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize && StageDragMerge == o.StageDragMerge && StageCloseButton == o.StageCloseButton &&
         StageExcluded.SequenceEqual(o.StageExcluded, StringComparer.OrdinalIgnoreCase) && WidgetMaterial == o.WidgetMaterial &&
         HideTaskbar == o.HideTaskbar && GenieMinimize == o.GenieMinimize && HideBanners == o.HideBanners && RemoteVisible == o.RemoteVisible &&
         WinKeyStart == o.WinKeyStart && WinNumbers == o.WinNumbers &&

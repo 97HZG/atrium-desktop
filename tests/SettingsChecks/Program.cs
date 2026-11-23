@@ -60,6 +60,10 @@ Require(parsed.StageMinimize && BarSettings.FromJson(parsed.ToJson(), new()).Sta
     "Minimizing to Stage Manager must survive a round trip and mark the settings dirty.");
 Require(new BarSettings().StageDragMerge && BarSettings.FromJson([], new()).StageDragMerge,
     "Dragging onto a Stage Manager group is on by default, also for old files.");
+var closeOff = BarSettings.FromJson(JsonNode.Parse("""{"stageCloseButton":false}""")!.AsObject(), new());
+Require(new BarSettings().StageCloseButton && !closeOff.StageCloseButton && !BarSettings.FromJson(closeOff.ToJson(), new()).StageCloseButton &&
+        !new BarSettings().SameAs(closeOff),
+    "The Stage Manager cards' close button is on by default, and off survives a round trip.");
 var dragMergeOff = BarSettings.FromJson(JsonNode.Parse("""{"stageDragMerge":false}""")!.AsObject(), new());
 Require(!dragMergeOff.StageDragMerge && !BarSettings.FromJson(dragMergeOff.ToJson(), new()).StageDragMerge &&
         !BarSettings.FromJson([], dragMergeOff).StageDragMerge &&

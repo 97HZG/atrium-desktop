@@ -1093,10 +1093,14 @@ void StageManager::Load()
 
 // A window over the strip's place moves beside it as it takes the stage: up, at once; minimized,
 // its place to come back to (its picture lands there). Maximized windows stay as they are, under
-// the strip.
+// the strip, and so do minimized ones that come back maximized (IsZoomed is false while they are down):
+// moved, the picture would land beside the strip and the window then come up over all of the screen.
 void StageManager::MoveBeside(HWND window)
 {
     if (!window || !IsWindow(window) || IsZoomed(window) || !OnMonitor(window, monitor_))
+        return;
+    WINDOWPLACEMENT wp{sizeof(wp)};
+    if (IsIconic(window) && GetWindowPlacement(window, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED))
         return;
     const bool down = IsIconic(window) != FALSE;
     if (!down && Transient(window))
@@ -1673,6 +1677,10 @@ void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
             c.Image(L"stage|shadow", kShadow, D2D1::RectF(ir.left - sp, ir.top - sp + 2, ir.right + sp, ir.bottom + sp + 2), 0.45f);
             c.Image(L"stage|" + apps[j] + L"|" + std::to_wstring(iconPx), icon, ir);
         }
+        // The close button on the front picture's top right corner; where it is after the card's scale and slide.
+        const D2D1_POINT_2F corner = Project(m, front.rect.right * s, front.rect.top * s);
+        const D2D1_POINT_2F at{corner.x / s, corner.y / s};
+        PaintClose(c, e, index, at, D2D1::Point2F(cx + (at.x - cx) * k + slide, cy + (at.y - cy) * k), live ? hv : 0.f);
     }
     c.EndGroup();
 }
@@ -1839,20 +1847,25 @@ bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             hover_ = i;
             surface_.Invalidate();
         }
+        CloseInput(m, pt);
         return true;
     }
     case WM_MOUSELEAVE:
         tracking_ = false;
         inside_ = false;
-        hover_ = pressed_ = -1;
+        hover_ = pressed_ = closeHot_ = closePressed_ = -1;
         surface_.Invalidate();
         return true;
     case WM_LBUTTONDOWN:
+        if (CloseInput(m, pt))
+            return true;
         Foresee();
         pressed_ = shown_ ? EntryAt(pt) : -1;
         surface_.Invalidate();
         return true;
     case WM_LBUTTONUP: {
+        if (CloseInput(m, pt))
+            return true;
         int i = EntryAt(pt);
         bool same = shown_ && i >= 0 && i == pressed_;
         pressed_ = -1;

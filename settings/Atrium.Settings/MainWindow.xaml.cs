@@ -798,6 +798,7 @@ public sealed partial class MainWindow : Window, IDisposable
         (CurrentSettings.StageAutoHide ? StageAutoHide : StageAlways).IsChecked = true;
         StageMinimizeSwitch.IsOn = CurrentSettings.StageMinimize;
         StageDragMergeSwitch.IsOn = CurrentSettings.StageDragMerge;
+        StageCloseButtonSwitch.IsOn = CurrentSettings.StageCloseButton;
         RebuildExcluded();
         (CurrentSettings.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
         (CurrentSettings.WidgetMaterial switch { "dusk" => MaterialDusk, "color" => MaterialColor, _ => MaterialGlass }).IsChecked = true;
@@ -1118,6 +1119,13 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_loading) return;
         CurrentSettings.HideBanners = HideBannersSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnStageCloseButtonToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        CurrentSettings.StageCloseButton = StageCloseButtonSwitch.IsOn;
         Changed();
     }
 

@@ -84,6 +84,7 @@
     "stageAutoHide": {"type": "bool", "default": false},
     "stageMinimize": {"type": "bool", "default": false},
     "stageDragMerge": {"type": "bool", "default": true},
+    "stageCloseButton": {"type": "bool", "default": true},
     "stageExcluded": {"type": "stringArray", "default": ["snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_"]},
     "imeStatus": {"type": "bool", "default": true},
     "hideTaskbar": {"type": "bool", "default": true},

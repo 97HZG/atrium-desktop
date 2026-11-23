@@ -50,6 +50,7 @@ private:
     std::wstring playlist_; // the liked playlist's id, once found
     std::unordered_set<std::wstring> ids_;
     bool ok_ = false;
+    std::wstring logged_; // the last answer logged
 };
 
 // The timeline the player does not report: its own position, read from its memory twice a second,

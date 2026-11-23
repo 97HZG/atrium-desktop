@@ -1,5 +1,7 @@
 #include "shell/netease_tracks.h"
 
+#include "log.h"
+
 #include "win32_path.h"
 
 #include <windows.h>
@@ -236,9 +238,16 @@ std::optional<bool> NeteaseLikes::Liked(const std::wstring& title, const std::ws
         ok_ = Read(path);
     }
     const NeteaseQueuedTrack* track = Queue().Find(title, artist);
-    if (!ok_ || !track || track->id.empty())
-        return std::nullopt;
-    return ids_.contains(track->id);
+    std::optional<bool> liked;
+    if (ok_ && track && !track->id.empty())
+        liked = ids_.contains(track->id);
+    const std::wstring said = title + L'\n' + std::to_wstring(liked ? int(*liked) : -1);
+    if (said != logged_) {
+        logged_ = said;
+        Log(L"netease: heart of '%s': %d (read %d, playlist %s, %zu ids, in the queue %d)", title.c_str(), liked ? int(*liked) : -1, ok_, playlist_.c_str(),
+            ids_.size(), track != nullptr);
+    }
+    return liked;
 }
 
 bool NeteaseLikes::Read(const std::wstring& path)

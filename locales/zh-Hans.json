@@ -1005,6 +1005,8 @@
   "Add {0} to the control centre": "将{0}添加到控制中心",
   "Windowed": "窗口",
   "Full-screen": "全屏",
-  "Display mode": "显示方式"
+  "Display mode": "显示方式",
+  "Close button on the cards": "卡片上的关闭按钮",
+  "A cross at the top right of a group in the strip closes its windows.": "指针停在侧边的一组窗口上时，右上角出现叉号，点它关闭这一组的窗口。"
  }
 }

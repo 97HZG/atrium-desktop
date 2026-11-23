@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "localization.h"
+#include "shell/launchpad_order.h"
 
 #include <algorithm>
 #include <cmath>
@@ -41,6 +42,9 @@ Launchpad::Launchpad(HINSTANCE instance, AppCatalog& catalog) : surface_(instanc
 void Launchpad::Open(RECT work, HWND previous)
 {
     previous_ = previous;
+    order_ = LoadLaunchpadOrder();
+    lifted_ = -1;
+    tilePos_.clear();
     apps_ = LaunchableApps();
     Split();
     folderOpen_ = false;
@@ -197,6 +201,7 @@ void Launchpad::Split()
     }
     if (!system_.empty())
         tiles_.push_back(CatalogApp{.name = Tr(L"System apps"), .id = kFolderId});
+    ApplyOrder();
 }
 
 void Launchpad::ShowFolder(bool open)
@@ -259,6 +264,7 @@ void Launchpad::Paint(Canvas& c)
     const Theme& t = c.theme;
     const float dt = float(std::clamp(c.now - lastPaint_, 0.0, 100.0)) / 1000.f;
     lastPaint_ = c.now;
+    glideMs_ = dt * 1000;
     if (!dragging_) {
         kPageSpring.Step(pageShown_, pageSpeed_, float(page_), dt);
         if (motion::Spring::AtRest(pageShown_, pageSpeed_, float(page_))) {
@@ -305,6 +311,10 @@ void Launchpad::Paint(Canvas& c)
         for (int page = first; page <= first + 1; ++page)
             if (page >= 0 && page < Pages() && std::abs(float(page) - pageShown_) < 1)
                 PaintPage(c, t, page, (float(page) - pageShown_) * w_);
+        if (gliding_)
+            c.Continue();
+        gliding_ = false;
+        PaintLifted(c, t);
         PaintDots(c, t);
         c.EndGroup();
     }
@@ -352,7 +362,9 @@ void Launchpad::PaintPage(Canvas& c, const Theme& t, int page, float dx)
         const D2D1_RECT_F at = D2D1::RectF(cell.left + dx, cell.top, cell.right + dx, cell.bottom);
         if (at.right < 0 || at.left > w_)
             continue;
-        PaintTile(c, t, int(i), at);
+        if (int(i) == lifted_ && Arranging())
+            continue; // under the pointer (PaintLifted)
+        PaintTile(c, t, int(i), Arranging() ? Glide(Shown()[i].id, cell, page, dx) : at);
         if (std::abs(dx) < 1)
             hits_.push_back({at, int(i)});
     }

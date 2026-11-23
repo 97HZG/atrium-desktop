@@ -75,6 +75,7 @@ public:
     void Minimized(HWND window);
     // A window dragged onto a group in the strip joins it (stageDragMerge).
     void SetDragMerge(bool on);
+    void SetCloseButton(bool on); // stageCloseButton: a card under the pointer shows a cross that closes its windows
     void MoveSize(HWND window, bool start) { start ? BeginDrag(window) : FinishDrag(window); } // EVENT_SYSTEM_MOVESIZESTART/END
     void SetMonitor(HMONITOR monitor, bool refresh = false);
     // The task model changed (every group, also those the bar does not show).
@@ -135,6 +136,7 @@ private:
         // Cards glide to their place (a spring) and come and go with a fade and a little scale.
         float y = 0, vy = 0, targetY = 0;
         float appear = 0, va = 0, targetAppear = 1;
+        D2D1_POINT_2F closeAt{-1e6f, -1e6f}; // its close button, content DIP, as last painted
     };
 
     static constexpr UINT_PTR kRaiseTimer = 0x5C03;
@@ -148,6 +150,12 @@ private:
     void StepDrag(POINT screen);
     void FinishDrag(HWND window);
     void CancelDrag();
+    // The cards' close buttons (stage_close.cpp): painted at `corner` (the front picture's top right, the
+    // card's own coordinates) and kept for the pointer at `at` (where it shows); the pointer's messages.
+    void PaintClose(Canvas& c, Entry& e, int index, D2D1_POINT_2F corner, D2D1_POINT_2F at, float shown);
+    int CloseAt(POINT pt) const;
+    bool CloseInput(UINT m, POINT pt);
+    void CloseEntry(int index);
     void Stage(const Set& keys, bool add, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly = nullptr);
     void Park(HWND window, const std::wstring& key);
     void Unpark(const Set& keys, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly = nullptr, bool moveBeside = true);
@@ -254,7 +262,8 @@ private:
     Surface flight_; // over the whole screen while pictures fly
     WindowSnapshots snapshots_;
     winrt::com_ptr<IVirtualDesktopManager> desktops_; // the strip shows the current virtual desktop's windows
-    bool enabled_ = false, onRight_ = false, autoHide_ = false, minimizeToStrip_ = false, dragMerge_ = true;
+    bool enabled_ = false, onRight_ = false, autoHide_ = false, minimizeToStrip_ = false, dragMerge_ = true, closeButton_ = true;
+    int closeHot_ = -1, closePressed_ = -1; // the card whose close button is under the pointer, pressed
     BarEdge barEdge_ = BarEdge::Bottom;
     std::unordered_map<HWND, RECT> up_; // the stage's windows up on this screen at the last look, and where (px)
     HWINEVENTHOOK minimizeHook_ = nullptr, moveHook_ = nullptr;

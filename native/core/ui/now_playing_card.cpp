@@ -401,8 +401,9 @@ void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
         float r;
         bool enabled;
     };
+    // The three light up in circles of one size, the play button's.
     const std::array<Control, 3> controls{
-        {{Part::Previous, -1, kControlR, media_.canPrevious}, {Part::Play, 0, kPlayR, media_.canPlayPause}, {Part::Next, 1, kControlR, media_.canNext}}};
+        {{Part::Previous, -1, kPlayR, media_.canPrevious}, {Part::Play, 0, kPlayR, media_.canPlayPause}, {Part::Next, 1, kPlayR, media_.canNext}}};
     for (const auto& k : controls) {
         BeginControl(c, t, k.part, k.at, k.r, k.enabled);
         PaintTransportMark(c, ControlCentre(k.at), k.part == Part::Play, Playing(), k.at, t.text);

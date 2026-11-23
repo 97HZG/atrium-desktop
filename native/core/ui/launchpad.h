@@ -19,6 +19,7 @@
 #include <windows.h>
 
 #include <map>
+#include <unordered_map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,7 +45,7 @@ public:
     HWND Hwnd() const { return surface_.Hwnd(); }
 
 private:
-    static constexpr UINT_PTR kCloseTimer = 0x4C50, kCaretTimer = 0x4C51;
+    static constexpr UINT_PTR kCloseTimer = 0x4C50, kCaretTimer = 0x4C51, kHoldTimer = 0x4C52, kEdgeTimer = 0x4C53;
     static constexpr int kSearch = -1, kGlass = -1000; // what HitAt finds besides a tile (its index) and page dot n (-2 - n)
     struct Hit {
         D2D1_RECT_F rect;
@@ -86,6 +87,16 @@ private:
     void SetPage(int page);
     void Launch(int index);
     bool ImeMessage(UINT m, WPARAM w, LPARAM l, LRESULT& result);
+    // Arranging (launchpad_drag.cpp): held a moment on an app, it lifts and follows the pointer; the others
+    // make room, the page turns at the sheet's sides, and the order is kept (shell/launchpad_order.h).
+    bool Arranging() const { return query_.empty() && !folderOpen_; }
+    void Lift();
+    void MoveLifted(POINT pt);
+    void TurnAtEdge();
+    void DropLifted();
+    void ApplyOrder();                                       // tiles_ in the user's order
+    D2D1_RECT_F Glide(const std::wstring& id, D2D1_RECT_F cell, int page, float dx); // where a tile is drawn as it makes room
+    void PaintLifted(Canvas& c, const Theme& t);
     void PlaceIme();
 
     void Finish();          // the closing has played: the window goes, the focus goes back
@@ -131,6 +142,12 @@ private:
     std::vector<Hit> hits_;
     std::vector<std::pair<std::wstring, int>> visibleIcons_, askedIcons_;
     std::map<int, motion::Follow> hoverAnim_;
+    int lifted_ = -1;                // the app being moved, its place in tiles_ as it goes
+    D2D1_POINT_2F liftAt_{};         // the pointer, DIP
+    std::vector<std::wstring> order_; // the user's order, as read when it opened
+    std::unordered_map<std::wstring, D2D1_POINT_2F> tilePos_; // the tiles' places on the sheet as they glide
+    float glideMs_ = 0;              // this frame's time step for the places
+    bool gliding_ = false;
 };
 
 } // namespace atrium

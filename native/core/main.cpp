@@ -600,6 +600,7 @@ void ApplySettings(const Settings& s)
     g_app.stage->SetDragMerge(s.stageDragMerge);
     g_app.stage->SetExcluded(s.stageExcluded);
     SetUserGames(s.stageExcluded);
+    g_app.stage->SetCloseButton(s.stageCloseButton);
     g_app.stage->SetEnabled(s.stageManager);
     g_app.genie->SetEnabled(s.genieMinimize && s.bar);
     g_app.control->SetStage(s.stageManager, s.stageOnRight);

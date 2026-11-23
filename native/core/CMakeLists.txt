@@ -66,6 +66,7 @@ add_library(atrium_core_lib STATIC
     shell/quick_links.cpp
     shell/quick_toggles.cpp
     shell/games.cpp
+    shell/launchpad_order.cpp
     shell/displays.cpp
     shell/tray_host.cpp
     shell/tray_model.cpp
@@ -90,9 +91,11 @@ add_library(atrium_core_lib STATIC
     ui/glass_menu.cpp
     ui/launchpad.cpp
     ui/launchpad_input.cpp
+    ui/launchpad_drag.cpp
     ui/now_playing_card.cpp
     ui/stage_manager.cpp
     ui/stage_drag.cpp
+    ui/stage_close.cpp
     ui/window_snapshot.cpp
     shell/weather.cpp
     shell/bluetooth_batteries.cpp
