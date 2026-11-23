@@ -751,7 +751,7 @@ void StageManager::Pick(const Set& keys, bool add, HWND front)
     Rebuild();
 }
 
-void StageManager::OpenInCurrentGroup(const std::wstring& app)
+void StageManager::OpenInCurrentGroup(const std::wstring& app, const std::function<void()>& launch)
 {
     if (!enabled_ || app.empty() || StageAppExcluded(excluded_, app))
         return; // excluded apps are left where they are (their own open command still works)
@@ -773,7 +773,7 @@ void StageManager::OpenInCurrentGroup(const std::wstring& app)
         Pick(keys, true, front);
     else {
         openIntent_.Arm(app, GetTickCount64());
-        tasks_.Launch(app);
+        launch ? launch() : tasks_.Launch(app);
     }
 }
 

@@ -29,8 +29,10 @@ struct ModuleSpec {
     const wchar_t* title;
 };
 constexpr ModuleSpec kSpecs[] = {
-    {L"stage", L"\uE7C4", L"Stage Manager"},  {L"nightlight", L"\uF08C", L"Night light"},   {L"energysaver", L"\uEC0A", L"Energy saver"},
-    {L"darkmode", L"\uE708", L"Dark mode"},     {L"hotspot", L"\uE88A", L"Mobile hotspot"},
+    {L"stage", L"\uE7C4", L"Stage Manager"},
+    {L"energysaver", L"\uEC0A", L"Energy saver"},
+    {L"darkmode", L"\uE708", L"Dark mode"},
+    {L"hotspot", L"\uE88A", L"Mobile hotspot"},
 };
 
 const ModuleSpec* Spec(const std::wstring& id)
@@ -44,8 +46,6 @@ D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b,
 // The system's switches; may block (worker thread).
 std::optional<bool> ReadSwitch(const std::wstring& id)
 {
-    if (id == L"nightlight")
-        return ReadNightLight();
     if (id == L"energysaver")
         return ReadEnergySaver();
     if (id == L"darkmode")
@@ -57,8 +57,6 @@ std::optional<bool> ReadSwitch(const std::wstring& id)
 
 bool SetSwitch(const std::wstring& id, bool on)
 {
-    if (id == L"nightlight")
-        return SetNightLight(on);
     if (id == L"energysaver")
         return SetEnergySaver(on);
     if (id == L"darkmode")

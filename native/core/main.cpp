@@ -576,6 +576,8 @@ void ApplySettings(const Settings& s)
         g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE);
     else if (!(s.bar && s.notifyWeChat) && g_app.wechat)
         g_app.wechat.reset();
+    if (g_app.wechat)
+        g_app.wechat->SetBlockOfficial(s.wechatBlockOfficial);
     if (s.bar && s.notifyFeishu && !g_app.feishu)
         g_app.feishu = std::make_unique<FeishuSource>(g_app.host, WM_NOTICE);
     else if (!(s.bar && s.notifyFeishu) && g_app.feishu)
@@ -711,19 +713,40 @@ std::vector<std::pair<std::wstring, std::vector<JumpItem>>> BuildFallbackJumpSec
     return sections;
 }
 
-void ShowItemMenu(const std::wstring& key, POINT pt)
+// An app's menu, the bar's and Launchpad's alike: what the Windows taskbar offers for it.
+struct AppMenuTarget {
+    std::wstring key; // the task model's group (also of an app it has not seen: its AUMID or exe, lower case)
+    std::wstring name;
+    bool pinned = false, multipleWindows = false, canTerminate = false;
+    int pinIndex = -1;
+    std::vector<HWND> windows;
+    PinnedApp pin;                 // what pinning it adds
+    std::wstring pinTarget;        // where it was pinned from (a shortcut), else empty
+    std::wstring location;         // its exe, for Open File Location
+    std::function<void()> launch;  // Open (New Window)
+};
+
+AppMenuTarget MenuTargetOf(const TaskItem& item)
+{
+    AppMenuTarget t{item.key, item.name, item.pinned, item.multipleWindows, g_app.tasks->CanTerminate(item.key), item.pinIndex, item.windows};
+    t.pin = g_app.tasks->PinFor(item.key);
+    t.pinTarget = g_app.tasks->PinTarget(item.key);
+    t.location = g_app.tasks->FileLocation(item.key);
+    t.launch = [key = item.key] { g_app.tasks->Launch(key); };
+    return t;
+}
+
+// done(picked) runs once the menu has closed.
+void ShowAppMenu(const AppMenuTarget& target, POINT pt, MenuPlace place, std::function<void(bool)> done = nullptr)
 {
     const ULONGLONG startedAt = GetTickCount64();
-    std::vector<TaskItem> items = ActiveBar().Items();
-    auto it = std::ranges::find_if(items, [&](const TaskItem& t) { return t.key == key; });
-    if (it == items.end())
-        return;
+    const std::wstring& key = target.key;
     std::optional<PinnedApp> pinnedEntry;
-    if (it->pinned && it->pinIndex >= 0 && g_app.server)
-        if (const auto& pins = g_app.server->Current().pins; pins && size_t(it->pinIndex) < pins->size())
-            pinnedEntry = (*pins)[size_t(it->pinIndex)];
-    PinnedApp pin = g_app.tasks->PinFor(key);
-    const std::wstring pinTarget = g_app.tasks->PinTarget(key);
+    if (target.pinned && target.pinIndex >= 0 && g_app.server)
+        if (const auto& pins = g_app.server->Current().pins; pins && size_t(target.pinIndex) < pins->size())
+            pinnedEntry = (*pins)[size_t(target.pinIndex)];
+    const PinnedApp& pin = target.pin;
+    const std::wstring& pinTarget = target.pinTarget;
     const std::wstring appPath = pinTarget.empty() ? pin.path : pinTarget;
     // The Windows-style entries are a setting of their own: with the switch off
     // the menu is the one Atrium always had.
@@ -759,8 +782,8 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
             sections = BuildFallbackJumpSections(appId);
     }
 
-    std::vector<MenuEntry> entries = {{it->name, 0, false, false, true}, {L"", 0}};
-    entries.push_back({it->windows.empty() || !it->multipleWindows ? Tr(L"Open") : Tr(L"Open New Window"), CmdNewWindow});
+    std::vector<MenuEntry> entries = {{target.name, 0, false, false, true}, {L"", 0}};
+    entries.push_back({target.windows.empty() || !target.multipleWindows ? Tr(L"Open") : Tr(L"Open New Window"), CmdNewWindow});
     // Always offered for managed apps: with Stage on it adds to the current group; with Stage off
     // it opens the app. Excluded apps keep only their ordinary Open row.
     if (g_app.stage && !g_app.stage->Excluded(key))
@@ -782,33 +805,38 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     std::wstring shape;
     for (const auto& [title, rows] : sections)
         shape += (shape.empty() ? L"" : L"; ") + title + L"(" + std::to_wstring(rows.size()) + L")";
-    Log(L"menu: '%s' path='%s' appid='%s' items=%zu [%s] in %llu ms", it->name.c_str(), appPath.c_str(), appId.c_str(), listed.size(), shape.c_str(),
+    Log(L"menu: '%s' path='%s' appid='%s' items=%zu [%s] in %llu ms", target.name.c_str(), appPath.c_str(), appId.c_str(), listed.size(), shape.c_str(),
         GetTickCount64() - startedAt);
     const bool canRunAs = windowsEntries && !appPath.empty() && FoldCase(appPath).find(L"\\windowsapps\\") == std::wstring::npos;
     if (canRunAs)
         entries.push_back({Tr(L"Run as administrator"), CmdRunAs});
-    std::wstring location = g_app.tasks->FileLocation(key);
+    const std::wstring& location = target.location;
     if (!location.empty())
         entries.push_back({Tr(L"Open File Location"), CmdOpenLocation});
-    entries.push_back({it->pinned ? Tr(L"Unpin from Atrium") : Tr(L"Pin to Atrium"), int(it->pinned ? CmdUnpin : CmdPin)});
+    entries.push_back({target.pinned ? Tr(L"Unpin from Atrium") : Tr(L"Pin to Atrium"), int(target.pinned ? CmdUnpin : CmdPin)});
     if (windowsEntries && !appPath.empty())
         entries.push_back({Tr(L"Properties"), CmdProperties});
-    if (!it->windows.empty())
-        entries.push_back({it->windows.size() > 1 ? Tr(L"Close All Windows") : Tr(L"Close Window"), CmdClose});
-    entries.push_back({Tr(L"Close Program"), CmdTerminate, false, !g_app.tasks->CanTerminate(key)});
-    int pinIndex = it->pinIndex;
-    auto windows = it->windows;
-    std::wstring name = it->name;
-    g_app.menu->Open(std::move(entries), pt, BarMenuPlace(true), [key, location, pinIndex, pinnedEntry, windows, name, pt, appPath, listed](int cmd) {
+    if (!target.windows.empty())
+        entries.push_back({target.windows.size() > 1 ? Tr(L"Close All Windows") : Tr(L"Close Window"), CmdClose});
+    entries.push_back({Tr(L"Close Program"), CmdTerminate, false, !target.canTerminate});
+    const int pinIndex = target.pinIndex;
+    const auto& windows = target.windows;
+    const std::wstring& name = target.name;
+    auto picked = std::make_shared<bool>(false);
+    const auto launch = target.launch;
+    g_app.menu->Open(std::move(entries), pt, place, [key, location, pinIndex, pinnedEntry, windows, name, pt, place, appPath, listed, pin, launch, picked](int cmd) {
+        *picked = cmd != 0;
         switch (cmd) {
-        case CmdNewWindow: g_app.tasks->Launch(key); break;
+        case CmdNewWindow: launch(); break;
         case CmdStageAdd:
             if (g_app.stage && g_app.stage->Enabled())
-                g_app.stage->OpenInCurrentGroup(key);
-            else
+                g_app.stage->OpenInCurrentGroup(key, launch);
+            else if (!windows.empty())
                 g_app.tasks->Activate(key); // no group to add to: the same row opens the app
+            else
+                launch();
             break;
-        case CmdPin: ModifyPins([pin = g_app.tasks->PinFor(key)](std::vector<PinnedApp>& pins) { return AddUniquePin(pins, pin); }); break;
+        case CmdPin: ModifyPins([&pin](std::vector<PinnedApp>& pins) { return AddUniquePin(pins, pin); }); break;
         case CmdUnpin: ModifyPins([pinIndex, &pinnedEntry](std::vector<PinnedApp>& pins) { return UnpinMatchingPin(pins, pinIndex, pinnedEntry); }); break;
         case CmdClose:
             for (HWND window : windows)
@@ -820,7 +848,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                                               {L"", 0},
                                               {Tr(L"Force close"), CmdTerminateConfirm},
                                               {Tr(L"Cancel"), 0}};
-            g_app.menu->Open(std::move(confirm), pt, BarMenuPlace(true), [key](int answer) {
+            g_app.menu->Open(std::move(confirm), pt, place, [key](int answer) {
                 if (answer == CmdTerminateConfirm)
                     g_app.tasks->Terminate(key);
             });
@@ -862,7 +890,43 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
             }
             break;
         }
+    }, [done, picked] {
+        if (done)
+            done(*picked);
     });
+}
+
+void ShowItemMenu(const std::wstring& key, POINT pt)
+{
+    std::vector<TaskItem> items = ActiveBar().Items();
+    auto it = std::ranges::find_if(items, [&](const TaskItem& t) { return t.key == key; });
+    if (it != items.end())
+        ShowAppMenu(MenuTargetOf(*it), pt, BarMenuPlace(true));
+}
+
+// An app in Launchpad: the bar's menu for it, as its group's when the task model knows it (pinned, running).
+void ShowCatalogMenu(const CatalogApp& app, POINT pt, std::function<void(bool)> done)
+{
+    const std::wstring aumid = FoldCase(app.aumid), exe = FoldCase(app.target);
+    const std::vector<TaskItem> all = g_app.tasks->Snapshot(true);
+    auto it = std::ranges::find_if(all, [&](const TaskItem& t) { return (!aumid.empty() && t.key == aumid) || (!exe.empty() && t.key == exe); });
+    if (it != all.end()) {
+        ShowAppMenu(MenuTargetOf(*it), pt, MenuPlace::Below, std::move(done));
+        return;
+    }
+    AppMenuTarget t;
+    t.key = !aumid.empty() ? aumid : exe;
+    t.name = app.name;
+    t.pin = AppCatalog::PinFor(app);
+    if (app.id.find(L'\\') != std::wstring::npos)
+        t.pinTarget = app.id; // a shortcut: the shell's menus and AppUserModelID live there
+    t.location = AppCatalog::FileLocation(app);
+    t.launch = [app] { AppCatalog::Launch(app); };
+    if (g_app.server)
+        if (const auto& pins = g_app.server->Current().pins)
+            if (auto p = std::ranges::find_if(*pins, [&](const PinnedApp& q) { return PinsEqual(q, t.pin); }); p != pins->end())
+                t.pinned = true, t.pinIndex = int(p - pins->begin());
+    ShowAppMenu(t, pt, MenuPlace::Below, std::move(done));
 }
 
 // The overflow entry: the apps that did not fit, as a menu above the entry.
@@ -1455,6 +1519,7 @@ void MakeExtras(HINSTANCE instance)
     g_app.extras = std::make_unique<ExtrasHost>(instance, *g_app.catalog, [](const std::function<void(Bar&)>& each) { ForBars(each); });
     g_app.extras->onPanelsChanged = [] { g_app.notes->PanelsChanged(); };
     g_app.extras->onOpenSettings = [](const wchar_t* page) { OpenSettings(page); };
+    g_app.extras->SetAppMenu(ShowCatalogMenu);
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)

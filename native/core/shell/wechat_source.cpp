@@ -214,15 +214,15 @@ void DiscoverWeChatProcesses(std::vector<std::pair<DWORD, std::wstring>>& procs)
         CloseHandle(snap);
 }
 
-void UpdateUnread(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool baseline, const std::wstring& exe, HWND notify, UINT msg,
-                  std::map<std::wstring, ChatState>& states)
+void UpdateUnread(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool baseline, bool blockOfficial, const std::wstring& exe, HWND notify,
+                  UINT msg, std::map<std::wstring, ChatState>& states)
 {
     std::map<std::wstring, ChatState> rebuilt;
     for (size_t i = 0; i < rows.size(); ++i) {
         const auto& [key, r] = rows[i];
         auto old = states.find(key);
         const int oldUnread = old != states.end() ? old->second.unread : 0;
-        const bool suppressed = r.muted || r.collapsed;
+        const bool suppressed = r.muted || r.collapsed || (blockOfficial && r.official);
         // A chat not seen before counts only at the top of the list,
         // where a new message puts it (scrolling brings old ones in).
         const bool countRose = old != states.end() ? r.unread > oldUnread : (r.unread > 0 && i < 3);
@@ -361,6 +361,14 @@ bool IsCollapsedWeChatRow(const std::wstring& chat)
            _wcsicmp(t.c_str(), L"Folded Group Chats") == 0;
 }
 
+bool IsOfficialWeChatRow(const std::wstring& chat)
+{
+    const std::wstring t = Trim(chat);
+    constexpr const wchar_t* kNames[] = {L"公众号", L"订阅号", L"订阅号消息", L"服务号", L"服务号消息", L"Official Accounts", L"Subscriptions",
+                                         L"Subscription Accounts", L"Service Accounts"};
+    return std::ranges::any_of(kNames, [&](const wchar_t* n) { return _wcsicmp(t.c_str(), n) == 0; });
+}
+
 // A row's name, line by line: the chat; optional tag/pin lines; "[N条] summary" or
 // "[N条]" and the summary on the following line, or only the summary when read; the time;
 // and "消息免打扰" for a muted chat.
@@ -380,6 +388,7 @@ WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackT
         return r;
     r.chat = lines[0];
     r.collapsed = IsCollapsedWeChatRow(r.chat);
+    r.official = IsOfficialWeChatRow(r.chat);
     r.muted = r.collapsed;
     bool sawUnread = false;
     bool summaryAfterUnread = false;
@@ -530,7 +539,7 @@ void WeChatSource::Run()
                         Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());
                     state = fromHeld ? 3 : 2;
                     reading_ = true;
-                    UpdateUnread(rows, baseline, exe, notify_, msg_, states);
+                    UpdateUnread(rows, baseline, blockOfficial_, exe, notify_, msg_, states);
                     baseline = true;
                 }
             } catch (...) {

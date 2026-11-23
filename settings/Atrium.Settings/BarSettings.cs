@@ -79,7 +79,7 @@ internal sealed class BarSettings
     public string BarEdge { get; set; } = "bottom"; // bottom | top | left | right
     public string StatusStyle { get; set; } = "ring"; // ring | icons (network, volume, battery as on the Windows taskbar)
     // The control centre's optional modules, in order; kControlModules in native/core/settings.h.
-    public static readonly string[] ControlModuleIds = ["stage", "nightlight", "energysaver", "darkmode", "hotspot"];
+    public static readonly string[] ControlModuleIds = ["stage", "energysaver", "darkmode", "hotspot"];
     public List<string> ControlModules { get; set; } = ["stage"];
     public string DockDisplayMode { get; set; } = "primary"; // primary | follow | fixed | all
     public double DockDisplayDelay { get; set; } = 450; // milliseconds at another display's bottom edge
@@ -98,6 +98,7 @@ internal sealed class BarSettings
     public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
     public bool NotifyFeishu { get; set; } = true;     // Feishu messages as Atrium cards (its own popup, read only)
     public bool NotifyWeChat { get; set; } = true;     // WeChat messages as Atrium cards (its chat list, read only)
+    public bool WeChatBlockOfficial { get; set; }       // ... but none for its official accounts (公众号, 订阅号, 服务号)
     public bool NotifyQQ { get; set; } = true;         // QQ's messages (its Windows notifications)
     public bool NotifyWeCom { get; set; } = true;      // WeCom's messages (a card when it flashes for one)
     public bool NotifyDingTalk { get; set; } = true;   // DingTalk's messages (likewise)
@@ -240,6 +241,7 @@ internal sealed class BarSettings
             ["imeStatus"] = ImeStatus,
             ["notifyListener"] = NotifyListener,
             ["notifyWeChat"] = NotifyWeChat,
+            ["wechatBlockOfficial"] = WeChatBlockOfficial,
             ["notifyFeishu"] = NotifyFeishu,
             ["notifyQQ"] = NotifyQQ,
             ["notifyWeCom"] = NotifyWeCom,
@@ -355,6 +357,7 @@ internal sealed class BarSettings
         bool v1 = o?["version"] is JsonValue ver && ver.TryGetValue(out double vn) && vn < 2;
         s.NotifyListener = v1 ? f.NotifyListener : Flag("notifyListener", f.NotifyListener);
         s.NotifyWeChat = Flag("notifyWeChat", f.NotifyWeChat);
+        s.WeChatBlockOfficial = Flag("wechatBlockOfficial", f.WeChatBlockOfficial);
         s.NotifyFeishu = Flag("notifyFeishu", f.NotifyFeishu);
         s.NotifyQQ = Flag("notifyQQ", f.NotifyQQ);
         s.NotifyWeCom = Flag("notifyWeCom", f.NotifyWeCom);
@@ -404,8 +407,9 @@ internal sealed class BarSettings
         s.Language = !LocalizationValidation.ValidTag(language) ? "auto" : language == "zh" ? "zh-Hans" : language;
         string statusStyle = Str("statusStyle", f.StatusStyle);
         s.StatusStyle = statusStyle == "icons" ? "icons" : "ring";
-        // Known modules only, each once, in the order given.
-        s.ControlModules = [.. ReadStringArray(o, "controlModules", f.ControlModules).Where(ControlModuleIds.Contains).Distinct()];
+        // Known modules only, each once, in the order given; the night light module that was is dark mode now.
+        s.ControlModules = [.. ReadStringArray(o, "controlModules", f.ControlModules).Select(id => id == "nightlight" ? "darkmode" : id)
+            .Where(ControlModuleIds.Contains).Distinct()];
         s.Pins = f.Pins == null ? null : [.. f.Pins];
         if (o?["pins"] is JsonArray arr)
         {
@@ -524,7 +528,7 @@ internal sealed class BarSettings
         TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
         BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && ControlModules.SequenceEqual(o.ControlModules) && NotifyTimeout == o.NotifyTimeout &&
         NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus &&
-        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu &&
+        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && WeChatBlockOfficial == o.WeChatBlockOfficial && NotifyFeishu == o.NotifyFeishu &&
         NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk &&
         AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&

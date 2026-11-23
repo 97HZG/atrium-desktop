@@ -32,7 +32,7 @@ bool Launchpad::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             TurnAtEdge();
         return w == kCloseTimer || w == kCaretTimer || w == kEdgeTimer;
     case WM_ACTIVATE:
-        if (LOWORD(w) == WA_INACTIVE)
+        if (LOWORD(w) == WA_INACTIVE && !menuOpen_)
             Close(false);
         return false;
     case WM_MOUSEMOVE: {
@@ -78,6 +78,7 @@ bool Launchpad::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             surface_.Invalidate();
         }
         return true;
+    case WM_RBUTTONUP: AppMenu(pt); return true;
     case WM_MOUSEWHEEL: Wheel(GET_WHEEL_DELTA_WPARAM(w)); return true;
     case WM_MOUSEHWHEEL: Wheel(-GET_WHEEL_DELTA_WPARAM(w)); return true;
     case WM_KEYDOWN: return Key(w);
@@ -272,6 +273,30 @@ void Launchpad::Release(POINT pt)
     else if (was == kGlass && at == kGlass && full_)
         Close(false); // all of the screen: its empty glass is the outside
     surface_.Invalidate();
+}
+
+void Launchpad::AppMenu(POINT pt)
+{
+    const int at = closing_ || down_ || lifted_ >= 0 ? kGlass : HitAt(pt);
+    if (at < 0 || size_t(at) >= Shown().size() || Shown()[size_t(at)].id == kFolderId || !onAppMenu)
+        return;
+    menuOpen_ = true;
+    hover_ = -1;
+    surface_.Invalidate();
+    onAppMenu(Shown()[size_t(at)], surface_.ContentToScreen(pt), [this](bool picked) {
+        menuOpen_ = false;
+        if (!surface_.Visible() || closing_)
+            return;
+        // Back to Launchpad, unless a row was picked or the click that closed the menu went elsewhere.
+        DWORD pid = 0;
+        const HWND fg = GetForegroundWindow();
+        if (fg)
+            GetWindowThreadProcessId(fg, &pid);
+        if (!picked && (!fg || pid == GetCurrentProcessId()))
+            SetForegroundWindow(surface_.Hwnd());
+        else
+            Close(false);
+    });
 }
 
 void Launchpad::Wheel(int delta)

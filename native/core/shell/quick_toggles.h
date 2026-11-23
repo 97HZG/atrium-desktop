@@ -1,5 +1,5 @@
-// Quick system switches for the control centre: Night light, Energy saver,
-// Dark mode and Mobile hotspot. Every call may block (registry, powrprof,
+// Quick system switches for the control centre: Energy saver, Dark mode and
+// Mobile hotspot (Night light, no longer one of its modules, is kept readable). Every call may block (registry, powrprof,
 // SendMessageTimeout, WinRT async): run them on a worker thread (MTA), never on
 // the UI thread.
 #pragma once

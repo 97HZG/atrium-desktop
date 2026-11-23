@@ -44,6 +44,9 @@ void CheckWeChatRows()
     Require(IsCollapsedWeChatRow(L"Collapsed Chats"), "English collapsed chats");
     Require(IsCollapsedWeChatRow(L"Folded Group Chats"), "English folded group chats");
     Require(!IsCollapsedWeChatRow(L"产品讨论群"), "normal group is not collapsed");
+    Require(IsOfficialWeChatRow(L"公众号") && IsOfficialWeChatRow(L" 服务号 ") && IsOfficialWeChatRow(L"Official Accounts"), "official accounts' rows");
+    Require(!IsOfficialWeChatRow(L"公众号运营群") && !IsOfficialWeChatRow(L"Alice"), "a chat is not the official accounts' row");
+    Require(ParseWeChatRow(L"订阅号消息\n[3条] 某号: 今日推送\n17:06").official, "an official accounts' row parses as such");
 
     const WeChatRow plain = ParseWeChatRow(L"Alice\n你好吗\n17:06");
     Require(plain.chat == L"Alice" && plain.summary == L"你好吗" && plain.unread == 0 && !plain.muted && !plain.collapsed, "plain text row");

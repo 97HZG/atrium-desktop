@@ -64,7 +64,8 @@ public:
     // Apps Stage Manager leaves alone (screenshot tools and anything the user lists).
     void SetExcluded(std::vector<std::wstring> apps);
     bool Excluded(const std::wstring& app) const { return StageAppExcluded(excluded_, app); }
-    void OpenInCurrentGroup(const std::wstring& app);
+    // launch: how to start it when none of its windows is up (else the task model starts it by its key).
+    void OpenInCurrentGroup(const std::wstring& app, const std::function<void()>& launch = nullptr);
     void SetOnRight(bool onRight);
     void SetBarEdge(BarEdge edge);
     void SetAutoHide(bool autoHide);

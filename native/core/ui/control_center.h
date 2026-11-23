@@ -57,7 +57,7 @@ public:
     // Stage Manager's state, for its switch.
     void SetStage(bool on, bool onRight);
     // The optional modules under the connections (controlModules): Stage Manager's switch and the
-    // system's (night light, energy saver, dark mode, mobile hotspot), two to a row.
+    // system's (energy saver, dark mode, mobile hotspot), two to a row.
     void SetModules(std::vector<std::wstring> ids);
 
     std::function<void()> onChanged; // volume, mute or the network changed: the bar's icon updates

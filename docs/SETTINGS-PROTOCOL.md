@@ -40,7 +40,7 @@
 | `autoHide` | string | `never` / `fullscreen` / `always` | `fullscreen` | 栏的显示方式：常驻；全屏时隐藏（有最大化、全屏或分屏铺满屏幕的窗口时滑出屏幕，前面再开小窗口也不出来）；一直隐藏。隐藏时，指针移到栏下方的屏幕底边栏就出现，离开后收回 |
 | `barEdge` | string | `bottom` / `top` / `left` / `right` | `bottom` | 栏停靠的屏幕边缘：底部、顶部、左侧或右侧；其他值视为 `bottom` |
 | `statusStyle` | string | `ring` / `icons` | `ring` | 状态栏的样子：Wi-Fi 外面一圈电量或音量的圆环；或者像 Windows 任务栏那样并排的网络、音量、电池三个图标（自绘，跟随字色）。点按都打开控制中心 |
-| `controlModules` | string[] | `stage` / `nightlight` / `energysaver` / `darkmode` / `hotspot` | `["stage"]` | 控制中心的可选模块，按顺序排在投屏下面、亮度上面：台前调度、夜间模式、节电模式、深色模式、移动热点，每个是一块带开关的玻璃（两块一行，单出来的一块占整行）；未知项和重复项丢弃。Wi-Fi、蓝牙、电池、投屏、亮度和声音固定显示，不在此列 |
+| `controlModules` | string[] | `stage` / `energysaver` / `darkmode` / `hotspot` | `["stage"]` | 控制中心的可选模块，按顺序排在投屏下面、亮度上面：台前调度、节电模式、深色模式（切换 Windows 和应用的深色/浅色主题）、移动热点，每个是一块带开关的玻璃（两块一行，单出来的一块占整行）；未知项和重复项丢弃；旧的 `nightlight`（夜间模式）读作 `darkmode`。Wi-Fi、蓝牙、电池、投屏、亮度和声音固定显示，不在此列 |
 | `iconSize` | number | 16–64 DIP | 30 | 任务栏图标边长 |
 | `magnify` | number | 1–2 | 1.7 | 悬停放大：指针下图标的缩放倍数，相邻图标按波形放大；1 为关闭 |
 | `hoverRise` | bool | | false | 形状页的“跟随鼠标拱起”：背景随鼠标局部向上延伸，幅度复用 `magnify`；关闭后保持图标放大。默认关闭，旧配置没有这一项时也是关闭 |
@@ -76,6 +76,7 @@
 | `notifyHideBody` | bool | | false | 隐藏通知正文；同时把通知窗口排除在截图和屏幕共享之外 |
 | `notifyListener` | bool | | true | 通过 UserNotificationListener 把其他应用的 Windows 通知显示为 Atrium 卡片（系统横幅仍会出现，除非用户在 Windows 里关闭该应用的横幅）；微信、QQ、飞书、企业微信、钉钉的通知由各自的开关决定 |
 | `notifyWeChat` | bool | | true | 读取微信的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片；窗口打开过一次后，关到托盘也能读到会话名与摘要；读不到时，微信为消息闪烁即显示“微信 · 新消息” |
+| `wechatBlockOfficial` | bool | | false | 屏蔽微信公众号通知：会话列表里“公众号”“订阅号”“服务号”这几行有新消息时不显示卡片。微信的界面只给出会话的显示名，单独列成一个会话的服务号仍按普通会话提醒 |
 | `notifyFeishu` | bool | | true | 读取飞书自己的消息弹窗里的文字（UI 自动化，只读），同时显示为 Atrium 卡片 |
 | `notifyQQ` | bool | | true | QQ 的消息：它的 Windows 通知；QQ 缩在托盘里闪烁却没有通知时，显示一张“QQ · 新消息”卡片 |
 | `notifyWeCom` | bool | | true | 企业微信的消息：它的窗口或托盘图标闪烁时，显示一张“企业微信 · 新消息”卡片 |

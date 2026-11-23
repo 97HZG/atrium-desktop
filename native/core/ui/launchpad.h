@@ -7,7 +7,7 @@
 // little larger, all at once when every icon is read (a spinner meanwhile; they are read ahead at start),
 // and it leaves the same way. Typing goes into the search (the input method's composition inline, the
 // caret shown once the field is clicked or typed in); the wheel, a drag or the arrows turn the pages with
-// a spring; a click launches; Esc clears a search, then closes the folder, then Launchpad, as a click
+// a spring; a click launches, a right click shows the bar's menu for the app; Esc clears a search, then closes the folder, then Launchpad, as a click
 // outside it does.
 #pragma once
 
@@ -18,6 +18,7 @@
 
 #include <windows.h>
 
+#include <functional>
 #include <map>
 #include <unordered_map>
 #include <string>
@@ -43,6 +44,8 @@ public:
     // Reads every app's icon ahead, at the size a window on `work` would show them.
     void Prewarm(RECT work);
     HWND Hwnd() const { return surface_.Hwnd(); }
+    // A right click on an app: its menu at `screen` (the bar's, main.cpp); done(picked) once it has closed.
+    std::function<void(const CatalogApp& app, POINT screen, std::function<void(bool picked)> done)> onAppMenu;
 
 private:
     static constexpr UINT_PTR kCloseTimer = 0x4C50, kCaretTimer = 0x4C51, kEdgeTimer = 0x4C53;
@@ -82,6 +85,7 @@ private:
     void Press(POINT pt);
     void Drag(POINT pt);
     void Release(POINT pt);
+    void AppMenu(POINT pt); // a right click
     void Wheel(int delta);
     int HitAt(POINT pt) const;
     void SetPage(int page);
@@ -135,6 +139,7 @@ private:
     float lastDragX_ = 0;
     int wheel_ = 0;          // wheel notches not yet turned into a page
     bool tracking_ = false;
+    bool menuOpen_ = false; // an app's menu is up: the focus going to it does not close Launchpad
     HWND previous_ = nullptr;
     double openedMs_ = 0, closedMs_ = 0, lastPaint_ = 0;
     bool closing_ = false, launched_ = false;

@@ -104,6 +104,10 @@ public sealed partial class MainWindow
             "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.",
             "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v)
         { Bundled = "wechat" });
+        _sources.Add(new SourceVm(this, "Block WeChat Official Accounts",
+            "No cards for the Official Accounts, Subscriptions and Service Accounts rows of WeChat's chat list. A service account listed as a chat of its own still shows.",
+            "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.WeChatBlockOfficial, (s, v) => s.WeChatBlockOfficial = v)
+        { Bundled = "wechat" });
         _sources.Add(new SourceVm(this, "QQ", "QQ's Windows notifications; when it flashes for a message without one, a card says there is a new message.",
             "\ue8bd", ["QQ.exe"], s => s.NotifyQQ, (s, v) => s.NotifyQQ = v)
         { Bundled = "qq" });

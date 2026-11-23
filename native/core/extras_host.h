@@ -45,6 +45,7 @@ public:
 
     std::function<void()> onPanelsChanged;                   // a popup opened (the notification cards step aside)
     std::function<void(const wchar_t* page)> onOpenSettings; // the empty stack's button
+    void SetAppMenu(decltype(Launchpad::onAppMenu) menu) { launchpad_.onAppMenu = std::move(menu); } // Launchpad's right click
 
 private:
     static LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l);

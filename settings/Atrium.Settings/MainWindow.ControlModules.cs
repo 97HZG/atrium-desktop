@@ -15,7 +15,6 @@ public sealed partial class MainWindow
     private static string ModuleGlyph(string id) => id switch
     {
         "stage" => "\uE7C4",
-        "nightlight" => "\uF08C",
         "energysaver" => "\uEC0A",
         "darkmode" => "\uE708",
         _ => "\uE88A",
@@ -24,7 +23,6 @@ public sealed partial class MainWindow
     private static string ModuleTitle(string id) => id switch
     {
         "stage" => "Stage Manager",
-        "nightlight" => "Night light",
         "energysaver" => "Energy saver",
         "darkmode" => "Dark mode",
         _ => "Mobile hotspot",
@@ -33,7 +31,6 @@ public sealed partial class MainWindow
     private static string ModuleNote(string id) => id switch
     {
         "stage" => "Turn Stage Manager on or off",
-        "nightlight" => "Warmer colours on the screen",
         "energysaver" => "Save battery",
         "darkmode" => "Windows and apps in dark colours",
         _ => "Share this PC's internet",

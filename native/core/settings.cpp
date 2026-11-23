@@ -102,6 +102,7 @@ void ReadModuleSettingsJson(const json::JsonObject& o, Settings& s)
     if (!v1)
         flag(L"notifyListener", s.notifyListener);
     flag(L"notifyWeChat", s.notifyWeChat);
+    flag(L"wechatBlockOfficial", s.wechatBlockOfficial);
     flag(L"notifyFeishu", s.notifyFeishu);
     flag(L"notifyQQ", s.notifyQQ);
     flag(L"notifyWeCom", s.notifyWeCom);
@@ -195,11 +196,15 @@ void NormalizeStringList(std::vector<std::wstring>& list, size_t maxCount = SIZE
         list.resize(maxCount);
 }
 
-// Known modules only, each once, in the order given.
+// Known modules only, each once, in the order given. The night light module that was (“夜间模式”, read as a
+// dark theme) is dark mode now.
 void NormalizeControlModules(std::vector<std::wstring>& list)
 {
     NormalizeStringList(list);
     std::vector<std::wstring> kept;
+    for (std::wstring& id : list)
+        if (id == L"nightlight")
+            id = L"darkmode";
     for (std::wstring& id : list)
         if (std::ranges::any_of(kControlModules, [&](const wchar_t* m) { return id == m; }) && std::ranges::find(kept, id) == kept.end())
             kept.push_back(std::move(id));
@@ -408,6 +413,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"imeStatus", json::JsonValue::CreateBooleanValue(imeStatus));
     o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
     o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
+    o.SetNamedValue(L"wechatBlockOfficial", json::JsonValue::CreateBooleanValue(wechatBlockOfficial));
     o.SetNamedValue(L"notifyFeishu", json::JsonValue::CreateBooleanValue(notifyFeishu));
     o.SetNamedValue(L"notifyQQ", json::JsonValue::CreateBooleanValue(notifyQQ));
     o.SetNamedValue(L"notifyWeCom", json::JsonValue::CreateBooleanValue(notifyWeCom));

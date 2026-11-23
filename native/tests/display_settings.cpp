@@ -233,6 +233,9 @@ void CheckExtrasSettings()
     modules.Clamp();
     Require(modules.controlModules == std::vector<std::wstring>{L"darkmode", L"stage", L"hotspot"},
             "controlModules keeps known modules once, in order");
+    modules.controlModules = {L"nightlight", L"stage", L"darkmode"};
+    modules.Clamp();
+    Require(modules.controlModules == std::vector<std::wstring>{L"darkmode", L"stage"}, "controlModules: night light is dark mode now");
     Settings modulesParsed;
     Require(Settings::FromJson(modules.ToJson(), Settings{}, modulesParsed) && modulesParsed.controlModules == modules.controlModules &&
                 Settings::FromJson(LR"({"controlModules":[]})", Settings{}, modulesParsed) && modulesParsed.controlModules.empty(),

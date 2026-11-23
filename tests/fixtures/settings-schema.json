@@ -68,6 +68,7 @@
     "notifyHideBody": {"type": "bool", "default": false},
     "notifyListener": {"type": "bool", "default": true},
     "notifyWeChat": {"type": "bool", "default": true},
+    "wechatBlockOfficial": {"type": "bool", "default": false},
     "notifyFeishu": {"type": "bool", "default": true},
     "notifyQQ": {"type": "bool", "default": true},
     "notifyWeCom": {"type": "bool", "default": true},

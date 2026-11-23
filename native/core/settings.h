@@ -15,7 +15,7 @@
 namespace atrium {
 
 // The control centre's optional modules (controlModules), in the settings app's order.
-inline constexpr const wchar_t* kControlModules[] = {L"stage", L"nightlight", L"energysaver", L"darkmode", L"hotspot"};
+inline constexpr const wchar_t* kControlModules[] = {L"stage", L"energysaver", L"darkmode", L"hotspot"};
 
 struct Settings {
     static constexpr int kVersion = 2; // 2: Windows notifications on by default (v1 files are migrated)
@@ -104,6 +104,7 @@ struct Settings {
     bool notifyListener = true;      // Windows notifications as Atrium cards (UserNotificationListener)
     bool notifyFeishu = true;        // Feishu messages as Atrium cards (its own popup, read through UI Automation)
     bool notifyWeChat = true;        // WeChat messages as Atrium cards (its chat list, read through UI Automation)
+    bool wechatBlockOfficial = false; // ... but none for its official accounts (公众号, 订阅号, 服务号)
     bool notifyQQ = true;            // QQ's messages (its Windows notifications; a flash without one: a plain card)
     bool notifyWeCom = true;         // WeCom's messages (a flash of its window or tray icon: a plain card)
     bool notifyDingTalk = true;      // DingTalk's messages (likewise)
