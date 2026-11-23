@@ -178,7 +178,7 @@ float ShapeDistance(float2 px, bool edge, bool basic)
     if (!basic && PartCount > 0.5) {
         float card = d;
         d = 1e6;
-        [unroll] for (int i = 0; i < 10; ++i)
+        [loop] for (int i = 0; i < 10; ++i)
         {
             if (float(i) < PartCount) {
                 float4 pr = PartRect[i];
