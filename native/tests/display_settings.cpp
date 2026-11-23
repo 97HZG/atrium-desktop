@@ -22,6 +22,39 @@ void Require(bool condition, const char* message)
         throw std::runtime_error(message);
 }
 
+void CheckClockAndBadgeSettings(Settings& settings, Settings& parsed)
+{
+    for (const wchar_t* mode : {L"follow", L"primary", L"fixed", L"all"}) {
+        settings.dockDisplayMode = mode;
+        Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.dockDisplayMode == mode, "every Dock mode survives saving");
+    }
+    settings.showClockSeconds = true;
+    Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.showClockSeconds, "clock seconds survive saving");
+    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.showClockSeconds && parsed.showClock && parsed.barBadges,
+            "old settings keep the clock at minutes and unread badges on");
+    {
+        Settings noBadges;
+        noBadges.barBadges = false;
+        Require(Settings::FromJson(noBadges.ToJson(), Settings{}, parsed) && !parsed.barBadges, "barBadges false survives round trip");
+        Require(Settings::FromJson(LR"({"barBadges":"bad"})", noBadges, parsed) && !parsed.barBadges, "malformed barBadges retains current value");
+    }
+    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.magnifyNear, "icons do not magnify above the bar unless chosen");
+    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.remoteVisible, "Atrium stays out of the screen's capture unless chosen");
+    {
+        Settings remote;
+        remote.remoteVisible = true;
+        Require(Settings::FromJson(remote.ToJson(), Settings{}, parsed) && parsed.remoteVisible, "remote-control mode survives saving");
+    }
+    Require(Settings::FromJson(LR"({"showClockSeconds":true})", settings, parsed) && parsed.showClockSeconds && parsed.showClock,
+            "clock seconds toggle independently of the clock");
+    Require(Settings::FromJson(LR"({"showClockSeconds":"bad"})", settings, parsed) && parsed.showClockSeconds,
+            "malformed clock seconds retain the current value");
+    settings.showClockSeconds = false;
+    Require(Settings::FromJson(LR"({"showClockSeconds":true})", settings, parsed) && parsed.showClockSeconds && parsed.dockDisplayMode == L"all",
+            "clock seconds preview without changing other keys");
+    Settings::FromJson(LR"({})", settings, parsed);
+}
+
 void CheckSettings()
 {
     Settings settings, parsed;
@@ -72,35 +105,7 @@ void CheckSettings()
     Require(Settings::FromJson(LR"({"taskbarRightPrimaryOnly":"bad"})", settings, parsed) && parsed.taskbarRightPrimaryOnly,
             "malformed primary-only visibility retains the current value");
     Require(Settings::FromJson(LR"({})", settings, parsed) && parsed.taskbarRightPrimaryOnly, "partial updates retain primary-only visibility");
-    for (const wchar_t* mode : {L"follow", L"primary", L"fixed", L"all"}) {
-        settings.dockDisplayMode = mode;
-        Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.dockDisplayMode == mode, "every Dock mode survives saving");
-    }
-    settings.showClockSeconds = true;
-    Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.showClockSeconds, "clock seconds survive saving");
-    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.showClockSeconds && parsed.showClock && parsed.barBadges,
-            "old settings keep the clock at minutes and unread badges on");
-    {
-        Settings noBadges;
-        noBadges.barBadges = false;
-        Require(Settings::FromJson(noBadges.ToJson(), Settings{}, parsed) && !parsed.barBadges, "barBadges false survives round trip");
-        Require(Settings::FromJson(LR"({"barBadges":"bad"})", noBadges, parsed) && !parsed.barBadges, "malformed barBadges retains current value");
-    }
-    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.magnifyNear, "icons do not magnify above the bar unless chosen");
-    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.remoteVisible, "Atrium stays out of the screen's capture unless chosen");
-    {
-        Settings remote;
-        remote.remoteVisible = true;
-        Require(Settings::FromJson(remote.ToJson(), Settings{}, parsed) && parsed.remoteVisible, "remote-control mode survives saving");
-    }
-    Require(Settings::FromJson(LR"({"showClockSeconds":true})", settings, parsed) && parsed.showClockSeconds && parsed.showClock,
-            "clock seconds toggle independently of the clock");
-    Require(Settings::FromJson(LR"({"showClockSeconds":"bad"})", settings, parsed) && parsed.showClockSeconds,
-            "malformed clock seconds retain the current value");
-    settings.showClockSeconds = false;
-    Require(Settings::FromJson(LR"({"showClockSeconds":true})", settings, parsed) && parsed.showClockSeconds && parsed.dockDisplayMode == L"all",
-            "clock seconds preview without changing other keys");
-    Settings::FromJson(LR"({})", settings, parsed);
+    CheckClockAndBadgeSettings(settings, parsed);
     for (const wchar_t* mode : {L"all", L"primaryAndWindow", L"window"}) {
         settings.taskbarApps = mode;
         Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.taskbarApps == mode, "every task distribution mode survives saving");
@@ -142,9 +147,9 @@ void CheckStageDragMerge()
     Require(defaults.imeBubble && Settings::FromJson(LR"({"imeBubble":false})", Settings{}, parsed) && !parsed.imeBubble &&
                 Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.imeBubble,
             "imeBubble is on by default, and off survives saving");
-    Require(defaults.barReserve && defaults.barFullscreenHide &&
-                Settings::FromJson(LR"({"barReserve":false,"barFullscreenHide":false})", Settings{}, parsed) && !parsed.barReserve &&
-                !parsed.barFullscreenHide && Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.barReserve && !parsed.barFullscreenHide,
+    Require(defaults.barReserve && defaults.barFullscreenHide && Settings::FromJson(LR"({"barReserve":false,"barFullscreenHide":false})", Settings{}, parsed) &&
+                !parsed.barReserve && !parsed.barFullscreenHide && Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.barReserve &&
+                !parsed.barFullscreenHide,
             "barReserve and barFullscreenHide are on by default, and off survives saving");
     Require(defaults.windowPeek && Settings::FromJson(LR"({"windowPeek":false})", Settings{}, parsed) && !parsed.windowPeek &&
                 Settings::FromJson(parsed.ToJson(), Settings{}, parsed) && !parsed.windowPeek,
@@ -183,10 +188,10 @@ void CheckSettingsNormalization()
 void CheckExtrasSettings()
 {
     Settings defaults, parsed;
-    Require(defaults.showLaunchpad && defaults.launchpadMaterial == L"bar" && defaults.launchpadLayout == L"window" && defaults.showNowPlaying && defaults.nowPlayingShowPaused &&
-                defaults.nowPlayingMotion == L"normal" && defaults.nowPlayingAppMode == L"all" && defaults.nowPlayingApps.empty() &&
-                !defaults.showFolderStacks && defaults.folderStackLayout == L"fan" && defaults.folderStackMax == 8 && defaults.folderStacks.empty() &&
-                defaults.folderStackFiles.empty(),
+    Require(defaults.showLaunchpad && defaults.launchpadMaterial == L"bar" && defaults.launchpadLayout == L"window" && defaults.showNowPlaying &&
+                defaults.nowPlayingShowPaused && defaults.nowPlayingMotion == L"normal" && defaults.nowPlayingAppMode == L"all" &&
+                defaults.nowPlayingApps.empty() && !defaults.showFolderStacks && defaults.folderStackLayout == L"fan" && defaults.folderStackMax == 8 &&
+                defaults.folderStacks.empty() && defaults.folderStackFiles.empty(),
             "extras settings have expected defaults");
     Require(Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.showLaunchpad && parsed.showNowPlaying && parsed.nowPlayingShowPaused &&
                 parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.nowPlayingApps.empty() && !parsed.showFolderStacks &&
@@ -207,17 +212,19 @@ void CheckExtrasSettings()
     custom.folderStackMax = 24;
     custom.folderStacks = {L"C:\\Users\\Demo\\Desktop", L"D:\\Projects"};
     custom.folderStackFiles = {L"C:\\Users\\Demo\\Notes.pdf", L"D:\\Deck.pptx"};
-    Require(Settings::FromJson(custom.ToJson(), Settings{}, parsed) && !parsed.showLaunchpad && parsed.launchpadMaterial == L"tint" && parsed.launchpadLayout == L"fullscreen" && !parsed.showNowPlaying &&
-                !parsed.nowPlayingShowPaused && parsed.nowPlayingMotion == L"vivid" && parsed.nowPlayingAppMode == L"allow" &&
-                parsed.nowPlayingApps == custom.nowPlayingApps && parsed.showFolderStacks && parsed.folderStackLayout == L"column" &&
-                parsed.folderStackMax == 24 && parsed.folderStacks == custom.folderStacks && parsed.folderStackFiles == custom.folderStackFiles,
+    Require(Settings::FromJson(custom.ToJson(), Settings{}, parsed) && !parsed.showLaunchpad && parsed.launchpadMaterial == L"tint" &&
+                parsed.launchpadLayout == L"fullscreen" && !parsed.showNowPlaying && !parsed.nowPlayingShowPaused && parsed.nowPlayingMotion == L"vivid" &&
+                parsed.nowPlayingAppMode == L"allow" && parsed.nowPlayingApps == custom.nowPlayingApps && parsed.showFolderStacks &&
+                parsed.folderStackLayout == L"column" && parsed.folderStackMax == 24 && parsed.folderStacks == custom.folderStacks &&
+                parsed.folderStackFiles == custom.folderStackFiles,
             "extras settings survive round trip");
 
-    Require(
-        Settings::FromJson(LR"({"launchpadLayout":"bad","launchpadMaterial":"bad","nowPlayingMotion":"bad","nowPlayingAppMode":"bad","folderStackLayout":"bad"})", custom, parsed) &&
-            parsed.launchpadMaterial == L"bar" && parsed.launchpadLayout == L"window" && parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" &&
-            parsed.folderStackLayout == L"fan",
-        "invalid extras enums normalize to defaults");
+    Require(Settings::FromJson(
+                LR"({"launchpadLayout":"bad","launchpadMaterial":"bad","nowPlayingMotion":"bad","nowPlayingAppMode":"bad","folderStackLayout":"bad"})", custom,
+                parsed) &&
+                parsed.launchpadMaterial == L"bar" && parsed.launchpadLayout == L"window" && parsed.nowPlayingMotion == L"normal" &&
+                parsed.nowPlayingAppMode == L"all" && parsed.folderStackLayout == L"fan",
+            "invalid extras enums normalize to defaults");
     Require(Settings::FromJson(LR"({"folderStackMax":1})", Settings{}, parsed) && parsed.folderStackMax == 4, "folderStackMax clamps lower bound");
     Require(Settings::FromJson(LR"({"folderStackMax":99})", Settings{}, parsed) && parsed.folderStackMax == 24, "folderStackMax clamps upper bound");
     Require(Settings::FromJson(LR"({"folderStackMax":"bad","showLaunchpad":"bad","nowPlayingApps":false,"folderStacks":123,"folderStackFiles":123})", custom,
@@ -249,8 +256,7 @@ void CheckExtrasSettings()
     Require(modules.controlModules == std::vector<std::wstring>{L"stage"}, "controlModules defaults to Stage Manager");
     modules.controlModules = {L" darkmode ", L"wifi", L"stage", L"darkmode", L"", L"hotspot"};
     modules.Clamp();
-    Require(modules.controlModules == std::vector<std::wstring>{L"darkmode", L"stage", L"hotspot"},
-            "controlModules keeps known modules once, in order");
+    Require(modules.controlModules == std::vector<std::wstring>{L"darkmode", L"stage", L"hotspot"}, "controlModules keeps known modules once, in order");
     modules.controlModules = {L"nightlight", L"stage", L"darkmode"};
     modules.Clamp();
     Require(modules.controlModules == std::vector<std::wstring>{L"darkmode", L"stage"}, "controlModules: night light is dark mode now");

@@ -117,6 +117,38 @@ void CheckWeChatDiff()
     Require(SumWeChatUnread({}, true) == 0, "empty rows sum to 0");
 }
 
+void CheckWeChatThrottle()
+{
+    // Initial foreground sample when nothing is held yet.
+    {
+        WeChatThrottleInput in{WeChatBusyState::ForegroundShown, false, 0, 5000, 1000, 0, false, false, 0};
+        const auto out = EvaluateWeChatThrottle(in);
+        Require(out.waitMs == 0 && out.nextSampledWhileBusy && !out.clearReadingAndBaseline, "initial foreground sample reads immediately");
+    }
+    // ForegroundShown with unread == 0 stays blocked when held rows already exist.
+    {
+        WeChatThrottleInput in{WeChatBusyState::ForegroundShown, true, 0, 5000, 1000, 0, true, false, 0};
+        const auto out = EvaluateWeChatThrottle(in);
+        Require(out.waitMs == 1000 && out.clearReadingAndBaseline, "foreground with zero unread does not poll UIA");
+    }
+    // ForegroundShown with unread > 0 debounces at 2s so reading inside WeChat clears Atrium's badge.
+    {
+        WeChatThrottleInput soon{WeChatBusyState::ForegroundShown, true, 3, 2500, 1000, 0, true, false, 0};
+        const auto waitSoon = EvaluateWeChatThrottle(soon);
+        Require(waitSoon.waitMs == 500 && waitSoon.clearReadingAndBaseline, "foreground unread read debounces until 2s");
+
+        WeChatThrottleInput due{WeChatBusyState::ForegroundShown, true, 3, 3000, 1000, 0, true, false, 0};
+        const auto allowDue = EvaluateWeChatThrottle(due);
+        Require(allowDue.waitMs == 0 && allowDue.clearReadingAndBaseline, "foreground unread read proceeds after 2s");
+    }
+    // Modal dialogs stay blocked even when unread > 0.
+    {
+        WeChatThrottleInput dlg{WeChatBusyState::Dialog, true, 3, 5000, 1000, 0, true, false, 0};
+        const auto out = EvaluateWeChatThrottle(dlg);
+        Require(out.waitMs == 1000 && out.clearReadingAndBaseline, "dialog state never polls UIA");
+    }
+}
+
 } // namespace
 
 int main()
@@ -161,6 +193,7 @@ int main()
         CheckWeChatTime();
         CheckWeChatRows();
         CheckWeChatDiff();
+        CheckWeChatThrottle();
         std::cout << "messengers: all checks passed\n";
         return 0;
     } catch (const std::exception& e) {

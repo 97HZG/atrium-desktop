@@ -181,7 +181,7 @@ private:
     static void CALLBACK ShellEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG object, LONG, DWORD, DWORD);
     LRESULT Message(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT OnNotifyIcon(WPARAM w, const COPYDATASTRUCT* cds);
-    void Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage> image, LRESULT result);
+    void Record(DWORD message, DWORD cbData, const void* nidPtr, HWND hwnd, const std::wstring& key, std::shared_ptr<const IconImage> image, LRESULT result);
     LRESULT OnIconRect(WPARAM w, const COPYDATASTRUCT* cds);
     LRESULT Forward(UINT m, WPARAM w, LPARAM l, BOOL* sent = nullptr, DWORD* err = nullptr);
     bool HasIcon(const std::wstring& key) const
