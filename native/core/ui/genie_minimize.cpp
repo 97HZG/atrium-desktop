@@ -72,8 +72,8 @@ GenieMinimize::GenieMinimize(HINSTANCE instance, std::function<std::optional<REC
     surface_.SetGlassless(true);
     // Over everything and never in the way: clicks go through to the windows below.
     const HWND h = surface_.Hwnd();
-    SetWindowLongPtrW(h, GWL_EXSTYLE, GetWindowLongPtrW(h, GWL_EXSTYLE) | WS_EX_LAYERED | WS_EX_TRANSPARENT);
-    SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
+    (void)h; // EXPERIMENT
+
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM, LRESULT&) {
         if (m == WM_TIMER && w == kWatchTimer) {
