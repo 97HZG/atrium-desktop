@@ -1314,6 +1314,14 @@ void CALLBACK Bar::WinEvent(HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG idO
     bar->GuardStacking(event == EVENT_SYSTEM_FOREGROUND ? L"foreground" : L"move");
 }
 
+void Bar::ExpectCover(UINT ms)
+{
+    expectCoverUntil_ = GetTickCount64() + ms;
+    UpdateCover();
+    coverPending_ = true;
+    SetTimer(input_, kCoverTimer, ms + 20, nullptr); // then by what is really in front
+}
+
 void Bar::Reveal()
 {
     if (!covered_ || revealed_ || !visible_ || FullScreenInFront(hmonitor_))

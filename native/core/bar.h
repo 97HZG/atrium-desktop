@@ -63,6 +63,10 @@ public:
     void RefreshDisplays(bool workAreaOnly = false);
     const std::wstring& DisplayOverride() const { return displayOverride_; }
     HMONITOR TaskMonitor() const { return filterTasks_ ? hmonitor_ : nullptr; }
+    HMONITOR Monitor() const { return hmonitor_; }
+    // A window is about to fill the screen (a maximized one flying back out of Stage Manager's strip): the
+    // bar goes now, with it, rather than show again for a moment once it lands. For `ms`, then as usual.
+    void ExpectCover(UINT ms);
     const std::vector<TaskItem>& Items() const { return items_; }
     void SetVisible(bool visible);
     bool Visible() const { return visible_; }
@@ -240,6 +244,7 @@ private:
     bool filterTasks_ = false;
     bool layoutPending_ = false; // coalesce window-move events
     bool coverPending_ = false; // a look at what covers the monitor is due (kCoverTimer)
+    ULONGLONG expectCoverUntil_ = 0; // ExpectCover
     std::map<std::wstring, CachedIcon> icons_;
     uint64_t nextIconId_ = 1;
     BarScene scene_;

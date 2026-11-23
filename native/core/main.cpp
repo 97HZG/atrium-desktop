@@ -1635,6 +1635,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     g_app.widgets = std::make_unique<DesktopWidgets>(instance);
     g_app.widgets->ReloadLanguage(); // cached weather labels follow the saved language
     g_app.stage = std::make_unique<StageManager>(instance, *g_app.tasks);
+    g_app.stage->onCoverSoon = [](HMONITOR monitor) {
+        ForBars([&](Bar& bar) {
+            if (bar.Monitor() == monitor)
+                bar.ExpectCover(1200);
+        });
+    };
     // A window minimizes into its app's icon on the bar it shows on (that bar's middle when tucked away).
     g_app.genie = std::make_unique<GenieMinimize>(
         instance,

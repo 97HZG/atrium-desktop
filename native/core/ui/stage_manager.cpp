@@ -686,6 +686,12 @@ void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std:
     std::ranges::sort(mine);
     if (!front && !mine.empty())
         front = mine.back().second;
+    // One of them comes back maximized: the bar goes with the flight, not after it lands.
+    if (onCoverSoon && std::ranges::any_of(mine, [](const auto& m) {
+            WINDOWPLACEMENT wp{sizeof(wp)};
+            return IsZoomed(m.second) || (IsIconic(m.second) && GetWindowPlacement(m.second, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED));
+        }))
+        onCoverSoon(monitor_);
     // Kept out of the strip's band: they come back beside it.
     if (moveBeside)
         for (const auto& [seq, h] : mine)

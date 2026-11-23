@@ -76,6 +76,8 @@ public:
     // A window dragged onto a group in the strip joins it (stageDragMerge).
     void SetDragMerge(bool on);
     void SetCloseButton(bool on); // stageCloseButton: a card under the pointer shows a cross that closes its windows
+    // A window coming back from the strip will fill this monitor (maximized): the bar may go at once.
+    std::function<void(HMONITOR)> onCoverSoon;
     void MoveSize(HWND window, bool start) { start ? BeginDrag(window) : FinishDrag(window); } // EVENT_SYSTEM_MOVESIZESTART/END
     void SetMonitor(HMONITOR monitor, bool refresh = false);
     // The task model changed (every group, also those the bar does not show).

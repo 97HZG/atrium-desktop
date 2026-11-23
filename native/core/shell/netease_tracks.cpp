@@ -72,11 +72,25 @@ bool Query(sqlite3* db, const char* sql, const std::string& param, Row row)
     return rc == SQLITE_ROW || rc == SQLITE_DONE;
 }
 
-// The liked playlist's id in the player's cached account playlists: the playlist object holding
+// The liked playlist's id: the player's record of it, else in its cached account playlists the playlist object holding
 // specialType 5 also holds its comment thread, "A_PL_0_<id>" (the cache stores the JSON escaped).
 std::wstring LikedPlaylist(sqlite3* db)
 {
     std::wstring found;
+    // The player's own record of it, newest first: "starPlaylistId":"<id>".
+    Query(db, "SELECT jsonStr FROM persistentModel WHERE jsonStr LIKE '%starPlaylistId%' ORDER BY time DESC", {}, [&](const std::wstring& j) {
+        const size_t at = j.find(L"starPlaylistId");
+        size_t v = at == std::wstring::npos ? j.size() : at + 14;
+        while (v < j.size() && (j[v] == L'\\' || j[v] == L'"' || j[v] == L':' || j[v] == L' '))
+            ++v;
+        size_t end = v;
+        while (end < j.size() && iswdigit(j[end]))
+            ++end;
+        found = j.substr(v, end - v);
+        return found.empty();
+    });
+    if (!found.empty())
+        return found;
     Query(db, "SELECT jsonStr FROM requestCache WHERE id LIKE '%/user/playlist%' AND jsonStr LIKE '%specialType%'", {}, [&](const std::wstring& j) {
         for (size_t at = j.find(L"specialType"); at != std::wstring::npos && found.empty(); at = j.find(L"specialType", at + 1)) {
             size_t v = at + 11;

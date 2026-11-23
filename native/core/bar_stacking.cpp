@@ -184,7 +184,8 @@ void Bar::UpdateCover()
     // Apply the hide mode independently on each display.
     const std::wstring& mode = settings_.autoHide;
     // A game in front always has the screen to itself, whatever the hide mode.
-    bool covered = mode == L"always" || (mode != L"never" && MonitorCoveredByApp()) || GameInFront(hmonitor_);
+    const bool expected = mode != L"never" && GetTickCount64() < expectCoverUntil_;
+    bool covered = mode == L"always" || (mode != L"never" && MonitorCoveredByApp()) || GameInFront(hmonitor_) || expected;
     if (covered == covered_)
         return;
     covered_ = covered;

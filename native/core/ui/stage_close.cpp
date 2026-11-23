@@ -32,12 +32,14 @@ void StageManager::PaintClose(Canvas& c, Entry& e, int index, D2D1_POINT_2F corn
         return;
     const bool hot = index == closeHot_, down = index == closePressed_;
     const float a = std::clamp(shown, 0.f, 1.f);
-    const float lift = hot ? (down ? 0.70f : 0.98f) : 0.86f;
-    c.Circle(corner.x, corner.y, kCloseR + 1, D2D1::ColorF(1, 1, 1, 0.55f * a)); // a rim against dark pictures
-    c.Circle(corner.x, corner.y, kCloseR, D2D1::ColorF(0.16f * lift, 0.16f * lift, 0.18f * lift, 0.92f * a));
+    // White, as macOS's close buttons over pictures: a soft shadow under it, the cross dark; greyer pressed.
+    const float face = down ? 0.84f : hot ? 0.93f : 1.f;
+    c.Circle(corner.x, corner.y + 1, kCloseR + 1.5f, D2D1::ColorF(0, 0, 0, 0.16f * a));
+    c.Circle(corner.x, corner.y, kCloseR, D2D1::ColorF(face, face, face, 0.97f * a));
     const bool halo = c.halo;
     c.halo = false;
-    c.Glyph(L"\uE711", D2D1::RectF(corner.x - kCloseR, corner.y - kCloseR, corner.x + kCloseR, corner.y + kCloseR), 9, D2D1::ColorF(1, 1, 1, a));
+    c.Glyph(L"\uE711", D2D1::RectF(corner.x - kCloseR, corner.y - kCloseR, corner.x + kCloseR, corner.y + kCloseR), 9,
+            D2D1::ColorF(0.11f, 0.11f, 0.13f, 0.9f * a));
     c.halo = halo;
 }
 
