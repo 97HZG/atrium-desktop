@@ -175,7 +175,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
             extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingRhythm == "live" && extrasDefault.NowPlayingAppMode == "all" &&
             extrasDefault.NowPlayingApps.Count == 0 &&
             !extrasDefault.ShowFolderStacks && extrasDefault.FolderStackLayout == "fan" &&
-            extrasDefault.FolderStackMax == 8 && extrasDefault.FolderStacks.Count == 0,
+            extrasDefault.FolderStackMax == 8 && extrasDefault.FolderStacks.Count == 0 && extrasDefault.FolderStackFiles.Count == 0,
         "Extras settings must have expected defaults.");
     var extrasCustom = new BarSettings
     {
@@ -189,8 +189,9 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
         NowPlayingApps = ["spotify.exe"],
         ShowFolderStacks = true,
         FolderStackLayout = "column",
-        FolderStackMax = 12,
+        FolderStackMax = 24,
         FolderStacks = [@"C:\Users\Demo\Desktop"],
+        FolderStackFiles = [@"C:\Users\Demo\Notes.pdf"],
     };
     Require(BarSettings.FromJson(extrasCustom.ToJson(), new()).SameAs(extrasCustom),
         "Extras settings must survive a round trip.");
@@ -200,7 +201,7 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
         s => s.NowPlayingMotion = "subtle", s => s.NowPlayingRhythm = "loop", s => s.NowPlayingAppMode = "allow",
         s => s.NowPlayingApps = ["a.exe"],
         s => s.ShowFolderStacks = true, s => s.FolderStackLayout = "column",
-        s => s.FolderStackMax = 10, s => s.FolderStacks = [@"D:\Work"],
+        s => s.FolderStackMax = 10, s => s.FolderStacks = [@"D:\Work"], s => s.FolderStackFiles = [@"D:\Notes.pdf"],
     })
     {
         var changed = extrasDefault.Clone();

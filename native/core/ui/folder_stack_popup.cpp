@@ -84,8 +84,9 @@ void FolderStackPopup::Refresh()
     std::vector<StackFolder> next = model_.Snapshot();
     if (next.size() > maxVisible_)
         next.resize(maxVisible_);
-    const bool same = next.size() == folders_.size() &&
-                      std::ranges::equal(next, folders_, [](const StackFolder& a, const StackFolder& b) { return a.path == b.path && a.name == b.name; });
+    const bool same = next.size() == folders_.size() && std::ranges::equal(next, folders_, [](const StackFolder& a, const StackFolder& b) {
+                          return a.path == b.path && a.name == b.name && a.isFile == b.isFile;
+                      });
     for (const auto& f : folders_)
         surface_.ForgetImage(L"stack|" + f.path);
     folders_ = std::move(next);
@@ -190,7 +191,7 @@ void FolderStackPopup::PaintIcon(Canvas& c, size_t i, D2D1_RECT_F r, float opaci
         return;
     }
     c.BeginGroup(fade, 1, (r.left + r.right) / 2, (r.top + r.bottom) / 2);
-    c.Glyph(L"", r, (r.bottom - r.top) * 0.8f, c.theme.text); // Folder
+    c.Glyph(f.isFile ? L"\uE7C3" : L"\uE8B7", r, (r.bottom - r.top) * 0.8f, c.theme.text); // Document / Folder
     c.EndGroup();
 }
 
@@ -297,7 +298,7 @@ void FolderStackPopup::Activate(size_t i, bool newWindow)
 {
     if (i >= folders_.size())
         return;
-    model_.OpenFolder(folders_[i].path, newWindow);
+    model_.OpenFolder(folders_[i].path, newWindow, folders_[i].isFile);
     Close();
 }
 

@@ -151,13 +151,14 @@ void CheckSettingsNormalization()
 void CheckExtrasSettings()
 {
     Settings defaults, parsed;
-    Require(defaults.showLaunchpad && defaults.launchpadMaterial == L"bar" && defaults.showNowPlaying && defaults.nowPlayingShowPaused && defaults.nowPlayingMotion == L"normal" &&
-                defaults.nowPlayingAppMode == L"all" && defaults.nowPlayingApps.empty() && !defaults.showFolderStacks && defaults.folderStackLayout == L"fan" &&
-                defaults.folderStackMax == 8 && defaults.folderStacks.empty(),
+    Require(defaults.showLaunchpad && defaults.launchpadMaterial == L"bar" && defaults.showNowPlaying && defaults.nowPlayingShowPaused &&
+                defaults.nowPlayingMotion == L"normal" && defaults.nowPlayingAppMode == L"all" && defaults.nowPlayingApps.empty() &&
+                !defaults.showFolderStacks && defaults.folderStackLayout == L"fan" && defaults.folderStackMax == 8 && defaults.folderStacks.empty() &&
+                defaults.folderStackFiles.empty(),
             "extras settings have expected defaults");
     Require(Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.showLaunchpad && parsed.showNowPlaying && parsed.nowPlayingShowPaused &&
                 parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.nowPlayingApps.empty() && !parsed.showFolderStacks &&
-                parsed.folderStackLayout == L"fan" && parsed.folderStackMax == 8 && parsed.folderStacks.empty(),
+                parsed.folderStackLayout == L"fan" && parsed.folderStackMax == 8 && parsed.folderStacks.empty() && parsed.folderStackFiles.empty(),
             "old settings receive extras defaults");
 
     Settings custom;
@@ -170,21 +171,26 @@ void CheckExtrasSettings()
     custom.nowPlayingApps = {L"spotify.exe", L"Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"};
     custom.showFolderStacks = true;
     custom.folderStackLayout = L"column";
-    custom.folderStackMax = 12;
+    custom.folderStackMax = 24;
     custom.folderStacks = {L"C:\\Users\\Demo\\Desktop", L"D:\\Projects"};
-    Require(Settings::FromJson(custom.ToJson(), Settings{}, parsed) && !parsed.showLaunchpad && parsed.launchpadMaterial == L"tint" && !parsed.showNowPlaying && !parsed.nowPlayingShowPaused &&
-                parsed.nowPlayingMotion == L"vivid" && parsed.nowPlayingAppMode == L"allow" && parsed.nowPlayingApps == custom.nowPlayingApps &&
-                parsed.showFolderStacks && parsed.folderStackLayout == L"column" && parsed.folderStackMax == 12 && parsed.folderStacks == custom.folderStacks,
+    custom.folderStackFiles = {L"C:\\Users\\Demo\\Notes.pdf", L"D:\\Deck.pptx"};
+    Require(Settings::FromJson(custom.ToJson(), Settings{}, parsed) && !parsed.showLaunchpad && parsed.launchpadMaterial == L"tint" && !parsed.showNowPlaying &&
+                !parsed.nowPlayingShowPaused && parsed.nowPlayingMotion == L"vivid" && parsed.nowPlayingAppMode == L"allow" &&
+                parsed.nowPlayingApps == custom.nowPlayingApps && parsed.showFolderStacks && parsed.folderStackLayout == L"column" &&
+                parsed.folderStackMax == 24 && parsed.folderStacks == custom.folderStacks && parsed.folderStackFiles == custom.folderStackFiles,
             "extras settings survive round trip");
 
-    Require(Settings::FromJson(LR"({"launchpadMaterial":"bad","nowPlayingMotion":"bad","nowPlayingAppMode":"bad","folderStackLayout":"bad"})", custom, parsed) &&
-                parsed.launchpadMaterial == L"bar" && parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" && parsed.folderStackLayout == L"fan",
-            "invalid extras enums normalize to defaults");
+    Require(
+        Settings::FromJson(LR"({"launchpadMaterial":"bad","nowPlayingMotion":"bad","nowPlayingAppMode":"bad","folderStackLayout":"bad"})", custom, parsed) &&
+            parsed.launchpadMaterial == L"bar" && parsed.nowPlayingMotion == L"normal" && parsed.nowPlayingAppMode == L"all" &&
+            parsed.folderStackLayout == L"fan",
+        "invalid extras enums normalize to defaults");
     Require(Settings::FromJson(LR"({"folderStackMax":1})", Settings{}, parsed) && parsed.folderStackMax == 4, "folderStackMax clamps lower bound");
-    Require(Settings::FromJson(LR"({"folderStackMax":99})", Settings{}, parsed) && parsed.folderStackMax == 16, "folderStackMax clamps upper bound");
-    Require(Settings::FromJson(LR"({"folderStackMax":"bad","showLaunchpad":"bad","nowPlayingApps":false,"folderStacks":123})", custom, parsed) &&
-                parsed.folderStackMax == 12 && !parsed.showLaunchpad && parsed.nowPlayingApps == custom.nowPlayingApps &&
-                parsed.folderStacks == custom.folderStacks,
+    Require(Settings::FromJson(LR"({"folderStackMax":99})", Settings{}, parsed) && parsed.folderStackMax == 24, "folderStackMax clamps upper bound");
+    Require(Settings::FromJson(LR"({"folderStackMax":"bad","showLaunchpad":"bad","nowPlayingApps":false,"folderStacks":123,"folderStackFiles":123})", custom,
+                               parsed) &&
+                parsed.folderStackMax == 24 && !parsed.showLaunchpad && parsed.nowPlayingApps == custom.nowPlayingApps &&
+                parsed.folderStacks == custom.folderStacks && parsed.folderStackFiles == custom.folderStackFiles,
             "malformed extras keys retain fallback values");
 
     Settings many;
@@ -195,11 +201,16 @@ void CheckExtrasSettings()
     many.folderStacks.emplace_back(L"\u3000C:\\Keep\u00A0");
     for (int i = 0; i < 35; ++i)
         many.folderStacks.emplace_back(L" D:\\Dir" + std::to_wstring(i) + L" ");
+    many.folderStackFiles.emplace_back(L" \t\r\n\v\f ");
+    for (int i = 0; i < 35; ++i)
+        many.folderStackFiles.emplace_back(L" D:\\Doc" + std::to_wstring(i) + L".pdf ");
     many.Clamp();
     Require(many.nowPlayingApps.size() == 64 && many.nowPlayingApps.front() == L"app0.exe" && many.nowPlayingApps.back() == L"app63.exe",
             "nowPlayingApps trims, drops empty, and caps at 64");
     Require(many.folderStacks.size() == 32 && many.folderStacks.front() == L"\u3000C:\\Keep\u00A0" && many.folderStacks.back() == L"D:\\Dir30",
             "folderStacks trims ASCII whitespace only, drops empty, and caps at 32");
+    Require(many.folderStackFiles.size() == 32 && many.folderStackFiles.front() == L"D:\\Doc0.pdf" && many.folderStackFiles.back() == L"D:\\Doc31.pdf",
+            "folderStackFiles trims, drops empty, and caps at 32");
 
     Settings deduped;
     deduped.folderStacks = {L"C:\\", L"c:\\\\", L" D:\\Work\\ ", L"d:/work", L"\\\\server\\share\\"};

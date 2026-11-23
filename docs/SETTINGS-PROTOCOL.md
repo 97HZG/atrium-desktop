@@ -59,8 +59,9 @@
 | `nowPlayingApps` | string[] | 最多 64 项 | `[]` | 正在播放过滤列表（AUMID 或可执行文件名），每项去除首尾空白并丢弃空项 |
 | `showFolderStacks` | bool | | false | 托盘左侧的文件夹叠放入口 |
 | `folderStackLayout` | string | `fan` / `column` | `fan` | 文件夹叠放的展开样式：扇形（`fan`）或列表（`column`） |
-| `folderStackMax` | number | 4–16 | 8 | 文件夹叠放一次最多显示的文件夹数量（整数，超出范围截断） |
+| `folderStackMax` | number | 4–24 | 8 | 文件夹叠放一次最多显示的项目数量（整数，超出范围截断） |
 | `folderStacks` | string[] | 最多 32 项 | `[]` | 文件夹叠放包含的文件夹路径列表，每项去除首尾 ASCII 空白并丢弃空项 |
+| `folderStackFiles` | string[] | 最多 32 项 | `[]` | 文件夹叠放包含的文件路径列表，每项去除首尾 ASCII 空白并丢弃空项 |
 | `dockDisplayMode` | string | `primary` / `follow` / `fixed` / `all` | `primary` | 仅主屏；单个 Dock 在其他屏幕底边停留后唤出（只有接了两块以上屏幕时才查看指针）；固定屏幕；或每个扩展显示器常驻一条任务栏 |
 | `dockDisplayDelay` | number | 100–2000 ms | 450 | 跨屏唤出的连续停留时间；拖动图标、文件或使用弹出面板时不切屏 |
 | `dockDisplay` | string | 显示器设备接口 ID，或空字符串 | `""` | `fixed` 模式的目标；空值跟随系统主屏；断开后临时使用主屏，保留 ID 供重连恢复 |

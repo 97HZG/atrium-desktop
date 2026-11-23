@@ -170,9 +170,10 @@ void ReadExtrasSettingsJson(const json::JsonObject& o, Settings& s)
     if (o.HasKey(L"folderStackMax") && o.GetNamedValue(L"folderStackMax").ValueType() == json::JsonValueType::Number) {
         const double raw = o.GetNamedNumber(L"folderStackMax");
         if (raw == raw)
-            s.folderStackMax = static_cast<int>(std::lround(std::clamp(raw, 4.0, 16.0)));
+            s.folderStackMax = static_cast<int>(std::lround(std::clamp(raw, 4.0, 24.0)));
     }
     ReadStringArrayJson(o, L"folderStacks", s.folderStacks);
+    ReadStringArrayJson(o, L"folderStackFiles", s.folderStackFiles);
 }
 
 void NormalizeStringList(std::vector<std::wstring>& list, size_t maxCount = SIZE_MAX)
@@ -297,10 +298,11 @@ void Settings::Clamp()
         nowPlayingAppMode = L"all";
     if (folderStackLayout != L"column")
         folderStackLayout = L"fan";
-    folderStackMax = std::clamp(folderStackMax, 4, 16);
+    folderStackMax = std::clamp(folderStackMax, 4, 24);
     NormalizeStringList(stageExcluded);
     NormalizeStringList(nowPlayingApps, 64);
     NormalizeFolderStacks(folderStacks, 32);
+    NormalizeStringList(folderStackFiles, 32);
     if (pins && pins->size() > 64)
         pins->resize(64);
     if (preset != L"liquid" && preset != L"frosted")
@@ -366,6 +368,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"folderStackLayout", json::JsonValue::CreateStringValue(folderStackLayout));
     num(L"folderStackMax", folderStackMax);
     strArr(L"folderStacks", folderStacks);
+    strArr(L"folderStackFiles", folderStackFiles);
     o.SetNamedValue(L"language", json::JsonValue::CreateStringValue(language));
     o.SetNamedValue(L"textColor", json::JsonValue::CreateStringValue(textColor));
     o.SetNamedValue(L"autoHide", json::JsonValue::CreateStringValue(autoHide));

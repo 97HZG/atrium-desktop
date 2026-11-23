@@ -69,8 +69,9 @@ struct Settings {
     std::vector<std::wstring> nowPlayingApps;  // AUMIDs or exe names (max 64)
     bool showFolderStacks = false;   // the folder stack entry left of the tray
     std::wstring folderStackLayout = L"fan";   // fan | column
-    int folderStackMax = 8;          // 4..16
+    int folderStackMax = 8;          // 4..24
     std::vector<std::wstring> folderStacks;    // folder paths (max 32)
+    std::vector<std::wstring> folderStackFiles; // file paths (max 32)
     // The interface language of the bar, its popups, the widgets and the settings app.
     // auto follows Windows' UI language (Chinese -> zh, anything else -> en).
     std::wstring language = L"auto"; // auto | zh | en

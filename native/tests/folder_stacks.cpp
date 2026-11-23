@@ -57,7 +57,8 @@ bool CheckDedupe()
 bool CheckModelRemoteAndMissing()
 {
     FolderStackModel model(nullptr, 0);
-    model.SetFolders({L"\\\\nonexistent-server\\share\\docs\\", L"\\\\NONEXISTENT-SERVER\\SHARE\\DOCS", L"C:\\__atrium_missing_folder_test__\\"}, 32);
+    model.SetFolders({L"\\\\nonexistent-server\\share\\docs\\", L"\\\\NONEXISTENT-SERVER\\SHARE\\DOCS", L"C:\\__atrium_missing_folder_test__\\"},
+                     {L"\\\\nonexistent-server\\share\\deck.pptx", L"C:\\__atrium_missing_file_test__.pdf"}, 32);
 
     std::vector<StackFolder> snap;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -68,11 +69,19 @@ bool CheckModelRemoteAndMissing()
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    return Require(snap.size() == 2, "model resolves both entries") &&
-           Require(snap[0].path == L"\\\\nonexistent-server\\share\\docs" && snap[0].name == L"docs" && !snap[0].missing && snap[0].icon.Empty(),
+    return Require(snap.size() == 4, "model resolves folders and files") &&
+           Require(snap[0].path == L"\\\\nonexistent-server\\share\\docs" && snap[0].name == L"docs" && !snap[0].missing && !snap[0].isFile &&
+                       snap[0].icon.Empty(),
                    "remote path skips disk probe and uses tail segment") &&
-           Require(snap[1].path == L"C:\\__atrium_missing_folder_test__" && snap[1].name == L"__atrium_missing_folder_test__" && snap[1].missing,
-                   "missing local path marks missing and keeps tail name");
+           Require(snap[1].path == L"C:\\__atrium_missing_folder_test__" && snap[1].name == L"__atrium_missing_folder_test__" && snap[1].missing &&
+                       !snap[1].isFile,
+                   "missing local path marks missing and keeps tail name") &&
+           Require(snap[2].path == L"\\\\nonexistent-server\\share\\deck.pptx" && snap[2].name == L"deck" && !snap[2].missing && snap[2].isFile &&
+                       snap[2].icon.Empty(),
+                   "remote file strips extension and sets isFile") &&
+           Require(snap[3].path == L"C:\\__atrium_missing_file_test__.pdf" && snap[3].name == L"__atrium_missing_file_test__" && snap[3].missing &&
+                       snap[3].isFile,
+                   "missing local file marks missing and strips extension");
 }
 
 } // namespace

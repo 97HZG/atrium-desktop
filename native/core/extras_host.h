@@ -68,6 +68,7 @@ private:
     bool liveRhythm_ = false, stacksCached_ = false;
     std::optional<bool> samplingActive_;
     std::vector<std::wstring> lastFolderStacks_;
+    std::vector<std::wstring> lastFolderStackFiles_;
     Bar* lastBar_ = nullptr;
 };
 

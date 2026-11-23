@@ -71,6 +71,7 @@ internal sealed class BarSettings
     public string FolderStackLayout { get; set; } = "fan";   // fan | column
     public int FolderStackMax { get; set; } = 8;
     public List<string> FolderStacks { get; set; } = [];
+    public List<string> FolderStackFiles { get; set; } = [];
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public string Language { get; set; } = "auto"; // auto (follow Windows) | a locale tag: en, zh-Hans, ...
     public string AutoHide { get; set; } = "fullscreen"; // never | fullscreen (a maximized or full-screen app in front) | always
@@ -161,6 +162,7 @@ internal sealed class BarSettings
         copy.StageExcluded = [.. StageExcluded];
         copy.NowPlayingApps = [.. NowPlayingApps];
         copy.FolderStacks = [.. FolderStacks];
+        copy.FolderStackFiles = [.. FolderStackFiles];
         return copy;
     }
 
@@ -263,6 +265,7 @@ internal sealed class BarSettings
         o["stageExcluded"] = ToStringArray(StageExcluded);
         o["nowPlayingApps"] = ToStringArray(NowPlayingApps);
         o["folderStacks"] = ToStringArray(FolderStacks);
+        o["folderStackFiles"] = ToStringArray(FolderStackFiles);
         if (StartSize.Length > 0)
             o["startSize"] = StartSize;
         if (StartIcon.Length > 0)
@@ -482,8 +485,9 @@ internal sealed class BarSettings
         string stackLayout = Str("folderStackLayout", f.FolderStackLayout);
         s.FolderStackLayout = stackLayout == "column" ? "column" : "fan";
         double rawMax = o?["folderStackMax"] is JsonValue mv && mv.TryGetValue(out double mx) && double.IsFinite(mx) ? mx : f.FolderStackMax;
-        s.FolderStackMax = (int)Math.Round(Math.Clamp(rawMax, 4, 16), MidpointRounding.AwayFromZero);
+        s.FolderStackMax = (int)Math.Round(Math.Clamp(rawMax, 4, 24), MidpointRounding.AwayFromZero);
         s.FolderStacks = ReadFolderStacks(o, f.FolderStacks, 32);
+        s.FolderStackFiles = ReadStringArray(o, "folderStackFiles", f.FolderStackFiles, 32);
     }
 
     public bool SameAs(BarSettings o) =>
@@ -500,6 +504,7 @@ internal sealed class BarSettings
         ShowFolderStacks == o.ShowFolderStacks &&
         FolderStackLayout == o.FolderStackLayout && FolderStackMax == o.FolderStackMax &&
         FolderStacks.SequenceEqual(o.FolderStacks, StringComparer.OrdinalIgnoreCase) &&
+        FolderStackFiles.SequenceEqual(o.FolderStackFiles, StringComparer.OrdinalIgnoreCase) &&
         TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
         BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout &&
         NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus &&

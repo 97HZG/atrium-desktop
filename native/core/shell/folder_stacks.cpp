@@ -66,6 +66,48 @@ std::wstring FallbackFolderName(const std::wstring& path)
     return path.substr(slash + 1, end - (slash + 1));
 }
 
+std::wstring FileNameStem(const std::wstring& path)
+{
+    const size_t slash = path.find_last_of(L"\\/");
+    const size_t start = slash == std::wstring::npos ? 0 : slash + 1;
+    const size_t dot = path.find_last_of(L'.');
+    const size_t end = (dot != std::wstring::npos && dot > start) ? dot : path.size();
+    return path.substr(start, end - start);
+}
+
+std::wstring TrimAscii(std::wstring path)
+{
+    size_t start = 0;
+    while (start < path.size() && IsWhitespace(path[start]))
+        ++start;
+    size_t end = path.size();
+    while (end > start && IsWhitespace(path[end - 1]))
+        --end;
+    if (start > 0 || end < path.size())
+        path = path.substr(start, end - start);
+    return path;
+}
+
+std::vector<std::wstring> DedupePaths(std::vector<std::wstring> paths, size_t maxCount, bool isFolder)
+{
+    std::vector<std::wstring> out;
+    if (maxCount == 0)
+        return out;
+    out.reserve(std::min(paths.size(), maxCount));
+    std::unordered_set<std::wstring> seen;
+    for (auto& raw : paths) {
+        std::wstring norm = isFolder ? NormalizeFolderPath(std::move(raw)) : TrimAscii(std::move(raw));
+        if (norm.empty())
+            continue;
+        if (seen.insert(DedupeKey(norm)).second) {
+            out.push_back(std::move(norm));
+            if (out.size() >= maxCount)
+                break;
+        }
+    }
+    return out;
+}
+
 struct StaComScope {
     bool owned = false;
     StaComScope() : owned(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {}
@@ -87,29 +129,34 @@ struct ScopedPidl {
     ScopedPidl& operator=(const ScopedPidl&) = delete;
 };
 
-StackFolder ResolveFolder(const std::wstring& path, int iconPx)
+StackFolder ResolveEntry(const std::wstring& path, int iconPx, bool isFile)
 {
     StackFolder entry;
     entry.path = path;
-    const std::wstring fallback = FallbackFolderName(path);
+    entry.isFile = isFile;
+    const std::wstring fallback = isFile ? FileNameStem(path) : FallbackFolderName(path);
     if (IsRemotePath(path)) {
-        entry.name = fallback;
+        entry.name = fallback.empty() ? path : fallback;
         return entry;
     }
 
     winrt::com_ptr<IShellItem> item;
     if (FAILED(SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(item.put()))) || !item) {
-        entry.name = fallback;
+        entry.name = fallback.empty() ? path : fallback;
         entry.missing = true;
         return entry;
     }
 
-    PWSTR display = nullptr;
-    if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &display)) && display && *display)
-        entry.name = display;
-    else
-        entry.name = fallback;
-    CoTaskMemFree(display);
+    if (isFile) {
+        entry.name = fallback.empty() ? FallbackFolderName(path) : fallback;
+    } else {
+        PWSTR display = nullptr;
+        if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &display)) && display && *display)
+            entry.name = display;
+        else
+            entry.name = fallback;
+        CoTaskMemFree(display);
+    }
 
     LoadShellImage(path, iconPx, entry.icon, false);
     return entry;
@@ -196,42 +243,27 @@ void LaunchExplorer(const std::wstring& path)
     }
 }
 
+void OpenFile(const std::wstring& path)
+{
+    SHELLEXECUTEINFOW sei{sizeof(sei)};
+    sei.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    sei.lpVerb = L"open";
+    sei.lpFile = path.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+    ShellExecuteExW(&sei);
+}
+
 } // namespace
 
 std::wstring NormalizeFolderPath(std::wstring path)
 {
-    size_t start = 0;
-    while (start < path.size() && IsWhitespace(path[start]))
-        ++start;
-    size_t end = path.size();
-    while (end > start && IsWhitespace(path[end - 1]))
-        --end;
-    if (start > 0 || end < path.size())
-        path = path.substr(start, end - start);
+    path = TrimAscii(std::move(path));
     while (!path.empty() && IsSlash(path.back()) && !IsRootSlash(path))
         path.pop_back();
     return path;
 }
 
-std::vector<std::wstring> DedupeFolders(std::vector<std::wstring> paths, size_t maxCount)
-{
-    std::vector<std::wstring> out;
-    if (maxCount == 0)
-        return out;
-    out.reserve(std::min(paths.size(), maxCount));
-    std::unordered_set<std::wstring> seen;
-    for (auto& raw : paths) {
-        std::wstring norm = NormalizeFolderPath(std::move(raw));
-        if (norm.empty())
-            continue;
-        if (seen.insert(DedupeKey(norm)).second) {
-            out.push_back(std::move(norm));
-            if (out.size() >= maxCount)
-                break;
-        }
-    }
-    return out;
-}
+std::vector<std::wstring> DedupeFolders(std::vector<std::wstring> paths, size_t maxCount) { return DedupePaths(std::move(paths), maxCount, true); }
 
 FolderStackModel::FolderStackModel(HWND notify, UINT msg) : notify_(notify), msg_(msg), thread_(&FolderStackModel::Worker, this) {}
 
@@ -246,13 +278,15 @@ FolderStackModel::~FolderStackModel()
         thread_.join();
 }
 
-void FolderStackModel::SetFolders(std::vector<std::wstring> paths, int iconPx)
+void FolderStackModel::SetFolders(std::vector<std::wstring> folders, std::vector<std::wstring> files, int iconPx)
 {
-    std::vector<std::wstring> normalized = DedupeFolders(std::move(paths), 32);
+    std::vector<std::wstring> normFolders = DedupePaths(std::move(folders), 32, true);
+    std::vector<std::wstring> normFiles = DedupePaths(std::move(files), 32, false);
     const int clampedPx = std::clamp(iconPx, 8, 512);
     {
         std::lock_guard g(mutex_);
-        pendingPaths_ = std::move(normalized);
+        pendingFolders_ = std::move(normFolders);
+        pendingFiles_ = std::move(normFiles);
         pendingIconPx_ = clampedPx;
         ++pendingGen_;
     }
@@ -265,14 +299,14 @@ std::vector<StackFolder> FolderStackModel::Snapshot() const
     return snapshot_;
 }
 
-void FolderStackModel::OpenFolder(const std::wstring& path, bool forceNewWindow)
+void FolderStackModel::OpenFolder(const std::wstring& path, bool forceNewWindow, bool isFile)
 {
-    std::wstring norm = NormalizeFolderPath(path);
+    std::wstring norm = isFile ? TrimAscii(path) : NormalizeFolderPath(path);
     if (norm.empty())
         return;
     {
         std::lock_guard g(mutex_);
-        openJobs_.push_back(OpenJob{std::move(norm), forceNewWindow});
+        openJobs_.push_back(OpenJob{std::move(norm), forceNewWindow, isFile});
     }
     cv_.notify_one();
 }
@@ -283,7 +317,7 @@ void FolderStackModel::Worker()
     for (;;) {
         OpenJob openJob;
         bool hasOpen = false;
-        std::vector<std::wstring> paths;
+        std::vector<std::wstring> folders, files;
         int iconPx = 32;
         uint64_t gen = 0;
         {
@@ -296,12 +330,17 @@ void FolderStackModel::Worker()
                 openJobs_.pop_front();
                 hasOpen = true;
             } else {
-                paths = pendingPaths_;
+                folders = pendingFolders_;
+                files = pendingFiles_;
                 iconPx = pendingIconPx_;
                 gen = pendingGen_;
             }
         }
         if (hasOpen) {
+            if (openJob.isFile) {
+                OpenFile(openJob.path);
+                continue;
+            }
             // Explorer's windows are asked only while it answers: a hung shell never holds this thread
             // (nor Atrium's exit, which joins it).
             const bool tryFocus = !openJob.forceNewWindow && !IsRemotePath(openJob.path) && ShellResponsive(GetShellWindow(), 300, false);
@@ -309,22 +348,27 @@ void FolderStackModel::Worker()
                 LaunchExplorer(openJob.path);
             continue;
         }
-        ResolveBatch(paths, iconPx, gen);
+        ResolveBatch(folders, files, iconPx, gen);
     }
 }
 
-void FolderStackModel::ResolveBatch(const std::vector<std::wstring>& paths, int iconPx, uint64_t gen)
+void FolderStackModel::ResolveBatch(const std::vector<std::wstring>& folders, const std::vector<std::wstring>& files, int iconPx, uint64_t gen)
 {
     std::vector<StackFolder> resolved;
-    resolved.reserve(paths.size());
-    for (const std::wstring& path : paths) {
-        {
-            std::lock_guard g(mutex_);
-            if (stop_ || pendingGen_ != gen)
-                return;
+    resolved.reserve(folders.size() + files.size());
+    auto append = [&](const std::vector<std::wstring>& paths, bool isFile) {
+        for (const std::wstring& path : paths) {
+            {
+                std::lock_guard g(mutex_);
+                if (stop_ || pendingGen_ != gen)
+                    return false;
+            }
+            resolved.push_back(ResolveEntry(path, iconPx, isFile));
         }
-        resolved.push_back(ResolveFolder(path, iconPx));
-    }
+        return true;
+    };
+    if (!append(folders, false) || !append(files, true))
+        return;
     HWND notify = nullptr;
     UINT msg = 0;
     {

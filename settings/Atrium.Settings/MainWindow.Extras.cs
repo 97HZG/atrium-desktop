@@ -15,7 +15,7 @@ public sealed partial class MainWindow
 {
     private const int NowPlayingPage = 15, StacksPage = 16, LaunchpadPage = 17;
     private static readonly string[] MotionTags = ["off", "subtle", "normal", "vivid"];
-    private static readonly int[] StackMaxima = [6, 8, 12, 16];
+    private static readonly int[] StackMaxima = [8, 12, 16, 24];
 
     private StackPanel? _npMain, _npSide, _stMain, _stSide, _lpMain, _lpSide;
     private Border? _npStage, _stStage, _lpStage;
@@ -23,9 +23,9 @@ public sealed partial class MainWindow
     private ModuleScene? _npScene, _stScene, _lpScene;
     private ToggleTile? _launchpadSwitch, _npSwitch, _npPausedSwitch, _stSwitch;
     private SegmentTrack? _lpMaterial, _npMotion, _npRhythm, _stLayout, _stMax;
-    private StackPanel? _stList;
-    private TextBlock? _stCount;
-    private bool _pickingStackFolder;
+    private StackPanel? _stList, _stFileList;
+    private TextBlock? _stCount, _stFileCount;
+    private bool _pickingStack;
 
     private StackPanel ExtrasPage(int page)
     {
@@ -64,7 +64,8 @@ public sealed partial class MainWindow
         CenterStack.Children.Insert(at, _npMain);
         _npSide = BuildNowPlayingSide();
         _stSide = BuildStacksSide();
-        _stMain.Children.Add(BuildStacksFolders());
+        _stMain.Children.Add(BuildStacksGroup(isFile: false));
+        _stMain.Children.Add(BuildStacksGroup(isFile: true));
         _npMain.Children.Add(BuildPlayers());
         _launchpadSwitch = Toggle("Show on the taskbar", "Show Launchpad on the taskbar",
             "An entry next to the start logo opens every app, page by page, in one large window of glass, as on macOS.", (s, on) => s.ShowLaunchpad = on);
@@ -147,40 +148,46 @@ public sealed partial class MainWindow
         return Side("Folder Stacks", _stSwitch, Row("Opens as", _stLayout), Row("Shows at most", _stMax));
     }
 
-    // The folders, under the picture as the taskbar's pinned apps are under theirs: a title with the
-    // count and the buttons that add, then the list in a group.
-    private StackPanel BuildStacksFolders()
+    // The folders and files, under the picture as the taskbar's pinned apps are under theirs: a
+    // title with the count and the buttons that add, then the list in a group.
+    private StackPanel BuildStacksGroup(bool isFile)
     {
         var res = Application.Current.Resources;
-        _stList = new StackPanel { Padding = new Thickness(0, 4, 0, 4) };
-        _stCount = new TextBlock { Style = (Style)res["FootnoteStyle"], VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
-        var places = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
-        foreach (var (name, path) in KnownStackFolders())
-        {
-            if (path.Length == 0) continue;
-            var item = new MenuFlyoutItem { Text = Loc.T(name) };
-            item.Click += (_, _) => AddStackFolder(path);
-            places.Items.Add(item);
-        }
-        var common = new DropDownButton { Content = Loc.T("Common folders"), Flyout = places };
-        var add = new Button { Content = Loc.T("Add folder…"), Style = (Style)res["PrimaryButtonStyle"] };
-        add.Click += async (_, _) => await AddStackFolderAsync();
+        var list = new StackPanel { Padding = new Thickness(0, 4, 0, 4) };
+        var count = new TextBlock { Style = (Style)res["FootnoteStyle"], VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+        if (isFile) (_stFileList, _stFileCount) = (list, count);
+        else (_stList, _stCount) = (list, count);
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { _stCount, common, add },
+            Children = { count },
         };
+        if (!isFile)
+        {
+            var places = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
+            foreach (var (name, path) in KnownStackFolders())
+            {
+                if (path.Length == 0) continue;
+                var item = new MenuFlyoutItem { Text = Loc.T(name) };
+                item.Click += (_, _) => AddStackPaths([path], isFile: false);
+                places.Items.Add(item);
+            }
+            buttons.Children.Add(new DropDownButton { Content = Loc.T("Common folders"), Flyout = places });
+        }
+        var add = new Button { Content = isFile ? Loc.T("Add files…") : Loc.T("Add folder…"), Style = (Style)res["PrimaryButtonStyle"] };
+        add.Click += async (_, _) => await PickStackAsync(isFile);
+        buttons.Children.Add(add);
         var title = new TextBlock
         {
-            Text = Loc.T("Folders"),
+            Text = isFile ? Loc.T("Files") : Loc.T("Folders"),
             Style = (Style)res["SectionStyle"],
             Margin = new Thickness(4, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
         var header = new Grid { Margin = new Thickness(0, 0, 0, 10), Children = { title, buttons } };
-        var group = new Border { Style = (Style)res["GroupStyle"], Child = _stList };
+        var group = new Border { Style = (Style)res["GroupStyle"], Child = list };
         return new StackPanel { Margin = new Thickness(0, 16, 0, 0), Children = { header, group } };
     }
 
@@ -265,43 +272,55 @@ public sealed partial class MainWindow
         Check(_stLayout, s.FolderStackLayout == "column" ? "column" : "fan");
         int max = StackMaxima.MinBy(n => Math.Abs(n - s.FolderStackMax));
         Check(_stMax, max.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        FillStackList();
+        FillStackList(isFile: false);
+        FillStackList(isFile: true);
         _loading = was;
     }
 
-    // ---- The stack's folders ----
+    // ---- The stack's folders and files ----
 
-    private void FillStackList()
+    private List<string> StackItems(bool isFile) => isFile ? CurrentSettings.FolderStackFiles : CurrentSettings.FolderStacks;
+
+    private void FillStackList(bool isFile)
     {
-        if (_stList == null) return;
-        _stList.Children.Clear();
-        var folders = CurrentSettings.FolderStacks;
-        _stCount?.Text = folders.Count == 0 ? "" : Loc.F("{0} of 32", folders.Count);
-        if (folders.Count == 0)
+        var list = isFile ? _stFileList : _stList;
+        if (list == null) return;
+        list.Children.Clear();
+        var items = StackItems(isFile);
+        var count = isFile ? _stFileCount : _stCount;
+        count?.Text = items.Count == 0 ? "" : Loc.F("{0} of 32", items.Count);
+        if (items.Count == 0)
         {
             var res = Application.Current.Resources;
-            _stList.Children.Add(new StackPanel
+            list.Children.Add(new StackPanel
             {
                 Padding = new Thickness(24, 36, 24, 36),
                 Spacing = 6,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Children =
                 {
-                    new TextBlock { Text = Loc.T("No folders yet"), Style = (Style)res["TitleStyle"], HorizontalAlignment = HorizontalAlignment.Center },
                     new TextBlock
                     {
-                        Text = Loc.T("Choose one with Add folder…, or pick a common folder such as Downloads."),
+                        Text = isFile ? Loc.T("No files yet") : Loc.T("No folders yet"),
+                        Style = (Style)res["TitleStyle"],
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                    new TextBlock
+                    {
+                        Text = isFile
+                            ? Loc.T("Choose documents or other files with Add files….")
+                            : Loc.T("Choose one with Add folder…, or pick a common folder such as Downloads."),
                         Style = (Style)res["RowNoteStyle"], TextAlignment = TextAlignment.Center, MaxWidth = 360,
                     },
                 },
             });
             return;
         }
-        for (int i = 0; i < folders.Count; i++) _stList.Children.Add(StackRow(i, folders[i]));
+        for (int i = 0; i < items.Count; i++) list.Children.Add(StackRow(i, items[i], items.Count, isFile));
     }
 
-    // A folder as a pinned app's row: its icon, its name over its path, and up, down and remove.
-    private Grid StackRow(int index, string path)
+    // A folder or file as a pinned app's row: its icon, its name over its path, and up, down and remove.
+    private Grid StackRow(int index, string path, int count, bool isFile)
     {
         var res = Application.Current.Resources;
         var row = new Grid { Padding = new Thickness(14, 8, 10, 8), ColumnSpacing = 14, MinHeight = 60 };
@@ -310,14 +329,15 @@ public sealed partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var icon = new TextBlock
         {
-            Text = "\U0001F4C1",
+            Text = isFile ? "\U0001F4C4" : "\U0001F4C1",
             FontFamily = new FontFamily("Segoe UI Emoji"),
             FontSize = 28,
             Width = 40,
             TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        string name = Path.GetFileName(path.TrimEnd('\\', '/'));
+        string name = isFile ? Path.GetFileNameWithoutExtension(path) : Path.GetFileName(path.TrimEnd('\\', '/'));
+        if (name.Length == 0 && isFile) name = Path.GetFileName(path);
         var text = new StackPanel
         {
             VerticalAlignment = VerticalAlignment.Center,
@@ -343,11 +363,11 @@ public sealed partial class MainWindow
             {
                 Style = (Style)res["IconButtonStyle"],
                 Content = new FontIcon { Glyph = glyph, FontSize = size },
-                IsEnabled = move == 0 || (index + move >= 0 && index + move < CurrentSettings.FolderStacks.Count),
+                IsEnabled = move == 0 || (index + move >= 0 && index + move < count),
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, Loc.T(label));
             ToolTipService.SetToolTip(button, Loc.T(label));
-            button.Click += (_, _) => EditStack(index, move);
+            button.Click += (_, _) => EditStack(index, move, isFile);
             buttons.Children.Add(button);
         }
         Grid.SetColumn(text, 1);
@@ -359,20 +379,20 @@ public sealed partial class MainWindow
     }
 
     // move: -1 up, 1 down, 0 remove.
-    private void EditStack(int index, int move)
+    private void EditStack(int index, int move, bool isFile)
     {
-        var folders = CurrentSettings.FolderStacks;
-        if (index < 0 || index >= folders.Count) return;
-        if (move == 0) folders.RemoveAt(index);
-        else if (index + move >= 0 && index + move < folders.Count) (folders[index], folders[index + move]) = (folders[index + move], folders[index]);
-        FillStackList();
+        var items = StackItems(isFile);
+        if (index < 0 || index >= items.Count) return;
+        if (move == 0) items.RemoveAt(index);
+        else if (index + move >= 0 && index + move < items.Count) (items[index], items[index + move]) = (items[index + move], items[index]);
+        FillStackList(isFile);
         Changed();
     }
 
-    private static string NormalizeStackFolder(string path)
+    private static string NormalizeStackPath(string path, bool isFile)
     {
         string trimmed = path.Trim();
-        if (trimmed.Length == 0) return "";
+        if (trimmed.Length == 0 || isFile) return trimmed;
         string? root = Path.GetPathRoot(trimmed);
         if (root != null)
         {
@@ -382,34 +402,52 @@ public sealed partial class MainWindow
         return trimmed;
     }
 
-    private void AddStackFolder(string path)
+    private void AddStackPaths(IEnumerable<string> paths, bool isFile)
     {
-        string normalized = NormalizeStackFolder(path);
-        if (normalized.Length == 0 || !Path.IsPathFullyQualified(normalized)) return;
-        var folders = CurrentSettings.FolderStacks;
-        bool known = folders.Any(f => string.Equals(NormalizeStackFolder(f), normalized, StringComparison.OrdinalIgnoreCase));
-        if (folders.Count >= 32 || known) return;
-        folders.Add(normalized);
+        var items = StackItems(isFile);
+        bool added = false;
+        foreach (string raw in paths)
+        {
+            string normalized = NormalizeStackPath(raw, isFile);
+            if (normalized.Length == 0 || !Path.IsPathFullyQualified(normalized)) continue;
+            bool known = items.Any(f => string.Equals(NormalizeStackPath(f, isFile), normalized, StringComparison.OrdinalIgnoreCase));
+            if (items.Count >= 32 || known) continue;
+            items.Add(normalized);
+            added = true;
+        }
+        if (!added) return;
         if (!CurrentSettings.ShowFolderStacks)
         {
-            CurrentSettings.ShowFolderStacks = true; // a folder added is a stack wanted
+            CurrentSettings.ShowFolderStacks = true; // an entry added is a stack wanted
             LoadExtras();
         }
-        FillStackList();
+        FillStackList(isFile);
         Changed();
     }
 
-    private async Task AddStackFolderAsync()
+    private async Task PickStackAsync(bool isFile)
     {
-        if (_pickingStackFolder || _updatesClosed) return;
-        _pickingStackFolder = true;
+        if (_pickingStack || _updatesClosed) return;
+        _pickingStack = true;
         try
         {
-            var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            picker.FileTypeFilter.Add("*");
-            if (await picker.PickSingleFolderAsync() is { } folder && !_updatesClosed)
-                AddStackFolder(folder.Path);
+            nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            if (isFile)
+            {
+                var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+                picker.FileTypeFilter.Add("*");
+                if (await picker.PickMultipleFilesAsync() is { Count: > 0 } picked && !_updatesClosed)
+                    AddStackPaths(picked.Select(f => f.Path), isFile: true);
+            }
+            else
+            {
+                var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+                picker.FileTypeFilter.Add("*");
+                if (await picker.PickSingleFolderAsync() is { } folder && !_updatesClosed)
+                    AddStackPaths([folder.Path], isFile: false);
+            }
         }
         catch (COMException)
         {
@@ -421,7 +459,7 @@ public sealed partial class MainWindow
         }
         finally
         {
-            _pickingStackFolder = false;
+            _pickingStack = false;
         }
     }
 }

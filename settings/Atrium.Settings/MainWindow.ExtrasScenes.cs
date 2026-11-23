@@ -165,20 +165,27 @@ public sealed partial class MainWindow
 
         private string[] Names()
         {
-            var paths = M.CurrentSettings.FolderStacks;
-            string[] names = paths.Count > 0
-                ? [.. paths.Select(p =>
-                {
-                    string trimmed = p.TrimEnd('\\', '/');
-                    string n = System.IO.Path.GetFileName(trimmed);
-                    return n.Length > 0 ? n : (trimmed.Length > 0 ? trimmed : p);
-                })]
+            var folders = M.CurrentSettings.FolderStacks;
+            var files = M.CurrentSettings.FolderStackFiles;
+            var items = folders.Select(p =>
+            {
+                string trimmed = p.TrimEnd('\\', '/');
+                string n = System.IO.Path.GetFileName(trimmed);
+                return n.Length > 0 ? n : (trimmed.Length > 0 ? trimmed : p);
+            }).Concat(files.Select(p =>
+            {
+                string n = System.IO.Path.GetFileNameWithoutExtension(p);
+                return n.Length > 0 ? n : p;
+            }));
+            string[] names = folders.Count > 0 || files.Count > 0
+                ? [.. items]
                 : [Loc.T("Desktop"), Loc.T("Downloads"), Loc.T("Documents"), Loc.T("Pictures"), Loc.T("Music")];
-            return [.. names.Take(Math.Clamp(M.CurrentSettings.FolderStackMax, 4, 16)).Take(7)];
+            return [.. names.Take(Math.Clamp(M.CurrentSettings.FolderStackMax, 4, 24)).Take(7)];
         }
 
         private bool Fan => M.CurrentSettings.FolderStackLayout != "column";
-        protected override bool IsOpen => M.CurrentSettings.ShowFolderStacks || M.CurrentSettings.FolderStacks.Count > 0;
+        protected override bool IsOpen =>
+            M.CurrentSettings.ShowFolderStacks || M.CurrentSettings.FolderStacks.Count > 0 || M.CurrentSettings.FolderStackFiles.Count > 0;
         protected override Size PopupSize => Fan ? new Size(360, Gap + Icon + 6 * StepY + Margin) : new Size(ColumnW, 2 * ColumnPad + 5 * RowH);
         // One slot left of the tray, where the bar puts it.
         protected override Vector2 Anchor => new((float)(Bar!.TrayX >= 0 ? Bar.TrayX - Bar.P * 0.6 : BarRight - 3 * Bar.P), (float)PopupBottom);

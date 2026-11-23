@@ -112,13 +112,16 @@ void ExtrasHost::Apply(const Settings& s, float radius)
         media_->SetFilter(s.nowPlayingShowPaused, s.nowPlayingAppMode, s.nowPlayingApps);
         UpdateSampling();
     }
-    const bool stacksChanged = !stacksCached_ || stacksOn_ != s.showFolderStacks || lastFolderStacks_ != s.folderStacks;
+    const bool stacksChanged =
+        !stacksCached_ || stacksOn_ != s.showFolderStacks || lastFolderStacks_ != s.folderStacks || lastFolderStackFiles_ != s.folderStackFiles;
     stacksCached_ = true;
     stacksOn_ = s.showFolderStacks;
     lastFolderStacks_ = s.folderStacks;
+    lastFolderStackFiles_ = s.folderStackFiles;
     stacks_.SetOptions(s.folderStackLayout != L"column", size_t(s.folderStackMax));
     if (stacksChanged)
-        stackModel_.SetFolders(stacksOn_ ? s.folderStacks : std::vector<std::wstring>{}, 96); // read once at a size every scale draws from
+        stackModel_.SetFolders(stacksOn_ ? s.folderStacks : std::vector<std::wstring>{}, stacksOn_ ? s.folderStackFiles : std::vector<std::wstring>{},
+                               96); // read once at a size every scale draws from
     if (!stacksOn_)
         stacks_.Close();
     launchpadOn_ = s.showLaunchpad;
