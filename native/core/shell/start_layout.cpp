@@ -248,9 +248,26 @@ uint32_t UnescapeEntity(std::wstring_view e)
         return cp;
     if (e.size() < 2 || e[0] != L'#')
         return 0;
-    wchar_t* end = nullptr;
-    unsigned long v = std::wcstoul(std::wstring(e.substr(e[1] == L'x' || e[1] == L'X' ? 2 : 1)).c_str(), &end, e[1] == L'x' || e[1] == L'X' ? 16 : 10);
-    return (end && *end == L'\0' && v <= 0x10FFFF) ? uint32_t(v) : 0;
+    const bool hex = e[1] == L'x' || e[1] == L'X';
+    const std::wstring_view digits = e.substr(hex ? 2 : 1);
+    if (digits.empty())
+        return 0;
+    uint32_t v = 0;
+    for (wchar_t ch : digits) {
+        uint32_t d = 16;
+        if (ch >= L'0' && ch <= L'9')
+            d = uint32_t(ch - L'0');
+        else if (hex && ch >= L'a' && ch <= L'f')
+            d = uint32_t(ch - L'a' + 10);
+        else if (hex && ch >= L'A' && ch <= L'F')
+            d = uint32_t(ch - L'A' + 10);
+        else
+            return 0;
+        v = v * (hex ? 16u : 10u) + d;
+        if (v > 0x10FFFFu)
+            return 0;
+    }
+    return v;
 }
 
 std::wstring UnescapeXml(std::wstring_view s)
