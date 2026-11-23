@@ -1210,8 +1210,6 @@ void StartMenu::PaintTiles(Canvas& c, const Theme& t, float shown)
         float vis = Covered(r) * shown;
         if (vis <= 0.01f)
             continue;
-        if (vis < 1)
-            c.Continue();
         c.BeginGroup(e * vis, 1, (r.left + r.right) / 2, (r.top + r.bottom) / 2, 0, 10 * (1 - e));
         const std::wstring id = L"tile:" + std::to_wstring(i);
         PaintTileFace(c, t, tile, r, id, i == sel_ && folder_ < 0, drag_.on && drag_.merge == i);
@@ -1288,8 +1286,6 @@ void StartMenu::PaintRows(Canvas& c, const Theme& t, const std::vector<Row>& row
         float visible = Covered(r) * shown;
         if (visible <= 0.01f)
             continue;
-        if (visible < 1)
-            c.Continue();
         c.BeginGroup(e * visible, 1, (r.left + r.right) / 2, (r.top + r.bottom) / 2, 0, 8 * (1 - e));
         if (row.letter) {
             // A letter's heading (or the hidden apps').
