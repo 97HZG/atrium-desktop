@@ -230,10 +230,11 @@ std::wstring ExtrasHost::MusicTip() const
     return last_.artist.empty() ? last_.title : last_.title + L" \u00b7 " + last_.artist;
 }
 
-void ExtrasHost::OnCatalogChanged()
+void ExtrasHost::OnCatalogChanged(bool listChanged)
 {
     launchpad_.Refresh();
-    PrewarmLaunchpad();
+    if (listChanged)
+        PrewarmLaunchpad();
 }
 
 // Every app's icon read ahead for the main display, so Launchpad opens with them all.

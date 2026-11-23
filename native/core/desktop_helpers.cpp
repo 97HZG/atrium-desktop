@@ -1,7 +1,9 @@
 // Small desktop helpers the bar's menus and entries use (desktop_helpers.h).
 #include "desktop_helpers.h"
 
+#include "log.h"
 #include "shell/jump_list.h"
+#include "shell/shell_taskbar.h"
 
 #include <algorithm>
 #include <iterator>
@@ -63,6 +65,37 @@ bool IsWorkspaceFile(const std::wstring& path)
     static const wchar_t* const kProjectKinds[] = {L".code-workspace",  L".sln",      L".slnx",        L".vcxproj", L".uvprojx", L".workspace",
                                                    L".sublime-project", L".uproject", L".xcworkspace", L".pro",     L".csproj"};
     return std::ranges::any_of(kProjectKinds, [&](const wchar_t* kind) { return _wcsicmp(extension, kind) == 0; });
+}
+
+void RestoreHiddenOverflowFocus(HWND previous)
+{
+    HWND fg = GetForegroundWindow();
+    wchar_t cls[64] = {};
+    GetClassNameW(fg, cls, 64);
+    if (wcscmp(cls, L"TopLevelWindowForOverflowXamlIsland") != 0 || IsWindowVisible(fg))
+        return;
+    HWND back = previous;
+    if (!back || !IsWindow(back))
+        back = FindWindowW(L"Progman", nullptr);
+    bool ok = false;
+    DWORD error = 0;
+    {
+        ForegroundAttach attach(fg);
+        ok = SetForegroundWindow(back) != FALSE;
+        if (!ok)
+            error = GetLastError();
+    }
+    const wchar_t* how = L"attached";
+    if (!ok) {
+        INPUT alt[2] = {};
+        alt[0].type = alt[1].type = INPUT_KEYBOARD;
+        alt[0].ki.wVk = alt[1].ki.wVk = VK_MENU;
+        alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(2, alt, sizeof(INPUT));
+        ok = SetForegroundWindow(back) != FALSE;
+        how = L"after a key press";
+    }
+    Log(L"tray: the hidden overflow window had the focus; given back %s (%s, error %lu)", how, ok && GetForegroundWindow() == back ? L"ok" : L"failed", error);
 }
 
 } // namespace atrium

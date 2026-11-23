@@ -1,3 +1,4 @@
+#include "host_messages.h"
 #include "settings.h"
 #include "settings_server.h"
 
@@ -234,12 +235,84 @@ void CheckSettingsServerLifecycle()
           "legacy commit advances revision to 4 and updates current");
 }
 
+struct ReadyTestState {
+    bool received = false;
+    bool readyWhenReceived = false;
+    const atrium::SettingsServer* server = nullptr;
+};
+
+LRESULT CALLBACK ReadyTestProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    if (m == atrium::WM_ATRIUM_SERVER_READY) {
+        if (auto* state = reinterpret_cast<ReadyTestState*>(GetWindowLongPtrW(h, GWLP_USERDATA))) {
+            state->received = true;
+            state->readyWhenReceived = state->server && state->server->Ready();
+        }
+        return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+
+void CheckSettingsServerPostsReadyMessage()
+{
+    TempDir temp(L"atrium-ready-test-");
+    const fs::path cfgPath = temp.path / L"settings.json";
+    atrium::Settings initial;
+    Check(atrium::SaveSettingsTo(cfgPath.wstring(), initial), "seed initial temp settings.json for ready message test");
+
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    constexpr wchar_t kClassName[] = L"AtriumSettingsReadyTest";
+    WNDCLASSEXW wc{sizeof(wc)};
+    wc.lpfnWndProc = ReadyTestProc;
+    wc.hInstance = instance;
+    wc.lpszClassName = kClassName;
+    RegisterClassExW(&wc);
+    HWND hwnd = CreateWindowExW(0, kClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, instance, nullptr);
+    Check(hwnd != nullptr, "creates message-only host window for ready handshake test");
+    if (!hwnd) {
+        UnregisterClassW(kClassName, instance);
+        return;
+    }
+
+    ReadyTestState state;
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    {
+        const std::wstring pipeName =
+            L"\\\\.\\pipe\\Atrium.Core.ReadyTest." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetTickCount64());
+        atrium::SettingsServer server(hwnd, initial, pipeName, cfgPath.wstring());
+        state.server = &server;
+
+        const ULONGLONG deadline = GetTickCount64() + 5000;
+        while (!state.received) {
+            MSG msg{};
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            if (state.received)
+                break;
+            const ULONGLONG now = GetTickCount64();
+            if (now >= deadline)
+                break;
+            MsgWaitForMultipleObjects(0, nullptr, FALSE, static_cast<DWORD>(deadline - now), QS_ALLINPUT);
+        }
+    }
+
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+    DestroyWindow(hwnd);
+    UnregisterClassW(kClassName, instance);
+
+    Check(state.received, "SettingsServer posts WM_ATRIUM_SERVER_READY to host window");
+    Check(state.readyWhenReceived, "SettingsServer::Ready() is true when WM_ATRIUM_SERVER_READY arrives");
+}
+
 } // namespace
 
 int main()
 {
     winrt::init_apartment();
     CheckSettingsServerLifecycle();
+    CheckSettingsServerPostsReadyMessage();
     if (g_failures) {
         std::fprintf(stderr, "%d settings server check(s) failed\n", g_failures);
         return 1;

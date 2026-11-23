@@ -39,7 +39,7 @@ public:
     void Apply(const Settings& s, float radius);
     void ConfigureBar(Bar& bar);
     void OnBarRetiring(const Bar* bar);
-    void OnCatalogChanged();
+    void OnCatalogChanged(bool listChanged = true);
     void ClosePopups();
     bool AnyPopupVisible() const;
     void Shutdown(); // before the bars go: the media watcher's thread ends

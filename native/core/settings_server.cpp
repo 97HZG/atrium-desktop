@@ -235,6 +235,7 @@ void SettingsServer::Run()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     PipeSecurity security;
+    bool readyNotified = false;
     while (WaitForSingleObject(quit_, 0) == WAIT_TIMEOUT) {
         // First instance only: another process cannot pre-create our pipe name.
         HANDLE pipe =
@@ -247,6 +248,11 @@ void SettingsServer::Run()
             continue;
         }
         ready_ = true;
+        if (!readyNotified) {
+            readyNotified = true;
+            if (host_)
+                PostMessageW(host_, WM_ATRIUM_SERVER_READY, 0, 0);
+        }
         Serve(pipe);
         CloseHandle(pipe);
 

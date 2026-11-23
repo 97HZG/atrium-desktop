@@ -296,17 +296,4 @@ void Bar::GuardStacking(const wchar_t* why)
     }
 }
 
-bool ExclusiveD3dInFront(HMONITOR monitor)
-{
-    HWND fg = GetForegroundWindow();
-    HWND root = fg ? GetAncestor(fg, GA_ROOT) : nullptr;
-    if (!root || IsIconic(root) || MonitorFromWindow(root, MONITOR_DEFAULTTONULL) != monitor)
-        return false;
-    DWORD pid = 0;
-    if (!GetWindowThreadProcessId(root, &pid) || pid == GetCurrentProcessId())
-        return false;
-    QUERY_USER_NOTIFICATION_STATE state{};
-    return SUCCEEDED(SHQueryUserNotificationState(&state)) && state == QUNS_RUNNING_D3D_FULL_SCREEN;
-}
-
 } // namespace atrium

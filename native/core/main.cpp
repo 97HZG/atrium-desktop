@@ -1019,47 +1019,30 @@ void HandleTrayIconsMessage(HWND h, WPARAM w)
     }
 }
 
-void RestoreHiddenOverflowFocus()
+void TrySignalReadyEvent(HWND h)
 {
-    HWND fg = GetForegroundWindow();
-    wchar_t cls[64] = {};
-    GetClassNameW(fg, cls, 64);
-    if (wcscmp(cls, L"TopLevelWindowForOverflowXamlIsland") != 0 || IsWindowVisible(fg))
+    if (g_readyEvent.empty()) {
+        KillTimer(h, kReadyTimer);
         return;
-    HWND back = g_app.trayPanel->Previous();
-    if (!back || !IsWindow(back))
-        back = FindWindowW(L"Progman", nullptr);
-    bool ok = false;
-    DWORD error = 0;
-    {
-        ForegroundAttach attach(fg);
-        ok = SetForegroundWindow(back) != FALSE;
-        if (!ok)
-            error = GetLastError();
     }
-    const wchar_t* how = L"attached";
-    if (!ok) {
-        INPUT alt[2] = {};
-        alt[0].type = alt[1].type = INPUT_KEYBOARD;
-        alt[0].ki.wVk = alt[1].ki.wVk = VK_MENU;
-        alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
-        SendInput(2, alt, sizeof(INPUT));
-        ok = SetForegroundWindow(back) != FALSE;
-        how = L"after a key press";
+    if (!g_app.server || !g_app.server->Ready())
+        return;
+    HANDLE event = OpenEventW(EVENT_MODIFY_STATE, FALSE, g_readyEvent.c_str());
+    if (event) {
+        SetEvent(event);
+        CloseHandle(event);
+        Log(L"core: ready event signalled");
+    } else {
+        Log(L"core: OpenEventW failed for ready event (%lu)", GetLastError());
     }
-    Log(L"tray: the hidden overflow window had the focus; given back %s (%s, error %lu)", how, ok && GetForegroundWindow() == back ? L"ok" : L"failed", error);
+    g_readyEvent.clear();
+    KillTimer(h, kReadyTimer);
 }
 
 bool HandleHostTimer(HWND h, WPARAM w)
 {
     if (w == kReadyTimer) {
-        if (g_app.server && g_app.server->Ready()) {
-            if (HANDLE event = OpenEventW(EVENT_MODIFY_STATE, FALSE, g_readyEvent.c_str())) {
-                SetEvent(event);
-                CloseHandle(event);
-            }
-            KillTimer(h, kReadyTimer);
-        }
+        TrySignalReadyEvent(h);
         return true;
     }
     if (w == kStatusTimer) {
@@ -1094,7 +1077,7 @@ bool HandleHostTimer(HWND h, WPARAM w)
     }
     if (w == kTrayFocusTimer) {
         KillTimer(h, kTrayFocusTimer);
-        RestoreHiddenOverflowFocus();
+        RestoreHiddenOverflowFocus(g_app.trayPanel->Previous());
         return true;
     }
     return false;
@@ -1139,7 +1122,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_CATALOG:
         if (g_app.start)
-            g_app.start->Refresh(), g_app.extras->OnCatalogChanged();
+            g_app.start->Refresh(), g_app.extras->OnCatalogChanged(w == 0);
         return 0;
     case WM_VOLUME: UpdateStatus(); return 0;
     case WM_STATUS: {
@@ -1178,6 +1161,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                    1 :
                    0;
     case WM_ATRIUM_SETTINGS: ApplySettings(g_app.server->Current()); return 0;
+    case WM_ATRIUM_SERVER_READY: TrySignalReadyEvent(h); return 0;
     case WM_DISPLAYCHANGE:
     case WM_DPICHANGED:
         if (!g_app.displaysReady)
@@ -1567,8 +1551,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     SetTimer(g_app.host, kStatusTimer, kStatusMs, nullptr);
     g_app.tray->Refresh();
     g_app.updates = std::make_unique<UpdateChecker>(g_app.host, WM_UPDATE_READY);
-    if (!g_readyEvent.empty())
+    if (!g_readyEvent.empty()) {
         SetTimer(g_app.host, kReadyTimer, 50, nullptr);
+        PostMessageW(g_app.host, WM_ATRIUM_SERVER_READY, 0, 0);
+    }
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

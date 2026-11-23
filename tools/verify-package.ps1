@@ -543,7 +543,11 @@ namespace AtriumVerify
             if ($PipeName) { $coreArgs += " --pipe-name $(Format-ProcessArg $PipeName)" }
             $proc = Start-Process -FilePath $core -ArgumentList $coreArgs -WorkingDirectory $temp -WindowStyle Hidden -PassThru
             Add-JobProcess $job $proc
-            if (!$ready.WaitOne(15000) -or $proc.HasExited) { throw 'Atrium.exe failed smoke startup.' }
+            $readyOk = $ready.WaitOne(15000)
+            $exited = $proc.HasExited
+            if (!$readyOk -or $exited) {
+                throw "Atrium.exe failed smoke startup (ready=$readyOk, exited=$exited" + $(if ($exited) { ", exitCode=$($proc.ExitCode)" } else { '' }) + ').'
+            }
             $effectivePipe = if ($PipeName) { $PipeName } else { "Atrium.Core.$([Diagnostics.Process]::GetCurrentProcess().SessionId)" }
             $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', $effectivePipe, [System.IO.Pipes.PipeDirection]::InOut)
             try {

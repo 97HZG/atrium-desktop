@@ -20,4 +20,7 @@ bool IsDirectoryPath(const std::wstring& path);
 // A project or workspace file an IDE opens (.sln, .code-workspace, ...).
 bool IsWorkspaceFile(const std::wstring& path);
 
+// Returns foreground focus from Explorer's hidden tray overflow window to `previous` (or Progman).
+void RestoreHiddenOverflowFocus(HWND previous);
+
 } // namespace atrium
