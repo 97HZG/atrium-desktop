@@ -233,21 +233,34 @@ std::optional<bool> NeteaseLikes::Liked(const std::wstring& title, const std::ws
     const uint64_t writeTime = WriteTime(path);
     if (!writeTime)
         return std::nullopt;
-    if (writeTime != writeTime_) {
+    // Read again when the player wrote, and a read that failed (the player writing) again a moment later.
+    const ULONGLONG now = GetTickCount64();
+    if (writeTime != writeTime_ || (!ok_ && now - readAt_ > 3000)) {
         writeTime_ = writeTime;
+        readAt_ = now;
         ok_ = Read(path);
     }
-    const NeteaseQueuedTrack* track = Queue().Find(title, artist);
+    const std::wstring id = CurrentId(title, artist);
     std::optional<bool> liked;
-    if (ok_ && track && !track->id.empty())
-        liked = ids_.contains(track->id);
+    if (ok_ && !id.empty())
+        liked = ids_.contains(id);
     const std::wstring said = title + L'\n' + std::to_wstring(liked ? int(*liked) : -1);
     if (said != logged_) {
         logged_ = said;
-        Log(L"netease: heart of '%s': %d (read %d, playlist %s, %zu ids, in the queue %d)", title.c_str(), liked ? int(*liked) : -1, ok_, playlist_.c_str(),
-            ids_.size(), track != nullptr);
+        Log(L"netease: heart of '%s': %d (read %d, %zu liked, track %s)", title.c_str(), liked ? int(*liked) : -1, ok_, ids_.size(), id.c_str());
     }
     return liked;
+}
+
+// The track's id: the one the player last began when it is this one (its history, by name), else the
+// queue's by title and artist.
+std::wstring NeteaseLikes::CurrentId(const std::wstring& title, const std::wstring& artist) const
+{
+    const std::wstring a = FoldCase(title), b = FoldCase(recentName_);
+    if (!recentId_.empty() && !a.empty() && !b.empty() && (a == b || a.find(b) != std::wstring::npos || b.find(a) != std::wstring::npos))
+        return recentId_;
+    const NeteaseQueuedTrack* track = Queue().Find(title, artist);
+    return track ? track->id : std::wstring();
 }
 
 bool NeteaseLikes::Read(const std::wstring& path)
@@ -262,6 +275,15 @@ bool NeteaseLikes::Read(const std::wstring& path)
     sqlite3_busy_timeout(db, 200); // the player may be writing
     if (playlist_.empty())
         playlist_ = LikedPlaylist(db);
+    Query(db, "SELECT jsonStr FROM historyTracks ORDER BY playtime DESC LIMIT 1", {}, [&](const std::wstring& text) {
+        json::JsonObject o{nullptr};
+        if (json::JsonObject::TryParse(text, o) && o.HasKey(L"id") && o.HasKey(L"name") && o.GetNamedValue(L"name").ValueType() == json::JsonValueType::String) {
+            const auto id = o.GetNamedValue(L"id");
+            recentId_ = id.ValueType() == json::JsonValueType::String ? std::wstring(id.GetString()) : std::to_wstring(int64_t(id.GetNumber()));
+            recentName_ = o.GetNamedString(L"name");
+        }
+        return false;
+    });
     bool found = false;
     std::unordered_set<std::wstring> ids;
     if (!playlist_.empty())

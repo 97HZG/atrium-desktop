@@ -746,7 +746,7 @@ private:
             }
             // A player whose heart is read from its files (NetEase) tells no event when it changes: read again
             // every second, playing or not.
-            const bool heartRead = lastPosted_.active && lastPosted_.liked.has_value();
+            const bool heartRead = lastPosted_.active && PlayerOf(lastPosted_.appId) == MediaPlayer::Netease;
             const DWORD waitMs = wantSample ? kSampleIntervalMs : hasActivePlayingSession ? static_cast<DWORD>(kRefreshMs) : heartRead ? 1000 : INFINITE;
             woke = WaitForSingleObject(wake_.handle, waitMs) == WAIT_OBJECT_0;
         }

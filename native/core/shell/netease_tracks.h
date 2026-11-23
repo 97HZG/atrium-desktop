@@ -46,7 +46,10 @@ public:
 
 private:
     bool Read(const std::wstring& path);
+    std::wstring CurrentId(const std::wstring& title, const std::wstring& artist) const;
     uint64_t writeTime_ = 0;
+    unsigned long long readAt_ = 0; // GetTickCount64 of the last read: a failed one is tried again
+    std::wstring recentId_, recentName_; // the track the player last began (its history), id and name
     std::wstring playlist_; // the liked playlist's id, once found
     std::unordered_set<std::wstring> ids_;
     bool ok_ = false;
