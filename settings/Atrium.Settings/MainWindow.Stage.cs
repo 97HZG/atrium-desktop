@@ -129,7 +129,7 @@ public sealed partial class MainWindow
         string side = CurrentSettings.StageOnRight ? Loc.T("Right") : Loc.T("Left");
         string format = CurrentSettings.StageAutoHide
             ? "Rest the pointer at the preview's {0} edge to slide the cards out; click to bring one forward, Shift-click to add it to this group"
-            : "Click a card on the {0} to bring it forward; Shift-click to add it to the current group";
+            : "Click a card on the {0} to bring it forward; Shift-click to bring it beside the window in front";
         StageCaption.Text = !on ? Loc.T("Stage Manager is off: windows stack on the desktop as usual") : Loc.F(format, side);
         StageReplay.IsEnabled = on;
 

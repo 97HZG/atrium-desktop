@@ -5,21 +5,52 @@ using Windows.Foundation;
 
 namespace Atrium.Settings;
 
-// Design tokens from App.xaml, in the app's current theme.
+// Design tokens from App.xaml, in the window's current theme. The brushes handed to code-made elements follow
+// the theme: Windows switching between light and dark while the window is open recolours them in place
+// (SetDark), as {ThemeResource} does for the XAML.
 public static class Tokens
 {
-    public static Microsoft.UI.Xaml.Media.Brush Brush(string key)
+    private static readonly List<(WeakReference<Microsoft.UI.Xaml.Media.SolidColorBrush> Brush, string Key)> Live = [];
+
+    public static bool Dark { get; private set; } = Application.Current.RequestedTheme == ApplicationTheme.Dark;
+
+    private static Microsoft.UI.Xaml.Media.Brush? Lookup(string key, bool dark)
     {
         var res = Application.Current.Resources;
-        if (res.TryGetValue(key, out object? v) && v is Microsoft.UI.Xaml.Media.Brush b) return b;
-        string theme = Application.Current.RequestedTheme == ApplicationTheme.Dark ? "Dark" : "Light";
-        if (res.ThemeDictionaries.TryGetValue(theme, out object? d) && d is ResourceDictionary rd && rd.TryGetValue(key, out object? t)
+        if (res.ThemeDictionaries.TryGetValue(dark ? "Dark" : "Light", out object? d) && d is ResourceDictionary rd && rd.TryGetValue(key, out object? t)
             && t is Microsoft.UI.Xaml.Media.Brush tb)
         {
             return tb;
         }
 
-        return new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        return res.TryGetValue(key, out object? v) && v is Microsoft.UI.Xaml.Media.Brush b ? b : null;
+    }
+
+    public static Microsoft.UI.Xaml.Media.Brush Brush(string key)
+    {
+        var found = Lookup(key, Dark);
+        if (found is not Microsoft.UI.Xaml.Media.SolidColorBrush solid)
+            return found ?? new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        var live = new Microsoft.UI.Xaml.Media.SolidColorBrush(solid.Color) { Opacity = solid.Opacity };
+        if (Live.Count >= 1024) Live.RemoveAll(l => !l.Brush.TryGetTarget(out _));
+        Live.Add((new(live), key));
+        return live;
+    }
+
+    // The theme the window shows now (UI thread).
+    internal static void SetDark(bool dark)
+    {
+        if (dark == Dark) return;
+        Dark = dark;
+        Live.RemoveAll(l => !l.Brush.TryGetTarget(out _));
+        foreach (var (weak, key) in Live)
+        {
+            if (weak.TryGetTarget(out var brush) && Lookup(key, dark) is Microsoft.UI.Xaml.Media.SolidColorBrush solid)
+            {
+                brush.Color = solid.Color;
+                brush.Opacity = solid.Opacity;
+            }
+        }
     }
 }
 

@@ -28,7 +28,7 @@ public partial class App : Application
 
     // ATRIUM_THEME=dark|light (development): that theme whatever Windows' is, in an instance of its own
     // (the other theme looked at beside the window in use).
-    private static readonly string? ThemeOverride = Environment.GetEnvironmentVariable("ATRIUM_THEME") is "dark" or "light" ? Environment.GetEnvironmentVariable("ATRIUM_THEME") : null;
+    internal static readonly string? ThemeOverride = Environment.GetEnvironmentVariable("ATRIUM_THEME") is "dark" or "light" ? Environment.GetEnvironmentVariable("ATRIUM_THEME") : null;
 
     public App()
     {

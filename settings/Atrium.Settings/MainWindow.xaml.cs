@@ -104,9 +104,28 @@ public sealed partial class MainWindow : Window, IDisposable
     private Process? _coreProcess;
     private CancellationTokenSource? _updateCheck;
 
+    // Windows' colours: switched between light and dark while the window is open, the window follows.
+    private readonly Windows.UI.ViewManagement.UISettings _colors = new();
+
+    private void FollowSystemTheme()
+    {
+        if (App.ThemeOverride != null) return;
+        var background = _colors.GetColorValue(Windows.UI.ViewManagement.UIColorType.Background);
+        bool dark = background.R + background.G + background.B < 3 * 128;
+        if (dark == Tokens.Dark) return;
+        RootGrid.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
+        Tokens.SetDark(dark);
+        var bar = AppWindow.TitleBar;
+        bar.ButtonForegroundColor = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+        bar.ButtonHoverForegroundColor = bar.ButtonPressedForegroundColor = bar.ButtonForegroundColor;
+        bar.ButtonInactiveForegroundColor = dark ? Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x80, 0, 0, 0);
+        bar.ButtonHoverBackgroundColor = dark ? Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x0F, 0, 0, 0);
+    }
+
     public MainWindow(int startPage = -1)
     {
         InitializeComponent();
+        _colors.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(FollowSystemTheme);
         AutomationProperties.SetAutomationId(SaveButton, "SaveButton");
         AutomationProperties.SetAutomationId(ClockSecondsSwitch.Switch, "ClockSecondsSwitch");
         // Windows 10 (#106): no Mica there, and a bitmap decoded during the first frame takes its XAML
@@ -786,6 +805,7 @@ public sealed partial class MainWindow : Window, IDisposable
         (_notifyCorner switch
         { "topLeft" => NotifyTopLeft, "bottomLeft" => NotifyBottomLeft, "bottomRight" => NotifyBottomRight, _ => NotifyTopRight }).IsChecked = true;
         RefreshSources();
+        BuildModuleGallery(); // also when the page already shows (opened on it, before the settings came)
         LoadExtras();
         BarSwitch.IsOn = CurrentSettings.Bar;
         UpdateBarModule();
