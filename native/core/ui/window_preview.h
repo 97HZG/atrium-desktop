@@ -2,13 +2,15 @@
 // an app that has windows, and a piece of the bar's glass above it shows each window live (DWM
 // thumbnails), with its title and a close button. A click brings that window to the front; a
 // middle click closes it. The preview stays while the pointer moves from the app onto it, and goes
-// a moment after the pointer has left both.
+// a moment after the pointer has left both. The pointer resting on a picture peeks at that window
+// (WindowPeek): it is shown where it is, the others faded.
 #pragma once
 
 #include "bar_edge.h"
 #include "motion.h"
 #include "shell/task_model.h"
 #include "ui/surface.h"
+#include "ui/window_peek.h"
 
 #include <dwmapi.h>
 
@@ -63,6 +65,7 @@ private:
     int CardAt(POINT pt) const;
 
     Surface surface_;
+    WindowPeek peek_;
     std::wstring key_;
     std::vector<Card> cards_;
     IconImage icon_;

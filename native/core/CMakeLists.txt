@@ -103,6 +103,7 @@ add_library(atrium_core_lib STATIC
     shell/bluetooth_batteries.cpp
     shell/network_monitor.cpp
     shell/logon_task.cpp
+    ui/window_peek.cpp
     ui/window_preview.cpp
     ui/widget_faces.cpp
     shell/notification_listener.cpp

@@ -18,8 +18,8 @@ namespace {
 // DIP. A card: its title row, then the window's picture; cards side by side, inset from the glass.
 constexpr float kRadius = 18, kPad = 8, kGap = 6, kCardPad = 8, kTitleH = 28, kImageH = 124, kMinImageW = 150, kMaxImageW = 228;
 constexpr float kCardR = kRadius - kPad; // concentric with the glass
-constexpr UINT_PTR kLeaveTimer = 0x5B01, kFadeTimer = 0x5B02;
-constexpr UINT kLeaveMs = 320, kFadeMs = 140;
+constexpr UINT_PTR kLeaveTimer = 0x5B01, kFadeTimer = 0x5B02, kPeekTimer = 0x5B03;
+constexpr UINT kLeaveMs = 320, kFadeMs = 140, kPeekMs = 300; // the pointer rests a moment before a peek
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 
@@ -48,7 +48,7 @@ void LogThumbFailure(std::unordered_set<HWND>& logged, HWND window, const wchar_
 
 } // namespace
 
-WindowPreview::WindowPreview(HINSTANCE instance) : surface_(instance, L"Atrium Window Previews", false)
+WindowPreview::WindowPreview(HINSTANCE instance) : surface_(instance, L"Atrium Window Previews", false), peek_(instance)
 {
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
@@ -101,6 +101,8 @@ void WindowPreview::SetWindows(const std::vector<HWND>& windows)
     pressed_ = indexOf(pressed);
     if (hover_ < 0)
         overClose_ = false;
+    if (peek_.Window() && indexOf(peek_.Window()) < 0)
+        peek_.Hide(); // its window closed or went
     if (cards_.empty()) {
         Close();
         return;
@@ -262,6 +264,8 @@ void WindowPreview::Close()
 {
     KillTimer(surface_.Hwnd(), kLeaveTimer);
     KillTimer(surface_.Hwnd(), kFadeTimer);
+    KillTimer(surface_.Hwnd(), kPeekTimer);
+    peek_.Hide();
     DropThumbs();
     cards_.clear();
     key_.clear();
@@ -376,6 +380,12 @@ bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
                 KillTimer(surface_.Hwnd(), kFadeTimer);
             return true;
         }
+        if (w == kPeekTimer) {
+            KillTimer(surface_.Hwnd(), kPeekTimer);
+            if (hover_ >= 0)
+                peek_.Show(cards_[size_t(hover_)].window);
+            return true;
+        }
         return false;
     case WM_MOUSEMOVE: {
         if (!tracking_) {
@@ -386,6 +396,12 @@ bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         KillTimer(surface_.Hwnd(), kLeaveTimer);
         int i = CardAt(pt);
         bool c = inClose(i);
+        if (i != hover_) {
+            // Onto another picture: a peek at it once the pointer rests; off the pictures: none.
+            if (i < 0)
+                peek_.Hide();
+            SetTimer(surface_.Hwnd(), kPeekTimer, peek_.Window() ? 0 : kPeekMs, nullptr);
+        }
         if (i != hover_ || c != overClose_) {
             hover_ = i;
             overClose_ = c;
@@ -394,6 +410,8 @@ bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     }
     case WM_MOUSELEAVE:
+        KillTimer(surface_.Hwnd(), kPeekTimer);
+        peek_.Hide();
         tracking_ = false;
         inside_ = false;
         hover_ = pressed_ = -1;
