@@ -589,6 +589,7 @@ struct TaskModel::Impl {
     std::vector<ScanRec> scan;
     std::vector<std::wstring> order;               // unpinned groups, first seen first
     std::vector<TaskItem> items;                   // pins + running groups (not filtered by showRunning)
+    std::vector<HWND> lastIconic;                  // minimized windows at the last Rebuild()
     std::unordered_map<std::wstring, Meta> meta;
     std::unordered_map<std::wstring, std::wstring> names;
     std::unordered_set<std::wstring> namesRequested;
@@ -1041,7 +1042,15 @@ struct TaskModel::Impl {
         }
         meta = std::move(newMeta);
 
-        bool changed = result.size() != items.size();
+        std::vector<HWND> newIconic;
+        for (const TaskItem& t : result)
+            for (HWND h : t.windows)
+                if (IsIconic(h))
+                    newIconic.push_back(h);
+        const bool iconicChanged = IconicSetChanged(lastIconic, newIconic);
+        lastIconic = std::move(newIconic);
+
+        bool changed = iconicChanged || result.size() != items.size();
         for (size_t i = 0; !changed && i < result.size(); ++i)
             changed = !Same(result[i], items[i]);
         items = std::move(result);
@@ -1550,12 +1559,12 @@ struct TaskModel::Impl {
             SysCommand(h, SC_MINIMIZE);
     }
 
-    static void BringToFront(HWND h)
+    static void BringToFront(HWND h, bool allowStep = true)
     {
         // A closed-to-tray window must be restored by its app, not by the task switcher.
         if (!IsWindowVisible(h))
             return;
-        if (IsIconic(h) && g_restoring && g_restoring(h, [h] { Raise(h); }))
+        if (allowStep && IsIconic(h) && g_restoring && g_restoring(h, [h] { Raise(h); }))
             return;
         Raise(h);
     }
@@ -1810,6 +1819,12 @@ void TaskModel::ActivateWindow(HWND window)
 {
     if (IsWindow(window))
         Impl::BringToFront(window);
+}
+
+void TaskModel::ActivateWindowDirect(HWND window)
+{
+    if (IsWindow(window))
+        Impl::BringToFront(window, false);
 }
 
 void TaskModel::SetWindowSteps(WindowStep minimizing, WindowStep restoring)

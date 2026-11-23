@@ -116,17 +116,17 @@ void GenieMinimize::SetEnabled(bool on)
         hook_ = nullptr;
         KillTimer(surface_.Hwnd(), kWatchTimer);
         RunPending();
-        Release(held_);
+        Release(held_, !(skip_ && skip_(held_)));
         pictures_.clear();
         front_ = nullptr;
     }
     Log(L"genie: %s", on ? L"on" : L"off");
 }
 
-void GenieMinimize::Release(HWND window)
+void GenieMinimize::Release(HWND window, bool restoreTransitions)
 {
     if (window && window == held_) {
-        if (IsWindow(window))
+        if (restoreTransitions && IsWindow(window))
             Transitions(window, true);
         held_ = nullptr;
     }
@@ -167,7 +167,7 @@ void GenieMinimize::Watch()
         root = nullptr;
     const ULONGLONG now = GetTickCount64();
     if (root != front_) {
-        Release(held_);
+        Release(held_, !(skip_ && skip_(held_)));
         front_ = root;
         frontSince_ = now;
     }
@@ -196,6 +196,11 @@ void GenieMinimize::Minimizing(HWND window)
 {
     if (!enabled_ || window != held_)
         return; // not prepared for: Windows' own animation played
+    if (skip_ && skip_(window)) {
+        Release(window, false);
+        front_ = nullptr;
+        return;
+    }
     eventMs_ = ClockMs();
     const auto it = pictures_.find(window);
     const std::optional<RECT> to = target_ ? target_(window) : std::nullopt;

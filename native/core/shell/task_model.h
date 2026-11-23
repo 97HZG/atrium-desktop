@@ -66,6 +66,8 @@ public:
     void Terminate(const std::wstring& key);
     // One window of a group (the window previews): restore and bring it to the front, or close it.
     static void ActivateWindow(HWND window);
+    // Same, without invoking the UI-thread restore animation (safe from StageManager's worker).
+    static void ActivateWindowDirect(HWND window);
     // An animation that plays a window's minimize or restore by these clicks (the genie): given the window
     // and the step itself, it returns true to take the step over and run it when it is ready. UI thread.
     using WindowStep = std::function<bool(HWND, std::function<void()>)>;

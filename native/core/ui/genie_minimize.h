@@ -54,9 +54,9 @@ private:
         std::function<void()> restore; // set: out of the icon, then this
         bool restoreDue = false;
     };
-    void Watch();                 // kWatchTimer: the window in front, its picture, its animations
-    void Release(HWND window);    // its own animations back
-    void Hold(HWND window);       // its own animations off
+    void Watch();                                             // kWatchTimer: the window in front, its picture, its animations
+    void Release(HWND window, bool restoreTransitions = true); // its own animations back (unless another owner took it)
+    void Hold(HWND window);                                   // its own animations off
     void Arm(const RECT& frame);  // the layer on the window's monitor, empty, for a while
     void Launch(Flight f);
     void RunPending();            // the bar's minimize, its picture taken (or not in time)

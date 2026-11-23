@@ -15,6 +15,14 @@
 
 namespace atrium {
 
+// True when the set of minimized windows changed between two snapshots.
+inline bool IconicSetChanged(std::vector<HWND> prev, std::vector<HWND> next)
+{
+    std::ranges::sort(prev);
+    std::ranges::sort(next);
+    return prev != next;
+}
+
 // A window still minimized when Atrium's restore timed out: it restores itself when it reads the
 // command, and is brought to front only then (#84).
 struct PendingRestore {

@@ -96,6 +96,32 @@ int main()
         scroll.Fit(0);
         require(scroll.Offset() == 0 && scroll.Index(4, 0) == 0, "empty rebuild is safe");
         CheckMerge();
+
+        // Adopt / wait / drop decisions for stage windows.
+        require(DecideStageAdopt(false, true, false, true, false, false) == StageAdoptAction::Up, "visible non-iconic on monitor stays up");
+        require(DecideStageAdopt(false, true, false, false, true, false) == StageAdoptAction::Drop, "non-iconic moved off monitor is dropped");
+        require(DecideStageAdopt(false, true, true, false, true, false) == StageAdoptAction::Adopt, "minimized in up_ at -32000 off-monitor is adopted");
+        require(DecideStageAdopt(false, true, true, false, false, false) == StageAdoptAction::Adopt, "minimized stage window that missed up_ is adopted");
+        require(DecideStageAdopt(false, true, true, false, false, true) == StageAdoptAction::Wait, "minimized window still restoring waits");
+        require(DecideStageAdopt(true, true, true, true, true, false) == StageAdoptAction::Drop, "already parked window is skipped");
+        require(DecideStageAdopt(false, false, true, true, true, false) == StageAdoptAction::Drop, "hidden window is skipped");
+
+        // First-picture short delay and failed/blank retry backoff.
+        require(!ShouldTakeStagePicture(false, false, 0, 299, ULLONG_MAX), "first picture waits 300 ms away from caption buttons");
+        require(ShouldTakeStagePicture(false, false, 0, 300, ULLONG_MAX), "first picture fires at 300 ms");
+        require(!ShouldTakeStagePicture(false, true, 0, 199, ULLONG_MAX), "first picture waits 200 ms on caption buttons");
+        require(ShouldTakeStagePicture(false, true, 0, 200, ULLONG_MAX), "first picture fires at 200 ms on caption buttons");
+        require(!ShouldTakeStagePicture(false, true, 0, 400, 100), "in-flight first picture does not re-request immediately");
+        require(!ShouldTakeStagePicture(false, false, 1, 1000, 699) && ShouldTakeStagePicture(false, false, 1, 1000, 700), "first blank retries after 700 ms");
+        require(!ShouldTakeStagePicture(false, false, 2, 3000, 1499) && ShouldTakeStagePicture(false, false, 2, 3000, 1500),
+                "second blank retries after 1500 ms");
+        require(!ShouldTakeStagePicture(false, false, 3, 9000, 4999) && ShouldTakeStagePicture(false, false, 3, 9000, 5000), "further blanks cap at 5000 ms");
+        require(!ShouldTakeStagePicture(true, true, 0, 1499, 5000), "refresh with picture still waits 1500 ms settle");
+        require(!ShouldTakeStagePicture(true, false, 0, 2000, 19999) && ShouldTakeStagePicture(true, false, 0, 2000, 20000),
+                "steady refresh away from buttons is 20 s");
+        require(!ShouldTakeStagePicture(true, true, 0, 2000, 1499) && ShouldTakeStagePicture(true, true, 0, 2000, 1500),
+                "steady refresh on buttons is 1500 ms");
+
         std::cout << "PASS: cyclic Stage scrolling, strip hit-testing and group merges\n";
         return 0;
     } catch (const std::exception& error) {

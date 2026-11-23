@@ -1,4 +1,5 @@
 #include "shell/shell_taskbar.h"
+#include "shell/task_rules.h"
 #include <cstdio>
 #include <thread>
 
@@ -35,6 +36,11 @@ int main()
         std::fprintf(stderr, "FAIL: shell_taskbar WindowResponsive check failed (%llu ms)\n", elapsed);
         return 1;
     }
-    std::printf("ok: shell_taskbar WindowResponsive checks passed\n");
+    const HWND a = reinterpret_cast<HWND>(uintptr_t{0x101}), b = reinterpret_cast<HWND>(uintptr_t{0x202});
+    if (atrium::IconicSetChanged({a, b}, {b, a}) || !atrium::IconicSetChanged({a}, {a, b}) || !atrium::IconicSetChanged({a, b}, {a})) {
+        std::fprintf(stderr, "FAIL: shell_taskbar IconicSetChanged check failed\n");
+        return 1;
+    }
+    std::printf("ok: shell_taskbar WindowResponsive and IconicSetChanged checks passed\n");
     return 0;
 }

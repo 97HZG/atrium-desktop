@@ -71,7 +71,10 @@ public:
     void SetAutoHide(bool autoHide);
     // A window minimized on the stage goes to the strip (setting stageMinimize), on a card of its own.
     // A window whose minimize Stage Manager animates itself (into its strip).
-    bool OwnsMinimize(HWND window) const { return minimizeToStrip_ && enabled_ && up_.contains(window); }
+    bool OwnsMinimize(HWND window) const
+    {
+        return minimizeToStrip_ && enabled_ && (up_.contains(window) || parked_.contains(window) || Flying(window) || InStage(window));
+    }
     void SetMinimizeToStrip(bool on);
     // EVENT_SYSTEM_MINIMIZESTART (its hook while the option is on): at once, not when the task model next reports.
     void Minimized(HWND window);
@@ -101,6 +104,7 @@ private:
         std::shared_ptr<const WindowPicture> large; // near the window's size, its own corners (flights)
         unsigned gen = 0; // its images' cache keys change with it
         ULONGLONG taken = 0; // when it was taken (or asked for)
+        int misses = 0;      // consecutive failed/blank captures before a picture exists
     };
     struct Placeholder {
         std::shared_ptr<const WindowPicture> picture;
@@ -173,6 +177,8 @@ private:
     void Prune();
     void ReleaseUp();          // the stage's windows get their own minimize animation back
     bool AdoptMinimized();     // the stage's apps whose windows were all minimized go to the strip
+    bool NeedsAdopt(ULONGLONG now) const;
+    void UnparkDirect(HWND h, bool showQuietly, ULONGLONG now);
     void KeepPicture();        // a picture of the window in front, ready for when it is minimized
     void RequestPicture(HWND window);
     void SetLarge(Flight& f);  // the flight's large picture, if the window has one
@@ -211,7 +217,7 @@ private:
             if (!IsWindow(a.window))
                 continue;
             if (a.kind != Action::Kind::MoveBeside) {
-                a.kind == Action::Kind::Activate ? TaskModel::ActivateWindow(a.window) : ShowQuietly(a.window);
+                a.kind == Action::Kind::Activate ? TaskModel::ActivateWindowDirect(a.window) : ShowQuietly(a.window);
                 continue;
             }
             WINDOWPLACEMENT wp{sizeof(wp)};
@@ -259,6 +265,17 @@ private:
     {
         return std::ranges::any_of(flights_, [window](const Flight& f) { return f.window == window; });
     }
+    bool HasPicture(HWND window) const
+    {
+        auto it = pictures_.find(window);
+        return it != pictures_.end() && it->second.picture && it->second.picture->ok;
+    }
+    bool InStage(HWND window) const
+    {
+        return std::ranges::any_of(items_, [this, window](const TaskItem& t) {
+            return std::ranges::find(stage_, t.key) != stage_.end() && std::ranges::find(t.windows, window) != t.windows.end();
+        });
+    }
     void PaintFlights(Canvas& c);
     void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow = 1, bool image = true);
 
@@ -271,6 +288,7 @@ private:
     int closeHot_ = -1, closePressed_ = -1; // the card whose close button is under the pointer, pressed
     BarEdge barEdge_ = BarEdge::Bottom;
     std::unordered_map<HWND, RECT> up_; // the stage's windows up on this screen at the last look, and where (px)
+    std::unordered_map<HWND, ULONGLONG> restoring_; // unparked without a picture, waiting to finish restoring
     HWINEVENTHOOK minimizeHook_ = nullptr, moveHook_ = nullptr;
     HWND dragWindow_ = nullptr;
     std::wstring dragKey_;
