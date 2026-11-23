@@ -63,6 +63,8 @@ add_library(atrium_core_lib STATIC
     shell/netease_memory.cpp
     shell/netease_tracks.cpp
     shell/projection.cpp
+    shell/quick_links.cpp
+    shell/quick_toggles.cpp
     shell/displays.cpp
     shell/tray_host.cpp
     shell/tray_model.cpp
@@ -80,6 +82,7 @@ add_library(atrium_core_lib STATIC
     ui/tray_panel.cpp
     ui/calendar_panel.cpp
     ui/control_center.cpp
+    ui/control_modules.cpp
     ui/desktop_widgets.cpp
     ui/folder_stack_popup.cpp
     ui/genie_minimize.cpp

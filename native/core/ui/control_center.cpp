@@ -7,6 +7,7 @@
 #include "log.h"
 #include "motion.h"
 #include "render/wifi_glyph.h"
+#include "ui/control_layout.h"
 
 #include <shellapi.h>
 #include <windowsx.h>
@@ -20,9 +21,12 @@ namespace atrium {
 
 namespace {
 
-constexpr float kW = 340, kGap = 10, kTopH = 150, kSliderH = 68, kHeader = 58, kRowH = 44, kFooter = 46, kPad = 14;
+using control::kGap;
+using control::kPad;
+using control::kTopH;
+using control::kW;
+constexpr float kSliderH = 68, kHeader = 58, kRowH = 44, kFooter = 46;
 constexpr float kSection = 30, kAppRowH = 50, kModeH = 78;
-constexpr float kStageH = 58; // Stage Manager's row, under the connections
 constexpr int kMaxRows = 6, kMaxOutputs = 4, kMaxApps = 5, kMaxDisplays = 4;
 constexpr double kPageMs = 320;
 constexpr UINT WM_WIFI_LIST = WM_APP + 0x50;   // wParam generation, lParam std::vector<WifiNetwork>*
@@ -98,7 +102,7 @@ ControlCenter::~ControlCenter()
         CloseHandle(stopEvent_);
 }
 
-float ControlCenter::MainHeight() const { return kTopH + kGap + kStageH + kGap + kSliderH + kGap + kSliderH; }
+float ControlCenter::MainHeight() const { return kTopH + kGap + ModulesHeight() + kSliderH + kGap + kSliderH; }
 
 float ControlCenter::PageHeight(Page page) const
 {
@@ -116,7 +120,7 @@ float ControlCenter::PageHeight(Page page) const
 
 float ControlCenter::MaxHeight() const
 {
-    return std::max({kTopH + kGap + kStageH + 2 * (kGap + kSliderH), kHeader + float(kMaxRows) * kRowH + kFooter + 6,
+    return std::max({MainHeight(), kHeader + float(kMaxRows) * kRowH + kFooter + 6,
                      kHeader + float(kMaxOutputs) * kRowH + kSection + float(kMaxApps) * kAppRowH + kFooter + 6,
                      kHeader + float(kMaxDisplays) * kRowH + kSection + kModeH + kFooter + 6});
 }
@@ -130,8 +134,9 @@ std::vector<ShapeDip> ControlCenter::MainShapes() const
     s.push_back({D2D1::RectF(0, 0, colW, kTopH), modR});
     s.push_back({D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2), modR});
     s.push_back({D2D1::RectF(colW + kGap, (kTopH - kGap) / 2 + kGap, kW, kTopH), modR});
-    s.push_back({D2D1::RectF(0, kTopH + kGap, kW, kTopH + kGap + kStageH), modR});
-    float y = kTopH + kGap + kStageH + kGap;
+    for (const D2D1_RECT_F& r : ModuleRects())
+        s.push_back({r, modR});
+    float y = kTopH + kGap + ModulesHeight();
     s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
     y += kSliderH + kGap;
     s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
@@ -169,6 +174,7 @@ void ControlCenter::Open(RECT anchor, RECT bar)
         onChanged();
     Place();
     ReadRadios(true);
+    ReadModules();
     ReadAudio(true); // ready for the sound's page
     Scan(false); // what the adapter already knows, ready for the Wi-Fi page
     SetTimer(surface_.Hwnd(), kStatusTimer, 1500, nullptr);
@@ -453,8 +459,7 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
     const D2D1_RECT_F conn = D2D1::RectF(0, 0, colW, kTopH);
     const D2D1_RECT_F batt = D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2);
     const D2D1_RECT_F cast = D2D1::RectF(colW + kGap, batt.bottom + kGap, kW, kTopH);
-    const D2D1_RECT_F stage = D2D1::RectF(0, kTopH + kGap, kW, kTopH + kGap + kStageH);
-    float y = stage.bottom + kGap;
+    float y = kTopH + kGap + ModulesHeight();
     const D2D1_RECT_F bright = D2D1::RectF(0, y, kW, y + kSliderH);
     y = bright.bottom + kGap;
     const D2D1_RECT_F sound = D2D1::RectF(0, y, kW, y + kSliderH);
@@ -546,22 +551,7 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
                projecting_.empty() ? t.subtext : t.accent);
         hits_.push_back({cast, L"cast"});
     }
-    // Stage Manager: the switch is the whole row, its symbol lit while on (macOS's tile).
-    {
-        float sh = Hover(c, L"stage", hover_ == L"stage");
-        if (sh > 0.001f || pressed_ == L"stage")
-            c.Fill(stage, modR, pressed_ == L"stage" ? t.press : Alpha(t.hover, sh));
-        float cx = stage.left + 32, cy = (stage.top + stage.bottom) / 2;
-        c.Circle(cx, cy, 18, stageOn_ ? t.accent : Alpha(t.text, 0.16f + 0.08f * sh));
-        bool halo = c.halo;
-        c.halo = false;
-        c.Glyph(L"\uE7C4", D2D1::RectF(cx - 14, cy - 14, cx + 14, cy + 14), 14, stageOn_ ? D2D1::ColorF(1, 1, 1, 0.98f) : t.text);
-        c.halo = halo;
-        c.Text(Tr(L"Stage Manager"), D2D1::RectF(cx + 28, cy - 18, stage.right - kPad, cy), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        c.Text(stageOn_ ? (stageRight_ ? Tr(L"On · recent apps on the right") : Tr(L"On · recent apps on the left")) : Tr(L"Off"),
-               D2D1::RectF(cx + 28, cy, stage.right - kPad, cy + 18), 11.5f, t.subtext);
-        hits_.push_back({stage, L"stage"});
-    }
+    PaintModules(c, t);
     PaintSlider(c, t, bright, L"bright", Tr(L"Displays"), L"\uE706", std::max(brightness_, 0), false,
                 CanSetBrightness() ? std::to_wstring(brightness_) + L"%" :
                 brightness_ == -1  ? Tr(L"Not adjustable") :
@@ -1071,6 +1061,8 @@ void ControlCenter::Activate(const std::wstring& id)
         surface_.Invalidate();
         if (onChanged)
             onChanged();
+    } else if (id.starts_with(L"mod:")) {
+        FlipModule(id.substr(4));
     } else if (id == L"stage") {
         stageOn_ = !stageOn_;
         surface_.Invalidate();
@@ -1221,6 +1213,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
             return true;
         }
         return OnAsync(m, w, l);
+    case WM_CC_MODULES: TakeModules(); return true;
     case WM_CC_RADIO_SET:
         radioWriteBusy_ = false;
         wifiWriteDone_ |= w != 0;

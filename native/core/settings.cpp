@@ -193,6 +193,17 @@ void NormalizeStringList(std::vector<std::wstring>& list, size_t maxCount = SIZE
         list.resize(maxCount);
 }
 
+// Known modules only, each once, in the order given.
+void NormalizeControlModules(std::vector<std::wstring>& list)
+{
+    NormalizeStringList(list);
+    std::vector<std::wstring> kept;
+    for (std::wstring& id : list)
+        if (std::ranges::any_of(kControlModules, [&](const wchar_t* m) { return id == m; }) && std::ranges::find(kept, id) == kept.end())
+            kept.push_back(std::move(id));
+    list = std::move(kept);
+}
+
 bool IsFolderSlash(wchar_t ch) { return ch == L'\\' || ch == L'/'; }
 
 bool IsFolderRootSlash(const std::wstring& path)
@@ -304,6 +315,7 @@ void Settings::Clamp()
     NormalizeStringList(nowPlayingApps, 64);
     NormalizeFolderStacks(folderStacks, 32);
     NormalizeStringList(folderStackFiles, 32);
+    NormalizeControlModules(controlModules);
     if (pins && pins->size() > 64)
         pins->resize(64);
     if (preset != L"liquid" && preset != L"frosted")
@@ -375,6 +387,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"autoHide", json::JsonValue::CreateStringValue(autoHide));
     o.SetNamedValue(L"barEdge", json::JsonValue::CreateStringValue(barEdge));
     o.SetNamedValue(L"statusStyle", json::JsonValue::CreateStringValue(statusStyle));
+    strArr(L"controlModules", controlModules);
     o.SetNamedValue(L"dockDisplayMode", json::JsonValue::CreateStringValue(dockDisplayMode));
     num(L"dockDisplayDelay", dockDisplayDelay);
     o.SetNamedValue(L"dockDisplay", json::JsonValue::CreateStringValue(dockDisplay));
@@ -463,6 +476,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
         s.barEdge = std::wstring(o.GetNamedString(L"barEdge"));
     if (o.HasKey(L"statusStyle") && o.GetNamedValue(L"statusStyle").ValueType() == json::JsonValueType::String)
         s.statusStyle = std::wstring(o.GetNamedString(L"statusStyle"));
+    ReadStringArrayJson(o, L"controlModules", s.controlModules);
     auto display = [&](const wchar_t* key, std::wstring& value) {
         if (o.HasKey(key) && o.GetNamedValue(key).ValueType() == json::JsonValueType::String)
             value = std::wstring(o.GetNamedString(key));

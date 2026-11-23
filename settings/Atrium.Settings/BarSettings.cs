@@ -77,6 +77,9 @@ internal sealed class BarSettings
     public string AutoHide { get; set; } = "fullscreen"; // never | fullscreen (a maximized or full-screen app in front) | always
     public string BarEdge { get; set; } = "bottom"; // bottom | top | left | right
     public string StatusStyle { get; set; } = "ring"; // ring | icons (network, volume, battery as on the Windows taskbar)
+    // The control centre's optional modules, in order; kControlModules in native/core/settings.h.
+    public static readonly string[] ControlModuleIds = ["stage", "nightlight", "energysaver", "darkmode", "hotspot"];
+    public List<string> ControlModules { get; set; } = ["stage"];
     public string DockDisplayMode { get; set; } = "primary"; // primary | follow | fixed | all
     public double DockDisplayDelay { get; set; } = 450; // milliseconds at another display's bottom edge
     public string DockDisplay { get; set; } = "";
@@ -164,6 +167,7 @@ internal sealed class BarSettings
         copy.NowPlayingApps = [.. NowPlayingApps];
         copy.FolderStacks = [.. FolderStacks];
         copy.FolderStackFiles = [.. FolderStackFiles];
+        copy.ControlModules = [.. ControlModules];
         return copy;
     }
 
@@ -268,6 +272,7 @@ internal sealed class BarSettings
         o["nowPlayingApps"] = ToStringArray(NowPlayingApps);
         o["folderStacks"] = ToStringArray(FolderStacks);
         o["folderStackFiles"] = ToStringArray(FolderStackFiles);
+        o["controlModules"] = ToStringArray(ControlModules);
         if (StartSize.Length > 0)
             o["startSize"] = StartSize;
         if (StartIcon.Length > 0)
@@ -394,6 +399,8 @@ internal sealed class BarSettings
         s.Language = !LocalizationValidation.ValidTag(language) ? "auto" : language == "zh" ? "zh-Hans" : language;
         string statusStyle = Str("statusStyle", f.StatusStyle);
         s.StatusStyle = statusStyle == "icons" ? "icons" : "ring";
+        // Known modules only, each once, in the order given.
+        s.ControlModules = [.. ReadStringArray(o, "controlModules", f.ControlModules).Where(ControlModuleIds.Contains).Distinct()];
         s.Pins = f.Pins == null ? null : [.. f.Pins];
         if (o?["pins"] is JsonArray arr)
         {
@@ -509,7 +516,7 @@ internal sealed class BarSettings
         FolderStacks.SequenceEqual(o.FolderStacks, StringComparer.OrdinalIgnoreCase) &&
         FolderStackFiles.SequenceEqual(o.FolderStackFiles, StringComparer.OrdinalIgnoreCase) &&
         TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
-        BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout &&
+        BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && ControlModules.SequenceEqual(o.ControlModules) && NotifyTimeout == o.NotifyTimeout &&
         NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu &&
         NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk &&

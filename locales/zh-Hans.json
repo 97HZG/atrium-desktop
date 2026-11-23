@@ -976,6 +976,22 @@
   "Its progress is read from the player itself. The heart and the lyrics use its shortcuts (Ctrl+Alt+L, Ctrl+Alt+D). It takes no position from other apps.": "进度直接从播放器读取；收藏和歌词使用它的快捷键（Ctrl+Alt+L、Ctrl+Alt+D）。它不接受其他软件调整进度。",
   "Progress and seeking. The heart and the lyrics use its shortcuts (Ctrl+Alt+V, Ctrl+Alt+W).": "显示进度，可拖动跳转；收藏和歌词使用它的快捷键（Ctrl+Alt+V、Ctrl+Alt+W）。",
   "Progress and seeking.": "显示进度，可拖动跳转。",
-  "Progress, and the artist and the album apart.": "显示进度，歌手和专辑分开显示。"
+  "Progress, and the artist and the album apart.": "显示进度，歌手和专辑分开显示。",
+  "Installed apps": "已安装的应用",
+  "Mobility Center": "移动中心",
+  "Power Options": "电源选项",
+  "Event Viewer": "事件查看器",
+  "Device Manager": "设备管理器",
+  "Network Connections": "网络连接",
+  "Disk Management": "磁盘管理",
+  "Computer Management": "计算机管理",
+  "Terminal (Admin)": "终端管理员",
+  "Run": "运行",
+  "Shut down or sign out": "关机或注销",
+  "Sign out": "注销",
+  "Night light": "夜间模式",
+  "Energy saver": "节电模式",
+  "Dark mode": "深色模式",
+  "Mobile hotspot": "移动热点"
  }
 }

@@ -639,6 +639,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         POINT screen = EdgeFrame{edge_, window_}.ToArea(POINT{pt.x, 0});
         if (!key.empty() && !IsEntry(key) && onItemMenu)
             onItemMenu(key, screen);
+        else if (key == kStartKey && onStartMenu) // the logo: Windows' Start button menu (Win+X)
+            onStartMenu(screen);
         else if (onContextMenu)
             onContextMenu(screen);
         return 0;

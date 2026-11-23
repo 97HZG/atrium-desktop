@@ -178,6 +178,12 @@ Require(new PinnedApp("Edge", @"C:\Program Files\msedge.exe", "", "").AllowsMult
 Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMultipleWindows(),
     "The Explorer AUMID must default to allowing multiple windows.");
 {
+    var modulesDefault = new BarSettings();
+    Require(modulesDefault.ControlModules.SequenceEqual(["stage"]), "Control centre modules must default to Stage Manager.");
+    var modules = BarSettings.FromJson(JsonNode.Parse("""{"controlModules":[" darkmode ","wifi","stage","darkmode","","hotspot"]}""")!.AsObject(), new());
+    Require(modules.ControlModules.SequenceEqual(["darkmode", "stage", "hotspot"]) && BarSettings.FromJson(modules.ToJson(), new()).SameAs(modules) &&
+            !modules.SameAs(modulesDefault),
+        "Control centre modules must keep known ids once, in order, and survive a round trip.");
     var extrasDefault = new BarSettings();
     Require(extrasDefault.ShowLaunchpad && extrasDefault.LaunchpadMaterial == "bar" && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
             extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingRhythm == "live" && extrasDefault.NowPlayingAppMode == "all" &&

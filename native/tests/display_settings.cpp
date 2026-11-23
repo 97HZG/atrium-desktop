@@ -223,6 +223,17 @@ void CheckExtrasSettings()
     Require(many.folderStackFiles.size() == 32 && many.folderStackFiles.front() == L"D:\\Doc0.pdf" && many.folderStackFiles.back() == L"D:\\Doc31.pdf",
             "folderStackFiles trims, drops empty, and caps at 32");
 
+    Settings modules;
+    Require(modules.controlModules == std::vector<std::wstring>{L"stage"}, "controlModules defaults to Stage Manager");
+    modules.controlModules = {L" darkmode ", L"wifi", L"stage", L"darkmode", L"", L"hotspot"};
+    modules.Clamp();
+    Require(modules.controlModules == std::vector<std::wstring>{L"darkmode", L"stage", L"hotspot"},
+            "controlModules keeps known modules once, in order");
+    Settings modulesParsed;
+    Require(Settings::FromJson(modules.ToJson(), Settings{}, modulesParsed) && modulesParsed.controlModules == modules.controlModules &&
+                Settings::FromJson(LR"({"controlModules":[]})", Settings{}, modulesParsed) && modulesParsed.controlModules.empty(),
+            "controlModules round-trips, empty included");
+
     Settings deduped;
     deduped.folderStacks = {L"C:\\", L"c:\\\\", L" D:\\Work\\ ", L"d:/work", L"\\\\server\\share\\"};
     deduped.Clamp();

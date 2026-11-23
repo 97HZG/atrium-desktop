@@ -40,6 +40,7 @@
 | `autoHide` | string | `never` / `fullscreen` / `always` | `fullscreen` | 栏的显示方式：常驻；全屏时隐藏（有最大化、全屏或分屏铺满屏幕的窗口时滑出屏幕，前面再开小窗口也不出来）；一直隐藏。隐藏时，指针移到栏下方的屏幕底边栏就出现，离开后收回 |
 | `barEdge` | string | `bottom` / `top` / `left` / `right` | `bottom` | 栏停靠的屏幕边缘：底部、顶部、左侧或右侧；其他值视为 `bottom` |
 | `statusStyle` | string | `ring` / `icons` | `ring` | 状态栏的样子：Wi-Fi 外面一圈电量或音量的圆环；或者像 Windows 任务栏那样并排的网络、音量、电池三个图标（自绘，跟随字色）。点按都打开控制中心 |
+| `controlModules` | string[] | `stage` / `nightlight` / `energysaver` / `darkmode` / `hotspot` | `["stage"]` | 控制中心的可选模块，按顺序排在投屏下面、亮度上面：台前调度、夜间模式、节电模式、深色模式、移动热点，每个是一块带开关的玻璃（两块一行，单出来的一块占整行）；未知项和重复项丢弃。Wi-Fi、蓝牙、电池、投屏、亮度和声音固定显示，不在此列 |
 | `iconSize` | number | 16–64 DIP | 30 | 任务栏图标边长 |
 | `magnify` | number | 1–2 | 1.7 | 悬停放大：指针下图标的缩放倍数，相邻图标按波形放大；1 为关闭 |
 | `hoverRise` | bool | | false | 形状页的“跟随鼠标拱起”：背景随鼠标局部向上延伸，幅度复用 `magnify`；关闭后保持图标放大。默认关闭，旧配置没有这一项时也是关闭 |

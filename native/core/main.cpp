@@ -31,6 +31,7 @@
 #include "shell/usb_volume.h"
 #include "shell/shell_verbs.h"
 #include "shell/jump_list.h"
+#include "shell/quick_links.h"
 #include "shell/win_key.h"
 #include "shell/feishu_source.h"
 #include "shell/wechat_source.h"
@@ -403,6 +404,14 @@ void ShowMenu(POINT pt)
     });
 }
 
+void ShowStartMenu(POINT pt)
+{
+    std::vector<MenuEntry> entries;
+    for (const QuickLink& link : QuickLinks())
+        entries.push_back({link.text, link.id, false, false, link.header});
+    g_app.menu->Open(std::move(entries), pt, BarMenuPlace(false), [](int id) { RunQuickLink(id); });
+}
+
 // The tray icon of a notice's sender: its program's file name or the start of
 // its tooltip is the sender's name or id ("QQ" -> qq.exe, "QQ: 12345").
 std::optional<TrayIcon> TrayIconOf(const Notice& n)
@@ -592,6 +601,7 @@ void ApplySettings(const Settings& s)
     g_app.stage->SetEnabled(s.stageManager);
     g_app.genie->SetEnabled(s.genieMinimize && s.bar);
     g_app.control->SetStage(s.stageManager, s.stageOnRight);
+    g_app.control->SetModules(s.controlModules);
     g_app.widgets->SetMaterial(s.widgetMaterial == L"dusk"  ? WidgetMaterial::Dusk :
                                s.widgetMaterial == L"color" ? WidgetMaterial::Color :
                                                               WidgetMaterial::Glass);
@@ -953,6 +963,7 @@ void ConfigureBar(Bar& bar)
     bar.onReorder = Reorder;
     bar.onOverflow = ShowOverflow;
     bar.onStartClick = ToggleStart;
+    bar.onStartMenu = ShowStartMenu;
     bar.onNotifyClick = [](RECT) { g_app.notes->ToggleCenter(); };
     bar.onTrayClick = ToggleTray;
     bar.onDesktopClick = [] { SendWinShortcut('D'); }; // the system's Show Desktop: a second click brings the windows back

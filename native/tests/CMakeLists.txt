@@ -36,6 +36,10 @@ add_executable(quiet_profile_tests quiet_profile.cpp)
 target_link_libraries(quiet_profile_tests PRIVATE atrium_core_lib)
 add_test(NAME quiet_profile COMMAND quiet_profile_tests)
 
+add_executable(quick_toggles_tests quick_toggles.cpp)
+target_link_libraries(quick_toggles_tests PRIVATE atrium_core_lib)
+add_test(NAME quick_toggles COMMAND quick_toggles_tests)
+
 add_executable(usb_volume_tests usb_volume.cpp)
 target_link_libraries(usb_volume_tests PRIVATE atrium_core_lib)
 add_test(NAME usb_volume COMMAND usb_volume_tests)

@@ -56,6 +56,9 @@ public:
     void BrightnessChanged(int percent);
     // Stage Manager's state, for its switch.
     void SetStage(bool on, bool onRight);
+    // The optional modules under the connections (controlModules): Stage Manager's switch and the
+    // system's (night light, energy saver, dark mode, mobile hotspot), two to a row.
+    void SetModules(std::vector<std::wstring> ids);
 
     std::function<void()> onChanged; // volume, mute or the network changed: the bar's icon updates
     std::function<void(bool)> onStage; // Stage Manager's switch was pressed: on or off
@@ -67,6 +70,7 @@ private:
         std::wstring id;
     };
     static constexpr UINT_PTR kStatusTimer = 1, kRadioRefreshTimer = 2, kWifiAgainTimer = 3;
+    static constexpr UINT WM_CC_MODULES = WM_APP + 0x5A; // the system's switches were read (moduleSlot_)
     struct Worker {
         void Post(std::wstring key, std::function<void()> task)
         {
@@ -223,6 +227,13 @@ private:
     }
     float MaxHeight() const;
     std::vector<ShapeDip> MainShapes() const; // the main page's pieces of glass, from its top
+    // The modules (control_modules.cpp): their rows' height, their tiles (DIP, from the main page's top).
+    float ModulesHeight() const;
+    std::vector<D2D1_RECT_F> ModuleRects() const;
+    void PaintModules(Canvas& c, const Theme& t);
+    void ReadModules();                      // the system's switches, on the slow worker
+    void FlipModule(const std::wstring& id); // a press on a system switch
+    void TakeModules();                      // WM_CC_MODULES
     void PaintPage(Canvas& c, const Theme& t, Page page);
     D2D1_SIZE_F Size() const; // the window's: as tall as the tallest page, the glass standing on its bottom
 
@@ -268,6 +279,10 @@ private:
     RECT anchor_{}, bar_{};
     float radius_ = 30, barH_ = 60;
     bool stageOn_ = false, stageRight_ = false;
+    std::vector<std::wstring> modules_{L"stage"};
+    std::map<std::wstring, std::optional<bool>> moduleOn_; // the system's switches as last read (none: unavailable)
+    std::unordered_set<std::wstring> moduleBusy_;          // switches on their way
+    std::optional<std::map<std::wstring, std::optional<bool>>> moduleSlot_;
     ULONGLONG lastClosed_ = 0;
     bool private_ = false;
     std::map<std::wstring, motion::Follow> hoverAnim_;
