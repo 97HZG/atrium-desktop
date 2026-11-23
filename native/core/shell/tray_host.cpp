@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <optional>
 
 namespace atrium {
 
@@ -151,10 +152,11 @@ const wchar_t* Name(tray::HostAction action)
 
 } // namespace
 
-TrayHost::TrayHost(HWND notify, UINT msg, DWORD readyWaitMs, DWORD startDelayMs)
+TrayHost::TrayHost(HWND notify, UINT msg, DWORD readyWaitMs, DWORD startDelayMs, std::function<void()> onYieldChange)
     : notify_(notify),
       msg_(msg),
       startDelayMs_(startDelayMs),
+      onYieldChange_(std::move(onYieldChange)),
       taskbarCreated_(RegisterWindowMessageW(L"TaskbarCreated")),
       quit_(RegisterWindowMessageW(L"Atrium.TrayHost.Quit")),
       hover_(RegisterWindowMessageW(L"Atrium.TrayHost.Hover")),
@@ -405,16 +407,19 @@ LRESULT TrayHost::Message(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-LRESULT TrayHost::Forward(UINT m, WPARAM w, LPARAM l)
+LRESULT TrayHost::Forward(UINT m, WPARAM w, LPARAM l, BOOL* sent, DWORD* err)
 {
     HWND shell = ShellTaskbar();
     if (!shell)
         return 0;
     if (m == WM_COPYDATA || InSendMessage()) {
         DWORD_PTR result = 0;
-        if (!SendMessageTimeoutW(shell, m, w, l, SMTO_ABORTIFHUNG, kForwardMs, &result))
-            return 0;
-        return LRESULT(result);
+        const LRESULT ok = SendMessageTimeoutW(shell, m, w, l, SMTO_ABORTIFHUNG, kForwardMs, &result);
+        if (sent)
+            *sent = ok != 0;
+        if (err)
+            *err = ok ? 0 : GetLastError();
+        return ok ? LRESULT(result) : 0;
     }
     PostMessageW(shell, m, w, l);
     return 0;
@@ -426,6 +431,9 @@ LRESULT TrayHost::OnNotifyIcon(WPARAM w, const COPYDATASTRUCT* cds)
     if (!data || cds->cbData < offsetof(TrayNotifyData, nid.szInfo) || data->signature != kSignature)
         return Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
     const NotifyIconData32& nid = data->nid;
+    const bool hasGuid = (nid.uFlags & NIF_GUID) && cds->cbData >= offsetof(TrayNotifyData, nid.guidItem) + sizeof(GUID);
+    const HWND hwnd = Handle(nid.hWnd);
+    const std::wstring key = KeyOf(hwnd, nid.uID, hasGuid ? &nid.guidItem : nullptr);
 
     // The picture is the app's: copied now, while the app waits for this call.
     std::shared_ptr<const IconImage> image;
@@ -440,9 +448,11 @@ LRESULT TrayHost::OnNotifyIcon(WPARAM w, const COPYDATASTRUCT* cds)
     }
 
     // Explorer first: what it answers is what the app is told.
-    const bool shell = ShellTaskbar() != nullptr;
-    LRESULT result = Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
-    if (data->message == NIM_ADD && !result && shell) {
+    HWND shell = ShellTaskbar();
+    BOOL sent = FALSE;
+    DWORD err = 0;
+    LRESULT forwardResult = Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds), &sent, &err);
+    if (data->message == NIM_ADD && !forwardResult && shell) {
         // The host's TaskbarCreated (not a new Explorer): Explorer has the icon already
         // and refuses a second add. It is the same icon, brought up to date.
         std::vector<BYTE> copy(static_cast<const BYTE*>(cds->lpData), static_cast<const BYTE*>(cds->lpData) + cds->cbData);
@@ -453,10 +463,18 @@ LRESULT TrayHost::OnNotifyIcon(WPARAM w, const COPYDATASTRUCT* cds)
         if ((again32->nid.uFlags & NIF_TIP) && !again32->nid.szTip[0])
             again32->nid.uFlags &= ~NIF_TIP;
         COPYDATASTRUCT again{cds->dwData, cds->cbData, copy.data()};
-        result = Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(&again));
+        forwardResult = Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(&again), &sent, &err);
     }
-    if (!shell && data->message != NIM_DELETE)
-        result = TRUE; // no Explorer for the moment: the host keeps the icon (it adds it again on TaskbarCreated)
+    const bool knownIcon = shell && !forwardResult && HasIcon(key);
+    const bool validWindow = hwnd && IsWindow(hwnd) && PidOf(hwnd) != 0 && PidOf(hwnd) != ShellPid();
+    const LRESULT result = tray::DecideHostForwardResult(data->message, shell != nullptr, forwardResult, knownIcon, validWindow);
+    if (shell && !forwardResult && !loggedRefusedForward_) {
+        loggedRefusedForward_ = true;
+        const DWORD targetPid = PidOf(shell);
+        const std::wstring targetPath = ProcessPath(targetPid);
+        Log(L"tray host: forward refused msg=%s target=0x%p(%s pid=%lu) sent=%d err=%lu res=%ld accepted=%d", Name(data->message), static_cast<void*>(shell),
+            targetPath.empty() ? L"-" : PathFindFileNameW(targetPath.c_str()), targetPid, sent ? 1 : 0, err, long(forwardResult), result ? 1 : 0);
+    }
     try {
         Record(cds, std::move(image), result);
     } catch (...) {
@@ -574,7 +592,8 @@ void TrayHost::KeepFirst()
     // E_NOTIMPL: apps that show progress on their button would not start (TeraCopy #90, NanaZip #86).
     if (HANDLE band = shell ? GetPropW(shell, kTaskband) : nullptr; band != GetPropW(w, kTaskband))
         SetPropW(w, kTaskband, band);
-    const DWORD shellPid = shell ? PidOf(shell) : ShellPid();
+    const DWORD shellPid = ShellPid();
+    const bool wasYieldedBefore = yielded_.load();
     if (shellPid != yieldPolicy_.shellPid && yieldPolicy_.OnShellPid(shellPid, HasStartAllBackModule(shellPid))) {
         yielded_ = false;
         dirty_ = true;
@@ -587,6 +606,7 @@ void TrayHost::KeepFirst()
             dirty_ = true;
             SetTimer(w, kRecollectTimer, 200, nullptr); // updates went past the host meanwhile
         }
+        FinishKeepFirst(first, shell, shellPid, wasYieldedBefore);
         return;
     }
     const DWORD owner = PidOf(first);
@@ -596,6 +616,7 @@ void TrayHost::KeepFirst()
             Log(L"tray host: another program's tray (pid %lu) is in front: left there", owner);
             dirty_ = true;
         }
+        FinishKeepFirst(first, shell, shellPid, wasYieldedBefore);
         return;
     }
     const ULONGLONG now = GetTickCount64();
@@ -610,6 +631,7 @@ void TrayHost::KeepFirst()
                 Log(L"tray host: Explorer's taskbar repeatedly reclaimed first (%d times); backing off 60s", yieldPolicy_.rapidLosses);
             dirty_ = true;
         }
+        FinishKeepFirst(first, shell, shellPid, wasYieldedBefore);
         return;
     }
     SetWindowPos(w, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
@@ -628,6 +650,59 @@ void TrayHost::KeepFirst()
     if (now - lostAt_ > 60000) // not on every round
         Log(L"tray host: Explorer's taskbar came first; moved back (%s)", again ? L"first again" : L"still second");
     lostAt_ = now;
+    FinishKeepFirst(first, shell, shellPid, wasYieldedBefore);
+}
+
+const wchar_t* YieldReasonName(TrayHostYieldReason reason)
+{
+    switch (reason) {
+    case TrayHostYieldReason::OtherProcess: return L"other-process";
+    case TrayHostYieldReason::RapidLoss: return L"rapid-loss";
+    case TrayHostYieldReason::StartAllBack: return L"startallback";
+    default: return L"none";
+    }
+}
+
+void LogShellTrayWindows()
+{
+    std::vector<std::wstring> lines;
+    std::wstring signature;
+    for (HWND h = nullptr; (h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) != nullptr;) {
+        const DWORD pid = PidOf(h);
+        const std::wstring path = ProcessPath(pid);
+        wchar_t line[256];
+        swprintf_s(line, L"tray diag: Shell_TrayWnd[%zu] hwnd=0x%p pid=%lu exe=%s visible=%d", lines.size(), static_cast<void*>(h), pid,
+                   path.empty() ? L"-" : PathFindFileNameW(path.c_str()), IsWindowVisible(h) ? 1 : 0);
+        lines.emplace_back(line);
+        signature += std::to_wstring(reinterpret_cast<uintptr_t>(h)) + L":" + std::to_wstring(pid) + (IsWindowVisible(h) ? L"+;" : L"-;");
+    }
+    static std::mutex mutex;
+    static std::optional<std::wstring> logged;
+    {
+        std::lock_guard g(mutex);
+        if (logged == signature)
+            return;
+        logged = signature;
+    }
+    if (lines.empty())
+        Log(L"tray diag: no Shell_TrayWnd");
+    for (const std::wstring& line : lines)
+        Log(L"%s", line.c_str());
+}
+
+void TrayHost::FinishKeepFirst(HWND first, HWND shell, DWORD shellPid, bool wasYielded)
+{
+    const TrayHostYieldReason reason = yieldPolicy_.Reason();
+    yieldReason_ = reason;
+    if (!loggedState_ || reason != lastLoggedReason_) {
+        loggedState_ = true;
+        lastLoggedReason_ = reason;
+        Log(L"tray host: yielded=%d reason=%s first=0x%p shell=0x%p (pid %lu)", yielded_.load() ? 1 : 0, YieldReasonName(reason), static_cast<void*>(first),
+            static_cast<void*>(shell), shellPid);
+        LogShellTrayWindows();
+    }
+    if (yielded_.load() != wasYielded && onYieldChange_)
+        onYieldChange_();
 }
 
 // The list in the log whenever its make-up changes (not on a picture or tooltip change).

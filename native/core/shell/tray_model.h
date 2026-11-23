@@ -75,6 +75,16 @@ public:
     // the shell's own messages. Icons only Explorer's tray has stay in the list. UI thread.
     void SetHosting(bool on);
     bool Hosting() const { return host_ != nullptr; }
+    bool HostYielded() const
+    {
+        std::lock_guard g(mutex_);
+        return host_ && host_->Yielded();
+    }
+    TrayHostYieldReason HostYieldReason() const
+    {
+        std::lock_guard g(mutex_);
+        return host_ ? host_->YieldReason() : TrayHostYieldReason::None;
+    }
     // A hosted icon only (the shell protocol has these; Explorer's buttons do not):
     // the middle button, and the pointer resting on an icon (null: on none).
     void MiddleClick(const TrayIcon& icon);
@@ -111,6 +121,8 @@ private:
     mutable std::map<std::wstring, std::pair<std::wstring, std::wstring>> hostNames_; // FileDescription and ProductName, for icons without a tooltip
     // Windows' order of the icons by "guid:{...}", "uid:<exe>|<uid>" and "exe:<exe>" (the first of the program).
     std::map<std::wstring, size_t> windowsOrder_;
+    tray::ShellSession lastReconcileSession_; // worker: what the last "reconcile" line said
+    size_t lastReconcileRecords_ = 0, lastReconcileLive_ = 0;
 };
 
 } // namespace atrium

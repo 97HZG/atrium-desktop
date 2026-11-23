@@ -1083,7 +1083,7 @@ void TrayModel::SetHosting(bool on)
     if (on == (host_ != nullptr))
         return;
     // Built and torn down outside the lock: the host's thread starts or stops meanwhile.
-    std::unique_ptr<TrayHost> host = on ? std::make_unique<TrayHost>(notify_, msg_) : nullptr;
+    std::unique_ptr<TrayHost> host = on ? std::make_unique<TrayHost>(notify_, msg_, 3000, 0, [this] { Refresh(); }) : nullptr;
     if (host && !host->Running())
         host.reset();
     {
@@ -1093,6 +1093,7 @@ void TrayModel::SetHosting(bool on)
     }
     host.reset();
     PostMessageW(notify_, msg_, 0, 0);
+    Refresh();
 }
 
 std::vector<std::wstring> TrayModel::Flashing() const
@@ -1510,9 +1511,17 @@ void TrayModel::Worker()
                 loaded_ = true;
                 available_ = available;
             }
-            if (changed) {
+            // Also when only the counts or Explorer changed: an empty list staying empty says nothing (#146).
+            if (changed || session != lastReconcileSession_ || diagnostics.records != lastReconcileRecords_ || diagnostics.live != lastReconcileLive_) {
+                lastReconcileSession_ = session;
+                lastReconcileRecords_ = diagnostics.records;
+                lastReconcileLive_ = diagnostics.live;
                 Log(L"tray: reconcile records=%zu live=%zu aliases=%zu sharedPlace=%zu unknown=%zu uiaMs=%llu", diagnostics.records, diagnostics.live,
                     diagnostics.aliases, diagnostics.shared, diagnostics.unknown, readMs);
+            }
+            if (diagnostics.records > 0 && diagnostics.live == 0)
+                LogShellTrayWindows();
+            if (changed) {
                 Log(L"tray: %zu icons (%d recognised %s%s) in %llu ms%s", buttons.size(), recognised, ordered ? L"in Windows' order" : L"by name",
                     std::ranges::any_of(buttons, [](const Found& f) { return f.toolbar != nullptr; }) ? L", classic tray" : L"", GetTickCount64() - readStart,
                     available ? L"" : L", the shell's tray was not found");

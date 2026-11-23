@@ -26,6 +26,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -36,6 +37,10 @@
 namespace atrium {
 
 enum class TrayHostYieldReason { None, OtherProcess, RapidLoss, StartAllBack };
+
+const wchar_t* YieldReasonName(TrayHostYieldReason reason);
+// Every Shell_TrayWnd in z-order with its program, logged when that changes (#146).
+void LogShellTrayWindows();
 
 struct TrayHostYieldPolicy {
     static constexpr ULONGLONG kLossWindowMs = 5000;
@@ -145,7 +150,7 @@ struct HostIcon {
 class TrayHost {
 public:
     // Posts `msg` (wParam 0) to `notify` when the icons change. `readyWaitMs` and `startDelayMs` are for tests only.
-    TrayHost(HWND notify, UINT msg, DWORD readyWaitMs = 3000, DWORD startDelayMs = 0);
+    TrayHost(HWND notify, UINT msg, DWORD readyWaitMs = 3000, DWORD startDelayMs = 0, std::function<void()> onYieldChange = {});
     ~TrayHost();
     TrayHost(const TrayHost&) = delete;
     TrayHost& operator=(const TrayHost&) = delete;
@@ -154,6 +159,7 @@ public:
     // Another program's tray host (RetroBar, a second shell) is in front: Atrium
     // leaves it there and reads Explorer's tray meanwhile.
     bool Yielded() const { return yielded_; }
+    TrayHostYieldReason YieldReason() const { return yieldReason_.load(); }
     std::vector<HostIcon> Icons() const;
     // The programs whose icon flashes now: QQ and WeChat flash theirs for a new message (they
     // have no window to flash while they sit in the tray).
@@ -177,7 +183,13 @@ private:
     LRESULT OnNotifyIcon(WPARAM w, const COPYDATASTRUCT* cds);
     void Record(const COPYDATASTRUCT* cds, std::shared_ptr<const IconImage> image, LRESULT result);
     LRESULT OnIconRect(WPARAM w, const COPYDATASTRUCT* cds);
-    LRESULT Forward(UINT m, WPARAM w, LPARAM l);
+    LRESULT Forward(UINT m, WPARAM w, LPARAM l, BOOL* sent = nullptr, DWORD* err = nullptr);
+    bool HasIcon(const std::wstring& key) const
+    {
+        std::lock_guard g(mutex_);
+        return icons_.contains(key);
+    }
+    void FinishKeepFirst(HWND first, HWND shell, DWORD shellPid, bool wasYielded);
     void Broadcast();
     void KeepFirst();
     void Prune();
@@ -187,11 +199,13 @@ private:
     HWND notify_;
     UINT msg_;
     DWORD startDelayMs_ = 0;
+    std::function<void()> onYieldChange_;
     UINT taskbarCreated_ = 0, quit_ = 0, hover_ = 0;
     HANDLE ready_ = nullptr, stop_ = nullptr;
     std::atomic<HWND> window_{nullptr};
     std::atomic_bool dirty_ = false;   // changed since the last notice (posted at most every 100 ms)
     std::atomic_bool yielded_ = false;
+    std::atomic<TrayHostYieldReason> yieldReason_{TrayHostYieldReason::None};
     std::atomic_bool stopping_ = false; // going: no longer moves itself in front
     std::thread thread_;
     mutable std::mutex mutex_;
@@ -205,6 +219,9 @@ private:
     TrayHostYieldPolicy yieldPolicy_;
     std::wstring loggedKeys_; // host thread: the list as last logged
     bool flashing_ = false;   // host thread: some icon flashed at the last look
+    bool loggedState_ = false;
+    TrayHostYieldReason lastLoggedReason_ = TrayHostYieldReason::None;
+    bool loggedRefusedForward_ = false;
 };
 
 } // namespace atrium

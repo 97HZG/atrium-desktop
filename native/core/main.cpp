@@ -270,11 +270,27 @@ void AddTrayIcon()
         LoadImageW(g_app.instance, MAKEINTRESOURCEW(IDI_ATRIUM), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
     wcscpy_s(nid.szTip, L"Atrium");
     g_app.trayAdded = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
+    const DWORD err = g_app.trayAdded ? 0 : GetLastError();
     DestroyIcon(nid.hIcon);
+    static bool failLogged = false;
+    static DWORD lastErr = 0;
+    static HWND lastFirst = nullptr;
     if (!g_app.trayAdded) {
-        Log(L"tray: could not add Atrium's notification icon; will retry when the taskbar is ready");
+        HWND first = FindWindowW(L"Shell_TrayWnd", nullptr);
+        if (!failLogged || err != lastErr || first != lastFirst) {
+            failLogged = true;
+            lastErr = err;
+            lastFirst = first;
+            const bool hosting = g_app.tray && g_app.tray->Hosting();
+            const bool yielded = g_app.tray && g_app.tray->HostYielded();
+            const auto reason = g_app.tray ? g_app.tray->HostYieldReason() : TrayHostYieldReason::None;
+            Log(L"tray: could not add Atrium's notification icon (err=%lu first=0x%p host=%d yielded=%d reason=%s); will retry", err, static_cast<void*>(first),
+                hosting ? 1 : 0, yielded ? 1 : 0, YieldReasonName(reason));
+            LogShellTrayWindows();
+        }
         return;
     }
+    failLogged = false;
     nid.uVersion = NOTIFYICON_VERSION_4;
     if (!Shell_NotifyIconW(NIM_SETVERSION, &nid))
         Log(L"tray: could not set notification icon version");
