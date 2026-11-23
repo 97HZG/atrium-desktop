@@ -24,17 +24,35 @@ namespace {
 
 namespace json = winrt::Windows::Data::Json;
 
+const std::wstring& PlayerRoot()
+{
+    static const std::wstring kRoot = [] {
+        PWSTR dir = nullptr;
+        std::wstring out;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &dir)) && dir)
+            out = std::wstring(dir) + L"\\NetEase\\CloudMusic\\";
+        CoTaskMemFree(dir);
+        return out;
+    }();
+    return kRoot;
+}
+
 std::wstring PlayerPath(const wchar_t* within)
 {
-    PWSTR dir = nullptr;
-    std::wstring path;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &dir)) && dir)
-        path = std::wstring(dir) + L"\\NetEase\\CloudMusic\\" + within;
-    CoTaskMemFree(dir);
-    return path;
+    const std::wstring& root = PlayerRoot();
+    return root.empty() ? std::wstring() : root + within;
 }
 
 std::wstring QueuePath() { return PlayerPath(L"webdata\\file\\playingList"); }
+
+std::wstring ParseJsonId(const json::IJsonValue& v)
+{
+    if (v.ValueType() == json::JsonValueType::String)
+        return std::wstring(v.GetString());
+    if (v.ValueType() == json::JsonValueType::Number)
+        return std::to_wstring(int64_t(v.GetNumber()));
+    return {};
+}
 
 uint64_t WriteTime(const std::wstring& path, uint64_t* size = nullptr)
 {
@@ -55,59 +73,73 @@ std::wstring Utf8(const unsigned char* s, int bytes)
     return out;
 }
 
+bool IsBusyError(int rc) { return rc == SQLITE_BUSY || rc == SQLITE_LOCKED; }
+
 // The first column of each row `sql` gives (one text parameter bound), until `row` returns false.
-template <class Row>
-bool Query(sqlite3* db, const char* sql, const std::string& param, Row row)
+template<class Row> bool Query(sqlite3* db, const char* sql, const std::string& param, Row row, bool* busy = nullptr)
 {
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK)
+    const int prep = sqlite3_prepare_v2(db, sql, -1, &st, nullptr);
+    if (prep != SQLITE_OK) {
+        if (busy && IsBusyError(prep))
+            *busy = true;
         return false;
+    }
     if (!param.empty())
         sqlite3_bind_text(st, 1, param.c_str(), int(param.size()), SQLITE_TRANSIENT);
     int rc = SQLITE_ROW;
-    while ((rc = sqlite3_step(st)) == SQLITE_ROW)
+    while ((rc = sqlite3_step(st)) == SQLITE_ROW) {
         if (!row(Utf8(sqlite3_column_text(st, 0), sqlite3_column_bytes(st, 0))))
             break;
+    }
     sqlite3_finalize(st);
+    if (busy && IsBusyError(rc))
+        *busy = true;
     return rc == SQLITE_ROW || rc == SQLITE_DONE;
 }
 
 // The liked playlist's id: the player's record of it, else in its cached account playlists the playlist object holding
 // specialType 5 also holds its comment thread, "A_PL_0_<id>" (the cache stores the JSON escaped).
-std::wstring LikedPlaylist(sqlite3* db)
+std::wstring LikedPlaylist(sqlite3* db, bool& retryable)
 {
     std::wstring found;
     // The player's own record of it, newest first: "starPlaylistId":"<id>".
-    Query(db, "SELECT jsonStr FROM persistentModel WHERE jsonStr LIKE '%starPlaylistId%' ORDER BY time DESC", {}, [&](const std::wstring& j) {
-        const size_t at = j.find(L"starPlaylistId");
-        size_t v = at == std::wstring::npos ? j.size() : at + 14;
-        while (v < j.size() && (j[v] == L'\\' || j[v] == L'"' || j[v] == L':' || j[v] == L' '))
-            ++v;
-        size_t end = v;
-        while (end < j.size() && iswdigit(j[end]))
-            ++end;
-        found = j.substr(v, end - v);
-        return found.empty();
-    });
-    if (!found.empty())
-        return found;
-    Query(db, "SELECT jsonStr FROM requestCache WHERE id LIKE '%/user/playlist%' AND jsonStr LIKE '%specialType%'", {}, [&](const std::wstring& j) {
-        for (size_t at = j.find(L"specialType"); at != std::wstring::npos && found.empty(); at = j.find(L"specialType", at + 1)) {
-            size_t v = at + 11;
+    Query(
+        db, "SELECT jsonStr FROM persistentModel WHERE jsonStr LIKE '%starPlaylistId%' ORDER BY time DESC", {},
+        [&](const std::wstring& j) {
+            const size_t at = j.find(L"starPlaylistId");
+            size_t v = at == std::wstring::npos ? j.size() : at + 14;
             while (v < j.size() && (j[v] == L'\\' || j[v] == L'"' || j[v] == L':' || j[v] == L' '))
                 ++v;
-            if (v >= j.size() || j[v] != L'5' || (v + 1 < j.size() && iswdigit(j[v + 1])))
-                continue;
-            const size_t from = at > 1500 ? at - 1500 : 0, thread = j.rfind(L"A_PL_0_", at);
-            if (thread == std::wstring::npos || thread < from)
-                continue;
-            size_t end = thread + 7;
+            size_t end = v;
             while (end < j.size() && iswdigit(j[end]))
                 ++end;
-            found = j.substr(thread + 7, end - thread - 7);
-        }
-        return found.empty();
-    });
+            found = j.substr(v, end - v);
+            return found.empty();
+        },
+        &retryable);
+    if (!found.empty() || retryable)
+        return found;
+    Query(
+        db, "SELECT jsonStr FROM requestCache WHERE id LIKE '%/user/playlist%' AND jsonStr LIKE '%specialType%'", {},
+        [&](const std::wstring& j) {
+            for (size_t at = j.find(L"specialType"); at != std::wstring::npos && found.empty(); at = j.find(L"specialType", at + 1)) {
+                size_t v = at + 11;
+                while (v < j.size() && (j[v] == L'\\' || j[v] == L'"' || j[v] == L':' || j[v] == L' '))
+                    ++v;
+                if (v >= j.size() || j[v] != L'5' || (v + 1 < j.size() && iswdigit(j[v + 1])))
+                    continue;
+                const size_t from = at > 1500 ? at - 1500 : 0, thread = j.rfind(L"A_PL_0_", at);
+                if (thread == std::wstring::npos || thread < from)
+                    continue;
+                size_t end = thread + 7;
+                while (end < j.size() && iswdigit(j[end]))
+                    ++end;
+                found = j.substr(thread + 7, end - thread - 7);
+            }
+            return found.empty();
+        },
+        &retryable);
     return found;
 }
 
@@ -178,8 +210,8 @@ bool ParseQueue(const std::wstring& text, std::vector<NeteaseQueuedTrack>& out)
         if (!entry.HasKey(L"track") || entry.GetNamedValue(L"track").ValueType() != json::JsonValueType::Object)
             continue;
         NeteaseQueuedTrack t = ParseTrackObject(entry.GetNamedObject(L"track"));
-        if (entry.HasKey(L"id") && entry.GetNamedValue(L"id").ValueType() == json::JsonValueType::Number)
-            t.id = std::to_wstring(int64_t(entry.GetNamedNumber(L"id")));
+        if (entry.HasKey(L"id"))
+            t.id = ParseJsonId(entry.GetNamedValue(L"id"));
         if (!t.title.empty() && t.lengthUs > 0)
             out.push_back(std::move(t));
     }
@@ -247,12 +279,13 @@ std::optional<bool> NeteaseLikes::Liked(const std::wstring& title, const std::ws
     const uint64_t writeTime = WriteTime(path);
     if (!writeTime)
         return std::nullopt;
-    // Read again when the player wrote, and a read that failed (the player writing) again a moment later.
+    // Read again when the player wrote, and a busy/open-failed read again a moment later.
     const ULONGLONG now = GetTickCount64();
-    if (writeTime != writeTime_ || (!ok_ && now - readAt_ > 3000)) {
+    if (writeTime != writeTime_ || (retryable_ && now - readAt_ > 3000)) {
         writeTime_ = writeTime;
         readAt_ = now;
-        ok_ = Read(path);
+        retryable_ = false;
+        ok_ = Read(path, retryable_);
     }
     const std::wstring id = CurrentId(title, artist);
     std::optional<bool> liked;
@@ -271,54 +304,67 @@ std::optional<bool> NeteaseLikes::Liked(const std::wstring& title, const std::ws
 std::wstring NeteaseLikes::CurrentId(const std::wstring& title, const std::wstring& artist) const
 {
     const std::wstring a = FoldCase(title), b = FoldCase(recentName_);
-    if (!recentId_.empty() && !a.empty() && !b.empty() && (a == b || a.find(b) != std::wstring::npos || b.find(a) != std::wstring::npos))
+    if (!recentId_.empty() && !a.empty() && a == b)
         return recentId_;
     const NeteaseQueuedTrack* track = Queue().Find(title, artist);
     return track ? track->id : std::wstring();
 }
 
-bool NeteaseLikes::Read(const std::wstring& path)
+bool NeteaseLikes::Read(const std::wstring& path, bool& retryable)
 {
+    retryable = false;
     sqlite3* db = nullptr;
     std::string utf8(size_t(WideCharToMultiByte(CP_UTF8, 0, path.c_str(), int(path.size()), nullptr, 0, nullptr, nullptr)), '\0');
     WideCharToMultiByte(CP_UTF8, 0, path.c_str(), int(path.size()), utf8.data(), int(utf8.size()), nullptr, nullptr);
     if (sqlite3_open_v2(utf8.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
         sqlite3_close(db);
+        retryable = true;
         return false;
     }
     sqlite3_busy_timeout(db, 200); // the player may be writing
     if (playlist_.empty())
-        playlist_ = LikedPlaylist(db);
-    Query(db, "SELECT jsonStr FROM historyTracks ORDER BY playtime DESC LIMIT 1", {}, [&](const std::wstring& text) {
-        json::JsonObject o{nullptr};
-        if (json::JsonObject::TryParse(text, o) && o.HasKey(L"id") && o.HasKey(L"name") && o.GetNamedValue(L"name").ValueType() == json::JsonValueType::String) {
-            const auto id = o.GetNamedValue(L"id");
-            recentId_ = id.ValueType() == json::JsonValueType::String ? std::wstring(id.GetString()) : std::to_wstring(int64_t(id.GetNumber()));
-            recentName_ = o.GetNamedString(L"name");
-        }
-        return false;
-    });
+        playlist_ = LikedPlaylist(db, retryable);
+    Query(
+        db, "SELECT jsonStr FROM historyTracks ORDER BY playtime DESC LIMIT 1", {},
+        [&](const std::wstring& text) {
+            json::JsonObject o{nullptr};
+            if (json::JsonObject::TryParse(text, o) && o.HasKey(L"id") && o.HasKey(L"name") &&
+                o.GetNamedValue(L"name").ValueType() == json::JsonValueType::String) {
+                recentId_ = ParseJsonId(o.GetNamedValue(L"id"));
+                recentName_ = recentId_.empty() ? std::wstring() : std::wstring(o.GetNamedString(L"name"));
+            }
+            return false;
+        },
+        &retryable);
     bool found = false;
     std::unordered_set<std::wstring> ids;
-    if (!playlist_.empty())
-        Query(db, "SELECT jsonStr FROM playlistTrackIds WHERE id = ?", Narrow(playlist_), [&](const std::wstring& text) {
-            json::JsonObject o{nullptr};
-            if (!json::JsonObject::TryParse(text, o) || !o.HasKey(L"trackIds") || o.GetNamedValue(L"trackIds").ValueType() != json::JsonValueType::Array)
-                return false;
-            for (const auto& v : o.GetNamedArray(L"trackIds")) {
-                if (v.ValueType() == json::JsonValueType::Object && v.GetObject().HasKey(L"id")) {
-                    const auto id = v.GetObject().GetNamedValue(L"id");
-                    ids.insert(id.ValueType() == json::JsonValueType::String ? std::wstring(id.GetString()) : std::to_wstring(int64_t(id.GetNumber())));
-                } else if (v.ValueType() == json::JsonValueType::Number) {
-                    ids.insert(std::to_wstring(int64_t(v.GetNumber())));
+    if (!playlist_.empty() && !retryable) {
+        Query(
+            db, "SELECT jsonStr FROM playlistTrackIds WHERE id = ?", Narrow(playlist_),
+            [&](const std::wstring& text) {
+                json::JsonObject o{nullptr};
+                if (!json::JsonObject::TryParse(text, o) || !o.HasKey(L"trackIds") || o.GetNamedValue(L"trackIds").ValueType() != json::JsonValueType::Array)
+                    return false;
+                for (const auto& v : o.GetNamedArray(L"trackIds")) {
+                    std::wstring tid;
+                    if (v.ValueType() == json::JsonValueType::Object && v.GetObject().HasKey(L"id"))
+                        tid = ParseJsonId(v.GetObject().GetNamedValue(L"id"));
+                    else
+                        tid = ParseJsonId(v);
+                    if (!tid.empty())
+                        ids.insert(std::move(tid));
                 }
-            }
-            found = true;
-            return false;
-        });
+                found = true;
+                return false;
+            },
+            &retryable);
+    }
     sqlite3_close(db);
+    if (retryable)
+        return false;
     if (!found) {
-        playlist_.clear(); // looked for again next time
+        playlist_.clear(); // looked for again when DB changes
+        ids_.clear();
         return false;
     }
     ids_ = std::move(ids);

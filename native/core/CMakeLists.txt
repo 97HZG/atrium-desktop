@@ -46,6 +46,7 @@ add_library(atrium_core_lib STATIC
     shell/task_model.cpp
     shell/app_processes.cpp
     shell/app_catalog.cpp
+    shell/start_pins.cpp
     shell/start_layout.cpp
     shell/win_key.cpp
     shell/app_registration.cpp

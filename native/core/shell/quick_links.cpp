@@ -6,35 +6,38 @@
 #include "shell/system_status.h"
 
 #include <windows.h>
+#include <objbase.h>
 #include <shellapi.h>
+
+#include <memory>
 
 namespace atrium {
 
 namespace {
 
 enum QuickLinkId {
-    kInstalledApps = 1,
-    kMobilityCenter,
-    kPowerOptions,
-    kEventViewer,
-    kSystem,
-    kDeviceManager,
-    kNetworkConnections,
-    kDiskManagement,
-    kComputerManagement,
-    kTerminal,
-    kTerminalAdmin,
-    kTaskManager,
-    kSettings,
-    kFileExplorer,
-    kSearch,
-    kRun,
-    kSignOut,
-    kSleep,
-    kHibernate,
-    kShutDown,
-    kRestart,
-    kDesktop,
+    InstalledApps = 1,
+    MobilityCenter,
+    PowerOptions,
+    EventViewer,
+    System,
+    DeviceManager,
+    NetworkConnections,
+    DiskManagement,
+    ComputerManagement,
+    Terminal,
+    TerminalAdmin,
+    TaskManager,
+    Settings,
+    FileExplorer,
+    Search,
+    Run,
+    SignOut,
+    Sleep,
+    Hibernate,
+    ShutDown,
+    Restart,
+    Desktop,
 };
 
 bool HasMobilityCenter()
@@ -52,7 +55,7 @@ const wchar_t* TerminalTarget() { return SearchPathW(nullptr, L"wt.exe", nullptr
 void ShellOpen(const wchar_t* target, bool elevated)
 {
     SHELLEXECUTEINFOW sei{sizeof(sei)};
-    sei.fMask = SEE_MASK_FLAG_NO_UI;
+    sei.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
     sei.lpVerb = elevated ? L"runas" : nullptr;
     sei.lpFile = target;
     sei.nShow = SW_SHOWNORMAL;
@@ -61,6 +64,33 @@ void ShellOpen(const wchar_t* target, bool elevated)
         if (!elevated || err != ERROR_CANCELLED)
             Log(L"quick_links: launch %s failed (%lu)", target, err);
     }
+}
+
+struct LaunchJob {
+    const wchar_t* target = nullptr;
+    bool elevated = false;
+    bool terminal = false;
+};
+
+void CALLBACK LaunchWorker(PTP_CALLBACK_INSTANCE, void* ctx)
+{
+    const std::unique_ptr<LaunchJob> job(static_cast<LaunchJob*>(ctx));
+    const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    const wchar_t* target = job->terminal ? TerminalTarget() : job->target;
+    if (target)
+        ShellOpen(target, job->elevated);
+    if (SUCCEEDED(hr))
+        CoUninitialize();
+}
+
+void DispatchShellOpen(const wchar_t* target, bool elevated, bool terminal)
+{
+    auto job = std::make_unique<LaunchJob>(LaunchJob{target, elevated, terminal});
+    if (TrySubmitThreadpoolCallback(LaunchWorker, job.get(), nullptr)) {
+        [[maybe_unused]] LaunchJob* raw = job.release();
+        return;
+    }
+    Log(L"quick_links: threadpool dispatch failed (%lu)", GetLastError());
 }
 
 void SendWinKey(WORD vk)
@@ -84,76 +114,76 @@ void SendWinKey(WORD vk)
 std::vector<QuickLink> QuickLinks()
 {
     std::vector<QuickLink> items;
-    items.push_back({kInstalledApps, Tr(L"Installed apps")});
+    items.push_back({InstalledApps, Tr(L"Installed apps")});
     if (HasMobilityCenter())
-        items.push_back({kMobilityCenter, Tr(L"Mobility Center")});
-    items.push_back({kPowerOptions, Tr(L"Power Options")});
-    items.push_back({kEventViewer, Tr(L"Event Viewer")});
-    items.push_back({kSystem, Tr(L"System")});
-    items.push_back({kDeviceManager, Tr(L"Device Manager")});
-    items.push_back({kNetworkConnections, Tr(L"Network Connections")});
-    items.push_back({kDiskManagement, Tr(L"Disk Management")});
-    items.push_back({kComputerManagement, Tr(L"Computer Management")});
-    items.push_back({kTerminal, Tr(L"Terminal")});
-    items.push_back({kTerminalAdmin, Tr(L"Terminal (Admin)")});
+        items.push_back({MobilityCenter, Tr(L"Mobility Center")});
+    items.push_back({PowerOptions, Tr(L"Power Options")});
+    items.push_back({EventViewer, Tr(L"Event Viewer")});
+    items.push_back({System, Tr(L"System")});
+    items.push_back({DeviceManager, Tr(L"Device Manager")});
+    items.push_back({NetworkConnections, Tr(L"Network Connections")});
+    items.push_back({DiskManagement, Tr(L"Disk Management")});
+    items.push_back({ComputerManagement, Tr(L"Computer Management")});
+    items.push_back({Terminal, Tr(L"Terminal")});
+    items.push_back({TerminalAdmin, Tr(L"Terminal (Admin)")});
     items.push_back({});
-    items.push_back({kTaskManager, Tr(L"Task Manager")});
-    items.push_back({kSettings, Tr(L"Settings")});
-    items.push_back({kFileExplorer, Tr(L"File Explorer")});
-    items.push_back({kSearch, Tr(L"Search")});
-    items.push_back({kRun, Tr(L"Run")});
+    items.push_back({TaskManager, Tr(L"Task Manager")});
+    items.push_back({Settings, Tr(L"Settings")});
+    items.push_back({FileExplorer, Tr(L"File Explorer")});
+    items.push_back({Search, Tr(L"Search")});
+    items.push_back({Run, Tr(L"Run")});
     items.push_back({});
     items.push_back({0, Tr(L"Shut down or sign out"), true});
-    items.push_back({kSignOut, Tr(L"Sign out")});
-    items.push_back({kSleep, Tr(L"Sleep")});
+    items.push_back({SignOut, Tr(L"Sign out")});
+    items.push_back({Sleep, Tr(L"Sleep")});
     if (CanHibernate())
-        items.push_back({kHibernate, Tr(L"Hibernate")});
-    items.push_back({kShutDown, Tr(L"Shut down")});
-    items.push_back({kRestart, Tr(L"Restart")});
+        items.push_back({Hibernate, Tr(L"Hibernate")});
+    items.push_back({ShutDown, Tr(L"Shut down")});
+    items.push_back({Restart, Tr(L"Restart")});
     items.push_back({});
-    items.push_back({kDesktop, Tr(L"Desktop")});
+    items.push_back({Desktop, Tr(L"Desktop")});
     return items;
 }
 
 void RunQuickLink(int id)
 {
+    if (id == Terminal || id == TerminalAdmin) {
+        DispatchShellOpen(nullptr, id == TerminalAdmin, true);
+        return;
+    }
     struct LaunchSpec {
         int id;
         const wchar_t* target;
-        bool elevated = false;
     };
-    const wchar_t* terminal = TerminalTarget();
-    const LaunchSpec launches[] = {
-        {kInstalledApps, L"ms-settings:appsfeatures"},
-        {kMobilityCenter, L"mblctr.exe"},
-        {kPowerOptions, L"ms-settings:powersleep"},
-        {kEventViewer, L"eventvwr.msc"},
-        {kSystem, L"ms-settings:about"},
-        {kDeviceManager, L"devmgmt.msc"},
-        {kNetworkConnections, L"ms-settings:network"},
-        {kDiskManagement, L"diskmgmt.msc"},
-        {kComputerManagement, L"compmgmt.msc"},
-        {kTerminal, terminal},
-        {kTerminalAdmin, terminal, true},
-        {kTaskManager, L"taskmgr.exe"},
-        {kSettings, L"ms-settings:"},
-        {kFileExplorer, L"explorer.exe"},
-        {kRun, L"shell:::{2559a1f3-21d7-11d4-bdaf-00c04f60b9f0}"},
+    static constexpr LaunchSpec kLaunches[] = {
+        {InstalledApps, L"ms-settings:appsfeatures"},
+        {MobilityCenter, L"mblctr.exe"},
+        {PowerOptions, L"ms-settings:powersleep"},
+        {EventViewer, L"eventvwr.msc"},
+        {System, L"ms-settings:about"},
+        {DeviceManager, L"devmgmt.msc"},
+        {NetworkConnections, L"ms-settings:network"},
+        {DiskManagement, L"diskmgmt.msc"},
+        {ComputerManagement, L"compmgmt.msc"},
+        {TaskManager, L"taskmgr.exe"},
+        {Settings, L"ms-settings:"},
+        {FileExplorer, L"explorer.exe"},
+        {Run, L"shell:::{2559a1f3-21d7-11d4-bdaf-00c04f60b9f0}"},
     };
-    for (const LaunchSpec& spec : launches) {
+    for (const LaunchSpec& spec : kLaunches) {
         if (spec.id == id) {
-            ShellOpen(spec.target, spec.elevated);
+            DispatchShellOpen(spec.target, false, false);
             return;
         }
     }
     switch (id) {
-    case kSearch: SendWinKey('S'); break;
-    case kDesktop: SendWinKey('D'); break;
-    case kSignOut: ExitWindowsEx(EWX_LOGOFF, SHTDN_REASON_MAJOR_OTHER); break;
-    case kSleep: RunPowerAction(PowerAction::Sleep); break;
-    case kHibernate: RunPowerAction(PowerAction::Hibernate); break;
-    case kShutDown: RunPowerAction(PowerAction::Shutdown); break;
-    case kRestart: RunPowerAction(PowerAction::Restart); break;
+    case Search: SendWinKey('S'); break;
+    case Desktop: SendWinKey('D'); break;
+    case SignOut: ExitWindowsEx(EWX_LOGOFF, SHTDN_REASON_MAJOR_OTHER); break;
+    case Sleep: RunPowerAction(PowerAction::Sleep); break;
+    case Hibernate: RunPowerAction(PowerAction::Hibernate); break;
+    case ShutDown: RunPowerAction(PowerAction::Shutdown); break;
+    case Restart: RunPowerAction(PowerAction::Restart); break;
     default: break;
     }
 }

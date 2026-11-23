@@ -107,6 +107,9 @@ private:
     void PruneIcons(); // under mutex_
     bool QueueIcon(const std::pair<std::wstring, int>& key, bool prefetch);
     void RefreshStartLayout(bool force); // worker only
+    std::vector<CatalogApp> ResolveStartLayoutPins(const std::vector<CatalogApp>& apps, std::vector<CatalogFolder>& pinGroups) const;
+    void RunRefresh(bool forceLayout);
+    void RunIconJob(const std::pair<std::wstring, int>& job);
     std::deque<std::pair<std::wstring, int>> iconJobs_;
     struct CachedIcon {
         IconImage image;
@@ -124,5 +127,13 @@ private:
     uint64_t iconUse_ = 0;
     std::thread thread_;
 };
+
+// Internal helpers shared between app_catalog.cpp and start_pins.cpp.
+std::wstring ExpandKnownEnvFolders(const std::wstring& value);
+void CollectStartLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, std::wstring>>& links, int depth = 0);
+std::vector<CatalogFolder> ReadStartMenuFolders(const std::vector<CatalogApp>& apps);
+bool IsSystemStartFolder(const std::wstring& foldedName);
+bool IsToolStartFolder(const std::wstring& foldedName);
+bool NotAnAppShortcut(const CatalogApp& app);
 
 } // namespace atrium

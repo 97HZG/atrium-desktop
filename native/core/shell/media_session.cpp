@@ -211,8 +211,8 @@ bool SnapshotChanged(const MediaSnapshot& a, const MediaSnapshot& b)
 {
     return TimelineChanged(a.timeline, b.timeline) || a.active != b.active || a.sessionId != b.sessionId || a.appId != b.appId || a.appName != b.appName ||
            a.title != b.title || a.artist != b.artist || a.album != b.album || a.state != b.state || a.canPlayPause != b.canPlayPause ||
-           a.canNext != b.canNext || a.canPrevious != b.canPrevious || a.canSeek != b.canSeek || a.canLike != b.canLike || a.liked != b.liked || a.canLyrics != b.canLyrics ||
-           a.artworkVersion != b.artworkVersion || a.sessionIndex != b.sessionIndex || a.sessionCount != b.sessionCount;
+           a.canNext != b.canNext || a.canPrevious != b.canPrevious || a.canSeek != b.canSeek || a.canLike != b.canLike || a.liked != b.liked ||
+           a.canLyrics != b.canLyrics || a.artworkVersion != b.artworkVersion || a.sessionIndex != b.sessionIndex || a.sessionCount != b.sessionCount;
 }
 
 bool IsRpcError(HRESULT hr)
@@ -291,12 +291,18 @@ struct MediaSessionWatcher::Impl {
         samplingActive_.store(barVisible, std::memory_order_release);
         SetEvent(wake_.handle);
     }
+    void SetCardVisible(bool visible)
+    {
+        const bool was = cardVisible_.exchange(visible, std::memory_order_acq_rel);
+        if (visible && !was)
+            SetEvent(wake_.handle);
+    }
 
 private:
     HWND notify_;
     UINT stateMsg_;
     std::function<void(float, bool)> onPeak_;
-    std::atomic<bool> stop_{false}, samplingActive_{true};
+    std::atomic<bool> stop_{false}, samplingActive_{true}, cardVisible_{false};
     ScopedHandle stopEvent_{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     ScopedHandle wake_{CreateEventW(nullptr, FALSE, TRUE, nullptr)};
     std::mutex mutex_;
@@ -730,7 +736,11 @@ private:
                 break;
             const double nowMs = ClockMs();
             if (woke || hasCommands || nowMs - refreshedMs >= kRefreshMs) {
-                RefreshAndPost();
+                try {
+                    RefreshAndPost();
+                } catch (const winrt::hresult_error& e) {
+                    Log(L"media: refresh failed (%08x)", static_cast<unsigned>(e.code()));
+                }
                 refreshedMs = nowMs;
             }
             if (stop_.load(std::memory_order_acquire))
@@ -744,9 +754,9 @@ private:
                 if (onPeak_)
                     onPeak_(peak, wantSample);
             }
-            // A player whose heart is read from its files (NetEase) tells no event when it changes: read again
-            // every second, playing or not.
-            const bool heartRead = lastPosted_.active && PlayerOf(lastPosted_.appId) == MediaPlayer::Netease;
+            // A player whose heart is read from its files (NetEase) tells no event when it changes: poll
+            // every second while active/playing or while the card is open.
+            const bool heartRead = lastPosted_.active && PlayerOf(lastPosted_.appId) == MediaPlayer::Netease && cardVisible_.load(std::memory_order_acquire);
             const DWORD waitMs = wantSample ? kSampleIntervalMs : hasActivePlayingSession ? static_cast<DWORD>(kRefreshMs) : heartRead ? 1000 : INFINITE;
             woke = WaitForSingleObject(wake_.handle, waitMs) == WAIT_OBJECT_0;
         }
@@ -767,6 +777,7 @@ void MediaSessionWatcher::SetFilter(bool showPaused, std::wstring appMode, std::
     impl_->SetFilter(showPaused, std::move(appMode), std::move(apps));
 }
 void MediaSessionWatcher::SetSamplingActive(bool barVisible) { impl_->SetSamplingActive(barVisible); }
+void MediaSessionWatcher::SetCardVisible(bool visible) { impl_->SetCardVisible(visible); }
 
 void MediaSessionWatcher::Command(MediaCommand command, int64_t positionUs) { impl_->Enqueue({QueuedAction::Kind::Command, command, positionUs, 0}); }
 void MediaSessionWatcher::CycleSession(int delta) { impl_->Enqueue({QueuedAction::Kind::Cycle, MediaCommand::NextSession, 0, delta}); }

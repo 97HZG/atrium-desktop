@@ -83,390 +83,25 @@ bool IsPath(const std::wstring& id) { return id.size() > 2 && id[1] == L':' && (
 
 std::wstring ShellTarget(const std::wstring& id) { return IsPath(id) ? id : (id.starts_with(L"::{") ? L"shell:" : L"shell:AppsFolder\\") + id; }
 
-bool IsWindows11()
-{
-    static const bool kEleven = [] {
-        OSVERSIONINFOW v{sizeof(v)};
-        auto get = reinterpret_cast<LONG(WINAPI*)(OSVERSIONINFOW*)>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
-        return get && get(&v) == 0 && v.dwBuildNumber >= 22000;
-    }();
-    return kEleven;
-}
-
-bool SameText(const std::wstring& a, const std::wstring& b)
-{
-    return !a.empty() && CompareStringOrdinal(a.c_str(), int(a.size()), b.c_str(), int(b.size()), TRUE) == CSTR_EQUAL;
-}
-
-std::wstring ReadUtf8File(const std::wstring& path)
-{
-    std::wstring text;
-    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (f == INVALID_HANDLE_VALUE)
-        return text;
-    LARGE_INTEGER size{};
-    GetFileSizeEx(f, &size);
-    std::string bytes(size_t(std::min<LONGLONG>(size.QuadPart, 4 << 20)), '\0');
-    DWORD read = 0;
-    if (!bytes.empty() && ReadFile(f, bytes.data(), DWORD(bytes.size()), &read, nullptr)) {
-        bytes.resize(read);
-        size_t skip = bytes.starts_with("\xEF\xBB\xBF") ? 3 : 0;
-        int n = MultiByteToWideChar(CP_UTF8, 0, bytes.data() + skip, int(bytes.size() - skip), nullptr, 0);
-        text.resize(size_t(std::max(n, 0)));
-        MultiByteToWideChar(CP_UTF8, 0, bytes.data() + skip, int(bytes.size() - skip), text.data(), n);
-    }
-    CloseHandle(f);
-    return text;
-}
-
-// The Windows start menu's layout file (start2.bin) is encrypted; the
-// supported way to read it is Export-StartLayout, which writes JSON:
-// {"pinnedList":[{"desktopAppLink":"%APPDATA%\\...lnk"},{"packagedAppId":"...!App"},...]}.
-std::wstring ExportStartLayout(HANDLE stopEvent, bool xml, bool* cancelled = nullptr)
-{
-    if (cancelled)
-        *cancelled = false;
-    if (stopEvent && WaitForSingleObject(stopEvent, 0) == WAIT_OBJECT_0) {
-        if (cancelled)
-            *cancelled = true;
-        return {};
-    }
-    wchar_t temp[MAX_PATH] = {}, sys[MAX_PATH] = {};
-    GetTempPathW(MAX_PATH, temp);
-    GetSystemDirectoryW(sys, MAX_PATH);
-    std::wstring file = std::wstring(temp) + L"atrium-start-layout-" + std::to_wstring(GetCurrentProcessId()) + (xml ? L".xml" : L".json");
-    std::wstring quoted; // a PowerShell single-quoted string
-    for (wchar_t ch : file)
-        quoted += ch == L'\'' ? L"''" : std::wstring(1, ch);
-    std::wstring cmd = L"\"" + std::wstring(sys) +
-                       L"\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -ExecutionPolicy Bypass "
-                       L"-Command \"Export-StartLayout -Path '" +
-                       quoted + L"'\"";
-    DeleteFileW(file.c_str());
-    STARTUPINFOW si{sizeof(si)};
-    PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        Log(L"catalog: Export-StartLayout could not start (%lu)", GetLastError());
-        return {};
-    }
-    HANDLE handles[2] = {pi.hProcess, stopEvent};
-    DWORD count = stopEvent ? 2 : 1;
-    DWORD wait = WaitForMultipleObjects(count, handles, FALSE, 20000);
-    if (wait != WAIT_OBJECT_0) {
-        TerminateProcess(pi.hProcess, 1);
-        WaitForSingleObject(pi.hProcess, 3000);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        DeleteFileW(file.c_str());
-        if (cancelled)
-            *cancelled = true;
-        Log(wait == WAIT_OBJECT_0 + 1 ? L"catalog: Export-StartLayout cancelled" : L"catalog: Export-StartLayout timed out");
-        return {};
-    }
-    DWORD code = 1;
-    GetExitCodeProcess(pi.hProcess, &code);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    std::wstring text;
-    if (code == 0)
-        text = ReadUtf8File(file);
-    else
-        Log(L"catalog: Export-StartLayout failed (exit code %lu)", code);
-    DeleteFileW(file.c_str());
-    return text;
-}
-
-// Every "key": "string" pair of a JSON text, in order (all the layout needs).
-std::vector<std::pair<std::wstring, std::wstring>> JsonStringPairs(const std::wstring& j)
-{
-    std::vector<std::pair<std::wstring, std::wstring>> out;
-    auto readString = [&](size_t& i) {
-        std::wstring s;
-        for (++i; i < j.size() && j[i] != L'"'; ++i) {
-            if (j[i] != L'\\' || i + 1 >= j.size()) {
-                s += j[i];
-                continue;
-            }
-            wchar_t e = j[++i];
-            if (e == L'u' && i + 4 < j.size()) {
-                s += wchar_t(std::wcstoul(j.substr(i + 1, 4).c_str(), nullptr, 16));
-                i += 4;
-            } else {
-                s += e == L'n' ? L'\n' : e == L't' ? L'\t' : e == L'r' ? L'\r' : e == L'b' ? L'\b' : e == L'f' ? L'\f' : e;
-            }
-        }
-        ++i; // the closing quote
-        return s;
-    };
-    auto skipSpace = [&](size_t& i) {
-        while (i < j.size() && iswspace(j[i]))
-            ++i;
-    };
-    for (size_t i = 0; i < j.size();) {
-        if (j[i] != L'"') {
-            ++i;
-            continue;
-        }
-        std::wstring key = readString(i);
-        skipSpace(i);
-        if (i >= j.size() || j[i] != L':')
-            continue;
-        ++i;
-        skipSpace(i);
-        if (i < j.size() && j[i] == L'"')
-            out.emplace_back(key, readString(i));
-    }
-    return out;
-}
-
-// %ALLUSERSPROFILE%, %APPDATA% and the like, from the shell's known folders:
-// the process environment may lack them (Atrium started from a service or a
-// sandbox), and then those pins would seem to point nowhere.
-std::wstring ExpandFolders(const std::wstring& value)
-{
-    static const std::pair<const wchar_t*, const KNOWNFOLDERID*> kFolders[] = {
-        {L"%ALLUSERSPROFILE%", &FOLDERID_ProgramData}, {L"%PROGRAMDATA%", &FOLDERID_ProgramData},
-        {L"%APPDATA%", &FOLDERID_RoamingAppData},      {L"%LOCALAPPDATA%", &FOLDERID_LocalAppData},
-        {L"%USERPROFILE%", &FOLDERID_Profile},         {L"%PUBLIC%", &FOLDERID_Public},
-        {L"%PROGRAMFILES%", &FOLDERID_ProgramFiles},   {L"%PROGRAMFILES(X86)%", &FOLDERID_ProgramFilesX86},
-        {L"%SYSTEMROOT%", &FOLDERID_Windows},          {L"%WINDIR%", &FOLDERID_Windows}};
-    std::wstring out = value;
-    for (const auto& [token, id] : kFolders) {
-        size_t len = wcslen(token);
-        if (out.size() < len || CompareStringOrdinal(out.c_str(), int(len), token, int(len), TRUE) != CSTR_EQUAL)
-            continue;
-        PWSTR path = nullptr;
-        if (SUCCEEDED(SHGetKnownFolderPath(*id, KF_FLAG_DEFAULT, nullptr, &path)))
-            out = std::wstring(path) + out.substr(len);
-        CoTaskMemFree(path);
-        break;
-    }
-    wchar_t expanded[MAX_PATH * 2] = {};
-    if (out.find(L'%') != std::wstring::npos && ExpandEnvironmentStringsW(out.c_str(), expanded, DWORD(std::size(expanded))))
-        out = expanded;
-    return out;
-}
-
-// The layout's entries as apps. A pinned shortcut is the catalog's entry only
-// when that is the same app (its AUMID, or the same target under the same
-// name); otherwise the shortcut itself, which keeps its arguments and keeps
-// two shortcuts to one program apart.
-bool ResolveDesktopAppId(const std::wstring& value, const std::vector<CatalogApp>& apps, CatalogApp& out)
-{
-    auto it = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.aumid, value) || SameText(a.id, value); });
-    if (it != apps.end()) return out = *it, true;
-    auto disp = [](const std::wstring& p) {
-        std::wstring n;
-        winrt::com_ptr<IShellItem> item;
-        PWSTR s = nullptr;
-        if (SUCCEEDED(SHCreateItemFromParsingName(p.c_str(), nullptr, IID_PPV_ARGS(item.put()))) && SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &s)) && s)
-            n = s;
-        return CoTaskMemFree(s), n;
-    };
-    if (value.starts_with(L"::{")) { std::wstring n = disp(L"shell:" + value); return out = {n.empty() ? value : n, value, {}, {}, {}}, true; }
-    std::wstring expanded;
-    if (size_t slash = value.find(L'\\'); value.starts_with(L"{") && slash != std::wstring::npos) {
-        GUID kf{}; PWSTR p = nullptr;
-        if (SUCCEEDED(CLSIDFromString(value.substr(0, slash).c_str(), &kf)) && SUCCEEDED(SHGetKnownFolderPath(kf, 0, nullptr, &p)) && p)
-            expanded = std::wstring(p) + value.substr(slash);
-        CoTaskMemFree(p);
-    }
-    if (expanded.empty()) return false;
-    if (auto bt = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.target, expanded); }); bt != apps.end()) return out = *bt, true;
-    if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES) return false;
-    std::wstring name = disp(expanded), f = expanded.substr(expanded.find_last_of(L"\\/") + 1);
-    return out = {name.empty() ? (f.size() > 4 ? f.substr(0, f.size() - 4) : f) : name, expanded, {}, expanded, {}}, true;
-}
-
-std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, std::wstring>>& layout, const std::vector<CatalogApp>& apps)
-{
-    std::vector<CatalogApp> out;
-    auto add = [&](const CatalogApp& a) {
-        if (std::ranges::none_of(out, [&](const CatalogApp& o) { return SameText(o.id, a.id); }))
-            out.push_back(a);
-    };
-    for (const auto& [key, value] : layout) {
-        if (key == L"packagedAppId") {
-            auto it = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.aumid, value) || SameText(a.id, value); });
-            if (it != apps.end())
-                add(*it);
-            else
-                Log(L"catalog: start pin %s is not installed", value.c_str());
-            continue;
-        }
-        if (key == L"desktopAppId") {
-            if (CatalogApp app; ResolveDesktopAppId(value, apps, app))
-                add(app);
-            continue;
-        }
-        if (key != L"desktopAppLink")
-            continue;
-        std::wstring expanded = ExpandFolders(value);
-        // Start layouts exported before the rename still refer to this shortcut.
-        constexpr std::wstring_view kLegacy = L"\\Atrium.Core.lnk";
-        if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES && expanded.size() >= kLegacy.size() &&
-            SameText(expanded.substr(expanded.size() - kLegacy.size()), std::wstring(kLegacy)))
-            expanded.replace(expanded.size() - kLegacy.size(), kLegacy.size(), L"\\Atrium.lnk");
-        if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            Log(L"catalog: start pin %s not found", value.c_str());
-            continue;
-        }
-        CatalogApp link;
-        link.id = expanded;
-        winrt::com_ptr<IShellItem2> item;
-        if (SUCCEEDED(SHCreateItemFromParsingName(expanded.c_str(), nullptr, IID_PPV_ARGS(item.put())))) {
-            PWSTR s = nullptr;
-            if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &s)) && s)
-                link.name = s; // localised ("File Explorer.lnk" shows as 文件资源管理器)
-            CoTaskMemFree(s);
-            link.aumid = PropString(item.get(), PKEY_AppUserModel_ID);
-            link.target = PropString(item.get(), PKEY_Link_TargetParsingPath);
-            link.args = PropString(item.get(), PKEY_Link_Arguments);
-        }
-        if (link.name.empty()) {
-            std::wstring file = link.id.substr(link.id.find_last_of(L"\\/") + 1);
-            link.name = file.size() > 4 ? file.substr(0, file.size() - 4) : file;
-        }
-        auto it = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.aumid, link.aumid) || SameText(a.id, link.aumid); });
-        if (it == apps.end())
-            it = std::ranges::find_if(apps, [&](const CatalogApp& a) { return SameText(a.target, link.target) && SameText(a.name, link.name); });
-        add(it != apps.end() ? *it : link);
-    }
-    return out;
-}
-
-std::vector<CatalogFolder> ResolvePinGroups(const std::vector<StartPinGroup>& groups, const std::vector<CatalogApp>& apps)
-{
-    std::vector<CatalogFolder> out;
-    std::vector<std::wstring> seen;
-    for (const StartPinGroup& g : groups) {
-        std::vector<std::pair<std::wstring, std::wstring>> pairs;
-        pairs.reserve(g.items.size());
-        for (const StartPinItem& it : g.items)
-            pairs.emplace_back(it.kind == StartPinItem::Kind::PackagedAppId ? L"packagedAppId" : it.kind == StartPinItem::Kind::DesktopAppLink ? L"desktopAppLink" : L"desktopAppId", it.value);
-        auto resolved = ResolvePins(pairs, apps);
-        std::erase_if(resolved, [&](const CatalogApp& a) { return std::ranges::any_of(seen, [&](const std::wstring& id) { return SameText(id, a.id); }) || (seen.push_back(a.id), false); });
-        if (const bool f = (g.folder || !g.name.empty()) && resolved.size() >= 2; !resolved.empty())
-            out.push_back({f ? g.name : L"", std::move(resolved), f});
-    }
-    return out;
-}
-
-// Not an app of a folder: an uninstaller ("卸载微信", "Uninstall Git", unins000.exe), or a shortcut
-// to a document ("7-Zip Help", release notes, a web page, a folder). A shortcut with no target path
-// (a packaged app, an installer's advertised shortcut) is an app.
-bool NotAnApp(const CatalogApp& app)
-{
-    const std::wstring name = Fold(app.name), target = Fold(app.target.substr(app.target.find_last_of(L"\\/") + 1));
-    if (name.find(L"uninstall") != std::wstring::npos || name.find(L"卸载") != std::wstring::npos || name.find(L"解除安装") != std::wstring::npos ||
-        target.starts_with(L"unins"))
-        return true;
-    return !target.empty() && !target.ends_with(L".exe");
-}
-
-// Windows' own folders of the start menu's All apps list.
-constexpr const wchar_t* kSystemFolders[] = {L"accessibility", L"accessories",  L"administrative tools", L"maintenance",
-                                             L"startup",       L"system tools", L"windows powershell",   L"windows tools"};
-
-// Beyond those, the tools that came with the PC, for Launchpad's folder of Windows' own apps: the start
-// menu's folders of tools, the computer makers' and the chip makers' apps (by publisher or by their
-// folder) and Windows' packaged helpers. Microsoft's everyday apps (Edge, Photos, Notepad, Outlook...)
-// stay with the user's, as Safari and Mail do on macOS.
-constexpr const wchar_t* kToolFolders[] = {L"microsoft office tools", L"windows kits"};
-constexpr const wchar_t* kMakers[] = {L"nvidia", L"intel",      L"realtek", L"dolby",       L"lenovo",  L"dell",        L"hp inc",
-                                      L"hewlett", L"asus",       L"acer",    L"micro-star",  L"synaptics", L"waves audio", L"elan"};
-constexpr const wchar_t* kHelperPackages[] = {L"microsoft.windowsfeedbackhub_",     L"microsoft.gethelp_",
-                                              L"microsoft.getstarted_",             L"microsoft.windows.devhome_",
-                                              L"microsoftcorporationii.quickassist_", L"microsoftcorporationii.microsoftfamily_",
-                                              L"microsoft.powerautomatedesktop_",   L"microsoft.xboxgamingoverlay_",
-                                              L"microsoftwindows.client."};
+constexpr const wchar_t* kMakers[] = {
+    L"nvidia",  L"intel", L"realtek", L"dolby",      L"lenovo",    L"dell",        L"hp inc",
+    L"hewlett", L"asus",  L"acer",    L"micro-star", L"synaptics", L"waves audio", L"elan",
+};
+constexpr const wchar_t* kHelperPackages[] = {
+    L"microsoft.windowsfeedbackhub_",
+    L"microsoft.gethelp_",
+    L"microsoft.getstarted_",
+    L"microsoft.windows.devhome_",
+    L"microsoftcorporationii.quickassist_",
+    L"microsoftcorporationii.microsoftfamily_",
+    L"microsoft.powerautomatedesktop_",
+    L"microsoft.xboxgamingoverlay_",
+    L"microsoftwindows.client.",
+};
 
 bool ByMaker(const std::wstring& folded)
 {
     return std::ranges::any_of(kMakers, [&](const wchar_t* m) { return folded.find(m) != std::wstring::npos; });
-}
-
-// Every shortcut in `dir` and its subfolders (bounded depth, skipping reparse loops).
-void CollectLinks(const std::wstring& dir, std::vector<std::pair<std::wstring, std::wstring>>& links, int depth = 0)
-{
-    if (depth >= 8)
-        return;
-    WIN32_FIND_DATAW fd{};
-    HANDLE h = FindFirstFileExW((dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
-    if (h == INVALID_HANDLE_VALUE)
-        return;
-    std::vector<std::wstring> subdirs;
-    do {
-        const std::wstring name = fd.cFileName;
-        if (name == L"." || name == L"..")
-            continue;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            if (depth + 1 < 8 && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
-                subdirs.push_back(dir + L"\\" + name);
-        } else if (name.size() > 4 && Fold(name.substr(name.size() - 4)) == L".lnk") {
-            links.emplace_back(L"desktopAppLink", dir + L"\\" + name);
-        }
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    for (const std::wstring& sub : subdirs)
-        CollectLinks(sub, links, depth + 1);
-}
-
-// The All apps list's folders: each folder right under the two Start Menu\Programs folders (a
-// folder of both is one), with the shortcuts in it and in its subfolders, as All apps shows them;
-// by the name the shell shows (desktop.ini's localised name). Windows' own folders
-// (Accessibility, Windows Tools' parts, Startup) are left out.
-std::vector<CatalogFolder> ReadStartFolders(const std::vector<CatalogApp>& apps)
-{
-    std::vector<std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>>> found; // shown name, its links
-    for (const KNOWNFOLDERID* id : {&FOLDERID_CommonPrograms, &FOLDERID_Programs}) {
-        PWSTR root = nullptr;
-        if (FAILED(SHGetKnownFolderPath(*id, KF_FLAG_DEFAULT, nullptr, &root)) || !root) {
-            CoTaskMemFree(root);
-            continue;
-        }
-        const std::wstring programs = root;
-        CoTaskMemFree(root);
-        WIN32_FIND_DATAW fd{};
-        HANDLE h = FindFirstFileExW((programs + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
-        if (h == INVALID_HANDLE_VALUE)
-            continue;
-        do {
-            const std::wstring name = fd.cFileName, folded = Fold(name);
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || name == L"." || name == L".." ||
-                std::ranges::any_of(kSystemFolders, [&](const wchar_t* s) { return folded == s; }))
-                continue;
-            const std::wstring dir = programs + L"\\" + name;
-            std::vector<std::pair<std::wstring, std::wstring>> links;
-            CollectLinks(dir, links);
-            if (links.empty())
-                continue;
-            std::wstring shown = name;
-            winrt::com_ptr<IShellItem> item;
-            if (SUCCEEDED(SHCreateItemFromParsingName(dir.c_str(), nullptr, IID_PPV_ARGS(item.put())))) {
-                PWSTR s = nullptr;
-                if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &s)) && s && *s)
-                    shown = s;
-                CoTaskMemFree(s);
-            }
-            auto it = std::ranges::find_if(found, [&](const auto& f) { return Fold(f.first) == Fold(shown); });
-            if (it == found.end())
-                found.emplace_back(shown, std::move(links));
-            else
-                it->second.insert(it->second.end(), links.begin(), links.end());
-        } while (FindNextFileW(h, &fd));
-        FindClose(h);
-    }
-    std::vector<CatalogFolder> out;
-    for (auto& [name, links] : found) {
-        CatalogFolder folder{name, {}};
-        for (CatalogApp& app : ResolvePins(links, apps))
-            if (!NotAnApp(app))
-                folder.apps.push_back(std::move(app));
-        if (folder.apps.size() >= 2)
-            out.push_back(std::move(folder));
-    }
-    return out;
 }
 
 int64_t Ticks(const FILETIME& t) { return int64_t((uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime); }
@@ -477,17 +112,14 @@ int64_t Created(const std::wstring& path)
     return !path.empty() && GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fa) ? Ticks(fa.ftCreationTime) : 0;
 }
 
-// When each app came, for Launchpad's order: a packaged app's package install date; a desktop app's start
-// menu shortcut's creation (the installer made it), else its program's; 0 when unknown (Windows' own). And
-// which are Windows' own tools, for Launchpad to keep apart: packages that ship inside Windows, makers' and
-// Windows' helper packages, programs under the Windows folder, shortcuts in Windows' folders of the start menu.
-void StampInstalled(std::vector<CatalogApp>& apps)
+struct PackageInfo {
+    int64_t installed = 0;
+    bool system = false;
+};
+
+std::map<std::wstring, PackageInfo> CollectInstalledPackages()
 {
-    struct Package {
-        int64_t installed;
-        bool system;
-    };
-    std::map<std::wstring, Package> packages; // family name, folded
+    std::map<std::wstring, PackageInfo> packages;
     try {
         namespace Wam = winrt::Windows::ApplicationModel;
         winrt::Windows::Management::Deployment::PackageManager manager;
@@ -499,84 +131,123 @@ void StampInstalled(std::vector<CatalogApp>& apps)
                                 std::ranges::any_of(kHelperPackages, [&](const wchar_t* p) { return family.starts_with(p); });
             packages[family] = {package.InstalledDate().time_since_epoch().count(), system};
         }
-    } catch (...) {
+    } catch (const winrt::hresult_error&) {
         Log(L"catalog: packages' install dates unavailable");
     }
+    return packages;
+}
+
+struct ShortcutIndex {
+    std::map<std::wstring, int64_t> byTarget;
+    std::map<std::wstring, int64_t> byName;
+    std::set<std::wstring> systemTargets;
+    std::set<std::wstring> systemNames;
+};
+
+void RecordEarliest(std::map<std::wstring, int64_t>& m, const std::wstring& key, int64_t t)
+{
+    if (key.empty() || t == 0)
+        return;
+    auto [it, added] = m.try_emplace(key, t);
+    if (!added)
+        it->second = std::min(it->second, t);
+}
+
+bool IsSystemShortcutRelativePath(const std::wstring& within)
+{
+    const size_t slash = within.find(L'\\');
+    if (slash == std::wstring::npos)
+        return false;
+    const std::wstring top = within.substr(0, slash);
+    return IsSystemStartFolder(top) || IsToolStartFolder(top);
+}
+
+void IndexProgramsFolderLinks(const KNOWNFOLDERID& id, ShortcutIndex& index)
+{
+    PWSTR root = nullptr;
+    if (FAILED(SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, nullptr, &root)) || !root) {
+        CoTaskMemFree(root);
+        return;
+    }
+    std::vector<std::pair<std::wstring, std::wstring>> links;
+    const std::wstring programs = root;
+    CollectStartLinks(programs, links);
+    CoTaskMemFree(root);
+    for (const auto& [_, link] : links) {
+        const int64_t t = Created(link);
+        const std::wstring file = link.substr(link.find_last_of(L'\\') + 1);
+        const std::wstring name = Fold(file.substr(0, file.size() - 4));
+        const std::wstring within = Fold(link.substr(std::min(link.size(), programs.size() + 1)));
+        const bool inSystem = IsSystemShortcutRelativePath(within);
+        RecordEarliest(index.byName, name, t);
+        if (inSystem)
+            index.systemNames.insert(name);
+        winrt::com_ptr<IShellLinkW> shell;
+        wchar_t target[MAX_PATH] = {};
+        if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(shell.put()))) &&
+            SUCCEEDED(shell.as<IPersistFile>()->Load(link.c_str(), STGM_READ)) && SUCCEEDED(shell->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH))) {
+            const std::wstring folded = Fold(ExpandKnownEnvFolders(target));
+            RecordEarliest(index.byTarget, folded, t);
+            if (inSystem)
+                index.systemTargets.insert(folded);
+        }
+    }
+}
+
+std::wstring ProgramFilesVendor(const std::wstring& target)
+{
+    const size_t pf = target.find(L"\\program files");
+    if (pf == std::wstring::npos)
+        return {};
+    const size_t afterRoot = target.find(L'\\', pf + 1);
+    if (afterRoot == std::wstring::npos)
+        return {};
+    const size_t nextSlash = target.find(L'\\', afterRoot + 1);
+    return target.substr(afterRoot, nextSlash - afterRoot);
+}
+
+void StampApp(CatalogApp& app, const std::map<std::wstring, PackageInfo>& packages, const ShortcutIndex& index, const std::wstring& windowsDir)
+{
+    const std::wstring& aumid = app.aumid.empty() ? app.id : app.aumid;
+    if (const size_t bang = aumid.find(L'!'); bang != std::wstring::npos) {
+        if (auto it = packages.find(Fold(aumid.substr(0, bang))); it != packages.end()) {
+            app.installed = it->second.installed;
+            app.system = it->second.system;
+            return;
+        }
+    }
+    const std::wstring target = Fold(app.target);
+    const std::wstring id = Fold(app.id);
+    const std::wstring exe = target.substr(target.find_last_of(L'\\') + 1);
+    // File Explorer is Windows' own and everyday, as the Finder.
+    app.system = (target.starts_with(windowsDir) && exe != L"explorer.exe") || index.systemTargets.contains(target) ||
+                 index.systemNames.contains(Fold(app.name)) || (id.starts_with(L"microsoft.windows.") && id != L"microsoft.windows.explorer") ||
+                 id.starts_with(L"::{") || ByMaker(ProgramFilesVendor(target));
+    if (IsPath(app.id) && Fold(app.id).ends_with(L".lnk")) {
+        app.installed = Created(app.id);
+        return;
+    }
+    if (auto it = index.byTarget.find(target); !app.target.empty() && it != index.byTarget.end())
+        app.installed = it->second;
+    else if (auto named = index.byName.find(Fold(app.name)); named != index.byName.end())
+        app.installed = named->second;
+    else
+        app.installed = Created(app.target);
+}
+
+// When each app came, for Launchpad's order: a packaged app's package install date; a desktop app's start
+// menu shortcut's creation (the installer made it), else its program's; 0 when unknown (Windows' own).
+void StampInstalled(std::vector<CatalogApp>& apps)
+{
+    const std::map<std::wstring, PackageInfo> packages = CollectInstalledPackages();
     wchar_t windows[MAX_PATH] = {};
     GetWindowsDirectoryW(windows, MAX_PATH);
     const std::wstring windowsDir = Fold(std::wstring(windows) + L"\\");
-    // The start menu's shortcuts by their target and by their name, the earliest of each; those in Windows' folders.
-    std::map<std::wstring, int64_t> byTarget, byName;
-    std::set<std::wstring> systemTargets, systemNames;
-    auto earliest = [](std::map<std::wstring, int64_t>& m, const std::wstring& key, int64_t t) {
-        if (key.empty() || t == 0)
-            return;
-        auto [it, added] = m.try_emplace(key, t);
-        if (!added)
-            it->second = std::min(it->second, t);
-    };
-    for (const KNOWNFOLDERID* id : {&FOLDERID_CommonPrograms, &FOLDERID_Programs}) {
-        PWSTR root = nullptr;
-        if (FAILED(SHGetKnownFolderPath(*id, KF_FLAG_DEFAULT, nullptr, &root)) || !root) {
-            CoTaskMemFree(root);
-            continue;
-        }
-        std::vector<std::pair<std::wstring, std::wstring>> links;
-        const std::wstring programs = root;
-        CollectLinks(programs, links);
-        CoTaskMemFree(root);
-        for (const auto& [_, link] : links) {
-            const int64_t t = Created(link);
-            const std::wstring file = link.substr(link.find_last_of(L'\\') + 1), name = Fold(file.substr(0, file.size() - 4));
-            const std::wstring within = Fold(link.substr(std::min(link.size(), programs.size() + 1)));
-            auto in = [&](const auto& folders) {
-                return std::ranges::any_of(folders, [&](const wchar_t* f) { return within.starts_with(std::wstring(f) + L"\\"); });
-            };
-            const bool inSystem = in(kSystemFolders) || in(kToolFolders);
-            earliest(byName, name, t);
-            if (inSystem)
-                systemNames.insert(name);
-            winrt::com_ptr<IShellLinkW> shell;
-            wchar_t target[MAX_PATH] = {};
-            if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(shell.put()))) &&
-                SUCCEEDED(shell.as<IPersistFile>()->Load(link.c_str(), STGM_READ)) && SUCCEEDED(shell->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH))) {
-                const std::wstring folded = Fold(ExpandFolders(target));
-                earliest(byTarget, folded, t);
-                if (inSystem)
-                    systemTargets.insert(folded);
-            }
-        }
-    }
-    for (CatalogApp& app : apps) {
-        const std::wstring& aumid = app.aumid.empty() ? app.id : app.aumid;
-        if (const size_t bang = aumid.find(L'!'); bang != std::wstring::npos)
-            if (auto it = packages.find(Fold(aumid.substr(0, bang))); it != packages.end()) {
-                app.installed = it->second.installed;
-                app.system = it->second.system;
-                continue;
-            }
-        const std::wstring target = Fold(app.target), id = Fold(app.id);
-        const std::wstring exe = target.substr(target.find_last_of(L'\\') + 1);
-        // A maker's program: its folder under Program Files (C:\Program Files\NVIDIA Corporation\...).
-        const size_t afterRoot = target.find(L'\\', target.find(L"\\program files") + 1);
-        const std::wstring vendor = target.find(L"\\program files") == std::wstring::npos || afterRoot == std::wstring::npos
-                                        ? std::wstring()
-                                        : target.substr(afterRoot, target.find(L'\\', afterRoot + 1) - afterRoot);
-        // File Explorer is Windows' own and everyday, as the Finder.
-        app.system = (target.starts_with(windowsDir) && exe != L"explorer.exe") || systemTargets.contains(target) ||
-                     systemNames.contains(Fold(app.name)) || (id.starts_with(L"microsoft.windows.") && id != L"microsoft.windows.explorer") ||
-                     id.starts_with(L"::{") || ByMaker(vendor);
-        if (IsPath(app.id) && Fold(app.id).ends_with(L".lnk")) {
-            app.installed = Created(app.id);
-            continue;
-        }
-        if (auto it = byTarget.find(Fold(app.target)); !app.target.empty() && it != byTarget.end())
-            app.installed = it->second;
-        else if (auto named = byName.find(Fold(app.name)); named != byName.end())
-            app.installed = named->second;
-        else
-            app.installed = Created(app.target);
-    }
+    ShortcutIndex index;
+    IndexProgramsFolderLinks(FOLDERID_CommonPrograms, index);
+    IndexProgramsFolderLinks(FOLDERID_Programs, index);
+    for (CatalogApp& app : apps)
+        StampApp(app, packages, index, windowsDir);
 }
 
 } // namespace
@@ -593,7 +264,7 @@ bool AppCatalog::IsLaunchable(const CatalogApp& app)
          {L"readme", L"read me", L"help", L"帮助", L"manual", L"手册", L"license", L"许可", L"website", L"官网", L"官方网站", L"release notes"})
         if (name.find(word) != std::wstring::npos)
             return false;
-    return !NotAnApp(app);
+    return !NotAnAppShortcut(app);
 }
 
 AppCatalog::AppCatalog(HWND notify, UINT readyMsg) : notify_(notify), msg_(readyMsg), stopEvent_(CreateEventW(nullptr, TRUE, FALSE, nullptr)), refresh_(true)
@@ -650,8 +321,6 @@ std::vector<CatalogFolder> AppCatalog::StartPinGroups() const
     std::lock_guard g(mutex_);
     return startPinGroups_;
 }
-
-bool AppCatalog::StartMenuUsesXml() const { return !IsWindows11(); }
 
 std::vector<CatalogFolder> AppCatalog::StartFolders() const
 {
@@ -790,29 +459,59 @@ void AppCatalog::PruneIcons()
     }
 }
 
-void AppCatalog::RefreshStartLayout(bool force)
+void AppCatalog::RunRefresh(bool forceLayout)
 {
-    const bool win11 = IsWindows11();
-    WIN32_FILE_ATTRIBUTE_DATA fa{};
-    bool hasBin = false;
-    if (win11) {
-        wchar_t local[MAX_PATH] = {};
-        GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
-        std::wstring bin = std::wstring(local) + L"\\Packages\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\LocalState\\start2.bin";
-        hasBin = GetFileAttributesExW(bin.c_str(), GetFileExInfoStandard, &fa) != 0;
+    const ULONGLONG t0 = GetTickCount64();
+    std::vector<CatalogApp> apps = Enumerate();
+    StampInstalled(apps);
+    Log(L"catalog: %zu apps in %llu ms", apps.size(), GetTickCount64() - t0);
+
+    RefreshStartLayout(forceLayout);
+    std::vector<CatalogFolder> pinGroups;
+    std::vector<CatalogApp> pins = ResolveStartLayoutPins(apps, pinGroups);
+    std::vector<CatalogFolder> folders = ReadStartMenuFolders(apps);
+    {
+        std::lock_guard g(mutex_);
+        apps_ = std::move(apps);
+        startPins_ = std::move(pins);
+        startPinGroups_ = std::move(pinGroups);
+        startFolders_ = std::move(folders);
+        liveIds_.clear();
+        for (const auto& app : apps_)
+            liveIds_.insert(app.id);
+        for (const auto& app : startPins_)
+            liveIds_.insert(app.id);
+        for (const auto& folder : startFolders_) {
+            for (const auto& app : folder.apps)
+                liveIds_.insert(app.id);
+        }
+        liveIds_.insert(startIds_.begin(), startIds_.end());
+        failed_.clear(); // catalogue changes allow another bounded attempt
+        loaded_ = true;
+        PruneIcons();
+        QueuePrefetch();
     }
-    if (layoutLoaded_ && !force && (!win11 || !hasBin || CompareFileTime(&fa.ftLastWriteTime, &layoutTime_) == 0))
-        return;
-    ULONGLONG t1 = GetTickCount64();
-    bool cancelled = false;
-    std::wstring text = ExportStartLayout(stopEvent_, !win11, &cancelled);
-    if (cancelled)
-        return;
-    if (text.find(win11 ? L"\"pinnedList\"" : L"LayoutModificationTemplate") != std::wstring::npos) {
-        win11 ? (void)(layout_ = JsonStringPairs(text)) : (void)(xmlLayout_ = ParseStartLayoutXml(text));
-        layoutTime_ = fa.ftLastWriteTime, layoutLoaded_ = true;
+    PostMessageW(notify_, msg_, 0, 0);
+}
+
+void AppCatalog::RunIconJob(const std::pair<std::wstring, int>& job)
+{
+    IconImage img;
+    LoadShellImage(ShellTarget(job.first), job.second, img);
+    {
+        std::lock_guard g(mutex_);
+        requested_.erase(job);
+        if (!img.Empty()) {
+            icons_[job] = {std::move(img), ++iconUse_};
+            failed_.erase(job);
+        } else {
+            auto& failure = failed_[job];
+            ++failure.attempts;
+            failure.time = GetTickCount64();
+        }
+        PruneIcons();
     }
-    Log(L"catalog: start layout exported (%zu entries) in %llu ms", win11 ? layout_.size() : xmlLayout_.size(), GetTickCount64() - t1);
+    PostMessageW(notify_, msg_, 1, 0);
 }
 
 void AppCatalog::Worker()
@@ -839,80 +538,10 @@ void AppCatalog::Worker()
                 forceLayout_ = false;
             }
         }
-        if (refresh) {
-            ULONGLONG t0 = GetTickCount64();
-            std::vector<CatalogApp> apps;
-            try {
-                apps = Enumerate();
-            } catch (...) {
-                Log(L"catalog: enumeration failed");
-            }
-            try {
-                StampInstalled(apps);
-            } catch (...) {
-                Log(L"catalog: install dates failed");
-            }
-            Log(L"catalog: %zu apps in %llu ms", apps.size(), GetTickCount64() - t0);
-            // The start menu's pins: exported again only when its layout file changed.
-            std::vector<CatalogApp> pins;
-            std::vector<CatalogFolder> pinGroups;
-            try {
-                RefreshStartLayout(forceLayout);
-                pins = IsWindows11() ? ResolvePins(layout_, apps) : [&] {
-                    pinGroups = ResolvePinGroups(xmlLayout_, apps);
-                    std::vector<CatalogApp> flat;
-                    for (const CatalogFolder& g : pinGroups)
-                        flat.insert(flat.end(), g.apps.begin(), g.apps.end());
-                    return flat;
-                }();
-            } catch (...) {
-                Log(L"catalog: start pins failed");
-            }
-            std::vector<CatalogFolder> folders;
-            try {
-                folders = ReadStartFolders(apps);
-            } catch (...) {
-                Log(L"catalog: start folders failed");
-            }
-            {
-                std::lock_guard g(mutex_);
-                apps_ = std::move(apps);
-                startPins_ = std::move(pins);
-                startPinGroups_ = std::move(pinGroups);
-                startFolders_ = std::move(folders);
-                liveIds_.clear();
-                for (const auto& app : apps_)
-                    liveIds_.insert(app.id);
-                for (const auto& app : startPins_)
-                    liveIds_.insert(app.id);
-                for (const auto& folder : startFolders_)
-                    for (const auto& app : folder.apps)
-                        liveIds_.insert(app.id);
-                liveIds_.insert(startIds_.begin(), startIds_.end());
-                failed_.clear(); // catalogue changes allow another bounded attempt
-                loaded_ = true;
-                PruneIcons();
-                QueuePrefetch();
-            }
-            PostMessageW(notify_, msg_, 0, 0);
-            continue;
-        }
-        IconImage img;
-        LoadShellImage(ShellTarget(job.first), job.second, img);
-        {
-            std::lock_guard g(mutex_);
-            requested_.erase(job);
-            if (!img.Empty()) {
-                icons_[job] = {std::move(img), ++iconUse_};
-                failed_.erase(job);
-            } else {
-                auto& failure = failed_[job];
-                ++failure.attempts;
-                failure.time = GetTickCount64();
-            }
-            PruneIcons();
-        }
-        PostMessageW(notify_, msg_, 1, 0);
+        if (refresh)
+            RunRefresh(forceLayout);
+        else
+            RunIconJob(job);
     }
     winrt::uninit_apartment();
 }

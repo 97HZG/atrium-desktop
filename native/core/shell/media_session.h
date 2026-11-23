@@ -23,6 +23,7 @@ public:
 
     void SetFilter(bool showPaused, std::wstring appMode, std::vector<std::wstring> apps);
     void SetSamplingActive(bool barVisible);
+    void SetCardVisible(bool visible);
 
     void Command(MediaCommand command, int64_t positionUs = 0);
     void PlayPause() { Command(MediaCommand::PlayPause, 0); }
