@@ -43,7 +43,7 @@ constexpr float kPictureScale = 1.25f; // pictures are taken this much larger th
 constexpr float kPictureRadius = 8;
 constexpr float kBarRoom = 90;         // the bar floats over the bottom of the work area
 constexpr int kMaxEntries = 6;
-constexpr float kMoreOpacity = 0.45f, kMoreBlur = 5; // the last card while more sets wait past it
+constexpr float kMoreBlur = 6, kMoreReach = 14; // the last card while more sets wait past it: its blur, and how far past its box the fade reaches
 constexpr UINT_PTR kWatchTimer = 0x5C01, kDownTimer = 0x5C02, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
 constexpr UINT kWatchMs = 30, kRaiseMs = 220, kDownMs = 700;
 constexpr ULONGLONG kDesktopMs = 250; // the desktop in front this long: it was clicked
@@ -1781,19 +1781,27 @@ void StageManager::Paint(Canvas& c)
     const bool moving = Animate(c.now);
     for (Entry& e : leaving_)
         PaintEntry(c, e, -1, false);
-    // More sets than the strip holds (the wheel pages through them): the last card fades out, blurred,
-    // so the strip reads as one that goes on (#112).
+    // More sets than the strip holds (the wheel pages through them): the last card goes from sharp at
+    // its top to blurred, and is gone at its bottom, so the strip reads as one that goes on (#112). A
+    // sharp and a blurred copy cross-fade down the card.
     const bool more = scrollCount_ > entries_.size();
     for (size_t i = 0; i < entries_.size(); ++i) {
         if (!more || i + 1 < entries_.size()) {
             PaintEntry(c, entries_[i], int(i), true);
             continue;
         }
-        c.BeginGroup(kMoreOpacity, 1, 0, 0);
-        c.BeginBlur();
+        const D2D1_RECT_F box = Box(entries_[i]);
+        const D2D1_POINT_2F from{0, box.top - kMoreReach}, to{0, box.bottom + kMoreReach};
+        static constexpr D2D1_GRADIENT_STOP kSharp[] = {{0.f, {1, 1, 1, 1}}, {0.2f, {1, 1, 1, 1}}, {0.7f, {1, 1, 1, 0}}};
+        static constexpr D2D1_GRADIENT_STOP kBlurred[] = {{0.2f, {1, 1, 1, 0}}, {0.6f, {1, 1, 1, 0.85f}}, {1.f, {1, 1, 1, 0}}};
+        c.BeginFade(from, to, kSharp);
         PaintEntry(c, entries_[i], int(i), true);
+        c.EndFade();
+        c.BeginBlur();
+        c.BeginFade(from, to, kBlurred);
+        PaintEntry(c, entries_[i], int(i), true);
+        c.EndFade();
         c.EndBlur(kMoreBlur);
-        c.EndGroup();
     }
     UpdateRegion(moving);
     if (moving)

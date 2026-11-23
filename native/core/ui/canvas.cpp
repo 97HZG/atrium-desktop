@@ -471,6 +471,23 @@ void Canvas::EndBlur(float radius)
     d2d_->SetTransform(transform);
 }
 
+void Canvas::BeginFade(D2D1_POINT_2F from, D2D1_POINT_2F to, std::span<const D2D1_GRADIENT_STOP> stops)
+{
+    winrt::com_ptr<ID2D1GradientStopCollection> collection;
+    winrt::com_ptr<ID2D1LinearGradientBrush> mask;
+    if (FAILED(d2d_->CreateGradientStopCollection(stops.data(), UINT32(stops.size()), collection.put())) ||
+        FAILED(d2d_->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(from.x * scale, from.y * scale),
+                                                                                    D2D1::Point2F(to.x * scale, to.y * scale)),
+                                               collection.get(), mask.put()))) {
+        d2d_->PushLayer(D2D1::LayerParameters1(), nullptr); // EndFade pops it either way
+        return;
+    }
+    d2d_->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), 1.f, mask.get()),
+                    nullptr);
+}
+
+void Canvas::EndFade() { d2d_->PopLayer(); }
+
 void Canvas::Clip(D2D1_RECT_F r) { d2d_->PushAxisAlignedClip(Px(r), D2D1_ANTIALIAS_MODE_ALIASED); }
 void Canvas::Unclip() { d2d_->PopAxisAlignedClip(); }
 

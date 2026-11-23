@@ -121,6 +121,10 @@ public:
     // No nesting; clips pushed inside are popped inside.
     void BeginBlur();
     void EndBlur(float radius);
+    // What is drawn between the two fades along the line `from` to `to` (DIP): `stops` give the
+    // opacity (their colour's alpha) at positions 0..1 of it. May sit inside a blur.
+    void BeginFade(D2D1_POINT_2F from, D2D1_POINT_2F to, std::span<const D2D1_GRADIENT_STOP> stops);
+    void EndFade();
     // Apply the analytic glass outline to the content already drawn.
     void MaskRounded(D2D1_RECT_F r, float radius);
     ID2D1DeviceContext* D2D() const { return d2d_; }
