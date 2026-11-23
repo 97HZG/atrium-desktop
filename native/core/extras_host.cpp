@@ -157,7 +157,9 @@ void ExtrasHost::UpdateSampling()
 {
     if (!media_)
         return;
-    bool seen = card_.Visible();
+    const bool cardVisible = card_.Visible();
+    media_->SetCardVisible(cardVisible);
+    bool seen = cardVisible;
     forBars_([&](Bar& bar) { seen = seen || bar.Seen(); });
     const bool want = liveRhythm_ && seen;
     if (samplingActive_ == want)
