@@ -15,7 +15,7 @@ public sealed partial class MainWindow
         ("NetEase Cloud Music",
             "Its progress is read from the player itself. The heart and the lyrics use its shortcuts (Ctrl+Alt+L, Ctrl+Alt+D). It takes no position from other apps.",
             ["cloudmusic.exe"], "netease", ["cloudmusic.exe"]),
-        ("QQ Music", "Progress and seeking. The heart and the lyrics use its shortcuts (Ctrl+Alt+V, Ctrl+Alt+W).",
+        ("QQ Music", "Progress and seeking. The lyrics use its shortcut (Ctrl+Alt+W).",
             ["QQMusic.exe"], "qqmusic", ["QQMusic.exe", "Tencent.QQMusic"]),
         ("Spotify", "Progress and seeking.", ["Spotify.exe"], "spotify", ["Spotify.exe", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!"]),
         ("Apple Music", "Progress, and the artist and the album apart.", ["AppleMusic.exe"], "applemusic",
@@ -56,7 +56,7 @@ public sealed partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var glyph = new FontIcon { Glyph = vm.Glyph, FontSize = 20, Foreground = (Brush)Application.Current.Resources["InkSecondaryBrush"] };
+        var glyph = new FontIcon { Glyph = vm.Glyph, FontSize = 20, Foreground = Tokens.Brush("InkSecondaryBrush") };
         var image = new Image { Width = 36, Height = 36 };
         vm.PropertyChanged += (_, e) =>
         {

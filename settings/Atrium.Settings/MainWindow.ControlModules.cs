@@ -86,7 +86,8 @@ public sealed partial class MainWindow
         };
         button.PointerEntered += (_, _) => button.Translation = new Vector3(0, -2, 0);
         button.PointerExited += (_, _) => button.Translation = Vector3.Zero;
-        AutomationProperties.SetName(button, added ? Loc.F("Remove {0} from the control centre", title.Text) : Loc.F("Add {0} to the control centre", title.Text));
+        AutomationProperties.SetName(button,
+            added ? Loc.F("Remove {0} from the control centre", title.Text) : Loc.F("Add {0} to the control centre", title.Text));
         button.Click += (_, _) => ToggleModule(id);
         return button;
     }

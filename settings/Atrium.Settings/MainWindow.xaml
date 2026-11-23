@@ -10,28 +10,17 @@
          the page's main choices) scrolling on its own; the inspector (the page's other parameters) on the right,
          scrolling on its own. A narrow window folds the inspector under the workspace (OnContentSizeChanged). -->
     <Grid x:Name="RootGrid">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="56" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="232" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="56" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="232" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
 
         <!-- Both scrolling columns start below this fixed title bar. -->
         <Border Grid.ColumnSpan="2" Background="{ThemeResource PageBrush}" BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="144" />
+                    <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="144" />
                 </Grid.ColumnDefinitions>
                 <Grid x:Name="AppTitleBar" Background="Transparent">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="232" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="232" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" Spacing="10" Margin="22,0,0,0" VerticalAlignment="Center">
                         <Image x:Name="TitleLogo" Width="26" Height="26" />
                         <TextBlock Text="Atrium" FontFamily="{StaticResource TitleFont}" FontSize="16" VerticalAlignment="Center" />
@@ -51,58 +40,31 @@
 
         <!-- ============ Sidebar ============ -->
         <Grid Grid.Row="1" Padding="12,16,12,18">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
 
             <ListView x:Name="Nav" SelectionMode="Single" SelectionChanged="OnNavChanged"
                       AutomationProperties.Name="Navigation" VerticalAlignment="Top" ItemContainerStyle="{StaticResource NavItemStyle}">
-                <ListViewItem Tag="0" AutomationProperties.Name="Material">
-                    <local:NavLabel Glyph="&#xE790;" Text="Material" />
-                </ListViewItem>
-                <ListViewItem Tag="1" AutomationProperties.Name="Shape">
-                    <local:NavLabel Glyph="&#xE7C9;" Text="Shape" />
-                </ListViewItem>
-                <ListViewItem Tag="2" AutomationProperties.Name="Taskbar">
-                    <local:NavLabel Glyph="&#xE718;" Text="Taskbar" />
-                </ListViewItem>
-                <ListViewItem Tag="10" AutomationProperties.Name="Start menu">
-                    <local:NavLabel Glyph="&#xE8FC;" Text="Start menu" Sub="True" />
-                </ListViewItem>
-                <ListViewItem Tag="11" AutomationProperties.Name="Tray">
-                    <local:NavLabel Glyph="&#xE70E;" Text="Tray" Sub="True" />
-                </ListViewItem>
+                <ListViewItem Tag="0" AutomationProperties.Name="Material"><local:NavLabel Glyph="&#xE790;" Text="Material" /></ListViewItem>
+                <ListViewItem Tag="1" AutomationProperties.Name="Shape"><local:NavLabel Glyph="&#xE7C9;" Text="Shape" /></ListViewItem>
+                <ListViewItem Tag="2" AutomationProperties.Name="Taskbar"><local:NavLabel Glyph="&#xE718;" Text="Taskbar" /></ListViewItem>
+                <ListViewItem Tag="10" AutomationProperties.Name="Start menu"><local:NavLabel Glyph="&#xE8FC;" Text="Start menu" Sub="True" /></ListViewItem>
+                <ListViewItem Tag="11" AutomationProperties.Name="Tray"><local:NavLabel Glyph="&#xE70E;" Text="Tray" Sub="True" /></ListViewItem>
                 <ListViewItem Tag="14" AutomationProperties.Name="Input method">
                     <local:NavLabel Glyph="&#xE765;" Text="Input method" Sub="True" />
                 </ListViewItem>
-                <ListViewItem Tag="12" AutomationProperties.Name="Status bar">
-                    <local:NavLabel Glyph="&#xE701;" Text="Status bar" Sub="True" />
-                </ListViewItem>
-                <ListViewItem Tag="13" AutomationProperties.Name="Time">
-                    <local:NavLabel Glyph="&#xE823;" Text="Time" Sub="True" />
-                </ListViewItem>
+                <ListViewItem Tag="12" AutomationProperties.Name="Status bar"><local:NavLabel Glyph="&#xE701;" Text="Status bar" Sub="True" /></ListViewItem>
+                <ListViewItem Tag="13" AutomationProperties.Name="Time"><local:NavLabel Glyph="&#xE823;" Text="Time" Sub="True" /></ListViewItem>
                 <ListViewItem Tag="3" AutomationProperties.Name="Notifications">
                     <local:NavLabel Glyph="&#xEA8F;" Text="Notifications" Sub="True" />
                 </ListViewItem>
-                <ListViewItem Tag="4" AutomationProperties.Name="Widgets">
-                    <local:NavLabel Glyph="&#xE8A9;" Text="Widgets" />
-                </ListViewItem>
-                <ListViewItem Tag="5" AutomationProperties.Name="Stage Manager">
-                    <local:NavLabel Glyph="&#xE7C4;" Text="Stage Manager" />
-                </ListViewItem>
-                <ListViewItem Tag="6" AutomationProperties.Name="Displays">
-                    <local:NavLabel Glyph="&#xE7F4;" Text="Displays" />
-                </ListViewItem>
-                <ListViewItem Tag="7" AutomationProperties.Name="System">
-                    <local:NavLabel Glyph="&#xE770;" Text="System" />
-                </ListViewItem>
+                <ListViewItem Tag="4" AutomationProperties.Name="Widgets"><local:NavLabel Glyph="&#xE8A9;" Text="Widgets" /></ListViewItem>
+                <ListViewItem Tag="5" AutomationProperties.Name="Stage Manager"><local:NavLabel Glyph="&#xE7C4;" Text="Stage Manager" /></ListViewItem>
+                <ListViewItem Tag="6" AutomationProperties.Name="Displays"><local:NavLabel Glyph="&#xE7F4;" Text="Displays" /></ListViewItem>
+                <ListViewItem Tag="7" AutomationProperties.Name="System"><local:NavLabel Glyph="&#xE770;" Text="System" /></ListViewItem>
                 <ListViewItem Tag="8" AutomationProperties.Name="Design language" Margin="0,18,0,2">
                     <local:NavLabel Glyph="&#xE8D2;" Text="Design language" />
                 </ListViewItem>
-                <ListViewItem Tag="9" AutomationProperties.Name="About">
-                    <local:NavLabel Glyph="&#xE946;" Text="About" />
-                </ListViewItem>
+                <ListViewItem Tag="9" AutomationProperties.Name="About"><local:NavLabel Glyph="&#xE946;" Text="About" /></ListViewItem>
             </ListView>
 
             <StackPanel Grid.Row="1" Spacing="4" Margin="10,0,6,0">
@@ -112,9 +74,7 @@
                         AutomationProperties.Name="Update available; view update" />
                 <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Ellipse x:Name="StatusDot" Width="8" Height="8" VerticalAlignment="Center" />
                     <TextBlock x:Name="StatusTitle" Grid.Column="1" Text="Atrium" FontSize="13"
@@ -128,10 +88,7 @@
 
         <!-- ============ Workspace + inspector ============ -->
         <Grid x:Name="ContentGrid" Grid.Row="1" Grid.Column="1" Background="{ThemeResource PageBrush}" SizeChanged="OnContentSizeChanged">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
 
             <!-- ======== Workspace ======== -->
             <ScrollViewer x:Name="CenterScroll" Style="{StaticResource PageStyle}" SizeChanged="OnWorkspaceSizeChanged">
@@ -224,10 +181,7 @@
                                 <!-- The tint, after the sliders (BuildRows puts them first) -->
                                 <Border x:Name="TintTile" Style="{StaticResource TileStyle}">
                                     <Grid RowSpacing="10">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                         <TextBlock Text="Tint" Style="{StaticResource RowTitleStyle}" />
                                         <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="0" Margin="-4,0,0,0">
                                             <StackPanel x:Name="TintSwatches" Orientation="Horizontal" />
@@ -405,9 +359,7 @@
                                             <Grid Padding="14,8,14,8" ColumnSpacing="14" MinHeight="60" Background="Transparent"
                                                   ToolTipService.ToolTip="{x:Bind Note}">
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
                                                 <Grid Width="40" Height="40" VerticalAlignment="Center">
                                                     <FontIcon Glyph="{x:Bind Glyph}" FontSize="20" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}"
@@ -417,8 +369,9 @@
                                                 <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Title, Mode=OneWay}"
                                                            Style="{StaticResource RowTitleStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                                                    <CheckBox Content="{x:Bind OptionTitle}" IsChecked="{x:Bind OptionOn, Mode=TwoWay}" IsEnabled="{x:Bind IsOn, Mode=OneWay}"
-                                                              Visibility="{x:Bind OptionVisibility}" ToolTipService.ToolTip="{x:Bind OptionNote}" MinWidth="0" />
+                                                    <CheckBox Content="{x:Bind OptionTitle}" IsChecked="{x:Bind OptionOn, Mode=TwoWay}"
+                                                              IsEnabled="{x:Bind IsOn, Mode=OneWay}" Visibility="{x:Bind OptionVisibility}"
+                                                              ToolTipService.ToolTip="{x:Bind OptionNote}" MinWidth="0" />
                                                     <ToggleSwitch Style="{StaticResource SwitchStyle}" IsOn="{x:Bind IsOn, Mode=TwoWay}"
                                                                   AutomationProperties.Name="{x:Bind Title, Mode=OneWay}" />
                                                 </StackPanel>
@@ -465,8 +418,9 @@
                         <!-- The control centre's optional modules (controlModules), a click adds or removes one -->
                         <StackPanel Spacing="8" Margin="0,8,0,0">
                             <TextBlock Text="Control centre modules" Style="{StaticResource SectionStyle}" Margin="4,0,0,0" />
-                            <TextBlock Text="Click a module to add it to the control centre, and again to take it away. Wi-Fi, Bluetooth, battery, casting, brightness and sound always stay."
-                                       Style="{StaticResource FootnoteStyle}" TextWrapping="Wrap" Margin="4,0,0,0" />
+                            <TextBlock
+                                Text="Click a module to add it to the control centre, and again to take it away. Wi-Fi, Bluetooth, battery, casting, brightness and sound always stay."
+                                Style="{StaticResource FootnoteStyle}" TextWrapping="Wrap" Margin="4,0,0,0" />
                             <local:ResponsiveGrid x:Name="ModuleGallery" MinCellWidth="240" Gap="12" />
                         </StackPanel>
                     </StackPanel>

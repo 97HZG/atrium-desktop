@@ -129,7 +129,8 @@ public sealed partial class MainWindow
         {
             Bundled = "wechat",
             OptionTitle = Loc.T("Block Official Accounts"),
-            OptionNote = Loc.T("No cards for the Official Accounts, Subscriptions and Service Accounts rows of WeChat's chat list. A service account listed as a chat of its own still shows."),
+            OptionNote = Loc.T(
+                "No cards for the Official Accounts, Subscriptions and Service Accounts rows of WeChat's chat list. A service account listed as a chat of its own still shows."),
             OptionGet = s => s.WeChatBlockOfficial,
             OptionSet = (s, v) => s.WeChatBlockOfficial = v,
         });

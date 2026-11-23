@@ -30,7 +30,11 @@ public sealed partial class MainWindow
         ];
 
         private readonly PanelInk _ink = new();
-        private readonly Border _veil = new() { IsHitTestVisible = false, Background = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(115, 0, 0, 0)) }; // kVeil
+        private readonly Border _veil = new()
+        {
+            IsHitTestVisible = false,
+            Background = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(115, 0, 0, 0)), // kVeil
+        };
         private bool _glassDark;
         private readonly Border _search;
         private readonly TextBlock _searchGlyph, _hint;
