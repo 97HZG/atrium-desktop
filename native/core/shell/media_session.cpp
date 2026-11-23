@@ -736,11 +736,7 @@ private:
                 break;
             const double nowMs = ClockMs();
             if (woke || hasCommands || nowMs - refreshedMs >= kRefreshMs) {
-                try {
-                    RefreshAndPost();
-                } catch (const winrt::hresult_error& e) {
-                    Log(L"media: refresh failed (%08x)", static_cast<unsigned>(e.code()));
-                }
+                RefreshAndPost();
                 refreshedMs = nowMs;
             }
             if (stop_.load(std::memory_order_acquire))

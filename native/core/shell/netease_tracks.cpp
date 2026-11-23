@@ -5,12 +5,13 @@
 #include "win32_path.h"
 
 #include <windows.h>
+#include <roapi.h>
 #include <shlobj.h>
-
-#include <winrt/Windows.Data.Json.h>
-#include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.Foundation.h>
+#include <windows.data.json.h>
+#include <winstring.h>
 #include <winsqlite/winsqlite3.h>
+
+#include <winrt/base.h>
 
 #include <algorithm>
 #include <cmath>
@@ -22,7 +23,97 @@ namespace atrium {
 
 namespace {
 
-namespace json = winrt::Windows::Data::Json;
+namespace Wdj = ABI::Windows::Data::Json;
+using JsonVector = __FIVector_1_Windows__CData__CJson__CIJsonValue;
+
+std::wstring TakeHString(HSTRING hs)
+{
+    if (!hs)
+        return {};
+    UINT32 len = 0;
+    const wchar_t* raw = WindowsGetStringRawBuffer(hs, &len);
+    std::wstring out = raw ? std::wstring(raw, len) : std::wstring{};
+    WindowsDeleteString(hs);
+    return out;
+}
+
+bool TryParseJsonObject(const std::wstring& text, winrt::com_ptr<Wdj::IJsonObject>& out)
+{
+    out = nullptr;
+    if (text.empty())
+        return false;
+    HSTRING_HEADER clsHdr{};
+    HSTRING cls = nullptr;
+    const wchar_t* name = RuntimeClass_Windows_Data_Json_JsonObject;
+    if (FAILED(WindowsCreateStringReference(name, static_cast<UINT32>(wcslen(name)), &clsHdr, &cls)))
+        return false;
+    winrt::com_ptr<Wdj::IJsonObjectStatics> statics;
+    if (FAILED(RoGetActivationFactory(cls, IID_PPV_ARGS(statics.put()))) || !statics)
+        return false;
+    HSTRING_HEADER inHdr{};
+    HSTRING inHs = nullptr;
+    if (FAILED(WindowsCreateStringReference(text.c_str(), static_cast<UINT32>(text.size()), &inHdr, &inHs)))
+        return false;
+    boolean ok = FALSE;
+    if (FAILED(statics->TryParse(inHs, out.put(), &ok)) || !ok || !out) {
+        out = nullptr;
+        return false;
+    }
+    return true;
+}
+
+bool NamedValue(Wdj::IJsonObject* obj, const wchar_t* key, winrt::com_ptr<Wdj::IJsonValue>& out)
+{
+    out = nullptr;
+    if (!obj || !key)
+        return false;
+    HSTRING_HEADER hdr{};
+    HSTRING hs = nullptr;
+    if (FAILED(WindowsCreateStringReference(key, static_cast<UINT32>(wcslen(key)), &hdr, &hs)))
+        return false;
+    if (FAILED(obj->GetNamedValue(hs, out.put())) || !out) {
+        out = nullptr;
+        return false;
+    }
+    return true;
+}
+
+Wdj::JsonValueType JsonType(Wdj::IJsonValue* v)
+{
+    Wdj::JsonValueType t = Wdj::JsonValueType_Null;
+    if (!v || FAILED(v->get_ValueType(&t)))
+        return Wdj::JsonValueType_Null;
+    return t;
+}
+
+bool JsonString(Wdj::IJsonValue* v, std::wstring& out)
+{
+    if (JsonType(v) != Wdj::JsonValueType_String)
+        return false;
+    HSTRING hs = nullptr;
+    if (FAILED(v->GetString(&hs)))
+        return false;
+    out = TakeHString(hs);
+    return true;
+}
+
+bool JsonNumber(Wdj::IJsonValue* v, double& out) { return JsonType(v) == Wdj::JsonValueType_Number && SUCCEEDED(v->GetNumber(&out)); }
+
+bool JsonObjectVal(Wdj::IJsonValue* v, winrt::com_ptr<Wdj::IJsonObject>& out)
+{
+    out = nullptr;
+    return JsonType(v) == Wdj::JsonValueType_Object && SUCCEEDED(v->GetObject(out.put())) && out != nullptr;
+}
+
+bool JsonArrayVal(Wdj::IJsonValue* v, winrt::com_ptr<JsonVector>& out)
+{
+    out = nullptr;
+    winrt::com_ptr<Wdj::IJsonArray> arr;
+    if (JsonType(v) != Wdj::JsonValueType_Array || FAILED(v->GetArray(arr.put())) || !arr)
+        return false;
+    out = arr.try_as<JsonVector>();
+    return out != nullptr;
+}
 
 const std::wstring& PlayerRoot()
 {
@@ -45,12 +136,14 @@ std::wstring PlayerPath(const wchar_t* within)
 
 std::wstring QueuePath() { return PlayerPath(L"webdata\\file\\playingList"); }
 
-std::wstring ParseJsonId(const json::IJsonValue& v)
+std::wstring ParseJsonId(Wdj::IJsonValue* v)
 {
-    if (v.ValueType() == json::JsonValueType::String)
-        return std::wstring(v.GetString());
-    if (v.ValueType() == json::JsonValueType::Number)
-        return std::to_wstring(int64_t(v.GetNumber()));
+    std::wstring s;
+    if (JsonString(v, s))
+        return s;
+    double n = 0.0;
+    if (JsonNumber(v, n) && std::isfinite(n))
+        return std::to_wstring(static_cast<int64_t>(n));
     return {};
 }
 
@@ -174,23 +267,30 @@ std::wstring ReadText(const std::wstring& path)
     return text;
 }
 
-NeteaseQueuedTrack ParseTrackObject(const json::JsonObject& track)
+NeteaseQueuedTrack ParseTrackObject(Wdj::IJsonObject* track)
 {
     NeteaseQueuedTrack t;
-    if (track.HasKey(L"name") && track.GetNamedValue(L"name").ValueType() == json::JsonValueType::String)
-        t.title = track.GetNamedString(L"name");
-    if (track.HasKey(L"duration") && track.GetNamedValue(L"duration").ValueType() == json::JsonValueType::Number) {
-        const double ms = track.GetNamedNumber(L"duration");
-        if (std::isfinite(ms) && ms > 0.0 && ms < 86400000.0)
-            t.lengthUs = static_cast<int64_t>(std::llround(ms * 1000.0));
-    }
-    if (track.HasKey(L"artists") && track.GetNamedValue(L"artists").ValueType() == json::JsonValueType::Array) {
-        for (const auto& a : track.GetNamedArray(L"artists")) {
-            if (a.ValueType() != json::JsonValueType::Object)
-                continue;
-            const auto obj = a.GetObject();
-            if (obj.HasKey(L"name") && obj.GetNamedValue(L"name").ValueType() == json::JsonValueType::String)
-                t.artists += (t.artists.empty() ? L"" : L"/") + std::wstring(obj.GetNamedString(L"name"));
+    if (!track)
+        return t;
+    winrt::com_ptr<Wdj::IJsonValue> val;
+    if (NamedValue(track, L"name", val))
+        JsonString(val.get(), t.title);
+    double ms = 0.0;
+    if (NamedValue(track, L"duration", val) && JsonNumber(val.get(), ms) && std::isfinite(ms) && ms > 0.0 && ms < 86400000.0)
+        t.lengthUs = static_cast<int64_t>(std::llround(ms * 1000.0));
+    winrt::com_ptr<JsonVector> artists;
+    if (NamedValue(track, L"artists", val) && JsonArrayVal(val.get(), artists)) {
+        UINT32 count = 0;
+        if (SUCCEEDED(artists->get_Size(&count))) {
+            for (UINT32 i = 0; i < count; ++i) {
+                winrt::com_ptr<Wdj::IJsonValue> elem;
+                winrt::com_ptr<Wdj::IJsonObject> obj;
+                std::wstring artistName;
+                if (SUCCEEDED(artists->GetAt(i, elem.put())) && JsonObjectVal(elem.get(), obj) && NamedValue(obj.get(), L"name", val) &&
+                    JsonString(val.get(), artistName)) {
+                    t.artists += (t.artists.empty() ? L"" : L"/") + artistName;
+                }
+            }
         }
     }
     return t;
@@ -199,19 +299,26 @@ NeteaseQueuedTrack ParseTrackObject(const json::JsonObject& track)
 bool ParseQueue(const std::wstring& text, std::vector<NeteaseQueuedTrack>& out)
 {
     out.clear();
-    json::JsonObject root{nullptr};
-    if (text.empty() || !json::JsonObject::TryParse(text, root) || !root.HasKey(L"list") ||
-        root.GetNamedValue(L"list").ValueType() != json::JsonValueType::Array)
+    winrt::com_ptr<Wdj::IJsonObject> root;
+    winrt::com_ptr<Wdj::IJsonValue> listVal;
+    winrt::com_ptr<JsonVector> list;
+    if (!TryParseJsonObject(text, root) || !NamedValue(root.get(), L"list", listVal) || !JsonArrayVal(listVal.get(), list))
         return false;
-    for (const auto& item : root.GetNamedArray(L"list")) {
-        if (item.ValueType() != json::JsonValueType::Object)
+    UINT32 count = 0;
+    if (FAILED(list->get_Size(&count)))
+        return false;
+    for (UINT32 i = 0; i < count; ++i) {
+        winrt::com_ptr<Wdj::IJsonValue> item;
+        winrt::com_ptr<Wdj::IJsonObject> entry;
+        winrt::com_ptr<Wdj::IJsonValue> trackVal;
+        winrt::com_ptr<Wdj::IJsonObject> trackObj;
+        if (FAILED(list->GetAt(i, item.put())) || !JsonObjectVal(item.get(), entry) || !NamedValue(entry.get(), L"track", trackVal) ||
+            !JsonObjectVal(trackVal.get(), trackObj))
             continue;
-        const json::JsonObject entry = item.GetObject();
-        if (!entry.HasKey(L"track") || entry.GetNamedValue(L"track").ValueType() != json::JsonValueType::Object)
-            continue;
-        NeteaseQueuedTrack t = ParseTrackObject(entry.GetNamedObject(L"track"));
-        if (entry.HasKey(L"id"))
-            t.id = ParseJsonId(entry.GetNamedValue(L"id"));
+        NeteaseQueuedTrack t = ParseTrackObject(trackObj.get());
+        winrt::com_ptr<Wdj::IJsonValue> idVal;
+        if (NamedValue(entry.get(), L"id", idVal))
+            t.id = ParseJsonId(idVal.get());
         if (!t.title.empty() && t.lengthUs > 0)
             out.push_back(std::move(t));
     }
@@ -327,11 +434,12 @@ bool NeteaseLikes::Read(const std::wstring& path, bool& retryable)
     Query(
         db, "SELECT jsonStr FROM historyTracks ORDER BY playtime DESC LIMIT 1", {},
         [&](const std::wstring& text) {
-            json::JsonObject o{nullptr};
-            if (json::JsonObject::TryParse(text, o) && o.HasKey(L"id") && o.HasKey(L"name") &&
-                o.GetNamedValue(L"name").ValueType() == json::JsonValueType::String) {
-                recentId_ = ParseJsonId(o.GetNamedValue(L"id"));
-                recentName_ = recentId_.empty() ? std::wstring() : std::wstring(o.GetNamedString(L"name"));
+            winrt::com_ptr<Wdj::IJsonObject> o;
+            winrt::com_ptr<Wdj::IJsonValue> idVal, nameVal;
+            std::wstring name;
+            if (TryParseJsonObject(text, o) && NamedValue(o.get(), L"id", idVal) && NamedValue(o.get(), L"name", nameVal) && JsonString(nameVal.get(), name)) {
+                recentId_ = ParseJsonId(idVal.get());
+                recentName_ = recentId_.empty() ? std::wstring() : std::move(name);
             }
             return false;
         },
@@ -342,15 +450,24 @@ bool NeteaseLikes::Read(const std::wstring& path, bool& retryable)
         Query(
             db, "SELECT jsonStr FROM playlistTrackIds WHERE id = ?", Narrow(playlist_),
             [&](const std::wstring& text) {
-                json::JsonObject o{nullptr};
-                if (!json::JsonObject::TryParse(text, o) || !o.HasKey(L"trackIds") || o.GetNamedValue(L"trackIds").ValueType() != json::JsonValueType::Array)
+                winrt::com_ptr<Wdj::IJsonObject> o;
+                winrt::com_ptr<Wdj::IJsonValue> trackIdsVal;
+                winrt::com_ptr<JsonVector> trackIds;
+                if (!TryParseJsonObject(text, o) || !NamedValue(o.get(), L"trackIds", trackIdsVal) || !JsonArrayVal(trackIdsVal.get(), trackIds))
                     return false;
-                for (const auto& v : o.GetNamedArray(L"trackIds")) {
+                UINT32 count = 0;
+                if (FAILED(trackIds->get_Size(&count)))
+                    return false;
+                for (UINT32 i = 0; i < count; ++i) {
+                    winrt::com_ptr<Wdj::IJsonValue> v, idVal;
+                    winrt::com_ptr<Wdj::IJsonObject> entry;
+                    if (FAILED(trackIds->GetAt(i, v.put())) || !v)
+                        continue;
                     std::wstring tid;
-                    if (v.ValueType() == json::JsonValueType::Object && v.GetObject().HasKey(L"id"))
-                        tid = ParseJsonId(v.GetObject().GetNamedValue(L"id"));
+                    if (JsonObjectVal(v.get(), entry) && NamedValue(entry.get(), L"id", idVal))
+                        tid = ParseJsonId(idVal.get());
                     else
-                        tid = ParseJsonId(v);
+                        tid = ParseJsonId(v.get());
                     if (!tid.empty())
                         ids.insert(std::move(tid));
                 }
