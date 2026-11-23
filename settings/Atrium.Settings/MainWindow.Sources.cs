@@ -34,7 +34,8 @@ public abstract partial class AppRowVm : INotifyPropertyChanged
     protected void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-// A notification source: one chat app, or the other apps' Windows notifications.
+// A notification source: one chat app, or the other apps' Windows notifications; some with an option of their
+// own beside the switch (WeChat's official accounts), to tick only while the source is on.
 public sealed partial class SourceVm : AppRowVm
 {
     private readonly Func<BarSettings, bool> _get;
@@ -61,9 +62,31 @@ public sealed partial class SourceVm : AppRowVm
             if (value == _get(_owner.CurrentSettings)) return;
             _set(_owner.CurrentSettings, value);
             _owner.SourceChanged();
+            Raise(nameof(IsOn)); // the option beside it follows
         }
     }
-    internal void Refresh() => Raise(nameof(IsOn));
+
+    // The option beside the switch, if the source has one.
+    internal Func<BarSettings, bool>? OptionGet { get; init; }
+    internal Action<BarSettings, bool>? OptionSet { get; init; }
+    public string OptionTitle { get; init; } = "";
+    public string OptionNote { get; init; } = "";
+    public Visibility OptionVisibility => OptionGet == null ? Visibility.Collapsed : Visibility.Visible;
+    public bool OptionOn
+    {
+        get => OptionGet?.Invoke(_owner.CurrentSettings) ?? false;
+        set
+        {
+            if (OptionSet == null || value == OptionOn) return;
+            OptionSet(_owner.CurrentSettings, value);
+            _owner.SourceChanged();
+        }
+    }
+    internal void Refresh()
+    {
+        Raise(nameof(IsOn));
+        Raise(nameof(OptionOn));
+    }
 }
 
 // An app Stage Manager leaves alone: one entry of stageExcluded (or the Snipping Tool's three).
@@ -103,11 +126,13 @@ public sealed partial class MainWindow
         _sources.Add(new SourceVm(this, "WeChat",
             "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.",
             "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v)
-        { Bundled = "wechat" });
-        _sources.Add(new SourceVm(this, "Block WeChat Official Accounts",
-            "No cards for the Official Accounts, Subscriptions and Service Accounts rows of WeChat's chat list. A service account listed as a chat of its own still shows.",
-            "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.WeChatBlockOfficial, (s, v) => s.WeChatBlockOfficial = v)
-        { Bundled = "wechat" });
+        {
+            Bundled = "wechat",
+            OptionTitle = Loc.T("Block Official Accounts"),
+            OptionNote = Loc.T("No cards for the Official Accounts, Subscriptions and Service Accounts rows of WeChat's chat list. A service account listed as a chat of its own still shows."),
+            OptionGet = s => s.WeChatBlockOfficial,
+            OptionSet = (s, v) => s.WeChatBlockOfficial = v,
+        });
         _sources.Add(new SourceVm(this, "QQ", "QQ's Windows notifications; when it flashes for a message without one, a card says there is a new message.",
             "\ue8bd", ["QQ.exe"], s => s.NotifyQQ, (s, v) => s.NotifyQQ = v)
         { Bundled = "qq" });

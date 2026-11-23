@@ -416,8 +416,12 @@
                                                 </Grid>
                                                 <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Title, Mode=OneWay}"
                                                            Style="{StaticResource RowTitleStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                                <ToggleSwitch Grid.Column="2" Style="{StaticResource SwitchStyle}" IsOn="{x:Bind IsOn, Mode=TwoWay}"
-                                                              AutomationProperties.Name="{x:Bind Title, Mode=OneWay}" />
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                                                    <CheckBox Content="{x:Bind OptionTitle}" IsChecked="{x:Bind OptionOn, Mode=TwoWay}" IsEnabled="{x:Bind IsOn, Mode=OneWay}"
+                                                              Visibility="{x:Bind OptionVisibility}" ToolTipService.ToolTip="{x:Bind OptionNote}" MinWidth="0" />
+                                                    <ToggleSwitch Style="{StaticResource SwitchStyle}" IsOn="{x:Bind IsOn, Mode=TwoWay}"
+                                                                  AutomationProperties.Name="{x:Bind Title, Mode=OneWay}" />
+                                                </StackPanel>
                                             </Grid>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>

@@ -76,7 +76,7 @@
 | `notifyHideBody` | bool | | false | 隐藏通知正文；同时把通知窗口排除在截图和屏幕共享之外 |
 | `notifyListener` | bool | | true | 通过 UserNotificationListener 把其他应用的 Windows 通知显示为 Atrium 卡片（系统横幅仍会出现，除非用户在 Windows 里关闭该应用的横幅）；微信、QQ、飞书、企业微信、钉钉的通知由各自的开关决定 |
 | `notifyWeChat` | bool | | true | 读取微信的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片；窗口打开过一次后，关到托盘也能读到会话名与摘要；读不到时，微信为消息闪烁即显示“微信 · 新消息” |
-| `wechatBlockOfficial` | bool | | false | 屏蔽微信公众号通知：会话列表里“公众号”“订阅号”“服务号”这几行有新消息时不显示卡片。微信的界面只给出会话的显示名，单独列成一个会话的服务号仍按普通会话提醒 |
+| `wechatBlockOfficial` | bool | | false | 屏蔽微信公众号通知（设置里微信那一行开关旁的“屏蔽公众号”，微信通知打开时才可勾选）：会话列表里“公众号”“订阅号”“服务号”这几行有新消息时不显示卡片。微信的界面只给出会话的显示名，单独列成一个会话的服务号仍按普通会话提醒 |
 | `notifyFeishu` | bool | | true | 读取飞书自己的消息弹窗里的文字（UI 自动化，只读），同时显示为 Atrium 卡片 |
 | `notifyQQ` | bool | | true | QQ 的消息：它的 Windows 通知；QQ 缩在托盘里闪烁却没有通知时，显示一张“QQ · 新消息”卡片 |
 | `notifyWeCom` | bool | | true | 企业微信的消息：它的窗口或托盘图标闪烁时，显示一张“企业微信 · 新消息”卡片 |

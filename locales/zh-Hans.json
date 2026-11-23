@@ -866,7 +866,7 @@
   "DingTalk": "钉钉",
   "QQ": "QQ",
   "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.": "微信窗口打开或最小化时读取会话列表；关到托盘时，卡片只提示有新消息。免打扰的会话不提醒。",
-  "Block WeChat Official Accounts": "屏蔽微信公众号通知",
+  "Block Official Accounts": "屏蔽公众号",
   "No cards for the Official Accounts, Subscriptions and Service Accounts rows of WeChat's chat list. A service account listed as a chat of its own still shows.": "微信会话列表里的“公众号”“订阅号”“服务号”有新消息时不显示卡片。单独列成一个会话的服务号仍会提醒。",
   "QQ's Windows notifications; when it flashes for a message without one, a card says there is a new message.": "QQ 的 Windows 通知；QQ 为消息闪烁却没有通知时，显示一张“新消息”卡片。",
   "Reads the text of Feishu's popups; when it flashes for a message without one, a card says there is a new message.": "读取飞书弹窗里的文字；飞书为消息闪烁却没有弹窗时，显示一张“新消息”卡片。",

@@ -26,8 +26,14 @@ public partial class App : Application
     private static BarSettings? _pendingCurrent, _pendingSaved;
     private static Mutex? _instance;
 
+    // ATRIUM_THEME=dark|light (development): that theme whatever Windows' is, in an instance of its own
+    // (the other theme looked at beside the window in use).
+    private static readonly string? ThemeOverride = Environment.GetEnvironmentVariable("ATRIUM_THEME") is "dark" or "light" ? Environment.GetEnvironmentVariable("ATRIUM_THEME") : null;
+
     public App()
     {
+        if (ThemeOverride != null)
+            RequestedTheme = ThemeOverride == "dark" ? ApplicationTheme.Dark : ApplicationTheme.Light;
         InitializeComponent();
         // A crash leaves its exception in %LOCALAPPDATA%\Atrium\logs\settings.log (WinUI itself reports only 0xc000027b).
         UnhandledException += (_, e) => LogCrash(e.Exception);
@@ -51,7 +57,7 @@ public partial class App : Application
         Loc.Load(); // also before the single-instance lookup: the title follows the language
         // Single instance: a second launch (tray menu, double click) brings the
         // existing window to the front instead of opening another one.
-        _instance = new Mutex(true, @"Local\Atrium.Settings", out bool created);
+        _instance = new Mutex(true, @"Local\Atrium.Settings" + (ThemeOverride == null ? "" : "." + ThemeOverride), out bool created);
         if (!created)
         {
             _instance.Dispose();
