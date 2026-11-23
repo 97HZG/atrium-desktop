@@ -482,20 +482,23 @@ internal sealed class BarSettings
         return false;
     }
 
-    private static List<string> ReadFolderStacks(JsonObject? o, List<string>? fallback, int maxCount = 32)
+    private static List<string> ReadUniquePaths(JsonObject? o, string key, List<string>? fallback, bool trimTrailingSlashes, int maxCount = 32)
     {
-        var raw = ReadStringArray(o, "folderStacks", fallback);
+        var raw = ReadStringArray(o, key, fallback);
         var result = new List<string>(Math.Min(raw.Count, maxCount));
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string item in raw)
         {
             var span = item.AsSpan();
-            while (span.Length > 0 && span[^1] is '\\' or '/' && !IsFolderRootSlash(span))
-                span = span[..^1];
-            if (span.Length == 0) continue;
+            if (trimTrailingSlashes)
+            {
+                while (span.Length > 0 && span[^1] is '\\' or '/' && !IsFolderRootSlash(span))
+                    span = span[..^1];
+                if (span.Length == 0) continue;
+            }
             string norm = span.ToString();
-            string key = norm.Replace('/', '\\');
-            if (seen.Add(key))
+            string dedupeKey = norm.Replace('/', '\\');
+            if (seen.Add(dedupeKey))
             {
                 result.Add(norm);
                 if (result.Count >= maxCount) break;
@@ -524,8 +527,8 @@ internal sealed class BarSettings
         s.FolderStackLayout = stackLayout == "column" ? "column" : "fan";
         double rawMax = o?["folderStackMax"] is JsonValue mv && mv.TryGetValue(out double mx) && double.IsFinite(mx) ? mx : f.FolderStackMax;
         s.FolderStackMax = (int)Math.Round(Math.Clamp(rawMax, 4, 24), MidpointRounding.AwayFromZero);
-        s.FolderStacks = ReadFolderStacks(o, f.FolderStacks, 32);
-        s.FolderStackFiles = ReadStringArray(o, "folderStackFiles", f.FolderStackFiles, 32);
+        s.FolderStacks = ReadUniquePaths(o, "folderStacks", f.FolderStacks, trimTrailingSlashes: true, 32);
+        s.FolderStackFiles = ReadUniquePaths(o, "folderStackFiles", f.FolderStackFiles, trimTrailingSlashes: false, 32);
     }
 
     public bool SameAs(BarSettings o) =>
@@ -536,23 +539,31 @@ internal sealed class BarSettings
         ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus &&
         StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
-        ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad && LaunchpadMaterial == o.LaunchpadMaterial && LaunchpadLayout == o.LaunchpadLayout && ShowNowPlaying == o.ShowNowPlaying &&
+        ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad &&
+        LaunchpadMaterial == o.LaunchpadMaterial && LaunchpadLayout == o.LaunchpadLayout &&
+        ShowNowPlaying == o.ShowNowPlaying &&
         NowPlayingShowPaused == o.NowPlayingShowPaused && NowPlayingMotion == o.NowPlayingMotion && NowPlayingRhythm == o.NowPlayingRhythm &&
         NowPlayingAppMode == o.NowPlayingAppMode && NowPlayingApps.SequenceEqual(o.NowPlayingApps, StringComparer.OrdinalIgnoreCase) &&
         ShowFolderStacks == o.ShowFolderStacks &&
         FolderStackLayout == o.FolderStackLayout && FolderStackMax == o.FolderStackMax &&
         FolderStacks.SequenceEqual(o.FolderStacks, StringComparer.OrdinalIgnoreCase) &&
         FolderStackFiles.SequenceEqual(o.FolderStackFiles, StringComparer.OrdinalIgnoreCase) &&
-        TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && BarReserve == o.BarReserve && BarFullscreenHide == o.BarFullscreenHide &&
+        TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
+        BarReserve == o.BarReserve && BarFullscreenHide == o.BarFullscreenHide &&
         BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && ControlModules.SequenceEqual(o.ControlModules) && NotifyTimeout == o.NotifyTimeout &&
         NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus && ImeBubble == o.ImeBubble &&
-        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && WeChatBlockOfficial == o.WeChatBlockOfficial && NotifyFeishu == o.NotifyFeishu &&
+        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat &&
+        WeChatBlockOfficial == o.WeChatBlockOfficial && NotifyFeishu == o.NotifyFeishu &&
         NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk &&
         AttentionLight == o.AttentionLight && AttentionBounce == o.AttentionBounce && BarBadges == o.BarBadges && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
-        StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize && StageDragMerge == o.StageDragMerge && StageCloseButton == o.StageCloseButton && StageAvoid == o.StageAvoid &&
+        StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize &&
+        StageDragMerge == o.StageDragMerge && StageCloseButton == o.StageCloseButton &&
+        StageAvoid == o.StageAvoid &&
         StageExcluded.SequenceEqual(o.StageExcluded, StringComparer.OrdinalIgnoreCase) && WidgetMaterial == o.WidgetMaterial &&
-        HideTaskbar == o.HideTaskbar && GenieMinimize == o.GenieMinimize && WindowPeek == o.WindowPeek && HideBanners == o.HideBanners && RemoteVisible == o.RemoteVisible &&
+        HideTaskbar == o.HideTaskbar && GenieMinimize == o.GenieMinimize &&
+        WindowPeek == o.WindowPeek && HideBanners == o.HideBanners &&
+        RemoteVisible == o.RemoteVisible &&
         WinKeyStart == o.WinKeyStart && WinNumbers == o.WinNumbers &&
         StartOnLogin == o.StartOnLogin &&
         DockDisplayMode == o.DockDisplayMode && DockDisplayDelay == o.DockDisplayDelay && DockDisplay == o.DockDisplay && DesktopDisplay == o.DesktopDisplay &&

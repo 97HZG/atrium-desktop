@@ -17,7 +17,8 @@ public sealed partial class MainWindow
     private sealed class NowPlayingScene : ModuleScene
     {
         // ui/now_playing_card.cpp's numbers: the panels' type (body 13.5, caption 11), padding 14.
-        private const double CW = 360, Pad = 14, Body = 13.5, Caption = 11, Art = 52, ArtR = 12, TextX = Pad + Art + 12, BarsW = 20, BarsRight = CW - Pad - 6, BarsY = Pad + Art / 2;
+        private const double CW = 360, Pad = 14, Body = 13.5, Caption = 11, Art = 52, ArtR = 12, TextX = Pad + Art + 12;
+        private const double BarsW = 20, BarsRight = CW - Pad - 6, BarsY = Pad + Art / 2;
         private const double TrackY = Pad + Art + 16, TrackH = 4, TimeW = 38, TrackL = Pad + TimeW + 6, TrackR = CW - Pad - TimeW - 6;
         private const double ControlsY = TrackY + 34, ControlStep = 58, ControlR = 16, PlayR = 20, CH = ControlsY + PlayR + Pad, MinRadius = 34;
         private static readonly double[] Shape = [0.58, 0.86, 1.0, 0.80, 0.52];
@@ -61,7 +62,7 @@ public sealed partial class MainWindow
             for (int i = 0; i < _pause.Length; i++) _pause[i] = Plate(_ink.Text, 1.8);
             _previous = Triangles("M9.5,-6 L1,0 L9.5,6 Z M0,-6 L-8.5,0 L0,6 Z");
             _next = Triangles("M-9.5,-6 L-1,0 L-9.5,6 Z M0,-6 L8.5,0 L0,6 Z");
-            // Either side of the controls: the heart and the lyrics (NetEase and QQ Music take them).
+            // Either side of the controls: the heart (NetEase) and the lyrics (NetEase and QQ Music).
             _heart = Symbol("\uEB51", 16, _ink.Text);
             string lyrics = Loc.T("Lyrics", "button");
             _lyrics = Words(lyrics.Length > 2 ? 11 : 16.5, _ink.Text, true, TextAlignment.Center);

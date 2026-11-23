@@ -39,7 +39,8 @@ var imeOff = BarSettings.FromJson(JsonNode.Parse("""{"imeStatus":false}""")!.AsO
 Require(!imeOff.ImeStatus && !new BarSettings().SameAs(imeOff) && !BarSettings.FromJson(imeOff.ToJson(), new()).ImeStatus,
     "Turning the input method status off must be saved, compared and survive a round trip.");
 var bubbleOff = BarSettings.FromJson(JsonNode.Parse("""{"imeBubble":false}""")!.AsObject(), new());
-Require(new BarSettings().ImeBubble && !bubbleOff.ImeBubble && !BarSettings.FromJson(bubbleOff.ToJson(), new()).ImeBubble && !new BarSettings().SameAs(bubbleOff),
+Require(new BarSettings().ImeBubble && !bubbleOff.ImeBubble &&
+        !BarSettings.FromJson(bubbleOff.ToJson(), new()).ImeBubble && !new BarSettings().SameAs(bubbleOff),
     "The input method bubble is on by default, and off survives a round trip and marks the settings dirty.");
 Require(!BarSettings.FromJson([], new()).HoverRise, "Old files must keep the glass flat.");
 Require(BarSettings.FromJson([], new() { HoverRise = true }).HoverRise, "Partial updates must retain enabled hover rise.");
@@ -56,7 +57,8 @@ Require(!parsed.StartStatus && parsed.StartTray && BarSettings.FromJson(parsed.T
 Require(!new BarSettings().SameAs(parsed), "The start menu's status buttons must participate in the Save/Revert dirty state.");
 Require(!BarSettings.FromJson([], new()).StageMinimize, "Old files must keep minimized windows out of Stage Manager.");
 parsed = BarSettings.FromJson(JsonNode.Parse("""{"genieMinimize":true}""")!.AsObject(), new());
-Require(!new BarSettings().GenieMinimize && parsed.GenieMinimize && BarSettings.FromJson(parsed.ToJson(), new()).GenieMinimize && !new BarSettings().SameAs(parsed),
+Require(!new BarSettings().GenieMinimize && parsed.GenieMinimize &&
+        BarSettings.FromJson(parsed.ToJson(), new()).GenieMinimize && !new BarSettings().SameAs(parsed),
     "The genie effect must be off by default, survive a round trip and mark the settings dirty.");
 var visibleOff = BarSettings.FromJson(JsonNode.Parse("""{"barReserve":false,"barFullscreenHide":false}""")!.AsObject(), new());
 Require(new BarSettings().BarReserve && new BarSettings().BarFullscreenHide && !visibleOff.BarReserve && !visibleOff.BarFullscreenHide &&
@@ -71,7 +73,8 @@ Require(parsed.StageMinimize && BarSettings.FromJson(parsed.ToJson(), new()).Sta
 Require(new BarSettings().StageDragMerge && BarSettings.FromJson([], new()).StageDragMerge,
     "Dragging onto a Stage Manager group is on by default, also for old files.");
 var avoidOff = BarSettings.FromJson(JsonNode.Parse("""{"stageAvoid":false}""")!.AsObject(), new());
-Require(new BarSettings().StageAvoid && !avoidOff.StageAvoid && !BarSettings.FromJson(avoidOff.ToJson(), new()).StageAvoid && !new BarSettings().SameAs(avoidOff),
+Require(new BarSettings().StageAvoid && !avoidOff.StageAvoid &&
+        !BarSettings.FromJson(avoidOff.ToJson(), new()).StageAvoid && !new BarSettings().SameAs(avoidOff),
     "Windows avoiding the Stage Manager strip is on by default, and off survives a round trip.");
 var closeOff = BarSettings.FromJson(JsonNode.Parse("""{"stageCloseButton":false}""")!.AsObject(), new());
 Require(new BarSettings().StageCloseButton && !closeOff.StageCloseButton && !BarSettings.FromJson(closeOff.ToJson(), new()).StageCloseButton &&
@@ -201,10 +204,16 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
     Require(modules.ControlModules.SequenceEqual(["darkmode", "stage", "hotspot"]) && BarSettings.FromJson(modules.ToJson(), new()).SameAs(modules) &&
             !modules.SameAs(modulesDefault),
         "Control centre modules must keep known ids once, in order, and survive a round trip.");
-    Require(BarSettings.FromJson(JsonNode.Parse("""{"controlModules":["nightlight","stage","darkmode"]}""")!.AsObject(), new()).ControlModules.SequenceEqual(["darkmode", "stage"]),
+    var nightLight = BarSettings.FromJson(JsonNode.Parse("""{"controlModules":["nightlight","stage","darkmode"]}""")!.AsObject(), new());
+    Require(nightLight.ControlModules.SequenceEqual(["darkmode", "stage"]),
         "The night light module must become dark mode.");
+    var stackFiles = BarSettings.FromJson(
+        JsonNode.Parse("""{"folderStackFiles":[" C:\\Docs\\Plan.pdf ","c:/docs/plan.pdf","","D:\\Notes.txt"]}""")!.AsObject(), new());
+    Require(stackFiles.FolderStackFiles.SequenceEqual([@"C:\Docs\Plan.pdf", @"D:\Notes.txt"]),
+        "Folder stack files must deduplicate paths case-insensitively.");
     var extrasDefault = new BarSettings();
-    Require(extrasDefault.ShowLaunchpad && extrasDefault.LaunchpadMaterial == "bar" && extrasDefault.LaunchpadLayout == "window" && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
+    Require(extrasDefault.ShowLaunchpad && extrasDefault.LaunchpadMaterial == "bar" &&
+            extrasDefault.LaunchpadLayout == "window" && extrasDefault.ShowNowPlaying && extrasDefault.NowPlayingShowPaused &&
             extrasDefault.NowPlayingMotion == "normal" && extrasDefault.NowPlayingRhythm == "live" && extrasDefault.NowPlayingAppMode == "all" &&
             extrasDefault.NowPlayingApps.Count == 0 &&
             !extrasDefault.ShowFolderStacks && extrasDefault.FolderStackLayout == "fan" &&
@@ -231,7 +240,8 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
         "Extras settings must survive a round trip.");
     foreach (var edit in new Action<BarSettings>[]
     {
-        s => s.ShowLaunchpad = false, s => s.LaunchpadMaterial = "tint", s => s.LaunchpadLayout = "fullscreen", s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
+        s => s.ShowLaunchpad = false, s => s.LaunchpadMaterial = "tint", s => s.LaunchpadLayout = "fullscreen",
+        s => s.ShowNowPlaying = false, s => s.NowPlayingShowPaused = false,
         s => s.NowPlayingMotion = "subtle", s => s.NowPlayingRhythm = "loop", s => s.NowPlayingAppMode = "allow",
         s => s.NowPlayingApps = ["a.exe"],
         s => s.ShowFolderStacks = true, s => s.FolderStackLayout = "column",
@@ -1248,6 +1258,71 @@ finally
             fsCap.Draft.FolderStacks = [.. fsBase, @"D:\Local1", @"D:\Local2"];
             fsCap.ApplyExternalChange(new BarSettings { FolderStacks = [.. fsBase, @"D:\Remote1", @"D:\Remote2", @"D:\Remote3"] }, 2);
             Require(fsCap.Draft.FolderStacks.Count == 32, "FolderStacks 3-way merge must cap at 32 items.");
+        }
+
+        // FolderStackFiles 3-way merge (max 32, case-insensitive slash-normalized path dedupe)
+        {
+            var fsf = new SettingsSession();
+            fsf.ApplyInitialState(
+                new BarSettings { FolderStackFiles = [@"C:\Docs\A.pdf", @"D:\Notes.txt"] },
+                new BarSettings { FolderStackFiles = [@"C:\Docs\A.pdf", @"D:\Notes.txt"] },
+                "i1", 1);
+            fsf.Draft.FolderStackFiles = [@"D:\Notes.txt", @"C:\Docs\A.pdf", @"E:\Media\Song.mp3"];
+            fsf.ApplyConflict(new BarSettings { FolderStackFiles = [@"c:/docs/a.pdf", @"d:\notes.txt", @"F:\Book.epub"] }, 2, "i1");
+            Require(fsf.Draft.FolderStackFiles.SequenceEqual([@"d:\notes.txt", @"c:/docs/a.pdf", @"E:\Media\Song.mp3", @"F:\Book.epub"]),
+                "FolderStackFiles 3-way merge must match case-insensitive paths and keep local reorder + additions.");
+
+            var fsfDrop = new SettingsSession();
+            fsfDrop.ApplyInitialState(
+                new BarSettings { FolderStackFiles = [@"C:\Docs\A.pdf", @"D:\Notes.txt"] },
+                new BarSettings { FolderStackFiles = [@"C:\Docs\A.pdf", @"D:\Notes.txt"] },
+                "i1", 1);
+            fsfDrop.Draft.FolderStackFiles = [@"C:\Docs\A.pdf"];
+            fsfDrop.ApplyExternalChange(new BarSettings { FolderStackFiles = [@"C:\Docs\A.pdf", @"d:/notes.txt", @"E:\New.pdf"] }, 2);
+            Require(fsfDrop.Draft.FolderStackFiles.SequenceEqual([@"C:\Docs\A.pdf", @"E:\New.pdf"]),
+                "FolderStackFiles 3-way merge must drop locally removed file even when remote casing or slashes differ.");
+
+            var fsfCap = new SettingsSession();
+            var fsfBase = Enumerable.Range(0, 30).Select(i => $@"D:\File{i}.pdf").ToList();
+            fsfCap.ApplyInitialState(new BarSettings { FolderStackFiles = [.. fsfBase] }, new BarSettings { FolderStackFiles = [.. fsfBase] }, "i1", 1);
+            fsfCap.Draft.FolderStackFiles = [.. fsfBase, @"D:\Local1.pdf", @"D:\Local2.pdf"];
+            fsfCap.ApplyExternalChange(
+                new BarSettings { FolderStackFiles = [.. fsfBase, @"D:\Remote1.pdf", @"D:\Remote2.pdf", @"D:\Remote3.pdf"] }, 2);
+            Require(fsfCap.Draft.FolderStackFiles.Count == 32, "FolderStackFiles 3-way merge must cap at 32 items.");
+        }
+
+        // ControlModules 3-way merge (dedupe, max 4, filtered by ControlModuleIds)
+        {
+            var cm = new SettingsSession();
+            cm.ApplyInitialState(
+                new BarSettings { Height = 60, ControlModules = ["stage"] },
+                new BarSettings { Height = 60, ControlModules = ["stage"] },
+                "i1", 1);
+            cm.Draft.ControlModules = ["darkmode", "wifi", "stage", "darkmode"];
+            cm.ApplyConflict(new BarSettings { Height = 72, ControlModules = ["stage", "hotspot"] }, 2, "i1");
+            Require(cm.Draft.Height == 72 && cm.Draft.ControlModules.SequenceEqual(["darkmode", "stage", "hotspot"]),
+                "ControlModules 3-way merge must filter unknown ids, dedupe, and merge local + remote additions.");
+
+            var cmDrop = new SettingsSession();
+            cmDrop.ApplyInitialState(
+                new BarSettings { ControlModules = ["stage", "darkmode"] },
+                new BarSettings { ControlModules = ["stage", "darkmode"] },
+                "i1", 1);
+            cmDrop.Draft.ControlModules = ["darkmode"];
+            cmDrop.ApplyExternalChange(new BarSettings { ControlModules = ["stage", "nightlight", "energysaver"] }, 2);
+            Require(cmDrop.Draft.ControlModules.SequenceEqual(["darkmode", "energysaver"]),
+                "ControlModules 3-way merge must drop locally removed module and normalize nightlight.");
+
+            var cmAll = new SettingsSession();
+            cmAll.ApplyInitialState(
+                new BarSettings { ControlModules = ["stage", "darkmode"] },
+                new BarSettings { ControlModules = ["stage", "darkmode"] },
+                "i1", 1);
+            cmAll.Draft.ControlModules = ["darkmode", "stage", "energysaver"];
+            cmAll.ApplyConflict(new BarSettings { ControlModules = ["stage", "darkmode", "hotspot"] }, 2, "i1");
+            Require(cmAll.Draft.ControlModules.Count <= 4 &&
+                    cmAll.Draft.ControlModules.SequenceEqual(["darkmode", "stage", "energysaver", "hotspot"]),
+                "ControlModules 3-way merge must preserve reorder and cap at 4 known modules.");
         }
 
         // 8. ReleaseInstaller.ReadPreparedRecovering: corrupt ready.json, missing files, and escaping path auto-clean and return null

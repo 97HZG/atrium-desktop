@@ -157,7 +157,7 @@ internal sealed class SettingsSession
         foreach (var kv in draftJson) keys.Add(kv.Key);
         foreach (string key in keys)
         {
-            if (key is "pins" or "stageExcluded" or "nowPlayingApps" or "folderStacks") continue;
+            if (key is "pins" or "stageExcluded" or "nowPlayingApps" or "folderStacks" or "folderStackFiles" or "controlModules") continue;
             baseJson.TryGetPropertyValue(key, out var baseVal);
             draftJson.TryGetPropertyValue(key, out var draftVal);
             bool draftChanged = !JsonNode.DeepEquals(draftVal, baseVal);
@@ -170,6 +170,14 @@ internal sealed class SettingsSession
         result.StageExcluded = MergeStringList(baseSaved.StageExcluded, targetSaved.StageExcluded, draft.StageExcluded, TrimAsciiKey);
         result.NowPlayingApps = MergeStringList(baseSaved.NowPlayingApps, targetSaved.NowPlayingApps, draft.NowPlayingApps, TrimAsciiKey, 64);
         result.FolderStacks = MergeStringList(baseSaved.FolderStacks, targetSaved.FolderStacks, draft.FolderStacks, NormalizeFolderKey, 32);
+        result.FolderStackFiles = MergeStringList(
+            baseSaved.FolderStackFiles, targetSaved.FolderStackFiles, draft.FolderStackFiles, NormalizeFileKey, 32);
+        result.ControlModules = MergeStringList(
+            NormalizeControlModules(baseSaved.ControlModules),
+            NormalizeControlModules(targetSaved.ControlModules),
+            NormalizeControlModules(draft.ControlModules),
+            TrimAsciiKey,
+            BarSettings.ControlModuleIds.Length);
         return result;
     }
 
@@ -207,6 +215,14 @@ internal sealed class SettingsSession
                 d.MultipleWindows != b.MultipleWindows ? d.MultipleWindows : t.MultipleWindows));
 
     private static string TrimAsciiKey(string s) => s.AsSpan().Trim(AsciiWs).ToString();
+
+    private static string NormalizeFileKey(string s) => s.AsSpan().Trim(AsciiWs).ToString().Replace('/', '\\');
+
+    private static List<string> NormalizeControlModules(IEnumerable<string> list) =>
+        [.. list.Select(id => TrimAsciiKey(id) is "nightlight" ? "darkmode" : TrimAsciiKey(id))
+                .Where(BarSettings.ControlModuleIds.Contains)
+                .Distinct(StringComparer.Ordinal)
+                .Take(BarSettings.ControlModuleIds.Length)];
 
     private static bool IsFolderRootSlash(ReadOnlySpan<char> path)
     {
