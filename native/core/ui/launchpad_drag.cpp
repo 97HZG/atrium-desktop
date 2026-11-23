@@ -95,7 +95,12 @@ void Launchpad::DropLifted()
         order_.push_back(app.id);
     SaveLaunchpadOrder(order_);
     Log(L"launchpad: arranged (%zu tiles)", order_.size());
-    surface_.Invalidate();
+    if (stale_) {
+        stale_ = false;
+        Refresh();
+    } else {
+        surface_.Invalidate();
+    }
 }
 
 // The tile's place on the sheet glides to its cell's; drawn where it is now on this page.

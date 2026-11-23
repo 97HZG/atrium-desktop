@@ -53,11 +53,14 @@ private:
         HWND window = nullptr;
         std::function<void()> restore; // set: out of the icon, then this
         bool restoreDue = false;
+        bool restoreTransitions = false;
     };
-    void Watch();                                             // kWatchTimer: the window in front, its picture, its animations
+    void Watch();                                              // kWatchTimer: the window in front, its picture, its animations
     void Release(HWND window, bool restoreTransitions = true); // its own animations back (unless another owner took it)
-    void Hold(HWND window);                                   // its own animations off
-    void Arm(const RECT& frame);  // the layer on the window's monitor, empty, for a while
+    void Hold(HWND window);                                    // its own animations off
+    RECT FlightBounds(const RECT& fallback) const;
+    void Arm(const RECT& frame); // the layer on the flights' monitor(s), empty, for a while
+    void Shutdown();
     void Launch(Flight f);
     void RunPending();            // the bar's minimize, its picture taken (or not in time)
     void RunRestores();           // flights out of the icon that have landed

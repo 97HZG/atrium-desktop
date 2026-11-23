@@ -50,6 +50,13 @@ RECT Frame(HWND h)
     return r;
 }
 
+RECT MonitorRect(const RECT& r)
+{
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST), &mi);
+    return mi.rcMonitor;
+}
+
 // A window worth the effect: a visible, top-level, captioned one that minimizes.
 bool Minimizable(HWND h)
 {
@@ -68,7 +75,10 @@ float Lerp(float a, float b, float t) { return a + (b - a) * t; }
 } // namespace
 
 GenieMinimize::GenieMinimize(HINSTANCE instance, std::function<std::optional<RECT>(HWND)> target, std::function<bool(HWND)> skip)
-    : surface_(instance, L"Atrium Genie", false, 0), snapshots_(surface_.Hwnd(), WM_GENIE_PICTURE), target_(std::move(target)), skip_(std::move(skip))
+    : surface_(instance, L"Atrium Genie", false, 0, false, true),
+      snapshots_(surface_.Hwnd(), WM_GENIE_PICTURE),
+      target_(std::move(target)),
+      skip_(std::move(skip))
 {
     surface_.SetGlassless(true);
     surface_.SetRegionNone(); // over everything and out of the way until something pours
@@ -98,7 +108,34 @@ GenieMinimize::GenieMinimize(HINSTANCE instance, std::function<std::optional<REC
     };
 }
 
-GenieMinimize::~GenieMinimize() { SetEnabled(false); }
+GenieMinimize::~GenieMinimize()
+{
+    SetEnabled(false);
+    Shutdown();
+}
+
+void GenieMinimize::Shutdown()
+{
+    if (g_genie == this)
+        g_genie = nullptr;
+    if (hook_)
+        UnhookWinEvent(hook_);
+    hook_ = nullptr;
+    KillTimer(surface_.Hwnd(), kWatchTimer);
+    KillTimer(surface_.Hwnd(), kIdleTimer);
+    RunPending();
+    Release(held_, !(skip_ && skip_(held_)));
+    for (const Flight& f : flights_) {
+        surface_.ForgetImage(f.key);
+        if (f.window && f.window != held_ && !(skip_ && skip_(f.window)) && IsWindow(f.window))
+            Transitions(f.window, true);
+    }
+    flights_.clear();
+    pictures_.clear();
+    front_ = nullptr;
+    surface_.SetRegionNone();
+    surface_.Hide(false);
+}
 
 void GenieMinimize::SetEnabled(bool on)
 {
@@ -111,14 +148,7 @@ void GenieMinimize::SetEnabled(bool on)
                                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
         SetTimer(surface_.Hwnd(), kWatchTimer, kWatchMs, nullptr);
     } else {
-        if (hook_)
-            UnhookWinEvent(hook_);
-        hook_ = nullptr;
-        KillTimer(surface_.Hwnd(), kWatchTimer);
-        RunPending();
-        Release(held_, !(skip_ && skip_(held_)));
-        pictures_.clear();
-        front_ = nullptr;
+        Shutdown();
     }
     Log(L"genie: %s", on ? L"on" : L"off");
 }
@@ -141,16 +171,30 @@ void GenieMinimize::Hold(HWND window)
     held_ = window;
 }
 
+RECT GenieMinimize::FlightBounds(const RECT& fallback) const
+{
+    RECT bounds{};
+    for (const Flight& g : flights_) {
+        const RECT a = MonitorRect(g.from), b = MonitorRect(g.to);
+        RECT both{};
+        UnionRect(&both, &a, &b);
+        if (IsRectEmpty(&bounds))
+            bounds = both;
+        else
+            UnionRect(&bounds, &bounds, &both);
+    }
+    return IsRectEmpty(&bounds) ? MonitorRect(fallback) : bounds;
+}
+
 void GenieMinimize::Arm(const RECT& frame)
 {
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(MonitorFromRect(&frame, MONITOR_DEFAULTTONEAREST), &mi);
+    const RECT bounds = FlightBounds(frame);
     if (!surface_.Visible()) {
-        surface_.Show(mi.rcMonitor, false, POINT{mi.rcMonitor.left, mi.rcMonitor.top}, false);
+        surface_.Show(bounds, false, POINT{bounds.left, bounds.top}, false);
     } else {
         const RECT now = surface_.Rect();
-        if (!EqualRect(&now, &mi.rcMonitor))
-            surface_.Move(mi.rcMonitor);
+        if (!EqualRect(&now, &bounds))
+            surface_.Move(bounds);
     }
     SetTimer(surface_.Hwnd(), kIdleTimer, kIdleMs, nullptr);
 }
@@ -158,6 +202,8 @@ void GenieMinimize::Arm(const RECT& frame)
 // The window in front: its picture kept fresh, and its own minimize animation off once there is one.
 void GenieMinimize::Watch()
 {
+    if (pending_)
+        return;
     HWND fg = GetForegroundWindow();
     HWND root = fg ? GetAncestor(fg, GA_ROOTOWNER) : nullptr;
     DWORD pid = 0;
@@ -171,7 +217,17 @@ void GenieMinimize::Watch()
         front_ = root;
         frontSince_ = now;
     }
-    std::erase_if(pictures_, [&](const auto& kv) { return kv.first != root && !IsWindow(kv.first); });
+    const auto inFlight = [&](HWND h) { return std::ranges::any_of(flights_, [h](const Flight& f) { return f.window == h; }); };
+    std::erase_if(pictures_, [&](auto& kv) {
+        const HWND h = kv.first;
+        if (h != root && !IsWindow(h))
+            return true;
+        if (h != root && h != pending_ && !IsIconic(h) && !inFlight(h)) {
+            kv.second.large.reset();
+            return true;
+        }
+        return false;
+    });
     if (!root)
         return;
     Picture& p = pictures_[root];
@@ -270,35 +326,52 @@ bool GenieMinimize::Restore(HWND window, std::function<void()> restore)
 void GenieMinimize::Launch(Flight f)
 {
     f.key = L"genie|" + std::to_wstring(++flightGen_);
-    Arm(f.from);
     flights_.push_back(std::move(f));
+    Arm(flights_.back().from);
     // On screen (and in the way of clicks) only where the flights go, while they do.
     const RECT origin = surface_.Rect();
     const float s = surface_.Scale();
+    const float maxW = float(origin.right - origin.left) / s, maxH = float(origin.bottom - origin.top) / s;
     D2D1_RECT_F area = D2D1::RectF(1e9f, 1e9f, -1e9f, -1e9f);
     for (const Flight& g : flights_)
         for (const RECT& r : {g.from, g.to})
             area = D2D1::RectF(std::min(area.left, float(r.left - origin.left) / s), std::min(area.top, float(r.top - origin.top) / s),
                                std::max(area.right, float(r.right - origin.left) / s), std::max(area.bottom, float(r.bottom - origin.top) / s));
-    surface_.SetRegion(area);
+    area =
+        D2D1::RectF(std::clamp(area.left, 0.f, maxW), std::clamp(area.top, 0.f, maxH), std::clamp(area.right, 0.f, maxW), std::clamp(area.bottom, 0.f, maxH));
+    if (area.right > area.left && area.bottom > area.top)
+        surface_.SetRegion(area);
+    else
+        surface_.SetRegionNone();
     surface_.Invalidate();
 }
 
 // Out of the icon and landed: the window comes back under its picture, without an animation of its own.
 void GenieMinimize::RunRestores()
 {
+    struct Due {
+        HWND window = nullptr;
+        std::function<void()> restore;
+    };
+    std::vector<Due> due;
     for (Flight& f : flights_)
         if (f.restoreDue && f.restore) {
-            if (IsWindow(f.window))
-                Transitions(f.window, false);
-            std::exchange(f.restore, nullptr)();
+            f.restoreTransitions = true;
+            due.push_back({f.window, std::exchange(f.restore, nullptr)});
         }
+    for (Due& d : due) {
+        if (IsWindow(d.window))
+            Transitions(d.window, false);
+        d.restore();
+    }
 }
 
 void GenieMinimize::Paint(Canvas& c)
 {
     for (auto it = flights_.begin(); it != flights_.end();) {
         if (PaintOne(c, *it)) {
+            if (it->restoreTransitions && it->window != held_ && !(skip_ && skip_(it->window)) && IsWindow(it->window))
+                Transitions(it->window, true);
             surface_.ForgetImage(it->key);
             it = flights_.erase(it);
         } else {
@@ -345,7 +418,8 @@ void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t, float alpha
     const WindowPicture& pic = *f.picture;
     const RECT origin = surface_.Rect();
     auto dip = [&](LONG v, LONG o) { return float(v - o) / c.scale; };
-    const D2D1_RECT_F w = D2D1::RectF(dip(f.from.left, origin.left), dip(f.from.top, origin.top), dip(f.from.right, origin.left), dip(f.from.bottom, origin.top));
+    const D2D1_RECT_F w =
+        D2D1::RectF(dip(f.from.left, origin.left), dip(f.from.top, origin.top), dip(f.from.right, origin.left), dip(f.from.bottom, origin.top));
     const D2D1_RECT_F ic = D2D1::RectF(dip(f.to.left, origin.left), dip(f.to.top, origin.top), dip(f.to.right, origin.left), dip(f.to.bottom, origin.top));
     const float wcx = (w.left + w.right) / 2, wcy = (w.top + w.bottom) / 2, icx = (ic.left + ic.right) / 2, icy = (ic.top + ic.bottom) / 2;
     // Which way: towards the bar's side the icon lies on.
@@ -389,12 +463,12 @@ void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t, float alpha
         D2D1_RECT_F src{};
         if (vertical) {
             // The source's top is the slice's far end when the icon is below, its near end when above.
-            quad = sign > 0 ? std::array{D2D1::Point2F(lo0, y0), D2D1::Point2F(hi0, y0), D2D1::Point2F(hi1, y1), D2D1::Point2F(lo1, y1)}
-                            : std::array{D2D1::Point2F(lo1, y1), D2D1::Point2F(hi1, y1), D2D1::Point2F(hi0, y0), D2D1::Point2F(lo0, y0)};
+            quad = sign > 0 ? std::array{D2D1::Point2F(lo0, y0), D2D1::Point2F(hi0, y0), D2D1::Point2F(hi1, y1), D2D1::Point2F(lo1, y1)} :
+                              std::array{D2D1::Point2F(lo1, y1), D2D1::Point2F(hi1, y1), D2D1::Point2F(hi0, y0), D2D1::Point2F(lo0, y0)};
             src = D2D1::RectF(pad, pad + s0 * ph, pad + pw, pad + s1 * ph);
         } else {
-            quad = sign > 0 ? std::array{D2D1::Point2F(y0, lo0), D2D1::Point2F(y1, lo1), D2D1::Point2F(y1, hi1), D2D1::Point2F(y0, hi0)}
-                            : std::array{D2D1::Point2F(y1, lo1), D2D1::Point2F(y0, lo0), D2D1::Point2F(y0, hi0), D2D1::Point2F(y1, hi1)};
+            quad = sign > 0 ? std::array{D2D1::Point2F(y0, lo0), D2D1::Point2F(y1, lo1), D2D1::Point2F(y1, hi1), D2D1::Point2F(y0, hi0)} :
+                              std::array{D2D1::Point2F(y1, lo1), D2D1::Point2F(y0, lo0), D2D1::Point2F(y0, hi0), D2D1::Point2F(y1, hi1)};
             src = D2D1::RectF(pad + s0 * pw, pad, pad + s1 * pw, pad + ph);
         }
         c.ImageQuad(f.key, image, src, quad, opacity);

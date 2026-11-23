@@ -1,0 +1,300 @@
+// Start menu's popup menus and Windows Start sync.
+#include "ui/start_menu.h"
+
+#include "localization.h"
+#include "log.h"
+
+#include <shlobj.h>
+
+#include <algorithm>
+
+namespace atrium {
+
+namespace {
+
+constexpr int kOpen = 1, kPinBar = 2, kPinStart = 3, kRemove = 4, kOutOfFolder = 5, kRename = 6, kUngroup = 7, kRemoveFolder = 8, kReset = 9, kHide = 10,
+              kUnhide = 11, kShowHidden = 12, kAdmin = 13, kLocation = 14, kSyncPins = 15, kSyncFolders = 16, kSyncBoth = 17, kSize = 18,
+              kIcon = kSize + StartLayout::kSizes;
+
+template<class CloseFn> void FinishMenuClose(Surface& surface, GlassMenu* menu, bool& menuOpen, CloseFn&& close)
+{
+    menuOpen = false;
+    if (!surface.Visible())
+        return;
+    // Back to the start menu, unless the click that closed the menu went to another window.
+    HWND fg = GetForegroundWindow();
+    if (!fg || fg == surface.Hwnd() || (menu && fg == menu->Hwnd()))
+        SetForegroundWindow(surface.Hwnd());
+    else
+        close();
+}
+
+bool TileHasApp(const std::vector<StartTile>& tiles, const std::wstring& id)
+{
+    for (const StartTile& t : tiles)
+        if (t.id == id || std::ranges::any_of(t.apps, [&](const StartTile& a) { return a.id == id; }))
+            return true;
+    return false;
+}
+
+void MergeWindowsFolder(std::vector<StartTile>& tiles, const CatalogFolder& f, bool win10Both, const std::vector<std::wstring>& hidden, size_t& apps,
+                        size_t& newFolders)
+{
+    std::vector<StartTile> missing;
+    for (const CatalogApp& a : f.apps) {
+        const bool isHidden = std::ranges::find(hidden, a.id) != hidden.end();
+        if (!TileHasApp(tiles, a.id) && !isHidden && std::ranges::none_of(missing, [&](const StartTile& m) { return m.id == a.id; }))
+            missing.push_back({a.id, a.name, {}});
+    }
+    if (!f.folder || (win10Both && missing.size() == 1)) {
+        apps += missing.size();
+        tiles.insert(tiles.end(), std::make_move_iterator(missing.begin()), std::make_move_iterator(missing.end()));
+        return;
+    }
+    const std::wstring fname = f.name.empty() ? Tr(L"New folder") : f.name;
+    auto same = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.Folder() && t.name == fname; });
+    if (same != tiles.end()) {
+        apps += missing.size();
+        same->apps.insert(same->apps.end(), missing.begin(), missing.end());
+    } else if (missing.size() >= 2) {
+        apps += missing.size();
+        ++newFolders;
+        StartLayout ids;
+        ids.tiles = tiles;
+        tiles.push_back({ids.NewFolderId(), fname, std::move(missing)});
+    }
+}
+
+} // namespace
+
+void StartMenu::OpenSyncMenu()
+{
+    if (!menu)
+        return;
+    const float s = surface_.Scale();
+    const D2D1_RECT_F b = SyncButton();
+    const POINT at = surface_.ContentToScreen(POINT{LONG(b.left * s) + OffsetXPx(), LONG((b.bottom + 6) * s) + OffsetPx()});
+    std::vector<MenuEntry> entries = {{Tr(L"Sync with the Windows start menu"), 0, false, true, true},
+                                      {Tr(L"Pinned apps and folders"), kSyncBoth},
+                                      {Tr(L"Pinned apps only"), kSyncPins},
+                                      {Tr(L"Folders and their apps only"), kSyncFolders}};
+    if (!catalog_.Loaded())
+        for (MenuEntry& e : entries)
+            e.disabled = true;
+    menuOpen_ = true;
+    menu->Open(
+        std::move(entries), at, MenuPlace::Below,
+        [this](int cmd) {
+            if (cmd == kSyncPins || cmd == kSyncFolders || cmd == kSyncBoth)
+                SyncFromWindows(cmd != kSyncFolders, cmd != kSyncPins);
+        },
+        [this] { FinishMenuClose(surface_, menu, menuOpen_, [this] { Close(false); }); });
+}
+
+// Pins in the Windows order, at the end; a folder of All apps as a folder of its own (one of the
+// same name already here takes the apps it lacks). An app already somewhere in the menu stays where
+// it is; hidden apps stay hidden.
+void StartMenu::SyncFromWindows(bool pins, bool folders, bool refresh)
+{
+    if (refresh && catalog_.StartMenuUsesXml())
+        pendingSync_ = {true, pins, folders}, catalog_.Refresh(true);
+    pins_ = catalog_.StartPins();
+    const bool win10Both = pins && folders && catalog_.StartMenuUsesXml();
+    const std::vector<CatalogFolder> windowsFolders = win10Both ? catalog_.StartPinGroups() : folders ? catalog_.StartFolders() : std::vector<CatalogFolder>{};
+    size_t apps = 0, newFolders = 0;
+    Arrange([&](std::vector<StartTile>& tiles) {
+        if (pins && !win10Both)
+            for (const CatalogApp& p : pins_)
+                if (!TileHasApp(tiles, p.id) && !Hidden(p.id)) {
+                    tiles.push_back({p.id, p.name, {}});
+                    ++apps;
+                }
+        for (const CatalogFolder& f : windowsFolders)
+            MergeWindowsFolder(tiles, f, win10Both, layout_.hidden, apps, newFolders);
+    });
+    if (pins) {
+        layout_.windowsPins.clear();
+        for (const CatalogApp& p : pins_)
+            layout_.windowsPins.push_back(p.id);
+        layout_.windowsPinsKnown = true;
+        SaveStartLayout(layout_);
+    }
+    Log(L"start: synced with the Windows start menu: %zu app(s), %zu new folder(s) (%zu pins, %zu folders there)", apps, newFolders, pins_.size(),
+        windowsFolders.size());
+}
+
+std::vector<MenuEntry> StartMenu::BuildContextEntries(const std::wstring& id, CatalogApp& app, std::wstring& folderKey) const
+{
+    std::vector<MenuEntry> entries;
+    bool isApp = false, inFolder = false;
+    if (id.starts_with(L"tile:")) {
+        const int i = ParseIndex(id, 5);
+        if (i < 0 || i >= int(tiles_.size()))
+            return entries;
+        if (tiles_[size_t(i)].folder)
+            folderKey = tiles_[size_t(i)].key;
+        else
+            app = tiles_[size_t(i)].app, isApp = true;
+    } else if (id.starts_with(L"fapp:")) {
+        const int i = ParseIndex(id, 5);
+        if (folder_ < 0 || i < 0 || i >= int(tiles_[size_t(folder_)].apps.size()))
+            return entries;
+        app = tiles_[size_t(folder_)].apps[size_t(i)];
+        isApp = inFolder = true;
+    } else if (id.starts_with(L"row:")) {
+        const auto& rows = RowsShown();
+        const size_t i = size_t(ParseIndex(id, 4));
+        if (i >= rows.size() || rows[i].letter)
+            return entries;
+        if (rows[i].folder >= 0)
+            folderKey = tiles_[size_t(rows[i].folder)].key;
+        else
+            app = rows[i].app, isApp = true;
+    }
+    if (isApp) {
+        entries.push_back({Tr(L"Open"), kOpen});
+        if (!AppCatalog::FileLocation(app).empty()) {
+            entries.push_back({Tr(L"Run as administrator"), kAdmin});
+            entries.push_back({Tr(L"Open File Location"), kLocation});
+        }
+        entries.push_back({});
+        entries.push_back({Tr(L"Pin to taskbar"), kPinBar});
+        if (!OnStart(app.id))
+            entries.push_back({Tr(L"Pin to Start"), kPinStart});
+        if (inFolder)
+            entries.push_back({Tr(L"Remove from folder"), kOutOfFolder});
+        if (OnStart(app.id))
+            entries.push_back({Tr(L"Remove from Start"), kRemove});
+        entries.push_back(Hidden(app.id) ? MenuEntry{Tr(L"Unhide"), kUnhide} : MenuEntry{Tr(L"Hide"), kHide});
+    } else if (!folderKey.empty()) {
+        entries = {{Tr(L"Open"), kOpen}, {Tr(L"Rename"), kRename}, {}, {Tr(L"Ungroup folder"), kUngroup}, {Tr(L"Remove from Start"), kRemoveFolder}};
+    } else if (id.empty() && !Listing() && folder_ < 0) {
+        const wchar_t* const kNames[] = {Tr(L"Small"), Tr(L"Medium"), Tr(L"Large"), Tr(L"Huge")};
+        entries.push_back({Tr(L"Menu size"), 0, false, true, true});
+        for (int grid = 0; grid <= room_; ++grid)
+            entries.push_back({kNames[grid], kSize + grid, grid == grid_});
+        entries.push_back({});
+        entries.push_back({Tr(L"Icon size"), 0, false, true, true});
+        for (int icon = 0; icon < StartLayout::kSizes; ++icon)
+            entries.push_back({kNames[icon], kIcon + icon, icon == layout_.icon});
+        if (!layout_.hidden.empty()) {
+            entries.push_back({});
+            entries.push_back({Tr(L"Show hidden apps"), kShowHidden});
+        }
+        if (layout_.custom) {
+            entries.push_back({});
+            entries.push_back({Tr(L"Restore Windows Start pins"), kReset});
+        }
+    }
+    return entries;
+}
+
+void StartMenu::RunContextCommand(int cmd, const CatalogApp& app, const std::wstring& folderKey, const std::wstring& openKey)
+{
+    auto tileOf = [&](const std::wstring& key) {
+        for (size_t i = 0; i < tiles_.size(); ++i)
+            if (tiles_[i].key == key)
+                return int(i);
+        return -1;
+    };
+    if (cmd >= kSize && cmd < kSize + 4) {
+        SetSize(cmd - kSize, layout_.icon);
+        SaveStartLayout(layout_);
+        Log(L"start: sized to %d x %d tiles", cols_, rows_);
+        if (onSize)
+            onSize(SizeName());
+        return;
+    }
+    if (cmd >= kIcon && cmd < kIcon + 4) {
+        SetSize(layout_.size, cmd - kIcon);
+        SaveStartLayout(layout_);
+        Log(L"start: icons %.0f DIP (%d px), %d x %d tiles", IconSize(), IconPx(), cols_, rows_);
+        if (onIcon)
+            onIcon(IconSizeName());
+        return;
+    }
+    switch (cmd) {
+    case kOpen:
+        if (!folderKey.empty())
+            OpenFolder(tileOf(folderKey));
+        else
+            Launch(app);
+        break;
+    case kAdmin:
+        Close(true);
+        AppCatalog::LaunchAsAdmin(app);
+        break;
+    case kLocation:
+        Close(true);
+        if (PIDLIST_ABSOLUTE item = ILCreateFromPathW(AppCatalog::FileLocation(app).c_str())) {
+            SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
+            ILFree(item);
+        }
+        break;
+    case kPinBar:
+        if (onPin)
+            onPin(AppCatalog::PinFor(app));
+        break;
+    case kPinStart: PinToStart(app); break;
+    case kRemove:
+        Arrange([&](std::vector<StartTile>& tiles) { TakeTile(tiles, app.id); });
+        Log(L"start: %s removed from the start menu", app.name.c_str());
+        break;
+    case kShowHidden: ShowHidden(); break;
+    case kHide: SetHidden(app, true); break;
+    case kUnhide: SetHidden(app, false); break;
+    case kOutOfFolder:
+        Arrange([&](std::vector<StartTile>& tiles) { // next to its folder on the grid
+            std::optional<StartTile> moved = TakeTile(tiles, app.id);
+            if (!moved)
+                return;
+            auto at = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.id == openKey; });
+            tiles.insert(at == tiles.end() ? at : at + 1, std::move(*moved));
+        });
+        break;
+    case kRename:
+        OpenFolder(tileOf(folderKey));
+        StartNaming();
+        break;
+    case kUngroup:
+    case kRemoveFolder:
+        if (folder_ >= 0 && tiles_[size_t(folder_)].key == folderKey)
+            folder_ = -1, folderClosing_ = naming_ = false;
+        Arrange([&](std::vector<StartTile>& tiles) {
+            if (cmd == kRemoveFolder)
+                RemoveStartFolder(tiles, folderKey);
+            else
+                UngroupStartFolder(tiles, folderKey);
+        });
+        Log(cmd == kRemoveFolder ? L"start: folder %s removed from the start menu" : L"start: folder %s ungrouped", folderKey.c_str());
+        break;
+    case kReset:
+        layout_.custom = false;
+        layout_.tiles.clear();
+        SaveStartLayout(layout_);
+        Rebuild();
+        surface_.Invalidate();
+        Log(L"start: back to the Windows start menu's pins");
+        break;
+    default: break;
+    }
+}
+
+void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
+{
+    if (!menu)
+        return;
+    CatalogApp app;
+    std::wstring folderKey;
+    std::vector<MenuEntry> entries = BuildContextEntries(id, app, folderKey);
+    if (entries.empty())
+        return;
+    const std::wstring openKey = folder_ >= 0 ? tiles_[size_t(folder_)].key : L"";
+    menuOpen_ = true;
+    menu->Open(
+        std::move(entries), screen, MenuPlace::Below, [this, app, folderKey, openKey](int cmd) { RunContextCommand(cmd, app, folderKey, openKey); },
+        [this] { FinishMenuClose(surface_, menu, menuOpen_, [this] { Close(false); }); });
+    surface_.Invalidate();
+}
+
+} // namespace atrium

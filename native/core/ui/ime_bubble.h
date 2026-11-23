@@ -59,6 +59,7 @@ private:
     RECT RectFor() const;
     void ArmEndTimer(double now);
     void Stop();
+    D2D1_RECT_F PublishShapes(const ImeBubbleModel::Frame& f, float r, bool steady);
     void Paint(Canvas& c);
 
     std::wstring glyph_;       // the OS's mark for this language and mode, from Show

@@ -131,24 +131,10 @@ StartTile* Find(std::vector<StartTile>& tiles, const std::wstring& id)
     return it == tiles.end() ? nullptr : &*it;
 }
 
-constexpr int kOpen = 1, kPinBar = 2, kPinStart = 3, kRemove = 4, kOutOfFolder = 5, kRename = 6, kUngroup = 7, kRemoveFolder = 8, kReset = 9, kHide = 10,
-              kUnhide = 11, kShowHidden = 12, kAdmin = 13, kLocation = 14, kSyncPins = 15, kSyncFolders = 16, kSyncBoth = 17, kSize = 18,
-              kIcon = kSize + StartLayout::kSizes;
-
-template<class CloseFn> void FinishMenuClose(Surface& surface, GlassMenu* menu, bool& menuOpen, CloseFn&& close)
-{
-    menuOpen = false;
-    if (!surface.Visible())
-        return;
-    // Back to the start menu, unless the click that closed the menu went to another window.
-    HWND fg = GetForegroundWindow();
-    if (!fg || fg == surface.Hwnd() || (menu && fg == menu->Hwnd()))
-        SetForegroundWindow(surface.Hwnd());
-    else
-        close();
-}
-
 } // namespace
+
+std::optional<StartTile> StartMenu::TakeTile(std::vector<StartTile>& tiles, const std::wstring& id) { return Take(tiles, id); }
+int StartMenu::ParseIndex(const std::wstring& id, size_t prefix) { return Index(id, prefix); }
 
 StartMenu::StartMenu(HINSTANCE instance, TaskModel& tasks, AppCatalog& catalog)
     : surface_(instance, L"Atrium Start", true),
@@ -574,99 +560,28 @@ void StartMenu::SyncWindowsPins()
     }
 }
 
-void StartMenu::OpenSyncMenu()
+void StartMenu::BuildDefaultTiles()
 {
-    if (!menu)
-        return;
-    const float s = surface_.Scale();
-    const D2D1_RECT_F b = SyncButton();
-    const POINT at = surface_.ContentToScreen(POINT{LONG(b.left * s) + OffsetXPx(), LONG((b.bottom + 6) * s) + OffsetPx()});
-    std::vector<MenuEntry> entries = {{Tr(L"Sync with the Windows start menu"), 0, false, true, true},
-                                      {Tr(L"Pinned apps and folders"), kSyncBoth},
-                                      {Tr(L"Pinned apps only"), kSyncPins},
-                                      {Tr(L"Folders and their apps only"), kSyncFolders}};
-    if (!catalog_.Loaded())
-        for (MenuEntry& e : entries)
-            e.disabled = true;
-    menuOpen_ = true;
-    menu->Open(
-        std::move(entries), at, MenuPlace::Below,
-        [this](int cmd) {
-            if (cmd == kSyncPins || cmd == kSyncFolders || cmd == kSyncBoth)
-                SyncFromWindows(cmd != kSyncFolders, cmd != kSyncPins);
-        },
-        [this] { FinishMenuClose(surface_, menu, menuOpen_, [this] { Close(false); }); });
-}
-
-// Pins in the Windows order, at the end; a folder of All apps as a folder of its own (one of the
-// same name already here takes the apps it lacks). An app already somewhere in the menu stays where
-// it is; hidden apps stay hidden.
-void StartMenu::SyncFromWindows(bool pins, bool folders, bool refresh)
-{
-    if (refresh && catalog_.StartMenuUsesXml())
-        pendingSync_ = {true, pins, folders}, catalog_.Refresh(true);
-    pins_ = catalog_.StartPins();
-    const bool win10Both = pins && folders && catalog_.StartMenuUsesXml();
-    const std::vector<CatalogFolder> windowsFolders = win10Both ? catalog_.StartPinGroups() : folders ? catalog_.StartFolders() : std::vector<CatalogFolder>{};
-    size_t apps = 0, newFolders = 0;
-    Arrange([&](std::vector<StartTile>& tiles) {
-        auto placed = [&](const std::wstring& id) {
-            for (const StartTile& t : tiles)
-                if (t.id == id || std::ranges::any_of(t.apps, [&](const StartTile& a) { return a.id == id; }))
-                    return true;
-            return false;
-        };
-        if (pins && !win10Both)
-            for (const CatalogApp& p : pins_)
-                if (!placed(p.id) && !Hidden(p.id)) {
-                    tiles.push_back({p.id, p.name, {}});
-                    ++apps;
-                }
-        for (const CatalogFolder& f : windowsFolders) {
-            std::vector<StartTile> missing;
-            for (const CatalogApp& a : f.apps)
-                if (!placed(a.id) && !Hidden(a.id) && std::ranges::none_of(missing, [&](const StartTile& m) { return m.id == a.id; }))
-                    missing.push_back({a.id, a.name, {}});
-            if (!f.folder || (win10Both && missing.size() == 1)) {
-                apps += missing.size();
-                tiles.insert(tiles.end(), std::make_move_iterator(missing.begin()), std::make_move_iterator(missing.end()));
-                continue;
-            }
-            const std::wstring fname = f.name.empty() ? Tr(L"New folder") : f.name;
-            auto same = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.Folder() && t.name == fname; });
-            if (same != tiles.end()) {
-                apps += missing.size();
-                same->apps.insert(same->apps.end(), missing.begin(), missing.end());
-            } else if (missing.size() >= 2) {
-                apps += missing.size();
-                ++newFolders;
-                StartLayout ids;
-                ids.tiles = tiles;
-                tiles.push_back({ids.NewFolderId(), fname, std::move(missing)});
-            }
-        }
-    });
-    if (pins) {
-        layout_.windowsPins.clear();
+    unsigned long nextFolder = 1;
+    if (pinGroups_.empty())
         for (const CatalogApp& p : pins_)
-            layout_.windowsPins.push_back(p.id);
-        layout_.windowsPinsKnown = true;
-        SaveStartLayout(layout_);
+            if (!Hidden(p.id))
+                tiles_.push_back({p.id, p.name, p, {}, false});
+    for (const CatalogFolder& g : pinGroups_) {
+        std::vector<CatalogApp> apps;
+        for (const CatalogApp& p : g.apps)
+            if (!Hidden(p.id))
+                apps.push_back(p);
+        if (g.folder && apps.size() >= 2)
+            tiles_.push_back({L"folder:" + std::to_wstring(nextFolder++), g.name.empty() ? Tr(L"New folder") : g.name, {}, std::move(apps), true});
+        else
+            for (const CatalogApp& p : apps)
+                tiles_.push_back({p.id, p.name, p, {}, false});
     }
-    Log(L"start: synced with the Windows start menu: %zu app(s), %zu new folder(s) (%zu pins, %zu folders there)", apps, newFolders, pins_.size(),
-        windowsFolders.size());
 }
 
-void StartMenu::Rebuild()
+void StartMenu::BuildCustomTiles(const std::map<std::wstring, const CatalogApp*>& known)
 {
-    const std::wstring openKey = folder_ >= 0 && folder_ < int(tiles_.size()) ? tiles_[size_t(folder_)].key : L"";
-    std::map<std::wstring, const CatalogApp*> known;
-    for (const CatalogApp& a : apps_)
-        known.emplace(a.id, &a);
-    for (const CatalogApp& a : pins_)
-        known.emplace(a.id, &a);
-    // An app of the arrangement: the catalog's entry; until the catalog is
-    // read, or for a shortcut outside it, what was saved. Uninstalled apps are left out.
     const bool loaded = catalog_.Loaded();
     auto resolve = [&](const StartTile& t, CatalogApp& out) {
         if (auto it = known.find(t.id); it != known.end()) {
@@ -678,42 +593,37 @@ void StartMenu::Rebuild()
         out = CatalogApp{t.name.empty() ? t.id : t.name, t.id, {}, {}, {}};
         return true;
     };
+    for (const StartTile& t : layout_.tiles) {
+        Tile tile{t.id, t.name, {}, {}, t.Folder()};
+        if (tile.folder) {
+            for (const StartTile& a : t.apps)
+                if (CatalogApp app; resolve(a, app))
+                    tile.apps.push_back(std::move(app));
+            if (tile.apps.empty())
+                continue;
+        } else {
+            if (!resolve(t, tile.app))
+                continue;
+            tile.name = tile.app.name;
+        }
+        tiles_.push_back(std::move(tile));
+    }
+}
+
+void StartMenu::Rebuild()
+{
+    const std::wstring openKey = folder_ >= 0 && folder_ < int(tiles_.size()) ? tiles_[size_t(folder_)].key : L"";
+    std::map<std::wstring, const CatalogApp*> known;
+    for (const CatalogApp& a : apps_)
+        known.emplace(a.id, &a);
+    for (const CatalogApp& a : pins_)
+        known.emplace(a.id, &a);
     SyncWindowsPins();
     tiles_.clear();
-    if (!layout_.custom) {
-        unsigned long nextFolder = 1;
-        if (pinGroups_.empty())
-            for (const CatalogApp& p : pins_)
-                if (!Hidden(p.id))
-                    tiles_.push_back({p.id, p.name, p, {}, false});
-        for (const CatalogFolder& g : pinGroups_) {
-            std::vector<CatalogApp> apps;
-            for (const CatalogApp& p : g.apps)
-                if (!Hidden(p.id))
-                    apps.push_back(p);
-            if (g.folder && apps.size() >= 2)
-                tiles_.push_back({L"folder:" + std::to_wstring(nextFolder++), g.name.empty() ? Tr(L"New folder") : g.name, {}, std::move(apps), true});
-            else
-                for (const CatalogApp& p : apps)
-                    tiles_.push_back({p.id, p.name, p, {}, false});
-        }
-    } else {
-        for (const StartTile& t : layout_.tiles) {
-            Tile tile{t.id, t.name, {}, {}, t.Folder()};
-            if (tile.folder) {
-                for (const StartTile& a : t.apps)
-                    if (CatalogApp app; resolve(a, app))
-                        tile.apps.push_back(std::move(app));
-                if (tile.apps.empty())
-                    continue;
-            } else {
-                if (!resolve(t, tile.app))
-                    continue;
-                tile.name = tile.app.name;
-            }
-            tiles_.push_back(std::move(tile));
-        }
-    }
+    if (!layout_.custom)
+        BuildDefaultTiles();
+    else
+        BuildCustomTiles(known);
     std::vector<std::wstring> ids;
     for (const Tile& t : tiles_) {
         // A folder's apps are read ahead with the tiles': opening it must find them there.
@@ -946,6 +856,60 @@ float StartMenu::Hover(Canvas& c, const std::wstring& id, bool on)
 
 // ---- Painting ----
 
+void StartMenu::PaintFolderCard(Canvas& c, std::vector<ShapeDip>& shapes, float dt, float& open, D2D1_RECT_F& card, bool& animating)
+{
+    if (folder_ < 0)
+        return;
+    // The card springs out of the folder's tile and back into it; turning round
+    // half-way keeps its speed.
+    const float goal = folderClosing_ ? 0.f : 1.f;
+    (folderClosing_ ? kFolderClose : kFolderOpen).Step(folderGrow_, folderV_, goal, dt / 1000);
+    const bool rest = std::fabs(folderGrow_ - goal) < 0.002f && std::fabs(folderV_) < 0.02f;
+    if (rest) {
+        folderGrow_ = goal;
+        folderV_ = 0;
+    }
+    if (folderClosing_ && (rest || folderGrow_ < 0.01f)) {
+        folder_ = -1;
+        folderClosing_ = false;
+        folderGrow_ = folderV_ = 0;
+        return;
+    }
+    open = std::clamp(folderGrow_, 0.f, 1.f);
+    card = Mix(folderFrom_, FolderRect(), folderGrow_);
+    const float cardR = std::max(12.f, radius_ - 14); // concentric with the panel
+    shapes.push_back({card, Mix(12.f, cardR, open)});
+    if (!rest) {
+        c.Continue();
+        animating = true;
+    }
+}
+
+void StartMenu::PaintPowerCard(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes, float dt, bool& animating)
+{
+    if (!powerOpen_ && powerGrow_ <= 0)
+        return;
+    // The power card springs out of its corner as popups open (kPop) and folds back as the folder does.
+    const float goal = powerOpen_ ? 1.f : 0.f;
+    (powerOpen_ ? motion::kPop : kFolderClose).Step(powerGrow_, powerV_, goal, dt / 1000);
+    if (motion::Spring::AtRest(powerGrow_, powerV_, goal) || (!powerOpen_ && powerGrow_ < 0.01f)) {
+        powerGrow_ = goal;
+        powerV_ = 0;
+    } else {
+        c.Continue();
+        animating = true;
+    }
+    if (powerGrow_ > 0) {
+        const D2D1_RECT_F full = PowerRect();
+        const float k = 0.5f + 0.5f * powerGrow_;
+        const D2D1_RECT_F pc = D2D1::RectF(full.right - (full.right - full.left) * k, full.bottom - (full.bottom - full.top) * k, full.right, full.bottom);
+        shapes.push_back({pc, PowerRadius() * std::min(k, 1.f)});
+        if (c.panel)
+            c.Fill(pc, PowerRadius(), t.panel);
+        PaintPower(c, t);
+    }
+}
+
 void StartMenu::Paint(Canvas& c)
 {
     visibleIcons_.clear();
@@ -1010,32 +974,7 @@ void StartMenu::Paint(Canvas& c)
     bool animating = false;
     float open = 0;
     D2D1_RECT_F card{};
-    if (folder_ >= 0) {
-        // The card springs out of the folder's tile and back into it; turning round
-        // half-way keeps its speed.
-        const float goal = folderClosing_ ? 0.f : 1.f;
-        (folderClosing_ ? kFolderClose : kFolderOpen).Step(folderGrow_, folderV_, goal, dt_ / 1000);
-        const bool rest = std::fabs(folderGrow_ - goal) < 0.002f && std::fabs(folderV_) < 0.02f;
-        if (rest) {
-            folderGrow_ = goal;
-            folderV_ = 0;
-        }
-        if (folderClosing_ && (rest || folderGrow_ < 0.01f)) {
-            folder_ = -1;
-            folderClosing_ = false;
-            folderGrow_ = folderV_ = 0;
-        } else {
-            const float grow = folderGrow_;
-            open = std::clamp(grow, 0.f, 1.f);
-            card = Mix(folderFrom_, FolderRect(), grow);
-            const float cardR = std::max(12.f, radius_ - 14); // concentric with the panel
-            shapes.push_back({card, Mix(12.f, cardR, open)});
-            if (!rest) {
-                c.Continue();
-                animating = true;
-            }
-        }
-    }
+    PaintFolderCard(c, shapes, dt_, open, card, animating);
     if (c.panel) // no glass (yet): plain panels keep the text readable
         for (const ShapeDip& sh : shapes)
             c.Fill(sh.rect, sh.radius, t.panel);
@@ -1061,27 +1000,7 @@ void StartMenu::Paint(Canvas& c)
     if (drag_.on)
         PaintDragged(c, t);
     catalog_.SetVisibleIcons(VisibleIconsOwner::Start, visibleIcons_);
-    if (powerOpen_ || powerGrow_ > 0) {
-        // The power card springs out of its corner as popups open (kPop) and folds back as the folder does.
-        const float goal = powerOpen_ ? 1.f : 0.f;
-        (powerOpen_ ? motion::kPop : kFolderClose).Step(powerGrow_, powerV_, goal, dt_ / 1000);
-        if (motion::Spring::AtRest(powerGrow_, powerV_, goal) || (!powerOpen_ && powerGrow_ < 0.01f)) {
-            powerGrow_ = goal;
-            powerV_ = 0;
-        } else {
-            c.Continue();
-            animating = true;
-        }
-        if (powerGrow_ > 0) {
-            const D2D1_RECT_F full = PowerRect();
-            const float k = 0.5f + 0.5f * powerGrow_;
-            const D2D1_RECT_F pc = D2D1::RectF(full.right - (full.right - full.left) * k, full.bottom - (full.bottom - full.top) * k, full.right, full.bottom);
-            shapes.push_back({pc, PowerRadius() * std::min(k, 1.f)});
-            if (c.panel)
-                c.Fill(pc, PowerRadius(), t.panel);
-            PaintPower(c, t);
-        }
-    }
+    PaintPowerCard(c, t, shapes, dt_, animating);
     c.EndGroup();
     for (ShapeDip& sh : shapes) {
         sh.rect.left += offX;
@@ -1958,11 +1877,66 @@ void StartMenu::DragTick()
         surface_.Invalidate();
 }
 
+void StartMenu::CommitFolderMerge(const std::wstring& appId, const std::wstring& targetKey, bool targetIsFolder)
+{
+    std::wstring made;
+    Arrange([&](std::vector<StartTile>& tiles) {
+        std::optional<StartTile> moved = Take(tiles, appId);
+        if (!moved)
+            return;
+        StartTile* target = Find(tiles, targetKey);
+        if (!target)
+            tiles.push_back(std::move(*moved));
+        else if (target->Folder())
+            target->apps.push_back(std::move(*moved));
+        else {
+            StartTile folder{layout_.NewFolderId(), Tr(L"New folder"), {std::move(*target), std::move(*moved)}};
+            made = folder.id;
+            *target = std::move(folder);
+        }
+    });
+    Log(L"start: %s put into %s%s", appId.c_str(), targetIsFolder ? L"folder " : L"a new folder with ", targetKey.c_str());
+    for (size_t i = 0; i < tiles_.size() && !made.empty(); ++i)
+        if (tiles_[i].key == made) {
+            OpenFolder(int(i));
+            StartNaming();
+            nameDraft_.clear();
+        }
+}
+
+void StartMenu::CommitDrag(const Drag& d, const std::wstring& appId, const std::wstring& targetKey, const std::wstring& folderKey, bool targetIsFolder,
+                           const std::vector<std::wstring>& keys)
+{
+    if (!targetKey.empty()) {
+        CommitFolderMerge(appId, targetKey, targetIsFolder);
+        return;
+    }
+    if (d.inFolder) {
+        Arrange([&](std::vector<StartTile>& tiles) {
+            if (StartTile* f = Find(tiles, folderKey)) {
+                std::vector<StartTile> apps;
+                for (const std::wstring& key : keys)
+                    if (auto it = std::ranges::find_if(f->apps, [&](const StartTile& a) { return a.id == key; }); it != f->apps.end())
+                        apps.push_back(*it);
+                if (apps.size() == f->apps.size())
+                    f->apps = std::move(apps);
+            }
+        });
+        return;
+    }
+    Arrange([&](std::vector<StartTile>& tiles) {
+        if (d.fromFolder)
+            if (std::optional<StartTile> moved = Take(tiles, appId))
+                tiles.push_back(std::move(*moved));
+        Reorder(tiles, keys);
+    });
+    Log(L"start: %s moved%s", appId.c_str(), d.fromFolder ? L" out of its folder" : L"");
+}
+
 void StartMenu::EndDrag(bool commit)
 {
     KillTimer(surface_.Hwnd(), kDragTimer);
     const Drag d = drag_;
-    // What it means, in keys, before anything moves.
     std::vector<std::wstring> keys;
     std::wstring appId, targetKey, folderKey;
     bool targetIsFolder = false;
@@ -1991,66 +1965,24 @@ void StartMenu::EndDrag(bool commit)
         stale_ = false;
         apps_ = catalog_.Apps();
         pins_ = catalog_.StartPins();
+        pinGroups_ = catalog_.StartPinGroups();
         Rebuild();
     }
-    if (!d.on || !commit) {
+    if (d.on && commit) {
+        const float dropX = d.x - d.grabX, dropY = d.y - d.grabY;
+        if (d.inFolder)
+            tilePos_[d.key] = D2D1::Point2F(dropX + float(folderPage_) * (FolderRect().right - FolderRect().left), dropY);
+        else
+            tilePos_[d.fromFolder ? appId : d.key] = D2D1::Point2F(dropX + float(page_) * W(), dropY);
+        CommitDrag(d, appId, targetKey, folderKey, targetIsFolder, keys);
+    } else {
         surface_.Invalidate();
-        return;
     }
-    // The tile glides from where it was let go into its place.
-    const float dropX = d.x - d.grabX, dropY = d.y - d.grabY;
-    if (d.inFolder)
-        tilePos_[d.key] = D2D1::Point2F(dropX + float(folderPage_) * (FolderRect().right - FolderRect().left), dropY);
-    else
-        tilePos_[d.fromFolder ? appId : d.key] = D2D1::Point2F(dropX + float(page_) * W(), dropY);
-
-    if (!targetKey.empty()) {
-        std::wstring made;
-        Arrange([&](std::vector<StartTile>& tiles) {
-            std::optional<StartTile> moved = Take(tiles, appId);
-            if (!moved)
-                return;
-            StartTile* target = Find(tiles, targetKey);
-            if (!target)
-                tiles.push_back(std::move(*moved));
-            else if (target->Folder())
-                target->apps.push_back(std::move(*moved));
-            else {
-                StartTile folder{layout_.NewFolderId(), Tr(L"New folder"), {std::move(*target), std::move(*moved)}};
-                made = folder.id;
-                *target = std::move(folder);
-            }
-        });
-        Log(L"start: %s put into %s%s", appId.c_str(), targetIsFolder ? L"folder " : L"a new folder with ", targetKey.c_str());
-        // A new folder opens with its name ready to be typed over.
-        for (size_t i = 0; i < tiles_.size() && !made.empty(); ++i)
-            if (tiles_[i].key == made) {
-                OpenFolder(int(i));
-                StartNaming();
-                nameDraft_.clear();
-            }
-        return;
+    if (pendingSync_.on) {
+        auto sync = pendingSync_;
+        pendingSync_.on = false;
+        SyncFromWindows(sync.pins, sync.folders, false);
     }
-    if (d.inFolder) {
-        Arrange([&](std::vector<StartTile>& tiles) {
-            if (StartTile* f = Find(tiles, folderKey)) {
-                std::vector<StartTile> apps;
-                for (const std::wstring& key : keys)
-                    if (auto it = std::ranges::find_if(f->apps, [&](const StartTile& a) { return a.id == key; }); it != f->apps.end())
-                        apps.push_back(*it);
-                if (apps.size() == f->apps.size())
-                    f->apps = std::move(apps);
-            }
-        });
-        return;
-    }
-    Arrange([&](std::vector<StartTile>& tiles) {
-        if (d.fromFolder) // out of its folder, onto the grid
-            if (std::optional<StartTile> moved = Take(tiles, appId))
-                tiles.push_back(std::move(*moved));
-        Reorder(tiles, keys);
-    });
-    Log(L"start: %s moved%s", appId.c_str(), d.fromFolder ? L" out of its folder" : L"");
 }
 
 // ---- Resizing ----
@@ -2183,178 +2115,6 @@ void StartMenu::Activate(const std::wstring& id)
         Close(true);
         onSystem(id);
     }
-}
-
-void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
-{
-    if (!menu)
-        return;
-    std::vector<MenuEntry> entries;
-    CatalogApp app;
-    bool isApp = false, inFolder = false;
-    std::wstring folderKey; // the folder the menu is for
-    if (id.starts_with(L"tile:")) {
-        const int i = Index(id, 5);
-        if (i < 0 || i >= int(tiles_.size()))
-            return;
-        if (tiles_[size_t(i)].folder)
-            folderKey = tiles_[size_t(i)].key;
-        else
-            app = tiles_[size_t(i)].app, isApp = true;
-    } else if (id.starts_with(L"fapp:")) {
-        const int i = Index(id, 5);
-        if (folder_ < 0 || i < 0 || i >= int(tiles_[size_t(folder_)].apps.size()))
-            return;
-        app = tiles_[size_t(folder_)].apps[size_t(i)];
-        isApp = inFolder = true;
-    } else if (id.starts_with(L"row:")) {
-        const auto& rows = RowsShown();
-        const size_t i = size_t(Index(id, 4));
-        if (i >= rows.size() || rows[i].letter)
-            return;
-        if (rows[i].folder >= 0)
-            folderKey = tiles_[size_t(rows[i].folder)].key;
-        else
-            app = rows[i].app, isApp = true;
-    }
-    if (isApp) {
-        entries.push_back({Tr(L"Open"), kOpen});
-        // As in Windows' start menu, for desktop apps.
-        if (!AppCatalog::FileLocation(app).empty()) {
-            entries.push_back({Tr(L"Run as administrator"), kAdmin});
-            entries.push_back({Tr(L"Open File Location"), kLocation});
-        }
-        entries.push_back({});
-        entries.push_back({Tr(L"Pin to taskbar"), kPinBar});
-        if (!OnStart(app.id))
-            entries.push_back({Tr(L"Pin to Start"), kPinStart});
-        if (inFolder)
-            entries.push_back({Tr(L"Remove from folder"), kOutOfFolder});
-        if (OnStart(app.id))
-            entries.push_back({Tr(L"Remove from Start"), kRemove});
-        entries.push_back(Hidden(app.id) ? MenuEntry{Tr(L"Unhide"), kUnhide} : MenuEntry{Tr(L"Hide"), kHide});
-    } else if (!folderKey.empty()) {
-        entries = {{Tr(L"Open"), kOpen}, {Tr(L"Rename"), kRename}, {}, {Tr(L"Ungroup folder"), kUngroup}, {Tr(L"Remove from Start"), kRemoveFolder}};
-    } else if (id.empty() && !Listing() && folder_ < 0) {
-        // Two choices of their own: how much the menu holds, and how large its icons are.
-        const wchar_t* const kNames[] = {Tr(L"Small"), Tr(L"Medium"), Tr(L"Large"), Tr(L"Huge")};
-        entries.push_back({Tr(L"Menu size"), 0, false, true, true});
-        for (int grid = 0; grid <= room_; ++grid)
-            entries.push_back({kNames[grid], kSize + grid, grid == grid_});
-        entries.push_back({});
-        entries.push_back({Tr(L"Icon size"), 0, false, true, true});
-        for (int icon = 0; icon < StartLayout::kSizes; ++icon)
-            entries.push_back({kNames[icon], kIcon + icon, icon == layout_.icon});
-        if (!layout_.hidden.empty()) {
-            entries.push_back({});
-            entries.push_back({Tr(L"Show hidden apps"), kShowHidden});
-        }
-        if (layout_.custom) {
-            entries.push_back({});
-            entries.push_back({Tr(L"Restore Windows Start pins"), kReset});
-        }
-    }
-    if (entries.empty())
-        return;
-    const std::wstring openKey = folder_ >= 0 ? tiles_[size_t(folder_)].key : L"";
-    menuOpen_ = true;
-    menu->Open(
-        std::move(entries), screen, MenuPlace::Below,
-        [this, app, folderKey, openKey](int cmd) {
-            auto tileOf = [&](const std::wstring& key) {
-                for (size_t i = 0; i < tiles_.size(); ++i)
-                    if (tiles_[i].key == key)
-                        return int(i);
-                return -1;
-            };
-            switch (cmd) {
-            case kOpen:
-                if (!folderKey.empty())
-                    OpenFolder(tileOf(folderKey));
-                else
-                    Launch(app);
-                break;
-            case kAdmin:
-                Close(true);
-                AppCatalog::LaunchAsAdmin(app);
-                break;
-            case kLocation:
-                Close(true);
-                if (PIDLIST_ABSOLUTE item = ILCreateFromPathW(AppCatalog::FileLocation(app).c_str())) {
-                    SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
-                    ILFree(item);
-                }
-                break;
-            case kPinBar:
-                if (onPin)
-                    onPin(AppCatalog::PinFor(app));
-                break;
-            case kPinStart: PinToStart(app); break;
-            case kRemove:
-                Arrange([&](std::vector<StartTile>& tiles) { Take(tiles, app.id); });
-                Log(L"start: %s removed from the start menu", app.name.c_str());
-                break;
-            case kShowHidden: ShowHidden(); break;
-            case kHide: SetHidden(app, true); break;
-            case kUnhide: SetHidden(app, false); break;
-            case kOutOfFolder:
-                Arrange([&](std::vector<StartTile>& tiles) { // next to its folder on the grid
-                    std::optional<StartTile> moved = Take(tiles, app.id);
-                    if (!moved)
-                        return;
-                    auto at = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.id == openKey; });
-                    tiles.insert(at == tiles.end() ? at : at + 1, std::move(*moved));
-                });
-                break;
-            case kRename:
-                OpenFolder(tileOf(folderKey));
-                StartNaming();
-                break;
-            case kUngroup:
-            case kRemoveFolder:
-                if (folder_ >= 0 && tiles_[size_t(folder_)].key == folderKey)
-                    folder_ = -1, folderClosing_ = naming_ = false;
-                Arrange([&](std::vector<StartTile>& tiles) {
-                    if (cmd == kRemoveFolder)
-                        RemoveStartFolder(tiles, folderKey);
-                    else
-                        UngroupStartFolder(tiles, folderKey);
-                });
-                Log(cmd == kRemoveFolder ? L"start: folder %s removed from the start menu" : L"start: folder %s ungrouped", folderKey.c_str());
-                break;
-            case kSize:
-            case kSize + 1:
-            case kSize + 2:
-            case kSize + 3:
-                SetSize(cmd - kSize, layout_.icon);
-                SaveStartLayout(layout_);
-                Log(L"start: sized to %d x %d tiles", cols_, rows_);
-                if (onSize)
-                    onSize(SizeName());
-                break;
-            case kIcon:
-            case kIcon + 1:
-            case kIcon + 2:
-            case kIcon + 3:
-                SetSize(layout_.size, cmd - kIcon);
-                SaveStartLayout(layout_);
-                Log(L"start: icons %.0f DIP (%d px), %d x %d tiles", IconSize(), IconPx(), cols_, rows_);
-                if (onIcon)
-                    onIcon(IconSizeName());
-                break;
-            case kReset:
-                layout_.custom = false;
-                layout_.tiles.clear();
-                SaveStartLayout(layout_);
-                Rebuild();
-                surface_.Invalidate();
-                Log(L"start: back to the Windows start menu's pins");
-                break;
-            default: break;
-            }
-        },
-        [this] { FinishMenuClose(surface_, menu, menuOpen_, [this] { Close(false); }); });
-    surface_.Invalidate();
 }
 
 void StartMenu::MoveSelection(int dx, int dy)

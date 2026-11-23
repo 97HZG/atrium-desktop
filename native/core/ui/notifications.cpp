@@ -83,6 +83,47 @@ void SyncToastRegion(HWND hwnd, int& curTop, int& curBottom, const RECT& rr, int
     }
 }
 
+struct CardTarget {
+    float y = 0, inset = 0, alpha = 1, content = 1;
+};
+
+CardTarget ComputeCardTarget(size_t i, bool stack, bool dockTop, bool column, bool bottom, bool fromTop, float listTop, float listH, float card, float scroll,
+                             float stackPos)
+{
+    if (!stack) {
+        const float y = column && bottom ? listTop + listH - card - float(i) * (card + kGap) + scroll :
+                        fromTop          ? listTop + notification::CardTop(i, card, kGap, scroll) :
+                                           listH - card - float(i) * (card + kGap) + scroll;
+        return {y};
+    }
+    const float rel = float(i) - stackPos;
+    if (rel >= 0) {
+        const float k = std::min(rel, 2.f);
+        return {dockTop ? listTop + kPeek * k : listH - card - kPeek * k, 12.f * k, std::clamp(3.f - rel, 0.f, 1.f),
+                motion::EaseOut(std::clamp(1.f - rel * 1.6f, 0.f, 1.f))};
+    }
+    const float u = std::min(-rel, 1.f);
+    return {dockTop ? listTop + (2 * kPeek + kStackLift) * u : listH - card - (2 * kPeek + kStackLift) * u, 28.f * u, (1 - u) * (1 - u),
+            1 - motion::EaseOut(std::clamp(u * 2.f, 0.f, 1.f))};
+}
+
+std::vector<size_t> StackDrawOrder(size_t count, bool stack, float stackPos)
+{
+    std::vector<size_t> order;
+    order.reserve(count);
+    auto passed = [&](size_t i, bool under) { return stack && float(i) < stackPos - 0.001f && (stackPos - float(i) >= 0.5f) == under; };
+    for (size_t i = 0; i < count; ++i)
+        if (passed(i, true))
+            order.push_back(i);
+    for (size_t i = count; i-- > 0;)
+        if (!stack || float(i) >= stackPos - 0.001f)
+            order.push_back(i);
+    for (size_t i = count; i-- > 0;)
+        if (passed(i, false))
+            order.push_back(i);
+    return order;
+}
+
 } // namespace
 
 Notifications::Notifications(HINSTANCE instance)
@@ -101,10 +142,8 @@ Notifications::Notifications(HINSTANCE instance)
             popup_.surface->Hide(false);
         }
     };
-    center_.surface->onDismiss = [this] { // a press next to the list closes it
-        center_.surface->Hide();
-        centerClosed_ = GetTickCount64();
-    };
+    // A press next to the list closes it.
+    center_.surface->onDismiss = [this] { center_.surface->Hide(), centerClosed_ = GetTickCount64(); };
 }
 
 void Notifications::SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement)
@@ -144,10 +183,7 @@ void Notifications::SetRadius(float dip)
     center_.surface->SetRadius(dip);
 }
 
-int Notifications::Unread() const
-{
-    return int(std::count_if(notices_.begin(), notices_.end(), [](const Notice& n) { return n.unread; }));
-}
+int Notifications::Unread() const { return int(std::ranges::count_if(notices_, &Notice::unread)); }
 
 int Notifications::QuietState() const
 {
@@ -193,29 +229,24 @@ void Notifications::Post(Notice n, bool silent)
             it->source == n.source && FoldCase(it->appId) == FoldCase(n.appId) && it->app == n.app && it->title == n.title && n.time - it->time < kMergeMs;
         if (sameExternal && it->title == n.title && it->body == n.body)
             return; // seen already
-        if (sameExternal) { // the sender changed its notification: the card follows, as new
-            Notice updated = *it;
-            updated.title = n.title;
-            updated.body = n.body;
-            updated.time = n.time;
-            updated.unread = true;
-            ShiftStack(Mode::Center, size_t(it - notices_.begin()), -1);
-            notices_.erase(it);
-            n = updated;
-            Log(L"notify: %llu updated by its sender", n.id);
-            break;
-        }
-        if (burst) {
+        if (sameExternal || burst) {
             Notice merged = *it;
+            if (sameExternal)
+                merged.title = n.title;
+            else
+                merged.count += 1;
             merged.body = n.body;
-            merged.action = n.action.empty() ? merged.action : n.action;
-            merged.count += 1;
+            if (!sameExternal && !n.action.empty())
+                merged.action = n.action;
             merged.time = n.time;
             merged.unread = true;
             ShiftStack(Mode::Center, size_t(it - notices_.begin()), -1);
             notices_.erase(it);
             n = merged;
-            Log(L"notify: merged into %llu (x%d)", n.id, n.count);
+            if (sameExternal)
+                Log(L"notify: %llu updated by its sender", n.id);
+            else
+                Log(L"notify: merged into %llu (x%d)", n.id, n.count);
             break;
         }
     }
@@ -324,24 +355,24 @@ void Notifications::Clear()
 
 void Notifications::Remove(uint64_t id)
 {
+    auto startLeave = [&](View& v) {
+        leaving_.try_emplace(id, ClockMs());
+        SetTimer(v.surface->Hwnd(), kSweepTimer, UINT(kLeaveMs + 20), nullptr);
+        v.surface->Invalidate();
+        Changed();
+    };
     bool inPopup = std::ranges::find(popupIds_, id) != popupIds_.end();
     if (popup_.surface->Visible() && inPopup) {
         // Fades and drifts away; the cards behind move up once it is gone.
         KillTimer(popup_.surface->Hwnd(), kPopupTimer);
-        leaving_.try_emplace(id, ClockMs());
-        SetTimer(popup_.surface->Hwnd(), kSweepTimer, UINT(kLeaveMs + 20), nullptr);
-        popup_.surface->Invalidate();
-        Changed();
+        startLeave(popup_);
         return;
     }
     std::erase(popupIds_, id);
     if (popupIds_.empty())
         HidePopup(L"last card closed");
     if (center_.surface->Visible() && std::ranges::any_of(notices_, [&](const Notice& n) { return n.id == id; })) {
-        leaving_.try_emplace(id, ClockMs()); // slides out; the others close up
-        SetTimer(center_.surface->Hwnd(), kSweepTimer, UINT(kLeaveMs + 20), nullptr);
-        center_.surface->Invalidate();
-        Changed();
+        startLeave(center_); // slides out; the others close up
         return;
     }
     std::erase_if(notices_, [&](const Notice& n) { return n.id == id; });
@@ -798,40 +829,14 @@ void Notifications::Paint(Mode mode, Canvas& c)
     std::vector<float> alphas(shown.size());
     for (size_t i = 0; i < shown.size(); ++i) {
         const Notice& n = *shown[i];
-        float ty, tinset = 0, talpha = 1, tcontent = 1;
-        if (stack) {
-            // Where the card is relative to the one in front (fractional
-            // while the wheel turns the stack): behind it, peeking out above
-            // and narrower, its text gone; in front of it (passed), moving
-            // back into the stack while it fades, under the new front.
-            float rel = float(i) - v.stackPos;
-            if (rel >= 0) {
-                float k = std::min(rel, 2.f);
-                ty = dockTop ? listTop + kPeek * k : listH - card - kPeek * k;
-                tinset = 12.f * k;
-                talpha = std::clamp(3.f - rel, 0.f, 1.f);
-                tcontent = motion::EaseOut(std::clamp(1.f - rel * 1.6f, 0.f, 1.f)); // the text comes in the later part
-            } else {
-                float u = std::min(-rel, 1.f);
-                ty = dockTop ? listTop + (2 * kPeek + kStackLift) * u : listH - card - (2 * kPeek + kStackLift) * u;
-                tinset = 28.f * u;
-                talpha = (1 - u) * (1 - u);
-                tcontent = 1 - motion::EaseOut(std::clamp(u * 2.f, 0.f, 1.f)); // its text goes first: two texts never show strongly at once
-            }
-        } else if (column && bottom_) {
-            ty = listTop + listH - card - float(i) * (card + kGap) + v.scroll; // the newest at the bottom corner
-        } else if (fromTop) {
-            ty = listTop + notification::CardTop(i, card, kGap, v.scroll);
-        } else {
-            ty = listH - card - float(i) * (card + kGap) + v.scroll;
-        }
+        const CardTarget ct = ComputeCardTarget(i, stack, dockTop, column, bottom_, fromTop, listTop, listH, card, v.scroll, v.stackPos);
         const bool others = !v.cards.empty();
         CardAnim& a = v.cards[n.id];
         if (!a.placed) {
-            float startY = ty;
+            float startY = ct.y;
             if (!column)
                 startY += dockTop ? -18.f : 18.f;
-            a = {startY, tinset, 0, 1, true};
+            a = {startY, ct.inset, 0, 1, true};
             a.x = column ? (left_ ? -w : w) : 0; // a new corner card comes in from the screen's edge; the others glide aside
             // ... after they have: coming in at once, it would pass over the one still leaving its place.
             if (column && others)
@@ -842,15 +847,15 @@ void Notifications::Paint(Mode mode, Canvas& c)
             cardMoving = true; // waits off the screen's edge, unseen
         } else if (stack && v.stackMoving) {
             // The wheel drives the stack: every card follows it exactly (it is smooth already).
-            a.y = ty;
-            a.inset = tinset;
-            a.alpha = talpha;
-            a.content = tcontent;
+            a.y = ct.y;
+            a.inset = ct.inset;
+            a.alpha = ct.alpha;
+            a.content = ct.content;
         } else {
-            cardMoving = Glide(a.y, ty, dt, 16, 0.2f);
-            cardMoving |= Glide(a.inset, tinset, dt, 16, 0.1f);
-            cardMoving |= Glide(a.alpha, talpha, dt, 12, 0.01f);
-            cardMoving |= Glide(a.content, tcontent, dt, 9, 0.01f);
+            cardMoving = Glide(a.y, ct.y, dt, 16, 0.2f);
+            cardMoving |= Glide(a.inset, ct.inset, dt, 16, 0.1f);
+            cardMoving |= Glide(a.alpha, ct.alpha, dt, 12, 0.01f);
+            cardMoving |= Glide(a.content, ct.content, dt, 9, 0.01f);
             cardMoving |= Glide(a.x, 0, dt, 16, 0.2f);
         }
         float alpha = a.alpha, dx = a.x, shrink = 0;
@@ -885,18 +890,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
     // (its text still shows) and under it for the second (it goes back under
     // the new front); the stack itself from the back. Drawn the other way, a
     // card turned slowly would show under the glass of the one behind it.
-    std::vector<size_t> order;
-    auto passed = [&](size_t i, bool under) { return stack && float(i) < v.stackPos - 0.001f && (v.stackPos - float(i) >= 0.5f) == under; };
-    for (size_t i = 0; i < shown.size(); ++i)
-        if (passed(i, true))
-            order.push_back(i);
-    for (size_t i = shown.size(); i-- > 0;)
-        if (!stack || float(i) >= v.stackPos - 0.001f)
-            order.push_back(i);
-    for (size_t i = shown.size(); i-- > 0;)
-        if (passed(i, false))
-            order.push_back(i);
-    for (size_t i : order) {
+    for (size_t i : StackDrawOrder(shown.size(), stack, v.stackPos)) {
         bool full = !stack || v.cards[shown[i]->id].content > 0.01f;
         D2D1_RECT_F r = rects[i];
         if (alphas[i] <= 0.02f || r.bottom < listTop || r.top > listBottom)

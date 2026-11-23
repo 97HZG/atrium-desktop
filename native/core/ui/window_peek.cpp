@@ -15,14 +15,14 @@ constexpr float kVeil = 0.62f; // how much of the other windows the veil hides
 bool AppsLight()
 {
     DWORD v = 1, size = sizeof(v);
-    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr,
-                 &v, &size);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &v,
+                 &size);
     return v != 0;
 }
 
 } // namespace
 
-WindowPeek::WindowPeek(HINSTANCE instance) : surface_(instance, L"Atrium Peek", false, 0)
+WindowPeek::WindowPeek(HINSTANCE instance) : surface_(instance, L"Atrium Peek", false, 0, false, true)
 {
     surface_.SetGlassless(true);
     surface_.paint = [this](Canvas& c) { Paint(c); };
@@ -60,16 +60,24 @@ void WindowPeek::Show(HWND window)
         return;
     }
     SIZE source{};
-    if (FAILED(DwmQueryThumbnailSourceSize(thumb_, &source)) || source.cx <= 0 || source.cy <= 0)
-        source = SIZE{win.right - win.left, win.bottom - win.top};
+    if (FAILED(DwmQueryThumbnailSourceSize(thumb_, &source)) || source.cx <= 0 || source.cy <= 0) {
+        Hide();
+        return;
+    }
     // The window without its invisible borders, in the thumbnail's px (they differ when its DPI does).
     const double sx = double(source.cx) / double(win.right - win.left), sy = double(source.cy) / double(win.bottom - win.top);
     POINT at{frame.left, frame.top};
     ScreenToClient(surface_.Hwnd(), &at);
     DWM_THUMBNAIL_PROPERTIES p{};
     p.dwFlags = DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE | DWM_TNP_SOURCECLIENTAREAONLY;
-    p.rcSource = RECT{LONG(std::lround(double(frame.left - win.left) * sx)), LONG(std::lround(double(frame.top - win.top) * sy)),
-                      LONG(std::lround(double(frame.right - win.left) * sx)), LONG(std::lround(double(frame.bottom - win.top) * sy))};
+    p.rcSource = RECT{std::clamp(LONG(std::lround(double(frame.left - win.left) * sx)), 0L, source.cx),
+                      std::clamp(LONG(std::lround(double(frame.top - win.top) * sy)), 0L, source.cy),
+                      std::clamp(LONG(std::lround(double(frame.right - win.left) * sx)), 0L, source.cx),
+                      std::clamp(LONG(std::lround(double(frame.bottom - win.top) * sy)), 0L, source.cy)};
+    if (p.rcSource.right <= p.rcSource.left || p.rcSource.bottom <= p.rcSource.top) {
+        Hide();
+        return;
+    }
     p.rcDestination = RECT{at.x, at.y, at.x + frame.right - frame.left, at.y + frame.bottom - frame.top};
     p.fVisible = TRUE;
     p.fSourceClientAreaOnly = FALSE;

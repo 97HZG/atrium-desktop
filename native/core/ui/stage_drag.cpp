@@ -42,8 +42,7 @@ void StageManager::StepDrag(POINT screen)
 {
     if (!dragWindow_)
         return;
-    if (!enabled_ || !dragMerge_ || !IsWindow(dragWindow_) || !IsWindowVisible(dragWindow_) || IsIconic(dragWindow_) ||
-        StageAppExcluded(excluded_, dragKey_)) {
+    if (!enabled_ || !dragMerge_ || !IsWindow(dragWindow_) || !IsWindowVisible(dragWindow_) || IsIconic(dragWindow_) || StageAppExcluded(excluded_, dragKey_)) {
         CancelDrag();
         return;
     }

@@ -32,19 +32,14 @@ namespace {
 // The eye is level with a point kKeystone of the way from a box to the strip's middle: the boxes
 // above it lean down towards the middle of the screen, those below lean up, the more so the
 // further they are.
-constexpr float kEdge = 22, kBoxW = 172, kBoxH = 112, kSlotGap = 36, kVPad = 24, kStripW = kEdge + kBoxW + 44;
-constexpr float kSlot = kBoxH + kSlotGap;
-constexpr float kTilt = 22, kHoverTilt = 0.7f, kDepth = 340, kComeTilt = 34, kKeystone = 0.45f;
-constexpr size_t kStack = 3;                                 // windows shown per set
-constexpr float kStackDx = 9, kStackDy = 8, kStackZ = 26;  // each window behind the front one: inwards, up, away
-constexpr float kShadowDrop = 6, kShadowAlpha = 0.5f;
-constexpr float kIcon = 34;
+constexpr float kSlotGap = kStageSlotGap, kVPad = 24, kStripW = kStageStripW;
+constexpr float kSlot = kStageBoxH + kSlotGap;
+constexpr size_t kStack = 3; // windows shown per set
 constexpr float kPictureScale = 1.25f; // pictures are taken this much larger than the box (the pointer enlarges them)
 constexpr float kPictureRadius = 8;
-constexpr float kBarRoom = 90;         // the bar floats over the bottom of the work area
+constexpr float kBarRoom = 90; // the bar floats over the bottom of the work area
 constexpr int kMaxEntries = 6;
-constexpr float kMoreBlur = 6, kMoreReach = 14; // the last card while more sets wait past it: its blur, and how far past its box the fade reaches
-constexpr UINT_PTR kWatchTimer = 0x5C01, kDownTimer = 0x5C02, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
+constexpr UINT_PTR kWatchTimer = 0x5C01, kDownTimer = 0x5C02;
 constexpr UINT kWatchMs = 30, kRaiseMs = 220, kDownMs = 700;
 constexpr ULONGLONG kDesktopMs = 250; // the desktop in front this long: it was clicked
 constexpr UINT WM_STAGE_PICTURE = WM_APP + 0x5C; // a window's picture was taken
@@ -52,20 +47,8 @@ constexpr UINT WM_STAGE_PICTURE = WM_APP + 0x5C; // a window's picture was taken
 // sends it back. Whether a window covers the strip's place is looked at every kCoverMs.
 constexpr ULONGLONG kEdgeMs = 40, kPeekLeaveMs = 350, kCoverMs = 150, kSettleMs = 2000;
 constexpr double kRevealInMs = 380, kRevealOutMs = 210, kRevealStagger = 32;
-// A picture flies between a window's place and the strip in kFlightMs; flying back, the window comes
-// up under it as it is all but there (kRestoreAt of the flight, the last percent of the way), so that
-// it has drawn itself when the picture, landed, stays kFlightHoldMs and fades over kFlightFadeMs (an
-// app comes back from minimized with an old or empty frame for a moment). The flight layer stays
-// (letting clicks through) kFlightIdleMs after.
-constexpr double kFlightHoldMs = 150, kFlightFadeMs = 150, kFlightStepMs = 34;
-constexpr float kRestoreAt = 0.86f;
-// A flight's picture turns into a large one (the window's own size and corners) on its way to the
-// window's place, so that it is the window, pixel for pixel, when it lands and fades: a smaller
-// one, enlarged, showed blurred text that turned sharp at once as the window came through. Only the
-// kLargeKept most recent are kept at full size (memory); older ones at most kLargeOld px.
 constexpr int kLargeMax = 4096, kLargeOld = 1440;
 constexpr size_t kLargeKept = 4;
-constexpr UINT kFlightIdleMs = 60000;
 // A window's picture taken this recently (the pointer went to the strip) is used as it is: the window
 // goes at once.
 constexpr ULONGLONG kFreshMs = 4000;
@@ -139,49 +122,38 @@ bool AppsDark()
     return light == 0;
 }
 
-// Turns what is drawn about the upright axis through (cx, cy) by `angle` degrees, `z` towards the eye,
-// seen from `depth` in front of (ox, oy); px.
-D2D1::Matrix4x4F Tilt(float cx, float cy, float ox, float oy, float angle, float depth, float z)
+float EaseOut3(float t) { return 1 - (1 - t) * (1 - t) * (1 - t); }
+
+constexpr motion::Spring kGlide{0.42f, 0.86f};
+constexpr motion::Spring kFadeSpring{0.30f, 1.f};
+
+StageManager* g_stage = nullptr; // the one Stage Manager, for its WinEvent hooks
+
+void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD event, HWND h, LONG object, LONG, DWORD, DWORD)
 {
-    using M = D2D1::Matrix4x4F;
-    return M::Translation(-cx, -cy, 0) * M::RotationY(angle) * M::Translation(cx - ox, cy - oy, z) * M::PerspectiveProjection(depth) *
-           M::Translation(ox, oy, 0);
+    if (object != OBJID_WINDOW || !h || !g_stage)
+        return;
+    if (event == EVENT_SYSTEM_MINIMIZESTART)
+        g_stage->Minimized(h);
+    else
+        g_stage->MoveSize(h, event == EVENT_SYSTEM_MOVESIZESTART);
 }
 
-// A window's own minimize and restore animations: off while Stage Manager flies its picture.
-void Transitions(HWND h, bool on)
+} // namespace
+
+void StageManager::SetTransitions(HWND h, bool on)
 {
     BOOL off = on ? FALSE : TRUE;
     DwmSetWindowAttribute(h, DWMWA_TRANSITIONS_FORCEDISABLED, &off, sizeof(off));
 }
 
-float EaseInOut(float t) { return t < 0.5f ? 4 * t * t * t : 1 - std::pow(-2 * t + 2, 3.f) / 2; }
-
-float Lerp(float a, float b, float t) { return a + (b - a) * t; }
-
-D2D1_POINT_2F Project(const D2D1_MATRIX_4X4_F& m, float x, float y)
-{
-    const float px = x * m._11 + y * m._21 + m._41, py = x * m._12 + y * m._22 + m._42, pw = x * m._14 + y * m._24 + m._44;
-    return D2D1::Point2F(px / pw, py / pw);
-}
-
-float EaseOut3(float t) { return 1 - (1 - t) * (1 - t) * (1 - t); }
-
-float SmoothStep(float a, float b, float x)
-{
-    const float t = std::clamp((x - a) / (b - a), 0.f, 1.f);
-    return t * t * (3 - 2 * t);
-}
-
-constexpr motion::Spring kGlide{0.42f, 0.86f};
-constexpr motion::Spring kFadeSpring{0.30f, 1.f};
-
-} // namespace
+std::wstring StageManager::AppKeyOf(const std::wstring& key) { return AppOf(key); }
+bool StageManager::HasKey(const Set& set, const std::wstring& key) { return Has(set, key); }
 
 StageManager::StageManager(HINSTANCE instance, TaskModel& tasks)
     : tasks_(tasks),
       surface_(instance, L"Atrium Stage Manager", false),
-      flight_(instance, L"Atrium Stage Flight", false, 0),
+      flight_(instance, L"Atrium Stage Flight", false, 0, false, true),
       snapshots_(surface_.Hwnd(), WM_STAGE_PICTURE),
       actionWorker_([this] { ActionWorker(); })
 {
@@ -205,6 +177,8 @@ StageManager::StageManager(HINSTANCE instance, TaskModel& tasks)
 
 StageManager::~StageManager()
 {
+    if (g_stage == this)
+        g_stage = nullptr;
     if (minimizeHook_)
         UnhookWinEvent(minimizeHook_);
     if (moveHook_)
@@ -216,20 +190,6 @@ StageManager::~StageManager()
     if (actionWorker_.joinable())
         actionWorker_.join();
 }
-
-namespace {
-StageManager* g_stage = nullptr; // the one Stage Manager, for its WinEvent hooks
-
-void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD event, HWND h, LONG object, LONG, DWORD, DWORD)
-{
-    if (object != OBJID_WINDOW || !h || !g_stage)
-        return;
-    if (event == EVENT_SYSTEM_MINIMIZESTART)
-        g_stage->Minimized(h);
-    else
-        g_stage->MoveSize(h, event == EVENT_SYSTEM_MOVESIZESTART);
-}
-} // namespace
 
 // ---- the stage ---------------------------------------------------------------------------------
 
@@ -268,7 +228,7 @@ void StageManager::SetExcluded(std::vector<std::wstring> apps)
                 }
             }
             if (excluded) {
-                Transitions(it->first, true);
+                SetTransitions(it->first, true);
                 it = up_.erase(it);
                 touched = true;
             } else {
@@ -390,6 +350,32 @@ void StageManager::SetMonitor(HMONITOR monitor, bool refresh)
     Rebuild();
 }
 
+void StageManager::ProcessOpenIntent()
+{
+    Set opened, openedApps;
+    for (const TaskItem& t : items_) {
+        if (!openIntent_.Matches(AppOf(t.key), GetTickCount64()))
+            continue;
+        for (HWND h : t.windows) {
+            BOOL here = TRUE;
+            if (IsWindow(h) && IsWindowVisible(h) && OnMonitor(h, monitor_) && !Transient(h) &&
+                (!desktops_ || FAILED(desktops_->IsWindowOnCurrentVirtualDesktop(h, &here)) || here)) {
+                opened.push_back(t.key);
+                if (!Has(openedApps, AppOf(t.key)))
+                    openedApps.push_back(AppOf(t.key));
+            }
+        }
+    }
+    if (opened.empty())
+        return;
+    // Only these launches are done: another app added meanwhile still waits for its window.
+    for (const std::wstring& app : openedApps)
+        openIntent_.Done(app);
+    pending_ = opened;
+    pendingUntil_ = GetTickCount64() + kPendingMs;
+    Stage(opened, true, nullptr, false);
+}
+
 void StageManager::Update(const std::vector<TaskItem>& items)
 {
     HWND fg = GetForegroundWindow();
@@ -420,26 +406,7 @@ void StageManager::Update(const std::vector<TaskItem>& items)
     if (!enabled_)
         return;
     Prune();
-    Set opened, openedApps;
-    for (const TaskItem& t : items_)
-        if (openIntent_.Matches(AppOf(t.key), GetTickCount64()))
-            for (HWND h : t.windows) {
-                BOOL here = TRUE;
-                if (IsWindow(h) && IsWindowVisible(h) && OnMonitor(h, monitor_) && !Transient(h) &&
-                    (!desktops_ || FAILED(desktops_->IsWindowOnCurrentVirtualDesktop(h, &here)) || here)) {
-                    opened.push_back(t.key);
-                    if (!Has(openedApps, AppOf(t.key)))
-                        openedApps.push_back(AppOf(t.key));
-                }
-            }
-    if (!opened.empty()) {
-        // Only these launches are done: another app added meanwhile still waits for its window.
-        for (const std::wstring& app : openedApps)
-            openIntent_.Done(app);
-        pending_ = opened;
-        pendingUntil_ = GetTickCount64() + kPendingMs;
-        Stage(opened, true, nullptr, false);
-    }
+    ProcessOpenIntent();
     AdoptMinimized();
     if (!pending_.empty() && GetTickCount64() > pendingUntil_)
         pending_.clear();
@@ -548,7 +515,7 @@ void StageManager::Park(HWND window, const std::wstring& key)
     if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &p.frame, sizeof(p.frame))))
         GetWindowRect(window, &p.frame);
     parked_[window] = p;
-    Transitions(window, false); // it goes at once: its picture flies instead
+    SetTransitions(window, false); // it goes at once: its picture flies instead
     if (auto fresh = pictures_.find(window);
         fresh != pictures_.end() && fresh->second.picture && fresh->second.picture->ok && GetTickCount64() - fresh->second.taken < kFreshMs) {
         PutDown(window, true);
@@ -616,7 +583,7 @@ void StageManager::PutDown(HWND window, bool fly)
     std::wstring key;
     auto picture = fly ? PictureOf(window, it->second.key, key) : nullptr;
     if (!picture || !picture->ok || !key.starts_with(L"stage|w|")) {
-        Transitions(window, true); // no picture to fly: Windows' own animation
+        SetTransitions(window, true); // no picture to fly: Windows' own animation
         ShowWindowAsync(window, SW_SHOWMINNOACTIVE);
         return;
     }
@@ -652,7 +619,7 @@ void StageManager::PictureTaken()
             p.taken = GetTickCount64();
             p.misses = 0;
             if (minimizeToStrip_ && enabled_ && up_.contains(r.window))
-                Transitions(r.window, false);
+                SetTransitions(r.window, false);
             // Beyond the most recent few, full-size pictures are kept smaller.
             std::vector<std::pair<ULONGLONG, HWND>> full;
             for (const auto& [h, q] : pictures_)
@@ -793,14 +760,14 @@ void StageManager::RestoreAll()
     // Pictures on their way back: their windows come up now.
     for (Flight& f : flights_)
         if (!f.toStrip && !f.restored && IsWindow(f.window)) {
-            Transitions(f.window, true);
+            SetTransitions(f.window, true);
             ShowQuietly(f.window);
         }
     flights_.clear();
     flight_.Hide(false);
     for (const auto& [h, p] : parked_)
         if (IsWindow(h))
-            Transitions(h, true);
+            SetTransitions(h, true);
     for (HWND h : ParkedInOrder())
         if (IsWindow(h) && IsIconic(h))
             ShowQuietly(h);
@@ -825,7 +792,7 @@ void StageManager::RestoreAll()
 void StageManager::UnparkDirect(HWND h, bool showQuietly, ULONGLONG now)
 {
     if (!minimizeToStrip_ || !HasPicture(h))
-        Transitions(h, true);
+        SetTransitions(h, true);
     if (IsIconic(h))
         restoring_[h] = now;
     if (showQuietly && IsWindow(h))
@@ -844,13 +811,42 @@ void StageManager::ReleaseUp()
 {
     for (const auto& [h, frame] : up_)
         if (IsWindow(h) && !parked_.contains(h) && !Flying(h))
-            Transitions(h, true);
+            SetTransitions(h, true);
     for (const TaskItem& t : items_)
         for (HWND h : t.windows)
             if (!up_.contains(h) && !parked_.contains(h) && !Flying(h) && IsWindow(h))
-                Transitions(h, true);
+                SetTransitions(h, true);
     up_.clear();
     restoring_.clear();
+}
+
+void StageManager::SyncUpTransitions(const std::unordered_map<HWND, RECT>& up)
+{
+    for (const auto& [h, frame] : up)
+        if ((!up_.contains(h) || Flying(h)) && HasPicture(h))
+            SetTransitions(h, false);
+    for (const auto& [h, frame] : up_)
+        if (!up.contains(h) && !parked_.contains(h) && IsWindow(h))
+            SetTransitions(h, true);
+}
+
+void StageManager::FlyAdopted(const std::vector<HWND>& flyIn)
+{
+    for (HWND h : flyIn) {
+        std::wstring key;
+        auto picture = PictureOf(h, parked_[h].key, key);
+        if (!picture || !picture->ok || !key.starts_with(L"stage|w|"))
+            continue; // no picture yet: the card just comes
+        std::erase_if(flights_, [&](const Flight& f) { return f.window == h; });
+        Flight f;
+        f.window = h;
+        f.picture = picture;
+        f.key = key;
+        f.toStrip = true;
+        f.place = PlacePose(parked_[h].frame);
+        SetLarge(f);
+        flights_.push_back(std::move(f));
+    }
 }
 
 bool StageManager::AdoptMinimized()
@@ -858,7 +854,7 @@ bool StageManager::AdoptMinimized()
     if (!minimizeToStrip_ || !enabled_) {
         for (const auto& [h, frame] : up_)
             if (IsWindow(h) && !parked_.contains(h))
-                Transitions(h, true);
+                SetTransitions(h, true);
         up_.clear();
         restoring_.clear();
         return false;
@@ -893,32 +889,18 @@ bool StageManager::AdoptMinimized()
         if (anyUp || down.empty())
             continue;
         for (HWND h : down) {
-            Parked p;
-            p.key = t.key;
-            p.seq = ++seq_;
-            p.since = now;
-            p.down = true;
-            if (auto seen = up_.find(h); seen != up_.end()) {
+            Parked p{t.key, ++seq_, now, true, {}};
+            if (auto seen = up_.find(h); seen != up_.end())
                 p.frame = seen->second;
-            } else {
-                WINDOWPLACEMENT wp{sizeof(wp)};
-                if (GetWindowPlacement(h, &wp))
-                    p.frame = wp.rcNormalPosition;
-            }
+            else if (WINDOWPLACEMENT wp{sizeof(wp)}; GetWindowPlacement(h, &wp))
+                p.frame = wp.rcNormalPosition;
             parked_[h] = p;
-            Transitions(h, !HasPicture(h)); // picked in the strip, its picture flies back: no zoom of its own
+            SetTransitions(h, !HasPicture(h)); // picked in the strip, its picture flies back: no zoom of its own
             flyIn.push_back(h);
         }
         gone.push_back(t.key);
     }
-    // Up on the stage, a window with a picture has no minimize animation of its own: minimized, its
-    // picture flies into the strip instead. Off the stage, it has its own again.
-    for (const auto& [h, frame] : up)
-        if ((!up_.contains(h) || Flying(h)) && HasPicture(h))
-            Transitions(h, false);
-    for (const auto& [h, frame] : up_)
-        if (!up.contains(h) && !parked_.contains(h) && IsWindow(h))
-            Transitions(h, true);
+    SyncUpTransitions(up);
     up_ = std::move(up);
     if (gone.empty())
         return false;
@@ -930,22 +912,7 @@ bool StageManager::AdoptMinimized()
     std::erase_if(recent_, [](const Set& set) { return set.empty(); });
     for (const std::wstring& k : gone)
         recent_.insert(recent_.begin(), Set{k}); // each on a card of its own
-    // Their pictures fly from where the windows were into the strip, as a window put away does.
-    for (HWND h : flyIn) {
-        std::wstring key;
-        auto picture = PictureOf(h, parked_[h].key, key);
-        if (!picture || !picture->ok || !key.starts_with(L"stage|w|"))
-            continue; // no picture yet: the card just comes
-        std::erase_if(flights_, [&](const Flight& f) { return f.window == h; });
-        Flight f;
-        f.window = h;
-        f.picture = picture;
-        f.key = key;
-        f.toStrip = true;
-        f.place = PlacePose(parked_[h].frame);
-        SetLarge(f);
-        flights_.push_back(std::move(f));
-    }
+    FlyAdopted(flyIn);
     const bool hasPicture = std::ranges::any_of(flyIn, [&](HWND h) { return Flying(h); });
     if (hasPicture)
         Launch();
@@ -999,12 +966,12 @@ void StageManager::Prune()
         if (!IsWindow(h))
             return true;
         if (!IsWindowVisible(h)) {
-            Transitions(h, true);
+            SetTransitions(h, true);
             return true;
         }
         // Minimizing is asynchronous (and waits for the picture): a window just put away may not be down yet.
         if (kv.second.down && !IsIconic(h) && now - kv.second.since > kSettleMs) {
-            Transitions(h, true); // came back some other way
+            SetTransitions(h, true); // came back some other way
             return true;
         }
         return false;
@@ -1181,40 +1148,46 @@ int StageManager::Capacity() const
     return std::clamp(int((avail + kSlotGap) / kSlot), 1, kMaxEntries);
 }
 
-void StageManager::Rebuild(bool keepAnchor)
+std::vector<StageManager::Entry> StageManager::BuildStripEntries() const
 {
     std::vector<Entry> next;
-    if (enabled_) {
-        for (const Set& set : recent_) {
-            std::vector<std::pair<uint64_t, HWND>> mine;
-            for (const auto& [h, p] : parked_) {
-                if (!Has(set, p.key) || !IsWindow(h))
-                    continue;
-                BOOL here = TRUE; // windows put away on another virtual desktop wait there
-                if (desktops_ && SUCCEEDED(desktops_->IsWindowOnCurrentVirtualDesktop(h, &here)) && !here)
-                    continue;
-                mine.emplace_back(p.seq, h);
-            }
-            if (mine.empty())
+    if (!enabled_)
+        return next;
+    for (const Set& set : recent_) {
+        std::vector<std::pair<uint64_t, HWND>> mine;
+        for (const auto& [h, p] : parked_) {
+            if (!Has(set, p.key) || !IsWindow(h))
                 continue;
-            std::ranges::sort(std::ranges::reverse_view(mine)); // most recent first
-            Entry e;
-            e.keys = set;
-            std::ranges::stable_sort(e.keys, [&](const std::wstring& a, const std::wstring& b) {
-                auto newest = [&](const std::wstring& k) {
-                    uint64_t n = 0;
-                    for (const auto& [seq, h] : mine)
-                        if (parked_[h].key == k)
-                            n = std::max(n, seq);
-                    return n;
-                };
-                return newest(a) > newest(b);
-            });
-            for (size_t i = 0; i < mine.size() && i < kStack; ++i)
-                e.windows.push_back(mine[i].second);
-            next.push_back(std::move(e));
+            BOOL here = TRUE; // windows put away on another virtual desktop wait there
+            if (desktops_ && SUCCEEDED(desktops_->IsWindowOnCurrentVirtualDesktop(h, &here)) && !here)
+                continue;
+            mine.emplace_back(p.seq, h);
         }
+        if (mine.empty())
+            continue;
+        std::ranges::sort(std::ranges::reverse_view(mine)); // most recent first
+        Entry e;
+        e.keys = set;
+        std::ranges::stable_sort(e.keys, [&](const std::wstring& a, const std::wstring& b) {
+            auto newest = [&](const std::wstring& k) {
+                uint64_t n = 0;
+                for (const auto& [seq, h] : mine)
+                    if (parked_.at(h).key == k)
+                        n = std::max(n, seq);
+                return n;
+            };
+            return newest(a) > newest(b);
+        });
+        for (size_t i = 0; i < mine.size() && i < kStack; ++i)
+            e.windows.push_back(mine[i].second);
+        next.push_back(std::move(e));
     }
+    return next;
+}
+
+void StageManager::Rebuild(bool keepAnchor)
+{
+    std::vector<Entry> next = BuildStripEntries();
     scrollCount_ = next.size();
     scroll_.Fit(scrollCount_);
     if (keepAnchor && !entries_.empty()) {
@@ -1227,10 +1200,15 @@ void StageManager::Rebuild(bool keepAnchor)
     if (next.size() > size_t(Capacity()))
         next.resize(size_t(Capacity()));
     // An index can now name another group. Check identity before the old keys are moved/cleared.
-    if (pressed_ >= 0 &&
-        (size_t(pressed_) >= next.size() || size_t(pressed_) >= entries_.size() || next[size_t(pressed_)].keys != entries_[size_t(pressed_)].keys)) {
+    auto sameSlot = [&](int index) {
+        return index >= 0 && size_t(index) < next.size() && size_t(index) < entries_.size() && next[size_t(index)].keys == entries_[size_t(index)].keys;
+    };
+    if (!sameSlot(pressed_))
         pressed_ = -1;
-    }
+    if (!sameSlot(closeHot_))
+        closeHot_ = -1;
+    if (!sameSlot(closePressed_))
+        closePressed_ = -1;
     const bool visible = shown_ && surface_.Visible();
     // A set keeps its card (where it is, how far it is hovered).
     for (Entry& e : next) {
@@ -1242,6 +1220,7 @@ void StageManager::Rebuild(bool keepAnchor)
             e.vy = old->vy;
             e.appear = old->appear;
             e.va = old->va;
+            e.closeAt = old->closeAt;
             old->keys.clear(); // taken
         } else {
             e.appear = visible ? 0.f : 1.f; // a new card fades in; a strip coming out slides as a whole
@@ -1531,6 +1510,7 @@ void StageManager::Show()
     revealFrom_ = visible ? Reveal(0, now) : 0.f; // turning back on its way in
     revealStart_ = now;
     shown_ = true;
+    closeHot_ = closePressed_ = -1;
     if (!visible) {
         hover_ = pressed_ = dragHover_ = -1;
         leaving_.clear();
@@ -1559,7 +1539,7 @@ void StageManager::Hide()
     revealStart_ = now;
     shown_ = false;
     inside_ = false;
-    hover_ = pressed_ = dragHover_ = -1;
+    hover_ = pressed_ = dragHover_ = closeHot_ = closePressed_ = -1;
     surface_.Invalidate(); // the cards slide back into the edge; then the window goes
 }
 
@@ -1596,267 +1576,40 @@ std::shared_ptr<const WindowPicture> StageManager::PictureOf(HWND window, const 
     return ph.picture;
 }
 
-StageManager::Pose StageManager::PoseOf(const Entry& e, size_t j, const WindowPicture& p, float angle) const
+bool StageManager::OnTimerMessage(WPARAM w)
 {
-    const float dir = onRight_ ? -1.f : 1.f;
-    const D2D1_RECT_F box = Box(e);
-    Pose pose;
-    pose.cx = pose.ox = (box.left + box.right) / 2;
-    pose.cy = (box.top + box.bottom) / 2;
-    pose.oy = pose.cy + kKeystone * (size_.height / 2 - pose.cy);
-    pose.angle = angle;
-    pose.z = -kStackZ * float(j);
-    const float f = std::min(kBoxW / float(p.width), kBoxH / float(p.height)) * std::pow(0.93f, float(j)); // DIP per picture px
-    const float w = float(p.width) * f, h = float(p.height) * f;
-    const float x = pose.cx - w / 2 + dir * kStackDx * float(j), y = pose.cy - h / 2 - kStackDy * float(j);
-    pose.rect = D2D1::RectF(x, y, x + w, y + h);
-    return pose;
-}
-
-D2D1_POINT_2F StageManager::StripOffset() const
-{
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    const float s = PopupScale(WorkArea());
-    return D2D1::Point2F(float(rect_.left - mi.rcMonitor.left) / s, float(rect_.top - mi.rcMonitor.top) / s);
-}
-
-bool StageManager::StripPose(HWND window, Pose& pose)
-{
-    if (!shown_)
-        return false;
-    for (const Entry& e : entries_) {
-        auto at = std::ranges::find(e.windows, window);
-        if (at == e.windows.end())
-            continue;
-        auto parked = parked_.find(window);
-        std::wstring key;
-        auto p = PictureOf(window, parked != parked_.end() ? parked->second.key : e.keys.front(), key);
-        if (!p || !p->ok)
-            return false;
-        Entry rest = e;
-        rest.y = rest.targetY;
-        pose = PoseOf(rest, size_t(at - e.windows.begin()), *p, (onRight_ ? -1.f : 1.f) * kTilt);
-        const D2D1_POINT_2F o = StripOffset();
-        pose.rect = D2D1::RectF(pose.rect.left + o.x, pose.rect.top + o.y, pose.rect.right + o.x, pose.rect.bottom + o.y);
-        pose.cx += o.x, pose.ox += o.x, pose.cy += o.y, pose.oy += o.y;
+    if (w == kWatchTimer) {
+        Watch();
+        return true;
+    }
+    if (w == kDownTimer) {
+        KillTimer(surface_.Hwnd(), kDownTimer);
+        std::vector<HWND> late;
+        for (const auto& [h, p] : parked_)
+            if (!p.down && GetTickCount64() - p.since >= kDownMs - 20)
+                late.push_back(h);
+        for (HWND h : late)
+            PutDown(h, false); // no picture in time: it waits without one
+        if (std::ranges::any_of(parked_, [](const auto& kv) { return !kv.second.down; }))
+            SetTimer(surface_.Hwnd(), kDownTimer, kDownMs / 4, nullptr);
+        return true;
+    }
+    if (w == kHideTimer) {
+        KillTimer(surface_.Hwnd(), kHideTimer);
+        if (shown_ && entries_.empty() && leaving_.empty())
+            Hide(); // slides away, then comes back here
+        else if (!shown_)
+            surface_.Hide(false);
+        return true;
+    }
+    if (w == kRaiseTimer) {
+        KillTimer(surface_.Hwnd(), kRaiseTimer);
+        if (raise_ && IsWindow(raise_) && IsWindowVisible(raise_) && !IsIconic(raise_))
+            SetWindowPos(raise_, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        raise_ = nullptr;
         return true;
     }
     return false;
-}
-
-StageManager::Pose StageManager::PlacePose(const RECT& frame) const
-{
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    const float s = PopupScale(WorkArea());
-    Pose pose;
-    pose.rect = D2D1::RectF(float(frame.left - mi.rcMonitor.left) / s, float(frame.top - mi.rcMonitor.top) / s, float(frame.right - mi.rcMonitor.left) / s,
-                            float(frame.bottom - mi.rcMonitor.top) / s);
-    pose.cx = pose.ox = (pose.rect.left + pose.rect.right) / 2;
-    pose.cy = pose.oy = (pose.rect.top + pose.rect.bottom) / 2;
-    return pose;
-}
-
-void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow, bool image)
-{
-    if (!p.ok || p.width <= 0 || p.height <= 0 || opacity < 0.004f)
-        return;
-    const float s = c.scale;
-    const D2D1::Matrix4x4F m = Tilt(pose.cx * s, pose.cy * s, pose.ox * s, pose.oy * s, pose.angle, kDepth * s, pose.z * s);
-    const D2D1_RECT_F& r = pose.rect;
-    const float f = (r.right - r.left) / float(p.width), sp = float(kShadowPad) * f, pp = float(kPicturePad) * f;
-    if (shadow > 0.004f && !p.shadow.Empty())
-        c.ImagePerspective(key + L"|s", p.shadow, D2D1::RectF(r.left - sp, r.top - sp, r.right + sp, r.bottom + sp),
-                           m * D2D1::Matrix4x4F::Translation(0, kShadowDrop * s, 0), kShadowAlpha * opacity * shadow);
-    if (image)
-        c.ImagePerspective(key, p.image, D2D1::RectF(r.left - pp, r.top - pp, r.right + pp, r.bottom + pp), m, opacity);
-}
-
-void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
-{
-    const float s = c.scale, dir = onRight_ ? -1.f : 1.f;
-    const float hv = e.hover.Step(live && (index == hover_ || index == dragHover_), c.now);
-    const float into = e.drop.Step(live && index == dragHover_, c.now);
-    if (e.hover.moving || e.drop.moving)
-        c.Continue();
-    const float rv = Reveal(std::max(index, 0), c.now);
-    const float opacity = e.appear * std::clamp(rv * 1.6f, 0.f, 1.f);
-    // A card whose pictures are all on their way in (or out) shows once they are there.
-    if (opacity < 0.004f || std::ranges::all_of(e.windows, [&](HWND h) { return Flying(h); }))
-        return;
-    const D2D1_RECT_F box = Box(e);
-    const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
-    const float k = (0.9f + 0.1f * e.appear) * (1 + 0.06f * hv + 0.04f * into) * (live && index == pressed_ ? 0.96f : 1.f);
-    // Out of the screen's edge, turning to the eye as it comes.
-    const float slide = onRight_ ? (size_.width - box.left + 24) * (1 - rv) : -(box.right + 24) * (1 - rv);
-    const float angle = dir * (kTilt * (1 - kHoverTilt * hv) + kComeTilt * (1 - rv));
-    c.BeginGroup(opacity, k, cx, cy, slide, 0);
-    if (into > 0.004f) {
-        const D2D1_RECT_F ring = D2D1::RectF(box.left - 10, box.top - 10, box.right + 10, box.bottom + 10);
-        c.Fill(ring, 14, D2D1::ColorF(c.theme.accent.r, c.theme.accent.g, c.theme.accent.b, 0.14f * into));
-        c.Stroke(ring, 14, D2D1::ColorF(c.theme.accent.r, c.theme.accent.g, c.theme.accent.b, 0.85f * into), 2.f);
-    }
-    // Back to front: the windows behind the most recent one a step inwards, up and away.
-    Pose front{};
-    bool hasFront = false;
-    for (size_t j = e.windows.size(); j-- > 0;) {
-        HWND h = e.windows[j];
-        if (Flying(h))
-            continue;
-        auto parked = parked_.find(h);
-        std::wstring key;
-        auto p = PictureOf(h, parked != parked_.end() ? parked->second.key : e.keys.front(), key);
-        if (!p || !p->ok || p->width <= 0 || p->height <= 0)
-            continue;
-        const Pose pose = PoseOf(e, j, *p, angle);
-        DrawPicture(c, *p, key, pose, 1);
-        if (!hasFront || j == 0)
-            front = pose, hasFront = true;
-    }
-    // The apps' icons in a column along the boxes' outer edge, level with the front window's lower
-    // corner, overlapping it.
-    if (hasFront) {
-        const D2D1::Matrix4x4F m = Tilt(front.cx * s, front.cy * s, front.ox * s, front.oy * s, front.angle, kDepth * s, front.z * s);
-        const float outer = onRight_ ? front.rect.right : front.rect.left;
-        const float bottom = Project(m, outer * s, front.rect.bottom * s).y / s;
-        const int iconPx = int(std::lround(kIcon * s));
-        static const IconImage kShadow = SoftShadow(96, 96);
-        std::vector<std::wstring> apps; // one icon an app, though several of its windows are in the set
-        for (const std::wstring& key : e.keys)
-            if (!Has(apps, AppOf(key)) && apps.size() < 3)
-                apps.push_back(AppOf(key));
-        for (size_t j = apps.size(); j-- > 0;) {
-            IconImage icon = tasks_.Icon(apps[j], iconPx);
-            if (icon.Empty())
-                continue;
-            const float ix = (onRight_ ? box.right : box.left) + dir * (10 + 24 * float(j)), iy = bottom - 6;
-            const D2D1_RECT_F ir = D2D1::RectF(ix - kIcon / 2, iy - kIcon / 2, ix + kIcon / 2, iy + kIcon / 2);
-            const float sp = kIcon * float(kShadowPad) / 96;
-            c.Image(L"stage|shadow", kShadow, D2D1::RectF(ir.left - sp, ir.top - sp + 2, ir.right + sp, ir.bottom + sp + 2), 0.45f);
-            c.Image(L"stage|" + apps[j] + L"|" + std::to_wstring(iconPx), icon, ir);
-        }
-        // The close button on the front picture's top right corner; where it is after the card's scale and slide.
-        const D2D1_POINT_2F corner = Project(m, front.rect.right * s, front.rect.top * s);
-        const D2D1_POINT_2F at{corner.x / s, corner.y / s};
-        PaintClose(c, e, index, at, D2D1::Point2F(cx + (at.x - cx) * k + slide, cy + (at.y - cy) * k), live ? hv : 0.f);
-    }
-    c.EndGroup();
-}
-
-// The pictures in flight, over everything: into the strip (the card shows them once they land) or
-// back to their windows' places (the windows come up under them, then they fade).
-void StageManager::PaintFlights(Canvas& c)
-{
-    const float dir = onRight_ ? -1.f : 1.f;
-    const bool drew = !flights_.empty();
-    for (auto it = flights_.begin(); it != flights_.end();) {
-        Flight& f = *it;
-        // Frame by frame, at most kFlightStepMs a frame: while windows go down or come up the screen
-        // may not be composed for a moment; the picture waits rather than jumps.
-        if (f.last > 0)
-            f.elapsed += std::clamp(c.now - f.last, 0.0, kFlightStepMs);
-        f.last = c.now;
-        const float t = float(std::clamp(f.elapsed / kFlightMs, 0.0, 1.0)), e = EaseInOut(t);
-        Pose a = f.toStrip ? f.place : f.from, b = f.toStrip ? Pose{} : f.place;
-        float opacity = 1;
-        if (f.toStrip && !StripPose(f.window, b)) {
-            // The strip is not out: into the screen's edge.
-            const D2D1_SIZE_F screen =
-                D2D1::SizeF(float(flight_.Rect().right - flight_.Rect().left) / c.scale, float(flight_.Rect().bottom - flight_.Rect().top) / c.scale);
-            const float x = onRight_ ? screen.width + kBoxW / 2 : -kBoxW / 2, y = StripOffset().y + size_.height / 2;
-            b.rect = D2D1::RectF(x - kBoxW / 2, y - kBoxH / 2, x + kBoxW / 2, y + kBoxH / 2);
-            b.cx = b.ox = x;
-            b.cy = b.oy = y;
-            b.angle = dir * kTilt;
-            opacity = 1 - e * e;
-        }
-        if (!f.toStrip && t >= kRestoreAt && !f.restored) {
-            f.restored = true;
-            EnqueueAction({f.activate ? Action::Kind::Activate : Action::Kind::ShowQuietly, f.window});
-        }
-        const double over = f.elapsed - kFlightMs - kFlightHoldMs;
-        if (!f.toStrip && over > 0)
-            opacity = 1 - float(std::clamp(over / kFlightFadeMs, 0.0, 1.0));
-        Pose p;
-        p.rect = D2D1::RectF(Lerp(a.rect.left, b.rect.left, e), Lerp(a.rect.top, b.rect.top, e), Lerp(a.rect.right, b.rect.right, e),
-                             Lerp(a.rect.bottom, b.rect.bottom, e));
-        p.cx = Lerp(a.cx, b.cx, e), p.cy = Lerp(a.cy, b.cy, e), p.ox = Lerp(a.ox, b.ox, e), p.oy = Lerp(a.oy, b.oy, e);
-        p.angle = Lerp(a.angle, b.angle, e), p.z = Lerp(a.z, b.z, e);
-        // On the way the small picture turns into the large one, sharp and with the window's own
-        // corners where the window is (it lands as the window; it leaves as it).
-        const float toPlace = f.toStrip ? 1 - e : e;
-        const float large = f.large ? SmoothStep(0.15f, 0.8f, toPlace) : 0.f;
-        // Once the window is up under it (kRestoreAt), the picture's shadow fades as the window's own
-        // takes over, gone by the landing: cut at once it was a shadow that vanished; kept while the
-        // picture fades it would darken the window under it for a moment.
-        const float shade = f.toStrip ? 1.f : 1.f - SmoothStep(kRestoreAt - 0.04f, 1.f, t);
-        DrawPicture(c, *f.picture, f.key, p, opacity, shade, large < 0.999f);
-        if (large > 0)
-            DrawPicture(c, *f.large, f.largeKey, p, opacity * large, 0.f);
-        const bool done = f.toStrip ? t >= 1 : over >= kFlightFadeMs;
-        if (done) {
-            // Up again: its own animations back, unless minimizing it on the stage sends its picture
-            // into the strip (then it stays without, and is looked at as the stage's from now).
-            if (!f.toStrip && minimizeToStrip_ && enabled_ && !IsIconic(f.window)) {
-                RECT r{};
-                if (FAILED(DwmGetWindowAttribute(f.window, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))))
-                    GetWindowRect(f.window, &r);
-                up_[f.window] = r;
-            } else if (!f.toStrip) {
-                Transitions(f.window, true);
-            }
-            it = flights_.erase(it);
-            surface_.Invalidate(); // the card shows its picture now
-        } else {
-            ++it;
-        }
-    }
-    // The last picture drawn is cleared before the layer lets clicks through: hidden by its region
-    // only, it would show that frame again for a moment when the next flight starts.
-    if (!flights_.empty() || drew) {
-        c.Continue();
-    } else {
-        // Clicks go through until the next flight; the layer goes if none comes for a while.
-        HRGN none = CreateRectRgn(0, 0, 0, 0);
-        if (!SetWindowRgn(flight_.Hwnd(), none, FALSE))
-            DeleteObject(none);
-        SetTimer(flight_.Hwnd(), kFlightTimer, kFlightIdleMs, nullptr);
-    }
-}
-
-void StageManager::Paint(Canvas& c)
-{
-    const bool moving = Animate(c.now);
-    for (Entry& e : leaving_)
-        PaintEntry(c, e, -1, false);
-    // More sets than the strip holds (the wheel pages through them): the last card goes from sharp at
-    // its top to blurred, and is gone at its bottom, so the strip reads as one that goes on (#112). A
-    // sharp and a blurred copy cross-fade down the card.
-    const bool more = scrollCount_ > entries_.size();
-    for (size_t i = 0; i < entries_.size(); ++i) {
-        if (!more || i + 1 < entries_.size()) {
-            PaintEntry(c, entries_[i], int(i), true);
-            continue;
-        }
-        const D2D1_RECT_F box = Box(entries_[i]);
-        const D2D1_POINT_2F from{0, box.top - kMoreReach}, to{0, box.bottom + kMoreReach};
-        static constexpr D2D1_GRADIENT_STOP kSharp[] = {{0.f, {1, 1, 1, 1}}, {0.2f, {1, 1, 1, 1}}, {0.7f, {1, 1, 1, 0}}};
-        static constexpr D2D1_GRADIENT_STOP kBlurred[] = {{0.2f, {1, 1, 1, 0}}, {0.6f, {1, 1, 1, 0.85f}}, {1.f, {1, 1, 1, 0}}};
-        c.BeginFade(from, to, kSharp);
-        PaintEntry(c, entries_[i], int(i), true);
-        c.EndFade();
-        c.BeginBlur();
-        c.BeginFade(from, to, kBlurred);
-        PaintEntry(c, entries_[i], int(i), true);
-        c.EndFade();
-        c.EndBlur(kMoreBlur);
-    }
-    UpdateRegion(moving);
-    if (moving)
-        c.Continue();
-    else if (!shown_ || (entries_.empty() && leaving_.empty()))
-        SetTimer(surface_.Hwnd(), kHideTimer, 1, nullptr); // back in the edge, or the last card gone: not from inside a paint
 }
 
 bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
@@ -1865,39 +1618,7 @@ bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     switch (m) {
     case WM_STAGE_PICTURE: PictureTaken(); return true;
-    case WM_TIMER:
-        if (w == kWatchTimer) {
-            Watch();
-            return true;
-        }
-        if (w == kDownTimer) {
-            KillTimer(surface_.Hwnd(), kDownTimer);
-            std::vector<HWND> late;
-            for (const auto& [h, p] : parked_)
-                if (!p.down && GetTickCount64() - p.since >= kDownMs - 20)
-                    late.push_back(h);
-            for (HWND h : late)
-                PutDown(h, false); // no picture in time: it waits without one
-            if (std::ranges::any_of(parked_, [](const auto& kv) { return !kv.second.down; }))
-                SetTimer(surface_.Hwnd(), kDownTimer, kDownMs / 4, nullptr);
-            return true;
-        }
-        if (w == kHideTimer) {
-            KillTimer(surface_.Hwnd(), kHideTimer);
-            if (shown_ && entries_.empty() && leaving_.empty())
-                Hide(); // slides away, then comes back here
-            else if (!shown_)
-                surface_.Hide(false);
-            return true;
-        }
-        if (w == kRaiseTimer) {
-            KillTimer(surface_.Hwnd(), kRaiseTimer);
-            if (raise_ && IsWindow(raise_) && IsWindowVisible(raise_) && !IsIconic(raise_))
-                SetWindowPos(raise_, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
-            raise_ = nullptr;
-            return true;
-        }
-        return false;
+    case WM_TIMER: return OnTimerMessage(w);
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL: {
         // Wheel messages carry screen pixels, unlike the other Surface mouse messages.

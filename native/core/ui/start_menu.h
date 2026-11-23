@@ -122,6 +122,8 @@ private:
     };
 
     void Paint(Canvas& c);
+    void PaintFolderCard(Canvas& c, std::vector<ShapeDip>& shapes, float dt, float& open, D2D1_RECT_F& card, bool& animating);
+    void PaintPowerCard(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes, float dt, bool& animating);
     void PaintSearch(Canvas& c, const Theme& t);
     void PaintTiles(Canvas& c, const Theme& t, float shown);
     // A tile in `r`: its icon (a folder: its first apps, small) and name. target: a carried app would go into it.
@@ -139,6 +141,8 @@ private:
 
     // The tiles, the rows.
     void Rebuild();
+    void BuildDefaultTiles();
+    void BuildCustomTiles(const std::map<std::wstring, const CatalogApp*>& known);
     void SyncWindowsPins();            // tiles_ from the layout (or the Windows pins) and the catalog
     std::vector<Row> Results() const; // search matches, best first
     std::vector<Row> AllApps() const; // the A-Z list with its headings
@@ -212,6 +216,9 @@ private:
     void BeginDrag();
     void UpdateDrag(POINT client);
     void EndDrag(bool commit);
+    void CommitDrag(const Drag& d, const std::wstring& appId, const std::wstring& targetKey, const std::wstring& folderKey, bool targetIsFolder,
+                    const std::vector<std::wstring>& keys);
+    void CommitFolderMerge(const std::wstring& appId, const std::wstring& targetKey, bool targetIsFolder);
     void DragTick(); // the pointer resting: the others make room, the page turns
     void Resize(POINT screen);
     void EndResize();
@@ -221,6 +228,10 @@ private:
     void Activate(const std::wstring& id);
     void Launch(const CatalogApp& app);
     void ContextMenu(const std::wstring& id, POINT screen);
+    std::vector<MenuEntry> BuildContextEntries(const std::wstring& id, CatalogApp& app, std::wstring& folderKey) const;
+    void RunContextCommand(int cmd, const CatalogApp& app, const std::wstring& folderKey, const std::wstring& openKey);
+    static std::optional<StartTile> TakeTile(std::vector<StartTile>& tiles, const std::wstring& id);
+    static int ParseIndex(const std::wstring& id, size_t prefix);
     void RunPower(int index);
     std::wstring HitAt(POINT pt) const;
     const std::vector<Row>& RowsShown() const { return query_.empty() ? list_ : results_; }
