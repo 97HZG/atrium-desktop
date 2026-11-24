@@ -109,6 +109,7 @@ add_library(atrium_core_lib STATIC
     ui/stage_close.cpp
     ui/stage_paint.cpp
     ui/stage_restore.cpp
+    ui/stage_fade.cpp
     ui/window_snapshot.cpp
     shell/weather.cpp
     shell/bluetooth_batteries.cpp

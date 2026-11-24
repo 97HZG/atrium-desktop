@@ -2,6 +2,7 @@
 #include "ui/stage_manager.h"
 
 #include "clock.h"
+#include "ui/stage_fade.h"
 
 #include <dwmapi.h>
 
@@ -16,7 +17,6 @@ constexpr float kHoverTilt = 0.7f, kDepth = 340, kComeTilt = 34, kKeystone = 0.4
 constexpr float kStackDx = 9, kStackDy = 8, kStackZ = 26;
 constexpr float kShadowDrop = 6, kShadowAlpha = 0.5f;
 constexpr float kIcon = 34;
-constexpr float kMoreBlur = 6, kMoreReach = 14;
 constexpr double kFlightHoldMs = 150, kFlightFadeMs = 150, kFlightStepMs = 34;
 constexpr float kRestoreAt = 0.86f;
 constexpr UINT kFlightIdleMs = 60000;
@@ -107,12 +107,17 @@ StageManager::Pose StageManager::PlacePose(const RECT& frame) const
     return pose;
 }
 
-void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow, bool image)
+void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow, bool image,
+                               int fade)
 {
     if (!p.ok || p.width <= 0 || p.height <= 0 || opacity < 0.004f)
         return;
     const float s = c.scale;
     const D2D1::Matrix4x4F m = Tilt(pose.cx * s, pose.cy * s, pose.ox * s, pose.oy * s, pose.angle, kDepth * s, pose.z * s);
+    if (fade != 0) {
+        DrawFaded(c, p, key, pose, m, opacity, shadow, fade);
+        return;
+    }
     const D2D1_RECT_F& r = pose.rect;
     const float f = (r.right - r.left) / float(p.width), sp = float(kShadowPad) * f, pp = float(kPicturePad) * f;
     if (shadow > 0.004f && !p.shadow.Empty())
@@ -122,7 +127,31 @@ void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wst
         c.ImagePerspective(key, p.image, D2D1::RectF(r.left - pp, r.top - pp, r.right + pp, r.bottom + pp), m, opacity);
 }
 
-void StageManager::PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_RECT_F box, float slide, float k, float hv, int index, bool live)
+// An end card's picture and shadow faded away (stage_fade.h): made once a picture, in its own px,
+// so they turn with the card. `fade` 1: away down (the last card), -1: away up (the first).
+void StageManager::DrawFaded(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, const D2D1::Matrix4x4F& m, float opacity, float shadow,
+                              int fade)
+{
+    const D2D1_RECT_F& r = pose.rect;
+    const float f = (r.right - r.left) / float(p.width), sp = float(kShadowPad) * f;
+    const bool up = fade < 0;
+    const std::wstring faded = key + (up ? L"|fu" : L"|fd");
+    if (shadow > 0.004f && !p.shadow.Empty()) {
+        const float k = float(p.shadow.height) / float(p.height + 2 * kShadowPad); // shadow px a picture px
+        const StageFade plain{p.shadow.width, 0, 0};
+        const IconImage made = c.Cached(faded + L"|s") ? IconImage{}
+                                                       : FadeAway(p.shadow, float(kShadowPad) * k, float(kShadowPad + p.height) * k, plain, up);
+        c.ImagePerspective(faded + L"|s", made, D2D1::RectF(r.left - sp, r.top - sp, r.right + sp, r.bottom + sp),
+                           m * D2D1::Matrix4x4F::Translation(0, kShadowDrop * c.scale, 0), kShadowAlpha * opacity * shadow);
+    }
+    const StageFade sf = StageFadeFor(p.image.width, kBoxW * c.scale);
+    const IconImage made = c.Cached(faded) ? IconImage{} : FadeAway(p.image, float(kPicturePad), float(kPicturePad + p.height), sf, up);
+    const float pp = (float(kPicturePad) + sf.margin) * f;
+    c.ImagePerspective(faded, made, D2D1::RectF(r.left - pp, r.top - pp, r.right + pp, r.bottom + pp), m, opacity);
+}
+
+void StageManager::PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_RECT_F box, float slide, float k, float hv, int index, bool live,
+                                   bool icons)
 {
     const float s = c.scale, dir = onRight_ ? -1.f : 1.f;
     const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
@@ -133,7 +162,7 @@ void StageManager::PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_
     static const IconImage kShadow = SoftShadow(96, 96);
     std::vector<std::wstring> apps; // one icon an app, though several of its windows are in the set
     for (const std::wstring& key : e.keys)
-        if (!HasKey(apps, AppKeyOf(key)) && apps.size() < 3)
+        if (icons && !HasKey(apps, AppKeyOf(key)) && apps.size() < 3)
             apps.push_back(AppKeyOf(key));
     for (size_t j = apps.size(); j-- > 0;) {
         IconImage icon = tasks_.Icon(apps[j], iconPx);
@@ -150,7 +179,7 @@ void StageManager::PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_
     PaintClose(c, e, index, at, D2D1::Point2F(cx + (at.x - cx) * k + slide, cy + (at.y - cy) * k), live ? hv : 0.f);
 }
 
-void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
+void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live, int fade)
 {
     const float dir = onRight_ ? -1.f : 1.f;
     const float hv = e.hover.Step(live && (index == hover_ || index == dragHover_), c.now);
@@ -187,12 +216,12 @@ void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
         if (!p || !p->ok || p->width <= 0 || p->height <= 0)
             continue;
         const Pose pose = PoseOf(e, j, *p, angle);
-        DrawPicture(c, *p, key, pose, 1);
+        DrawPicture(c, *p, key, pose, 1, 1, true, fade);
         if (!hasFront || j == 0)
             front = pose, hasFront = true;
     }
     if (hasFront)
-        PaintEntryIcons(c, e, front, box, slide, k, hv, index, live);
+        PaintEntryIcons(c, e, front, box, slide, k, hv, index, live, fade <= 0); // the last card's would sit in its fade
     c.EndGroup();
 }
 
@@ -277,52 +306,16 @@ void StageManager::PaintFlights(Canvas& c)
     }
 }
 
-void StageManager::PaintMore(Canvas& c, Entry& e, int index)
-{
-    // The fade follows the front picture's bottom edge as the tilt shows it (slanted, lower at the
-    // near side), not the card's upright box: across the box, the far side's bottom stopped half way
-    // through the cross-fade and read as a blurred band in the card's middle.
-    const D2D1_RECT_F box = Box(e);
-    D2D1_POINT_2F bl{box.left, box.bottom}, br{box.right, box.bottom}, top{(box.left + box.right) / 2, box.top};
-    std::wstring key;
-    if (auto p = e.windows.empty() ? nullptr : PictureOf(e.windows.front(), e.keys.front(), key); p && p->ok && p->width > 0 && p->height > 0) {
-        const Pose pose = PoseOf(e, 0, *p, (onRight_ ? -1.f : 1.f) * kTilt);
-        const D2D1::Matrix4x4F m = Tilt(pose.cx, pose.cy, pose.ox, pose.oy, pose.angle, kDepth, pose.z);
-        bl = Project(m, pose.rect.left, pose.rect.bottom), br = Project(m, pose.rect.right, pose.rect.bottom);
-        top = Project(m, (pose.rect.left + pose.rect.right) / 2, pose.rect.top);
-    }
-    const float ex = br.x - bl.x, ey = br.y - bl.y, len = std::max(std::hypot(ex, ey), 1.f);
-    const D2D1_POINT_2F n{-ey / len, ex / len}, mid{(bl.x + br.x) / 2, (bl.y + br.y) / 2}; // n: down, across the bottom edge
-    const float height = std::max((mid.x - top.x) * n.x + (mid.y - top.y) * n.y, 1.f);
-    const D2D1_POINT_2F from{mid.x - n.x * height, mid.y - n.y * height}, to{mid.x + n.x * kMoreReach, mid.y + n.y * kMoreReach};
-    const D2D1_RECT_F fadeBounds = D2D1::RectF(-12.f, box.top - 28.f, size_.width + 12.f, box.bottom + 34.f);
-    // Sharp down to a little past the middle, then blurred, then gone just below the bottom edge.
-    static constexpr D2D1_GRADIENT_STOP kSharp[] = {{0.f, {1, 1, 1, 1}}, {0.5f, {1, 1, 1, 1}}, {0.75f, {1, 1, 1, 0}}};
-    static constexpr D2D1_GRADIENT_STOP kBlurred[] = {{0.5f, {1, 1, 1, 0}}, {0.75f, {1, 1, 1, 0.9f}}, {1.f, {1, 1, 1, 0}}};
-    c.BeginFade(from, to, kSharp, fadeBounds);
-    PaintEntry(c, e, index, true);
-    c.EndFade();
-    c.BeginBlur();
-    c.BeginFade(from, to, kBlurred, fadeBounds);
-    PaintEntry(c, e, index, true);
-    c.EndFade();
-    c.EndBlur(kMoreBlur);
-}
-
 void StageManager::Paint(Canvas& c)
 {
     const bool moving = Animate(c.now);
     for (Entry& e : leaving_)
         PaintEntry(c, e, -1, false);
-    // More sets than the strip holds (the wheel pages through them): the last card goes from sharp at
-    // its top to blurred, and is gone at its bottom, so the strip reads as one that goes on (#112).
-    const bool more = scrollCount_ > entries_.size();
-    for (size_t i = 0; i < entries_.size(); ++i) {
-        if (more && i + 1 == entries_.size())
-            PaintMore(c, entries_[i], int(i));
-        else
-            PaintEntry(c, entries_[i], int(i), true);
-    }
+    // More sets than the strip holds (the wheel pages through them, round): the last card blurs more and
+    // more down to nothing, the first the same way up, so the strip reads as one that goes on (#112).
+    const bool more = scrollCount_ > entries_.size() && entries_.size() > 1;
+    for (size_t i = 0; i < entries_.size(); ++i)
+        PaintEntry(c, entries_[i], int(i), true, !more ? 0 : i + 1 == entries_.size() ? 1 : i == 0 ? -1 : 0);
     UpdateRegion(moving);
     if (moving)
         c.Continue();

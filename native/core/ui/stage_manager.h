@@ -195,6 +195,8 @@ private:
         surface_.ForgetImage(key + L"|s");
         flight_.ForgetImage(key);
         flight_.ForgetImage(key + L"|s");
+        for (const wchar_t* faded : {L"|fd", L"|fd|s", L"|fu", L"|fu|s"})
+            surface_.ForgetImage(key + faded);
         if (large)
             flight_.ForgetImage(key + L"|L");
     }
@@ -251,8 +253,7 @@ private:
     void Show();
     void Hide();
     void Paint(Canvas& c);
-    void PaintEntry(Canvas& c, Entry& e, int index, bool live);
-    void PaintMore(Canvas& c, Entry& e, int index); // the last card, when more sets follow: blurred away at its bottom
+    void PaintEntry(Canvas& c, Entry& e, int index, bool live, int fade = 0); // fade: 1 away down, -1 away up (stage_fade.h)
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
     bool OnTimerMessage(WPARAM w);
     void ProcessOpenIntent();
@@ -297,8 +298,11 @@ private:
     }
     bool StepFlight(Canvas& c, Flight& f);
     void PaintFlights(Canvas& c);
-    void PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_RECT_F box, float slide, float k, float hv, int index, bool live);
-    void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow = 1, bool image = true);
+    void PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_RECT_F box, float slide, float k, float hv, int index, bool live, bool icons = true);
+    void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow = 1, bool image = true,
+                     int fade = 0);
+    void DrawFaded(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, const D2D1::Matrix4x4F& m, float opacity, float shadow,
+                   int fade);
 
     TaskModel& tasks_;
     Surface surface_;

@@ -1,9 +1,12 @@
 #include "ui/stage_merge.h"
 #include "ui/stage_scroll.h"
+#include "ui/stage_fade.h"
 #include "ui/stage_open.h"
 
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 using namespace atrium;
 
@@ -59,9 +62,27 @@ void CheckMerge()
 
 } // namespace
 
+void CheckFade()
+{
+    Require(StageFadeOpacity(0) == 1 && StageFadeOpacity(1) == 0 && StageFadeBlur(0) == 0 && StageFadeBlur(1) == 1, "the fade's ends");
+    for (float v = 0; v < 1; v += 0.05f)
+        Require(StageFadeOpacity(v + 0.05f) <= StageFadeOpacity(v) && StageFadeBlur(v + 0.05f) >= StageFadeBlur(v), "blurs more and fades more along");
+    IconImage white{40, 40, std::vector<uint8_t>(40 * 40 * 4, 255)};
+    const StageFade f = StageFadeFor(40, 40);
+    Require(f.width == 40 && f.margin > f.maxBlur && f.maxBlur > 0, "a small picture kept at its size, room for the blur");
+    const IconImage down = FadeAway(white, 0, 40, f, false), up = FadeAway(white, 0, 40, f, true);
+    const int pad = (down.width - 40) / 2;
+    auto alpha = [&](const IconImage& i, int y) { return i.bgra[(size_t(y + pad) * size_t(i.width) + size_t(i.width / 2)) * 4 + 3]; };
+    Require(down.width == 40 + 2 * pad && down.height == down.width, "the margin around");
+    Require(alpha(down, 2) > 245 && alpha(down, 39) < 10 && alpha(down, 20) > alpha(down, 32), "away down: whole at the top, gone at the bottom");
+    Require(alpha(up, 37) > 245 && alpha(up, 0) < 10, "away up: the other way");
+    Require(alpha(down, -pad) == 0, "nothing reaches the margin's far edge");
+}
+
 int main()
 {
     try {
+        CheckFade();
         auto require = Require;
         StageOpenIntent intent;
         intent.Arm(L"editor", 100);
