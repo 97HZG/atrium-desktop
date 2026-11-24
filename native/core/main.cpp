@@ -1202,12 +1202,12 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-std::thread StartLogonUpdate(bool registeredHere, const Settings& settings)
+std::thread StartLogonUpdate(const Settings& settings)
 {
-    if (!IsRegisteredApplication(ExeDir()) || (registeredHere && (!settings.startOnLogin || StartupTurnedOff())))
+    if (!ShouldSyncStartupOnLaunch(IsDevelopmentBuild(), IsRegisteredApplication(ExeDir()), settings.startOnLogin, StartupTurnedOff()))
         return {};
-    return std::thread([on = settings.startOnLogin] {
-        if (!SetStartOnLogin(on))
+    return std::thread([] {
+        if (!SetStartOnLogin(true))
             Log(L"startup: could not update the Windows logon entry");
     });
 }
@@ -1508,7 +1508,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     Log(L"core: starting");
     if (LowIntegrity())
         Log(L"core: running at low integrity (Atrium.exe has a Low label?): settings cannot be saved, the Windows key is left alone");
-    const bool registeredHere = IsRegisteredApplication(ExeDir());
     RegisterApplication(ExeDir());
     SetUnhandledExceptionFilter([](EXCEPTION_POINTERS*) -> LONG {
         SystemChrome::EmergencyRestore();
@@ -1528,7 +1527,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 
     Settings settings = LoadSettings();
     SetLanguage(settings.language);
-    std::thread startupThread = StartLogonUpdate(registeredHere, settings);
+    std::thread startupThread = StartLogonUpdate(settings);
     if (!settings.pins) {
         settings.pins = TaskModel::ImportWindowsPins();
         Log(L"core: imported %zu Windows taskbar pins", settings.pins->size());

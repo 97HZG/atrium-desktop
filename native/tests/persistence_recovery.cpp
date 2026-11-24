@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "shell/logon_task.h"
 #include "shell/system_chrome.h"
 #include "ui/stage_manager.h"
 
@@ -566,6 +567,58 @@ void CheckStartupHandoffFromLeftover(const fs::path& root)
     Check(!HasTmpFiles(dir), "startup handoff test leaves no .tmp files");
 }
 
+void CheckLogonTaskDecisions()
+{
+    using namespace atrium;
+    const uint8_t enabled2[]{0x02, 0x00};
+    const uint8_t enabled6[]{0x06, 0x00};
+    const uint8_t disabled3[]{0x03, 0x00};
+    const uint8_t disabled7[]{0x07, 0x00};
+    Check(!IsStartupApprovedDisabled(nullptr, 0), "StartupApproved empty slice is enabled");
+    Check(!IsStartupApprovedDisabled(enabled2, sizeof(enabled2)) && !IsStartupApprovedDisabled(enabled6, sizeof(enabled6)),
+          "StartupApproved even first byte is enabled");
+    Check(IsStartupApprovedDisabled(disabled3, sizeof(disabled3)) && IsStartupApprovedDisabled(disabled7, sizeof(disabled7)),
+          "StartupApproved odd first byte is disabled");
+
+    Check(!ShouldSyncStartupOnLaunch(true, true, true, false), "ShouldSyncStartupOnLaunch skips development build");
+    Check(!ShouldSyncStartupOnLaunch(false, false, true, false), "ShouldSyncStartupOnLaunch skips unregistered install");
+    Check(!ShouldSyncStartupOnLaunch(false, true, false, false), "ShouldSyncStartupOnLaunch skips when startOnLogin is off");
+    Check(!ShouldSyncStartupOnLaunch(false, true, true, true), "ShouldSyncStartupOnLaunch skips when StartupApproved is off");
+    Check(ShouldSyncStartupOnLaunch(false, true, true, false), "ShouldSyncStartupOnLaunch syncs registered release build");
+
+    const std::wstring exe = LR"(C:\Program Files\Atrium\Atrium.exe)";
+    const std::wstring exeAltCase = LR"(c:\program files\atrium\atrium.exe)";
+    const std::wstring otherExe = LR"(D:\Portable\Atrium\Atrium.exe)";
+    const std::wstring cmd = L"\"" + exe + L"\"";
+    const std::wstring cmdAltCase = L"\"" + exeAltCase + L"\"";
+    const std::wstring otherCmd = L"\"" + otherExe + L"\"";
+
+    auto samePlan = [](const StartupPlan& a, const StartupPlan& b) {
+        return a.ok == b.ok && a.removeTask == b.removeTask && a.writeRun == b.writeRun && a.deleteRun == b.deleteRun;
+    };
+
+    Check(samePlan(PlanStartupChange({exe, exeAltCase, {}, false, true}, true), {true, true, true, false}), "enable migrates own legacy task and writes Run");
+    Check(samePlan(PlanStartupChange({exe, exeAltCase, cmd, true, true}, true), {true, true, false, false}),
+          "enable removes own legacy task and skips identical Run");
+    Check(samePlan(PlanStartupChange({exe, otherExe, {}, false, true}, true), {true, false, true, false}),
+          "enable leaves other install task untouched and writes Run");
+    Check(samePlan(PlanStartupChange({exe, {}, cmd, true, true}, true), {true, false, false, false}), "enable is a no-op when Run already matches");
+    Check(samePlan(PlanStartupChange({exe, {}, otherCmd, true, true}, true), {true, false, true, false}), "enable updates stale Run entry to current exe");
+
+    Check(samePlan(PlanStartupChange({exe, exeAltCase, cmdAltCase, true, true}, false), {true, true, false, true}),
+          "disable removes own task and own Run (case-insensitive)");
+    Check(samePlan(PlanStartupChange({exe, exeAltCase, {}, false, true}, false), {true, true, false, false}),
+          "disable removes only own task when Run is absent");
+    Check(samePlan(PlanStartupChange({exe, {}, cmdAltCase, true, true}, false), {true, false, false, true}),
+          "disable removes only own Run when task is absent");
+    Check(samePlan(PlanStartupChange({exe, {}, {}, false, true}, false), {true, false, false, false}), "disable succeeds when neither entry exists");
+    Check(samePlan(PlanStartupChange({exe, {}, otherCmd, true, true}, false), {false, false, false, false}),
+          "disable refuses when Run belongs to another install");
+    Check(samePlan(PlanStartupChange({exe, otherExe, cmd, true, true}, false), {false, false, false, false}),
+          "disable refuses when task belongs to another install");
+    Check(samePlan(PlanStartupChange({exe, exe, {}, false, false}, false), {false, false, false, false}), "disable refuses when Run registry read fails");
+}
+
 } // namespace
 
 int main()
@@ -580,6 +633,7 @@ int main()
     CheckSaveChromeRecord(temp.path);
     CheckUndoLeftoverRetry(temp.path);
     CheckStartupHandoffFromLeftover(temp.path);
+    CheckLogonTaskDecisions();
     if (g_failures) {
         std::fprintf(stderr, "%d persistence recovery check(s) failed\n", g_failures);
         return 1;

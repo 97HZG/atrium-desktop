@@ -465,13 +465,14 @@ internal sealed partial class CoreClient : IDisposable
             string command = $"\"{exe}\"";
             if (s.StartOnLogin)
             {
+                RemoveLogonTask(exe, strictOwner: false);
                 run.SetValue("Atrium", command);
             }
             else
             {
                 if (run.GetValue("Atrium") is string owner && !string.Equals(owner, command, StringComparison.OrdinalIgnoreCase))
                     throw new IOException(Loc.T("That startup entry belongs to Atrium in another location"));
-                RemoveLogonTask(exe);
+                RemoveLogonTask(exe, strictOwner: true);
                 run.DeleteValue("Atrium", throwOnMissingValue: false);
             }
         }
@@ -482,9 +483,8 @@ internal sealed partial class CoreClient : IDisposable
         return null;
     }
 
-    // The core starts from a Task Scheduler logon task (shell/logon_task.cpp); it registers it
-    // itself, from the Run entry written above, when it next starts.
-    private static void RemoveLogonTask(string exe)
+    // Atrium starts from the HKCU Run key; remove any leftover Task Scheduler logon task for this install.
+    private static void RemoveLogonTask(string exe, bool strictOwner)
     {
         if (!OperatingSystem.IsWindows()) return;
         string name = "Atrium Startup-" + System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
@@ -502,7 +502,11 @@ internal sealed partial class CoreClient : IDisposable
             action = actions.Item(1);
             string? command = (action.Path as string)?.Trim('"');
             if (!string.Equals(command, exe, StringComparison.OrdinalIgnoreCase))
-                throw new IOException(Loc.T("That startup entry belongs to Atrium in another location"));
+            {
+                if (strictOwner)
+                    throw new IOException(Loc.T("That startup entry belongs to Atrium in another location"));
+                return;
+            }
             folder.DeleteTask(name, 0);
         }
         catch (Exception e) when (e is RuntimeBinderException or COMException or ArgumentException)

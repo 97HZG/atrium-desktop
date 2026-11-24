@@ -71,45 +71,35 @@ winrt::com_ptr<ITaskFolder> RootFolder()
     return folder;
 }
 
-std::wstring Xml(const std::wstring& s)
-{
-    std::wstring out;
-    for (wchar_t c : s)
-        out += c == L'&' ? L"&amp;" : c == L'<' ? L"&lt;" : c == L'>' ? L"&gt;" : std::wstring(1, c);
-    return out;
-}
-
 } // namespace
 
-bool RegisterLogonTask(const std::wstring& exe)
+bool IsStartupApprovedDisabled(const uint8_t* data, size_t size)
 {
-    ComScope com;
-    const std::wstring sid = UserSid();
-    auto folder = sid.empty() ? nullptr : RootFolder();
-    if (!folder)
-        return false;
-    // Normal priority (a task's default is below normal), on battery too, never stopped.
-    const std::wstring xml = L"<?xml version=\"1.0\" encoding=\"UTF-16\"?>"
-                             L"<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">"
-                             L"<RegistrationInfo><Description>Starts Atrium when you sign in.</Description></RegistrationInfo>"
-                             L"<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" +
-                             sid +
-                             L"</UserId></LogonTrigger></Triggers>"
-                             L"<Principals><Principal id=\"Author\"><UserId>" +
-                             sid +
-                             L"</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>"
-                             L"<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
-                             L"<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
-                             L"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>4</Priority>"
-                             L"<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings></Settings>"
-                             L"<Actions Context=\"Author\"><Exec><Command>\"" +
-                             Xml(exe) + L"\"</Command></Exec></Actions></Task>";
-    VARIANT none{};
-    winrt::com_ptr<IRegisteredTask> task;
-    HRESULT hr = folder->RegisterTask(Bstr(TaskName(sid)).b, Bstr(xml).b, TASK_CREATE_OR_UPDATE, none, none, TASK_LOGON_INTERACTIVE_TOKEN, none, task.put());
-    if (FAILED(hr))
-        Log(L"startup: the logon task could not be registered (0x%08X)", unsigned(hr));
-    return SUCCEEDED(hr);
+    // The first byte is odd when the switch is off (2 on, 3 off).
+    return data && size > 0 && (data[0] & 1) != 0;
+}
+
+bool ShouldSyncStartupOnLaunch(bool development, bool registeredNow, bool startOnLogin, bool startupTurnedOff)
+{
+    return !development && registeredNow && startOnLogin && !startupTurnedOff;
+}
+
+StartupPlan PlanStartupChange(const StartupState& state, bool enabled)
+{
+    if (state.exe.empty())
+        return {};
+    const std::wstring command = L"\"" + state.exe + L"\"";
+    const bool ownTask = !state.taskProgram.empty() && _wcsicmp(state.taskProgram.c_str(), state.exe.c_str()) == 0;
+    const bool otherTask = !state.taskProgram.empty() && !ownTask;
+    const bool ownRun = state.hasRunValue && _wcsicmp(state.runValue.c_str(), command.c_str()) == 0;
+    const bool otherRun = state.hasRunValue && !ownRun;
+    if (!enabled) {
+        // Another distribution's entries are not ours to remove.
+        if (!state.runReadOk || otherRun || otherTask)
+            return {};
+        return {.ok = true, .removeTask = ownTask, .writeRun = false, .deleteRun = state.hasRunValue};
+    }
+    return {.ok = true, .removeTask = ownTask, .writeRun = !state.hasRunValue || state.runValue != command, .deleteRun = false};
 }
 
 std::wstring LogonTaskProgram()
@@ -157,42 +147,39 @@ bool SetStartOnLogin(bool enabled)
     DWORD length = GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe)));
     if (!length || length == std::size(exe))
         return false;
-    std::wstring command = L"\"" + std::wstring(exe) + L"\"";
     wchar_t current[32771]{};
     DWORD size = sizeof(current);
     LSTATUS read = RegGetValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium", RRF_RT_REG_SZ, nullptr, current, &size);
-    const bool runEntry = read == ERROR_SUCCESS;
-    const std::wstring task = LogonTaskProgram();
-    if (!enabled) {
-        // Another distribution's entries are not ours to remove.
-        if ((read != ERROR_SUCCESS && read != ERROR_FILE_NOT_FOUND && read != ERROR_PATH_NOT_FOUND) || (runEntry && _wcsicmp(command.c_str(), current) != 0) ||
-            (!task.empty() && _wcsicmp(task.c_str(), exe) != 0))
-            return false;
-        if (!task.empty() && !RemoveLogonTask())
-            return false;
-        if (!runEntry)
-            return true;
+    const StartupState state{
+        .exe = exe,
+        .taskProgram = LogonTaskProgram(),
+        .runValue = read == ERROR_SUCCESS ? current : std::wstring{},
+        .hasRunValue = read == ERROR_SUCCESS,
+        .runReadOk = read == ERROR_SUCCESS || read == ERROR_FILE_NOT_FOUND || read == ERROR_PATH_NOT_FOUND,
+    };
+    const StartupPlan plan = PlanStartupChange(state, enabled);
+    if (!plan.ok)
+        return false;
+    if (plan.removeTask && !RemoveLogonTask())
+        return false;
+    if (plan.deleteRun) {
         LSTATUS result = RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium");
         return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
     }
-    // The logon task, and no Run entry left to start Atrium a second time (also from
-    // earlier versions, which started from the Run kRunKey).
-    if ((_wcsicmp(task.c_str(), exe) == 0 || RegisterLogonTask(exe)) &&
-        (!runEntry || RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium") == ERROR_SUCCESS))
-        return true;
-    if (read == ERROR_SUCCESS && command == current)
-        return true;
-    return RegSetKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium", REG_SZ, command.c_str(), DWORD((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+    if (plan.writeRun) {
+        const std::wstring command = L"\"" + state.exe + L"\"";
+        return RegSetKeyValueW(HKEY_CURRENT_USER, kRunKey, L"Atrium", REG_SZ, command.c_str(), DWORD((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+    }
+    return true;
 }
 
 bool StartupTurnedOff()
 {
-    // The first byte is odd when the switch is off (2 on, 3 off).
     BYTE state[12]{};
     DWORD size = sizeof(state);
     return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run", L"Atrium", RRF_RT_REG_BINARY,
                         nullptr, state, &size) == ERROR_SUCCESS &&
-           size > 0 && (state[0] & 1);
+           IsStartupApprovedDisabled(state, size);
 }
 
 } // namespace atrium
