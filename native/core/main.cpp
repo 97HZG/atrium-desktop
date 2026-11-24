@@ -1041,10 +1041,8 @@ void TrySignalReadyEvent(HWND h)
 
 bool HandleHostTimer(HWND h, WPARAM w)
 {
-    if (w == kReadyTimer) {
-        TrySignalReadyEvent(h);
-        return true;
-    }
+    if (w == kReadyTimer)
+        return TrySignalReadyEvent(h), true;
     if (w == kStatusTimer) {
         std::erase_if(g_app.drainingBars, [](const auto& bar) { return bar->StopRendering(0); });
         if (!g_app.trayAdded)
@@ -1072,30 +1070,32 @@ bool HandleHostTimer(HWND h, WPARAM w)
         if (g_app.displaysReady) {
             Log(L"core: displays settled: renderers set up again");
             SyncDisplayBars(g_app.displaySettings, true);
+            UpdateDesktopMonitor(true);
         }
         return true;
     }
-    if (w == kTrayFocusTimer) {
-        KillTimer(h, kTrayFocusTimer);
-        RestoreHiddenOverflowFocus(g_app.trayPanel->Previous());
-        return true;
-    }
+    if (w == kTrayFocusTimer)
+        return KillTimer(h, kTrayFocusTimer), RestoreHiddenOverflowFocus(g_app.trayPanel->Previous()), true;
     return false;
 }
 
+void HandleTaskbarCreated()
+{
+    g_app.trayAdded = false;
+    AddTrayIcon();
+    if (g_app.tray)
+        g_app.tray->Refresh();
+    if (g_app.chrome)
+        g_app.chrome->Enforce();
+    if (g_app.widgets)
+        g_app.widgets->OnShellRestart();
+}
 LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (g_app.tasks && g_app.tasks->HandleMessage(m, w, l))
         return 0;
-    if (m == g_app.taskbarCreated && m != 0) {
-        g_app.trayAdded = false;
-        AddTrayIcon();
-        if (g_app.tray)
-            g_app.tray->Refresh();
-        if (g_app.chrome)
-            g_app.chrome->Enforce();
-        return 0;
-    }
+    if (m == g_app.taskbarCreated && m != 0)
+        return HandleTaskbarCreated(), 0;
     switch (m) {
     case WM_UPDATE_READY:
         if (g_app.updates && g_app.notes)

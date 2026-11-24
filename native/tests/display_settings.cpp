@@ -3,6 +3,7 @@
 #include "shell/system_chrome.h"
 #include "shell/task_model.h"
 #include "ui/notification_layout.h"
+#include "ui/widget_stacking.h"
 #include "motion.h"
 
 #include <winrt/Windows.Data.Json.h>
@@ -564,6 +565,46 @@ void RunNormalizer()
         std::cout.flush();
     }
 }
+
+StackWindow MakeStackWin(uintptr_t id, const wchar_t* cls, RECT r, bool caption = true, bool topmost = false)
+{
+    return StackWindow{reinterpret_cast<HWND>(id), cls, r, true, false, false, topmost, false, false, false, false, caption};
+}
+
+void CheckWidgetStacking()
+{
+    const RECT mon1{0, 0, 2560, 1440}, mon2{2560, 0, 6400, 2160}, both{0, 0, 6400, 2160};
+    const StackWindow bar = MakeStackWin(1, L"AtriumBar", mon1, false, true), progman = MakeStackWin(2, L"Progman", both, false);
+    const StackWindow bambu = MakeStackWin(3, L"BambuStudio", mon1), aux = MakeStackWin(4, L"WorkerW", mon1, false);
+    StackWindow defViewW = MakeStackWin(5, L"WorkerW", both, false);
+    defViewW.hasDefView = true;
+    StackWindow menu = MakeStackWin(6, L"AtriumMenu", mon2, false), widget = MakeStackWin(7, L"AtriumWidget", mon1, false);
+    menu.ours = widget.ours = widget.widget = true;
+
+    Require(ComputeWidgetStackPlan({bar, bambu, progman}, mon1, bambu.hwnd, false, false).after == bambu.hwnd, "normal: below app");
+    auto p = ComputeWidgetStackPlan({bar, aux, bambu, progman}, mon1, progman.hwnd, false, false);
+    Require(p.after == bambu.hwnd && !p.showDesktop, "#145: helper WorkerW + desktop fg stays below app");
+    Require(ComputeWidgetStackPlan({bar, aux, bambu, progman}, mon1, menu.hwnd, true, false).after == bambu.hwnd, "#145: helper WorkerW + ours fg");
+    const StackWindow borderless = MakeStackWin(8, L"Borderless", RECT{100, 100, 300, 300}, false);
+    Require(ComputeWidgetStackPlan({bar, borderless, progman}, mon1, progman.hwnd, false, false).after == borderless.hwnd, "captionless >=64x64");
+    StackWindow tiny = MakeStackWin(9, L"Tiny", RECT{10, 10, 42, 42}, false);
+    Require(ComputeWidgetStackPlan({bar, tiny, progman}, mon1, progman.hwnd, false, false).lowestApp == nullptr, "tiny untitled ignored");
+    tiny.hasTitle = true;
+    Require(ComputeWidgetStackPlan({bar, tiny, progman}, mon1, progman.hwnd, false, false).after == tiny.hwnd, "tiny titled counted");
+    p = ComputeWidgetStackPlan({bar, progman, bambu}, mon1, progman.hwnd, false, false);
+    Require(p.showDesktop && p.after == HWND_TOP, "Win+D Progman fg lifts on smaller monitor");
+    p = ComputeWidgetStackPlan({bar, defViewW, bambu}, mon1, defViewW.hwnd, false, false);
+    Require(p.showDesktop && p.after == HWND_TOP, "Win+D DefView WorkerW fg lifts on smaller monitor");
+    p = ComputeWidgetStackPlan({bar, progman, bambu}, mon1, widget.hwnd, true, true);
+    Require(p.showDesktop && p.after == HWND_TOP, "wasShowDesktop kept while fg is ours");
+    Require(!ComputeWidgetStackPlan({bar, progman, bambu}, mon1, bambu.hwnd, false, true).showDesktop, "wasShowDesktop exits on app");
+    Require(!ComputeWidgetStackPlan({bar, progman, bambu}, mon1, menu.hwnd, true, false).showDesktop, "Explorer restart race");
+    Require(ComputeWidgetStackPlan({bar, progman}, mon1, progman.hwnd, false, false).after == HWND_TOP, "only topmost above desktop");
+    Require(ComputeWidgetStackPlan({bar, bambu}, mon1, bambu.hwnd, false, false).after == bambu.hwnd, "no host with app");
+    Require(ComputeWidgetStackPlan({bar, widget}, mon1, nullptr, false, false).after == HWND_BOTTOM, "no host no app -> HWND_BOTTOM");
+    const StackWindow appMon2 = MakeStackWin(10, L"OtherMonApp", mon2);
+    Require(!ComputeWidgetStackPlan({bar, appMon2, progman}, mon1, appMon2.hwnd, false, false).lowestApp, "two monitors independent");
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -585,6 +626,7 @@ int main(int argc, char** argv)
         CheckTaskbarReshowGuard();
         CheckNotificationLayout();
         CheckNotificationQuietState();
+        CheckWidgetStacking();
         std::cout << "Display, fullscreen auto-hide, notification placement and animated reflow checks passed.\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

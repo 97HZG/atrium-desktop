@@ -24,6 +24,8 @@
 
 namespace atrium {
 
+struct WidgetStackPlan;
+
 class DesktopWidgets {
 public:
     explicit DesktopWidgets(HINSTANCE instance);
@@ -42,6 +44,7 @@ public:
     void ReloadLanguage();
     // Adds a widget in the first free place; false when there is no room.
     bool Add(WidgetKind kind, WidgetSize size);
+    void OnShellRestart();
     static bool ParseNames(const std::wstring& kind, const std::wstring& size, WidgetKind& outKind, WidgetSize& outSize);
 
     std::function<void()> onCalendar;    // a calendar widget was clicked
@@ -76,11 +79,15 @@ private:
     void Place(Widget& w, bool glide);
     void Glide();
     void Restack();
+    void OnDisplayChanged();
+    void LogRestackAnomaly(const WidgetStackPlan& plan, HWND fg, DWORD swpErr);
     void Tick();
     bool IsOurs(HWND h) const;
     // Bottom corner grips: -1 on the left, 1 on the right, 0 outside either grip.
     int GripAt(const Widget& w, POINT screen) const;
     void DragSize(Widget& w, POINT screen);
+    LRESULT MouseActivate(const Widget& w, LPARAM lp) const;
+    bool UpdateCursor(const Widget& w, LPARAM lp, LRESULT& r) const;
     bool Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r);
     void Menu(Widget& w);
     void Activate(Widget& w);
@@ -136,6 +143,9 @@ private:
     bool photoStop_ = false;
     std::thread photoWorker_;
     bool restackPosted_ = false;
+    bool wasShowDesktop_ = false;
+    ULONGLONG lastRestackLog_ = 0;
+    std::wstring lastRestackSig_;
     // Only Restack may change a widget's place in the z-order: anything else
     // (showing the window, a click, the system) is held back in WM_WINDOWPOSCHANGING.
     bool zMoving_ = false;
