@@ -32,6 +32,7 @@ add_library(atrium_core_lib STATIC
     bar_drop.cpp
     bar_entries.cpp
     bar_input.cpp
+    bar_render.cpp
     bar_stacking.cpp
     desktop_helpers.cpp
     notice_actions.cpp
@@ -129,6 +130,7 @@ add_library(atrium_core_lib STATIC
     render/desktop_backdrop.cpp
     render/glass_renderer.cpp
     render/glass_panel.cpp
+    render/panel_glass_host.cpp
     render/ui_font.cpp
     render/gpu.cpp
     render/wifi_glyph.cpp)

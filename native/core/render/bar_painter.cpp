@@ -42,6 +42,41 @@ float ApproachPx(float v, float target, double dtMs, float rate)
     return std::fabs(target - v) < 0.25f ? target : v;
 }
 
+D2D1_COLOR_F BarMixColor(float dark, D2D1_COLOR_F d, D2D1_COLOR_F l)
+{
+    return D2D1::ColorF(l.r + (d.r - l.r) * dark, l.g + (d.g - l.g) * dark, l.b + (d.b - l.b) * dark, l.a + (d.a - l.a) * dark);
+}
+
+D2D1_COLOR_F BarHaloColor(float dark) { return BarMixColor(dark, D2D1::ColorF(1, 1, 1, 0.35f), D2D1::ColorF(0, 0, 0, 0.32f)); }
+
+D2D1_COLOR_F BarWashColor(float dark) { return BarMixColor(dark, D2D1::ColorF(0, 0, 0, 0.10f), D2D1::ColorF(1, 1, 1, 0.20f)); }
+
+bool StepItemHop(const BarScene& scene, const SceneItem& item, double alertSince, double nowMs, float& hop)
+{
+    hop = 0;
+    bool moving = false;
+    // Launch: one soft hop (v0.9.8; it was up to four, each lower). It leaves and lands
+    // without a jolt (sin², no speed at either end), whatever the app does meanwhile.
+    if (item.bounceMs > 0) {
+        const double t = nowMs - item.bounceMs;
+        if (t >= 0 && t < kHopMs) {
+            const float sn = std::sin(std::numbers::pi_v<float> * float(t / kHopMs));
+            hop = sn * sn;
+            moving = true;
+        }
+    }
+    // Asking for attention: a few hops of the same kind when it starts (not under the pointer).
+    if (item.attention && scene.alertBounce && alertSince >= 0 && scene.hoverKey != item.key && scene.dragKey != item.key) {
+        const double t = nowMs - alertSince;
+        if (t >= 0 && t < kAlertHops * kHopMs) {
+            const float sn = std::sin(std::numbers::pi_v<float> * float(std::fmod(t, kHopMs) / kHopMs));
+            hop = std::max(hop, sn * sn);
+            moving = true;
+        }
+    }
+    return moving;
+}
+
 template<class StatusMotionT> bool StepStatusRing(StatusMotionT& s, const SystemStatus& st, double nowMs, double dt)
 {
     constexpr double kLevelShowMs = 1500;
@@ -124,108 +159,84 @@ ID2D1Bitmap1* BarPainter::BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& i
 
 float BarPainter::MapX(float u) const { return wave_.MapX(u); }
 
-bool BarPainter::Animate(const BarScene& scene, double nowMs)
+void BarPainter::StepWave(const BarScene& scene, double dt, BarAnimation& anim)
 {
-    double dt = lastMs_ == 0 ? 16 : std::clamp(nowMs - lastMs_, 0.0, 100.0);
-    lastMs_ = nowMs;
-    bool moving = false;
-    // A new window geometry: items jump to their places instead of sliding
-    // across from coordinates of the old window. (The window keeps its width
-    // when apps come and go; then the bar's edges and the items slide.)
-    bool snap = scene.edge != lastEdge_ || scene.windowW != lastWindowW_ || scene.bar.top != lastTop_ || scene.bar.bottom != lastBottom_;
-    lastEdge_ = scene.edge;
-    lastWindowW_ = scene.windowW;
-    lastTop_ = scene.bar.top;
-    lastBottom_ = scene.bar.bottom;
-    auto slide = [&](float& v, float target) {
-        if (snap) {
-            v = target;
-            return;
-        }
-        float n = ApproachPx(v, target, dt, kSlideRate);
-        moving |= n != v;
-        v = n;
-    };
-    slide(barL_, scene.bar.left);
-    slide(barR_, scene.bar.right);
-    if (scene.separatorX < 0 || sepX_ < 0)
-        sepX_ = scene.separatorX;
-    else
-        slide(sepX_, scene.separatorX);
-    slide(clockX_, (scene.clock.left + scene.clock.right) / 2);
+    const float prevRise = wave_.Height(1.f);
+    const float prevCentre = wave_.Centre();
+    const float prevWidth = wave_.Width();
+    const float prevHeight = wave_.Height(scene.magnifyLift);
+    const float prevMag = wave_.Scale(prevCentre, 1.f);
+    if (!wave_.Update(scene, dt))
+        return;
+    const float curRise = wave_.Height(1.f);
+    const float curCentre = wave_.Centre();
+    const float curWidth = wave_.Width();
+    const float curHeight = wave_.Height(scene.magnifyLift);
+    const float curMag = wave_.Scale(curCentre, 1.f);
+    if (curRise != prevRise || curHeight != prevHeight || (curRise > 0.f && (curCentre != prevCentre || curWidth != prevWidth)))
+        anim.glass = true;
+    if (curMag != prevMag || curMag > 1.0001f)
+        anim.body = true;
+}
 
-    // Magnification: follows the pointer at once, grows and settles smoothly. A pointer
-    // resting just above the bar is answered ahead of time too, each on its own switch:
-    // the glass rises to it (riseNear, with hoverRise) and the icons magnify (magnifyNear).
-    moving |= wave_.Update(scene, dt);
+bool BarPainter::StepSingleItemMotion(const BarScene& scene, const std::wstring& key, const SceneItem* item, double nowMs, double dt, bool snap)
+{
+    Motion& m = motion_[key];
+    m.inScene = true;
+    const float h = Approach(m.hover, scene.hoverKey == key || scene.dragKey == key ? 1.f : 0.f, dt, 18);
+    const float p = Approach(m.press, scene.pressedKey == key && scene.dragKey != key ? 1.f : 0.f, dt, 30);
+    const float a = Approach(m.appear, 1.f, dt, 10);
+    const float l = Approach(m.lift, scene.dragKey == key ? 1.f : 0.f, dt, 22);
+    const float d = Approach(m.dot, item && item->running ? 1.f : 0.f, dt, 12);
+    const bool asks = item && item->attention;
+    // Not under the pointer: the icon grows there and would cover part of the lit plate.
+    const bool lit = asks && scene.alertLight && scene.hoverKey != key && scene.dragKey != key;
+    const float al = Approach(m.alert, lit ? 1.f : 0.f, dt, 8);
+    if (asks && m.alertSince < 0)
+        m.alertSince = nowMs;
+    else if (!asks)
+        m.alertSince = -1;
+    // The lit plate pulses softly for its first seconds, then stays lit until the app is opened.
+    bool moving = lit && nowMs - m.alertSince < kAlertPulseMs;
+    moving |= h != m.hover || p != m.press || a != m.appear || l != m.lift || d != m.dot || al != m.alert;
+    m.alert = al;
+    m.hover = h;
+    m.press = p;
+    m.appear = a;
+    m.lift = l;
+    m.dot = d;
+    m.leaving = false; // back again
+    if (!item)
+        return moving;
+    const float x = (item->plate.left + item->plate.right) / 2;
+    if (!m.placed || snap || scene.dragKey == key) {
+        m.x = x;
+        m.placed = true;
+    } else {
+        const float nx = ApproachPx(m.x, x, dt, kSlideRate);
+        moving |= nx != m.x;
+        m.x = nx;
+    }
+    moving |= StepItemHop(scene, *item, m.alertSince, nowMs, m.hop);
+    return moving;
+}
 
+bool BarPainter::StepItemMotions(const BarScene& scene, double nowMs, double dt, bool snap)
+{
     for (auto& [key, m] : motion_)
         m.inScene = false;
-    auto step = [&](const std::wstring& key, const SceneItem* item) {
-        Motion& m = motion_[key];
-        m.inScene = true;
-        float h = Approach(m.hover, scene.hoverKey == key || scene.dragKey == key ? 1.f : 0.f, dt, 18);
-        float p = Approach(m.press, scene.pressedKey == key && scene.dragKey != key ? 1.f : 0.f, dt, 30);
-        float a = Approach(m.appear, 1.f, dt, 10);
-        float l = Approach(m.lift, scene.dragKey == key ? 1.f : 0.f, dt, 22);
-        float d = Approach(m.dot, item && item->running ? 1.f : 0.f, dt, 12);
-        const bool asks = item && item->attention;
-        // Not under the pointer: the icon grows there and would cover part of the lit plate.
-        const bool lit = asks && scene.alertLight && scene.hoverKey != key && scene.dragKey != key;
-        float al = Approach(m.alert, lit ? 1.f : 0.f, dt, 8);
-        if (asks && m.alertSince < 0)
-            m.alertSince = nowMs;
-        else if (!asks)
-            m.alertSince = -1;
-        // The lit plate pulses softly for its first seconds, then stays lit until the app is opened.
-        moving |= lit && nowMs - m.alertSince < kAlertPulseMs;
-        moving |= h != m.hover || p != m.press || a != m.appear || l != m.lift || d != m.dot || al != m.alert;
-        m.alert = al;
-        m.hover = h;
-        m.press = p;
-        m.appear = a;
-        m.lift = l;
-        m.dot = d;
-        m.leaving = false; // back again
-        if (!item)
-            return;
-        float x = (item->plate.left + item->plate.right) / 2;
-        if (!m.placed || snap || scene.dragKey == key) {
-            m.x = x;
-            m.placed = true;
-        } else {
-            float nx = ApproachPx(m.x, x, dt, kSlideRate);
-            moving |= nx != m.x;
-            m.x = nx;
-        }
-        // Launch: one soft hop (v0.9.8; it was up to four, each lower). It leaves and lands
-        // without a jolt (sin², no speed at either end), whatever the app does meanwhile.
-        m.hop = 0;
-        if (item->bounceMs > 0) {
-            double t = nowMs - item->bounceMs;
-            if (t >= 0 && t < kHopMs) {
-                float sn = std::sin(std::numbers::pi_v<float> * float(t / kHopMs));
-                m.hop = sn * sn;
-                moving = true;
-            }
-        }
-        // Asking for attention: a few hops of the same kind when it starts (not under the pointer).
-        if (asks && scene.alertBounce && m.alertSince >= 0 && scene.hoverKey != key && scene.dragKey != key) {
-            double t = nowMs - m.alertSince;
-            if (t >= 0 && t < kAlertHops * kHopMs) {
-                float sn = std::sin(std::numbers::pi_v<float> * float(std::fmod(t, kHopMs) / kHopMs));
-                m.hop = std::max(m.hop, sn * sn);
-                moving = true;
-            }
-        }
-    };
+    bool moving = false;
     for (const auto& it : scene.items)
-        step(it.key, &it);
+        moving |= StepSingleItemMotion(scene, it.key, &it, nowMs, dt, snap);
     for (const auto& it : scene.extras)
-        step(it.key, &it);
-    step(L"#clock", nullptr);
-    // Apps that went away shrink and fade out where they were while the
-    // others close up; other entries just go.
+        moving |= StepSingleItemMotion(scene, it.key, &it, nowMs, dt, snap);
+    moving |= StepSingleItemMotion(scene, L"#clock", nullptr, nowMs, dt, snap);
+    return moving;
+}
+
+bool BarPainter::PruneLeavingItems(const BarScene& scene, double dt, bool snap)
+{
+    bool moving = false;
     for (auto it = motion_.begin(); it != motion_.end();) {
         Motion& m = it->second;
         if (m.inScene) {
@@ -253,39 +264,80 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     }
     for (const auto& it : scene.items)
         lastApps_[it.key] = it;
+    return moving;
+}
 
-    // Status ring: a changed volume or brightness shows on the ring for a
-    // while; the fill follows on a spring with a slight overshoot (no linear
-    // sweep).
-    moving |= StepStatusRing(statusMotion_, scene.status, nowMs, dt);
+bool BarPainter::StepRipple(const BarScene& scene, double nowMs)
+{
+    frame_.rippleA = 0;
+    if (scene.rippleMs <= 0)
+        return false;
+    constexpr double kRippleMs = 720;
+    const double t = nowMs - scene.rippleMs;
+    if (t < 0 || t >= kRippleMs)
+        return false;
+    const float u = float(t / kRippleMs);
+    frame_.rippleX = MapX(scene.rippleX);
+    frame_.rippleY = scene.rippleY + frame_.slideY;
+    frame_.rippleR = (scene.bar.bottom - scene.bar.top) * 1.5f * motion::EaseOut(u);
+    frame_.rippleA = 0.9f * (1 - u) * (1 - u);
+    return true;
+}
+
+BarAnimation BarPainter::Animate(const BarScene& scene, double nowMs)
+{
+    const double dt = lastMs_ == 0 ? 16 : std::clamp(nowMs - lastMs_, 0.0, 100.0);
+    lastMs_ = nowMs;
+    BarAnimation anim;
+    // A new window geometry: items jump to their places instead of sliding
+    // across from coordinates of the old window. (The window keeps its width
+    // when apps come and go; then the bar's edges and the items slide.)
+    const bool snap = scene.edge != lastEdge_ || scene.windowW != lastWindowW_ || scene.bar.top != lastTop_ || scene.bar.bottom != lastBottom_;
+    lastEdge_ = scene.edge;
+    lastWindowW_ = scene.windowW;
+    lastTop_ = scene.bar.top;
+    lastBottom_ = scene.bar.bottom;
+    auto slide = [&](float& v, float target, bool& channel) {
+        if (snap) {
+            v = target;
+            return;
+        }
+        const float n = ApproachPx(v, target, dt, kSlideRate);
+        channel |= n != v;
+        v = n;
+    };
+    slide(barL_, scene.bar.left, anim.glass);
+    slide(barR_, scene.bar.right, anim.glass);
+    if (scene.separatorX < 0 || sepX_ < 0)
+        sepX_ = scene.separatorX;
+    else
+        slide(sepX_, scene.separatorX, anim.body);
+    slide(clockX_, (scene.clock.left + scene.clock.right) / 2, anim.body);
+
+    // Magnification: follows the pointer at once, grows and settles smoothly. A pointer
+    // resting just above the bar is answered ahead of time too, each on its own switch:
+    // the glass rises to it (riseNear, with hoverRise) and the icons magnify (magnifyNear).
+    StepWave(scene, dt, anim);
+
+    anim.body |= StepItemMotions(scene, nowMs, dt, snap);
+    anim.body |= PruneLeavingItems(scene, dt, snap);
+    anim.body |= StepStatusRing(statusMotion_, scene.status, nowMs, dt);
 
     constexpr double kImeFadeMs = 180;
+    const float prevImeFade = imeFade_;
     imeFade_ = scene.imeMs > 0 ? float(std::clamp((nowMs - scene.imeMs) / kImeFadeMs, 0.0, 1.0)) : 1.f;
-    moving |= imeFade_ < 1;
+    anim.body |= imeFade_ < 1.f || prevImeFade < 1.f;
 
-    moving |= AnimateSlide(scene, nowMs);
-    moving |= AnimateMusic(scene, dt);
+    anim.glass |= AnimateSlide(scene, nowMs);
+    anim.music |= AnimateMusic(scene, dt);
 
     // What the glass shows this frame: the stretched shape and the ripple.
     frame_.shape = D2D1::RectF(MapX(barL_), scene.bar.top + frame_.slideY, MapX(barR_), scene.bar.bottom + frame_.slideY);
-    // Share the icons' wave and easing; its support widens with the stretched bar.
     frame_.waveX = wave_.Centre();
     frame_.waveWidth = wave_.Width();
     frame_.waveHeight = wave_.Height(scene.magnifyLift);
-    frame_.rippleA = 0;
-    if (scene.rippleMs > 0) {
-        constexpr double kRippleMs = 720;
-        double t = nowMs - scene.rippleMs;
-        if (t >= 0 && t < kRippleMs) {
-            float u = float(t / kRippleMs);
-            frame_.rippleX = MapX(scene.rippleX);
-            frame_.rippleY = scene.rippleY + frame_.slideY;
-            frame_.rippleR = (scene.bar.bottom - scene.bar.top) * 1.5f * motion::EaseOut(u);
-            frame_.rippleA = 0.9f * (1 - u) * (1 - u);
-            moving = true;
-        }
-    }
-    return moving;
+    anim.glass |= StepRipple(scene, nowMs);
+    return anim;
 }
 
 D2D1_ELLIPSE BarPainter::RunningDot(const BarScene& scene, const SceneItem& item, const Motion& motion) const
@@ -302,7 +354,13 @@ bool BarPainter::AnimateMusic(const BarScene& scene, double dt)
 {
     if (!scene.music || std::ranges::none_of(scene.extras, [](const SceneItem& it) { return it.key == L"#music"; }))
         return false;
-    return music_.Step(scene.music->peak.load(), scene.music->playing.load(), scene.music->intensity.load(), dt);
+    const float peak = scene.music->EffectivePeak();
+    const bool playing = scene.music->playing.load();
+    const float intensity = scene.music->intensity.load();
+    const bool moving = music_.Step(peak, playing, intensity, dt);
+    if (!moving && playing && intensity > 0.f)
+        scene.music->needWake.store(true, std::memory_order_release);
+    return moving;
 }
 
 // Auto-hide: the slide down off the screen and back up; true while it moves.
@@ -362,12 +420,51 @@ bool BarPainter::UpdateDotInk(const BarScene& scene, const Readback& backdrop, c
     return moving;
 }
 
+bool BarPainter::TryDrawMusicClip(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& contentKey, ID2D1Image* target,
+                                  D2D1_SIZE_U size)
+{
+    const auto itExtra = std::ranges::find_if(scene.extras, [](const SceneItem& it) { return it.key == L"#music"; });
+    if (itExtra == scene.extras.end() || itExtra->running || itExtra->attention || itExtra->badge > 0)
+        return false;
+    const auto itMotion = motion_.find(L"#music");
+    if (itMotion == motion_.end())
+        return false;
+    const Motion& m = itMotion->second;
+    const float plateCx = (itExtra->plate.left + itExtra->plate.right) / 2;
+    const float plateW = std::max(1.f, itExtra->plate.right - itExtra->plate.left);
+    if (m.hover != 0.f || m.press != 0.f || m.lift != 0.f || m.alert != 0.f || m.hop != 0.f || m.leaving || m.appear < 0.999f ||
+        (m.placed && std::fabs(m.x - plateCx) > 0.01f))
+        return false;
+    if (wave_.Height(1.f) > 0.001f || std::fabs(wave_.MapX(plateCx) - plateCx) > 0.01f || std::fabs(wave_.Scale(plateCx, plateW) - 1.f) > 0.001f)
+        return false;
+    const D2D1_RECT_F areaRect = BarFrameFor(scene).ToArea(itExtra->plate);
+    const D2D1_RECT_F clip =
+        D2D1::RectF(std::max(0.f, std::floor(areaRect.left - 1.f)), std::max(0.f, std::floor(areaRect.top - 1.f)),
+                    std::min(float(size.width), std::ceil(areaRect.right + 1.f)), std::min(float(size.height), std::ceil(areaRect.bottom + 1.f)));
+    if (clip.right <= clip.left || clip.bottom <= clip.top)
+        return false;
+    d2d->SetTarget(layer_.get());
+    d2d->SetTransform(D2D1::Matrix3x2F::Identity());
+    d2d->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
+    d2d->Clear(D2D1::ColorF(0, 0, 0, 0));
+    d2d->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    d2d->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    const D2D1_COLOR_F rightInk = BarInkColor(ink.darkClock);
+    contentBrush_->SetColor(rightInk);
+    DrawItem(d2d, scene, *itExtra, contentBrush_.get(), rightInk, BarWashColor(ink.darkClock));
+    d2d->PopAxisAlignedClip();
+    d2d->SetTarget(target);
+    layerKey_ = contentKey;
+    layerEdge_ = scene.edge;
+    return true;
+}
+
 void BarPainter::Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date,
-                      const std::wstring& contentKey, bool animating)
+                      const std::wstring& contentKey, BarAnimation anim, bool forceBody)
 {
     winrt::com_ptr<ID2D1Image> target;
     d2d->GetTarget(target.put());
-    auto size = d2d->GetPixelSize();
+    const auto size = d2d->GetPixelSize();
     if (layer_ && (layer_->GetPixelSize().width != size.width || layer_->GetPixelSize().height != size.height))
         layer_ = nullptr;
     if (!layer_) {
@@ -379,13 +476,17 @@ void BarPainter::Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, 
         }
         layerKey_.clear();
     }
-    if (animating || contentKey != layerKey_ || scene.edge != layerEdge_) {
-        d2d->SetTarget(layer_.get());
-        d2d->Clear(D2D1::ColorF(0, 0, 0, 0));
-        DrawContent(d2d, scene, ink, time, date);
-        d2d->SetTarget(target.get());
-        layerKey_ = animating ? std::wstring() : contentKey;
-        layerEdge_ = scene.edge;
+    const bool keyMismatch = contentKey != layerKey_ || scene.edge != layerEdge_;
+    if (anim.body || anim.music || forceBody || keyMismatch) {
+        const bool musicOnly = anim.music && !anim.body && !anim.glass && !forceBody && !keyMismatch;
+        if (!musicOnly || !TryDrawMusicClip(d2d, scene, ink, contentKey, target.get(), size)) {
+            d2d->SetTarget(layer_.get());
+            d2d->Clear(D2D1::ColorF(0, 0, 0, 0));
+            DrawContent(d2d, scene, ink, time, date);
+            d2d->SetTarget(target.get());
+            layerKey_ = (anim.body || forceBody) ? std::wstring() : contentKey;
+            layerEdge_ = scene.edge;
+        }
     }
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());
     const D2D1_POINT_2F at = BarVectorToArea(BarFrameFor(scene), 0, std::round(frame_.slideY));
@@ -397,16 +498,11 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
     const float s = scene.scale;
     // Ink colours: white on dark glass, near-black on light glass, per region.
     // `dark` is the amount of dark ink: colours in between while the ink fades.
-    auto mix = [](float dark, D2D1_COLOR_F d, D2D1_COLOR_F l) {
-        return D2D1::ColorF(l.r + (d.r - l.r) * dark, l.g + (d.g - l.g) * dark, l.b + (d.b - l.b) * dark, l.a + (d.a - l.a) * dark);
-    };
     auto inkFor = BarInkColor;
-    auto haloFor = [&](float dark) { return mix(dark, D2D1::ColorF(1, 1, 1, 0.35f), D2D1::ColorF(0, 0, 0, 0.32f)); };
-    auto washFor = [&](float dark) { return mix(dark, D2D1::ColorF(0, 0, 0, 0.10f), D2D1::ColorF(1, 1, 1, 0.20f)); };
     float darkText = inks.darkClock;
     D2D1_COLOR_F ink = inkFor(inks.darkApps);
-    D2D1_COLOR_F halo = haloFor(darkText);
-    D2D1_COLOR_F wash = washFor(inks.darkApps);
+    D2D1_COLOR_F halo = BarHaloColor(darkText);
+    D2D1_COLOR_F wash = BarWashColor(inks.darkApps);
     const auto& brush = contentBrush_;
     brush->SetColor(ink);
     d2d->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -416,7 +512,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
     for (const auto& it : scene.extras) { // the right group follows the clock's ink, the others the apps'
         bool right = it.key == L"#notify" || it.key == L"#tray" || it.key == L"#status" || it.key == L"#ime" || it.key == L"#desktop" || it.key == L"#music" ||
                      it.key == L"#stacks";
-        DrawItem(d2d, scene, it, brush.get(), right ? inkFor(darkText) : ink, right ? washFor(darkText) : wash);
+        DrawItem(d2d, scene, it, brush.get(), right ? inkFor(darkText) : ink, right ? BarWashColor(darkText) : wash);
     }
     for (const auto& [key, m] : motion_)
         if (m.leaving)
@@ -449,7 +545,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
         const D2D1_POINT_2F clockShift = BarVectorToArea(frame, shift, 0);
         d2d->SetTransform(D2D1::Matrix3x2F::Translation(clockShift.x, clockShift.y));
         if (m.hover > 0.001f) {
-            D2D1_COLOR_F c = washFor(darkText);
+            D2D1_COLOR_F c = BarWashColor(darkText);
             c.a *= motion::EaseOut(m.hover);
             brush->SetColor(c);
             float r = scene.plateRadius;

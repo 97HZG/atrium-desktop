@@ -104,6 +104,14 @@ struct Ink {
     float darkApps = 0;
 };
 
+struct BarAnimation {
+    bool glass = false;
+    bool body = false;
+    bool music = false;
+    bool Any() const { return glass || body || music; }
+    bool MusicOnly() const { return music && !glass && !body; }
+};
+
 class BarPainter {
 public:
     BarPainter(ID2D1DeviceContext2* d2d, IDWriteFactory3* dwrite);
@@ -111,16 +119,16 @@ public:
     // slight overshoot.
     static constexpr double kSlideOutMs = 300, kSlideInMs = 420;
 
-    // Advances animations to `nowMs` (ClockMs); true while any animation is still moving.
-    bool Animate(const BarScene& scene, double nowMs);
+    // Advances animations to `nowMs` (ClockMs); reports which channels are still moving.
+    BarAnimation Animate(const BarScene& scene, double nowMs);
     // Each running dot follows only the backdrop at its displayed position.
     bool UpdateDotInk(const BarScene& scene, const Readback& backdrop, const Settings& settings, double nowMs);
     const BarFrame& Frame() const { return frame_; }
     // Draws the content. It is rendered into a cached layer and only redrawn
-    // when `contentKey` changes or an animation runs; a present caused by the
-    // backdrop alone just composites the cached layer.
+    // when `contentKey` changes or a body/music animation runs; glass-only
+    // presents just composite the cached layer.
     void Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date, const std::wstring& contentKey,
-              bool animating);
+              BarAnimation anim, bool forceBody = false);
 
 private:
     void DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date);
@@ -128,6 +136,12 @@ private:
     IDWriteTextFormat* Format(float px, DWRITE_FONT_WEIGHT weight, const wchar_t* family = nullptr); // nullptr: the interface face
     bool AnimateSlide(const BarScene& scene, double nowMs);
     bool AnimateMusic(const BarScene& scene, double dt);
+    void StepWave(const BarScene& scene, double dt, BarAnimation& anim);
+    bool StepSingleItemMotion(const BarScene& scene, const std::wstring& key, const SceneItem* item, double nowMs, double dt, bool snap);
+    bool StepItemMotions(const BarScene& scene, double nowMs, double dt, bool snap);
+    bool PruneLeavingItems(const BarScene& scene, double dt, bool snap);
+    bool StepRipple(const BarScene& scene, double nowMs);
+    bool TryDrawMusicClip(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& contentKey, ID2D1Image* target, D2D1_SIZE_U size);
     // The status icon in `r` (icon height): a ring open at the bottom with the
     // battery's level (the volume without a battery) round the Wi-Fi fan (or
     // wired / offline); while the volume or the brightness changes the ring

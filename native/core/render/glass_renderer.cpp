@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <utility>
 
 namespace atrium {
@@ -42,6 +43,38 @@ void SpringTo(IDCompositionAnimation* a, const motion::Spring& spring, float fro
         v = v1;
     }
     a->End(length, to);
+}
+
+D3D11_RECT ShapeScissorRect(const GlassParams& p, int w, int h)
+{
+    // The shader runs only over the shape's bounds and its shadow (a tall
+    // popup with a few cards would otherwise shade every pixel per card).
+    float l = p.shapeL, t = p.shapeT - p.waveHeight, r = p.shapeR, b = p.shapeB;
+    if (p.tailHeight > 0)
+        b += p.tailHeight;
+    if (p.rotate != 0) { // turned: the circle round it
+        const float cx = (l + r) / 2, cy = (t + b) / 2, half = std::hypot(r - l, b - t) / 2;
+        l = cx - half, t = cy - half, r = cx + half, b = cy + half;
+    }
+    for (int i = 0; i < int(p.partCount) && i < kMaxGlassParts; ++i) {
+        l = std::min(l, p.parts[i][0]);
+        t = std::min(t, p.parts[i][1]);
+        r = std::max(r, p.parts[i][2]);
+        b = std::max(b, p.parts[i][3]);
+    }
+    auto toArea = [&](float u, float v) {
+        u -= p.fromArea._31;
+        v -= p.fromArea._32;
+        return D2D1::Point2F(u * p.fromArea._11 + v * p.fromArea._12, u * p.fromArea._21 + v * p.fromArea._22);
+    };
+    const auto a = toArea(l, t), c = toArea(r, b);
+    l = std::min(a.x, c.x);
+    t = std::min(a.y, c.y);
+    r = std::max(a.x, c.x);
+    b = std::max(a.y, c.y);
+    const float m = 2 * std::max(p.inset, 1.f) + 2; // the shadow has faded out by then
+    return {LONG(std::max(0.f, std::floor(l - m))), LONG(std::max(0.f, std::floor(t - m))), LONG(std::min(float(w), std::ceil(r + m))),
+            LONG(std::min(float(h), std::ceil(b + m)))};
 }
 
 } // namespace
@@ -236,6 +269,10 @@ void GlassRenderer::CreateSizeDependent()
 
     const UINT cp[4] = {rw, rh, 1, 1u << 30}; // one tile covering everything
     gpu_.context->UpdateSubresource(cmpCb_.get(), 0, nullptr, cp, 0, 0);
+    glassCache_ = nullptr;
+    glassCacheRtv_ = nullptr;
+    cachedGlassParams_.clear();
+    glassCacheValid_ = false;
     hasPresented_ = false;
     hasBackdrop_ = false;
     comparisonPending_ = false;
@@ -447,24 +484,60 @@ std::optional<Readback> GlassRenderer::Poll()
     return merged;
 }
 
-bool GlassRenderer::Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay)
+void GlassRenderer::EnsureBackBufferRtv()
 {
-    return Present(std::vector<GlassParams>{params}, overlay);
+    if (rtv_)
+        return;
+    winrt::com_ptr<ID3D11Texture2D> back;
+    Check(swap_->GetBuffer(0, IID_PPV_ARGS(back.put())));
+    Check(gpu_.device->CreateRenderTargetView(back.get(), nullptr, rtv_.put()));
 }
 
-bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay)
+void GlassRenderer::EnsureGlassCache()
 {
-    PrepareBackdrop(); // a present can need the newest glass before its comparison completes
-    auto* ctx = gpu_.context.get();
-    if (!rtv_) {
-        winrt::com_ptr<ID3D11Texture2D> back;
-        Check(swap_->GetBuffer(0, IID_PPV_ARGS(back.put())));
-        Check(gpu_.device->CreateRenderTargetView(back.get(), nullptr, rtv_.put()));
+    if (glassCache_ && glassCacheRtv_)
+        return;
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = UINT(w_);
+    td.Height = UINT(h_);
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET;
+    glassCache_ = nullptr;
+    glassCacheRtv_ = nullptr;
+    Check(gpu_.device->CreateTexture2D(&td, nullptr, glassCache_.put()));
+    Check(gpu_.device->CreateRenderTargetView(glassCache_.get(), nullptr, glassCacheRtv_.put()));
+    glassCacheValid_ = false;
+}
+
+std::vector<GlassParams> GlassRenderer::NormalizeShapes(const std::vector<GlassParams>& shapes) const
+{
+    std::vector<GlassParams> norm = shapes;
+    for (auto& p : norm) {
+        p.sizeX = float(w_);
+        p.sizeY = float(h_);
+        p.roiOriginX = float(roiOrigin_.x);
+        p.roiOriginY = float(roiOrigin_.y);
+        p.roiSizeX = float(roiW_);
+        p.roiSizeY = float(roiH_);
+        if (p.shapeR <= p.shapeL || p.shapeB <= p.shapeT) {
+            p.shapeL = p.shapeT = p.inset;
+            p.shapeR = float(w_) - p.inset;
+            p.shapeB = float(h_) - p.inset;
+        }
     }
-    ID3D11RenderTargetView* rt = rtv_.get();
+    return norm;
+}
+
+void GlassRenderer::RenderGlassShapes(ID3D11RenderTargetView* target, const std::vector<GlassParams>& shapes)
+{
+    auto* ctx = gpu_.context.get();
     const float clear[4] = {0, 0, 0, 0};
-    ctx->ClearRenderTargetView(rt, clear);
-    ctx->OMSetRenderTargets(1, &rt, nullptr);
+    ctx->ClearRenderTargetView(target, clear);
+    ctx->OMSetRenderTargets(1, &target, nullptr);
     ctx->OMSetBlendState(blend_.get(), nullptr, 0xFFFFFFFF);
     D3D11_VIEWPORT vp{0, 0, float(w_), float(h_), 0, 1};
     ctx->RSSetViewports(1, &vp);
@@ -478,48 +551,10 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
     ctx->PSSetShaderResources(0, 1, &srv);
     ID3D11SamplerState* s = sampler_.get();
     ctx->PSSetSamplers(0, 1, &s);
-    for (auto p : shapes) {
-        bool basic = p.partCount < 0.5f && p.tailHeight <= 0 && p.waveHeight <= 0;
+    for (const auto& p : shapes) {
+        const bool basic = p.partCount < 0.5f && p.tailHeight <= 0 && p.waveHeight <= 0;
         ctx->PSSetShader(basic ? basicPs_.get() : ps_.get(), nullptr, 0);
-        p.sizeX = float(w_);
-        p.sizeY = float(h_);
-        p.roiOriginX = float(roiOrigin_.x);
-        p.roiOriginY = float(roiOrigin_.y);
-        p.roiSizeX = float(roiW_);
-        p.roiSizeY = float(roiH_);
-        if (p.shapeR <= p.shapeL || p.shapeB <= p.shapeT) {
-            p.shapeL = p.shapeT = p.inset;
-            p.shapeR = float(w_) - p.inset;
-            p.shapeB = float(h_) - p.inset;
-        }
-        // The shader runs only over the shape's bounds and its shadow (a tall
-        // popup with a few cards would otherwise shade every pixel per card).
-        float l = p.shapeL, t = p.shapeT - p.waveHeight, r = p.shapeR, b = p.shapeB;
-        if (p.tailHeight > 0)
-            b += p.tailHeight;
-        if (p.rotate != 0) { // turned: the circle round it
-            const float cx = (l + r) / 2, cy = (t + b) / 2, half = std::hypot(r - l, b - t) / 2;
-            l = cx - half, t = cy - half, r = cx + half, b = cy + half;
-        }
-        for (int i = 0; i < int(p.partCount) && i < kMaxGlassParts; ++i) {
-            l = std::min(l, p.parts[i][0]);
-            t = std::min(t, p.parts[i][1]);
-            r = std::max(r, p.parts[i][2]);
-            b = std::max(b, p.parts[i][3]);
-        }
-        auto toArea = [&](float u, float v) {
-            u -= p.fromArea._31;
-            v -= p.fromArea._32;
-            return D2D1::Point2F(u * p.fromArea._11 + v * p.fromArea._12, u * p.fromArea._21 + v * p.fromArea._22);
-        };
-        const auto a = toArea(l, t), c = toArea(r, b);
-        l = std::min(a.x, c.x);
-        t = std::min(a.y, c.y);
-        r = std::max(a.x, c.x);
-        b = std::max(a.y, c.y);
-        const float m = 2 * std::max(p.inset, 1.f) + 2; // the shadow has faded out by then
-        D3D11_RECT sc{LONG(std::max(0.f, std::floor(l - m))), LONG(std::max(0.f, std::floor(t - m))), LONG(std::min(float(w_), std::ceil(r + m))),
-                      LONG(std::min(float(h_), std::ceil(b + m)))};
+        const D3D11_RECT sc = ShapeScissorRect(p, w_, h_);
         if (sc.right <= sc.left || sc.bottom <= sc.top)
             continue;
         ctx->RSSetScissorRects(1, &sc);
@@ -530,27 +565,62 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
     ID3D11ShaderResourceView* none[2] = {};
     ctx->PSSetShaderResources(0, 2, none);
     ctx->OMSetRenderTargets(0, nullptr, nullptr);
+}
 
-    if (overlay && d2d_) {
-        if (!overlayTarget_) {
-            winrt::com_ptr<IDXGISurface> surface;
-            Check(swap_->GetBuffer(0, IID_PPV_ARGS(surface.put())));
-            D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-                                                                 D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-            Check(d2d_->CreateBitmapFromDxgiSurface(surface.get(), &bp, overlayTarget_.put()));
-        }
-        d2d_->SetTarget(overlayTarget_.get());
-        d2d_->BeginDraw();
-        d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
-        overlay(d2d_.get());
-        HRESULT hr = d2d_->EndDraw();
-        d2d_->SetTarget(nullptr);
-        if (hr == D2DERR_RECREATE_TARGET)
-            return false;
+bool GlassRenderer::DrawOverlay(const std::function<void(ID2D1DeviceContext2*)>& overlay)
+{
+    if (!overlayTarget_) {
+        winrt::com_ptr<IDXGISurface> surface;
+        Check(swap_->GetBuffer(0, IID_PPV_ARGS(surface.put())));
+        D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                                                             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        Check(d2d_->CreateBitmapFromDxgiSurface(surface.get(), &bp, overlayTarget_.put()));
     }
+    d2d_->SetTarget(overlayTarget_.get());
+    d2d_->BeginDraw();
+    d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
+    overlay(d2d_.get());
+    HRESULT hr = d2d_->EndDraw();
+    d2d_->SetTarget(nullptr);
+    return hr != D2DERR_RECREATE_TARGET;
+}
 
-    ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
-    hasPresented_ = hasBackdrop_;
+bool GlassRenderer::Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty)
+{
+    return Present(std::vector<GlassParams>{params}, overlay, backdropDirty);
+}
+
+bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty)
+{
+    auto* ctx = gpu_.context.get();
+    EnsureBackBufferRtv();
+    std::vector<GlassParams> norm = NormalizeShapes(shapes);
+    if (overlay && d2d_) {
+        const bool paramsChanged = norm.size() != cachedGlassParams_.size() ||
+                                   (!norm.empty() && std::memcmp(norm.data(), cachedGlassParams_.data(), norm.size() * sizeof(GlassParams)) != 0);
+        const bool needGlass = backdropDirty || !glassCacheValid_ || !glassCache_ || paramsChanged;
+        EnsureGlassCache();
+        lastGlassDrawn_ = needGlass;
+        if (needGlass) {
+            PrepareBackdrop();
+            RenderGlassShapes(glassCacheRtv_.get(), norm);
+            cachedGlassParams_ = std::move(norm);
+            glassCacheValid_ = true;
+            ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
+            hasPresented_ = hasBackdrop_;
+        }
+        winrt::com_ptr<ID3D11Resource> back;
+        rtv_->GetResource(back.put());
+        ctx->CopyResource(back.get(), glassCache_.get());
+        if (!DrawOverlay(overlay))
+            return false;
+    } else {
+        PrepareBackdrop(); // a present can need the newest glass before its comparison completes
+        RenderGlassShapes(rtv_.get(), norm);
+        lastGlassDrawn_ = true;
+        ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
+        hasPresented_ = hasBackdrop_;
+    }
     HRESULT hr = swap_->Present(sync_, 0);
     if (SUCCEEDED(hr))
         ready_ = false;

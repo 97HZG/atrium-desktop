@@ -92,9 +92,10 @@ public:
 
     // Draws the glass, then `overlay` with D2D on the same back buffer, and
     // presents. Returns false if the device was lost.
-    bool Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay);
+    bool Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty = true);
     // Several shapes, back to front (each with its own shadow), then the overlay.
-    bool Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay);
+    bool Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty = true);
+    bool LastPresentDrewGlass() const { return lastGlassDrawn_; }
 
     // D45: the swap chain queues one frame at most, and its latency object is signalled when
     // that frame has been taken for the screen. Ready() takes the signal without waiting (once
@@ -108,6 +109,11 @@ private:
     void CreateSizeDependent();
     void PrepareBackdrop();
     void ExtendBackdropEdges(ID3D11Texture2D* frame, const D3D11_TEXTURE2D_DESC& source, int x, int y);
+    void EnsureBackBufferRtv();
+    void EnsureGlassCache();
+    std::vector<GlassParams> NormalizeShapes(const std::vector<GlassParams>& shapes) const;
+    void RenderGlassShapes(ID3D11RenderTargetView* target, const std::vector<GlassParams>& shapes);
+    bool DrawOverlay(const std::function<void(ID2D1DeviceContext2*)>& overlay);
 
     Gpu gpu_;
     int w_, h_;
@@ -154,6 +160,11 @@ private:
     winrt::com_ptr<ID3D11RasterizerState> scissor_; // each shape only where it and its shadow are
     winrt::com_ptr<ID3D11Texture2D> roi_, presented_;
     winrt::com_ptr<ID3D11ShaderResourceView> roiSrv_, presentedSrv_;
+    winrt::com_ptr<ID3D11Texture2D> glassCache_;
+    winrt::com_ptr<ID3D11RenderTargetView> glassCacheRtv_;
+    std::vector<GlassParams> cachedGlassParams_;
+    bool glassCacheValid_ = false;
+    bool lastGlassDrawn_ = false;
     bool hasPresented_ = false;
     // The bar waits for the display between frames; a popup's glass is shown
     // at once, as its content is (Surface presents without waiting), so a

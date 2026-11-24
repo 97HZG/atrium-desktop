@@ -39,6 +39,8 @@
 
 namespace atrium {
 
+struct Gpu;
+class GlassRenderer;
 class Surface;
 
 // Every Atrium window's capture exclusion again (remote-control mode changed). UI thread.
@@ -229,8 +231,11 @@ private:
     void UpdateDrag(POINT pt);
     void EndDrag(bool commit);
     friend struct BarDropTarget;
+    friend struct BarRender;
     std::wstring FileDragOver(POINT screen); // returns the app under the point
     void FileDragLeave();
+    static void ClockStrings(std::wstring& time, std::wstring& date, bool seconds);
+    std::unique_ptr<GlassRenderer> TryCreatePanelGlass(const Gpu& gpu, HWND hwnd, int width, int height, bool desktop) const;
     void RenderThread();
     SessionEnd RenderSession();
     void SetRegion(bool extended); // input region: the shape, plus the room above it while magnified
@@ -342,6 +347,7 @@ private:
 
     std::mutex lock_;
     Snapshot snapshot_;
+    std::atomic<uint64_t> publishSeq_{0};
     HANDLE wake_ = nullptr;  // snapshot changed
     HANDLE quit_ = nullptr;
     HANDLE frame_ = nullptr; // a capture frame arrived
