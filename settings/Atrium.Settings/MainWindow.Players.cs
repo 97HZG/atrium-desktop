@@ -38,9 +38,16 @@ public sealed partial class MainWindow
             rows.Children.Add(PlayerRow(vm, sw));
             _ = LoadRowIconAsync(vm);
         }
-        var title = new TextBlock { Text = Loc.T("Players"), Style = (Style)res["SectionStyle"], Margin = new Thickness(4, 0, 0, 10) };
-        return new StackPanel { Margin = new Thickness(0, 14, 0, 0), Children = { title, new Border { Style = (Style)res["GroupStyle"], Child = rows } } };
+        var title = new TextBlock { Text = Loc.T("Players"), Style = (Style)res["SectionStyle"], Margin = new Thickness(4, 0, 0, 6) };
+        var limits = LimitNote(
+            Loc.T("Limited by what each player lets other apps do: NetEase Cloud Music's progress can't be dragged, QQ Music's tracks can't be liked, and Spotify's can be neither liked nor shown with lyrics."));
+        var group = new Border { Style = (Style)res["GroupStyle"], Child = rows };
+        return new StackPanel { Margin = new Thickness(0, 14, 0, 0), Children = { title, limits, group } };
     }
+
+    // A grey line between a section's title and its rows: what an app's own interface keeps Atrium from doing.
+    private static TextBlock LimitNote(string text) =>
+        new() { Text = text, Style = (Style)Application.Current.Resources["FootnoteStyle"], Margin = new Thickness(4, 0, 0, 10) };
 
     // A row as the sources' (MainWindow.xaml, SourcesList): the icon (assets/apps), the name, the switch.
     private static Grid PlayerRow(SourceVm vm, ToggleSwitch sw)
