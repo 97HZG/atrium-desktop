@@ -170,11 +170,8 @@ public sealed partial class MainWindow
         _sources.Add(new SourceVm(this, "Other apps", "Apps that send Windows notifications. Allow notification access in Windows privacy settings.",
             "\uea8f", [], s => s.NotifyListener, (s, v) => s.NotifyListener = v));
         SourcesList.ItemsSource = _sources;
-        if (SourcesList.Parent is FrameworkElement { Parent: Panel section } group)
-        {
-            section.Children.Insert(section.Children.IndexOf(group), LimitNote(
-                Loc.T("Limited by what WeChat lets other apps read: chat names and text are read only after WeChat's window has been opened once (until then a card only says there is a new message), and only from the chats near the top of its list.")));
-        }
+        SourcesLimit.Text = Loc.T(
+            "Limited by what WeChat lets other apps read: chat names and text are read only after WeChat's window has been opened once (until then a card only says there is a new message), and only from the chats near the top of its list.");
         foreach (var vm in _sources) _ = LoadRowIconAsync(vm);
         ExcludedList.ItemsSource = _excluded;
     }

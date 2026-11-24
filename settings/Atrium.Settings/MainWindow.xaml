@@ -337,13 +337,13 @@
                         </Border>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <TextBlock x:Name="NotifyCaption" Style="{StaticResource FootnoteStyle}" TextWrapping="Wrap" VerticalAlignment="Center"
-                                       Margin="4,0,0,0" />
+                            <TextBlock x:Name="NotifyCaption" Style="{StaticResource FootnoteStyle}" VerticalAlignment="Center" Margin="4,0,0,0" />
                             <Button Grid.Column="1" Content="Show again" Click="OnReplayNotify" HorizontalAlignment="Right" />
                         </Grid>
                         <!-- Where cards come from: the chat apps one by one, then every other app -->
                         <StackPanel Margin="0,14,0,0">
-                            <TextBlock Text="Sources" Style="{StaticResource SectionStyle}" Margin="4,0,0,10" />
+                            <TextBlock Text="Sources" Style="{StaticResource SectionStyle}" Margin="4,0,0,6" />
+                            <TextBlock x:Name="SourcesLimit" Style="{StaticResource FootnoteStyle}" Margin="4,0,0,10" />
                             <Border Style="{StaticResource GroupStyle}">
                                 <ListView x:Name="SourcesList" SelectionMode="None" IsItemClickEnabled="False"
                                           ItemContainerStyle="{StaticResource PinItemStyle}" AutomationProperties.Name="Sources" Padding="0,4,0,4">
