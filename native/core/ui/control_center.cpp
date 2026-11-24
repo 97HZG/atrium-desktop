@@ -499,11 +499,7 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
         c.Text(title, D2D1::RectF(disc.right + 10, cy - 18, conn.right - 10, cy), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         c.Text(sub, D2D1::RectF(disc.right + 10, cy, conn.right - 10, cy + 18), 11.5f, t.subtext);
     };
-    std::wstring wifiSub = radiosRead_ && !radios_.wifiPresent ? (status_.connected ? Tr(L"Ethernet") : Tr(L"No Wi-Fi adapter")) :
-                           radiosRead_ && !radios_.wifiOn      ? Tr(L"Off") :
-                           status_.connected && status_.wifi   ? (private_ ? std::wstring(Tr(L"Connected")) : status_.network) :
-                           status_.connected                   ? Tr(L"Ethernet") :
-                                                                 Tr(L"Not connected");
+    std::wstring wifiSub = WifiTileSubtitle(status_, radiosRead_, radios_.wifiPresent, radios_.wifiOn, private_);
     bool wifiOn = radiosRead_ ? radios_.wifiOn : status_.wifi && status_.connected;
     row(0, L"wifi", L"\uE701", L"Wi-Fi", wifiSub, wifiOn, !radiosRead_ || radios_.wifiPresent);
     int connected = int(std::count_if(devices_.begin(), devices_.end(), [](const BluetoothDevice& d) { return d.connected; }));

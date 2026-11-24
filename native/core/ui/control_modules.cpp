@@ -78,6 +78,26 @@ std::wstring ModuleStateText(bool stage, bool wide, bool stageOn, bool stageRigh
 
 } // namespace
 
+std::wstring WifiTileSubtitle(const SystemStatus& status, bool radiosRead, bool wifiPresent, bool wifiOn, bool privateMode)
+{
+    bool hasWired = status.links.empty() && status.connected && !status.wifi;
+    bool hasWifi = status.links.empty() && status.connected && status.wifi;
+    std::wstring wifiName = hasWifi ? status.network : L"";
+    for (const auto& l : status.links) {
+        if (l.kind == NetworkLink::Kind::Wifi) {
+            hasWifi = true;
+            wifiName = wifiName.empty() ? (l.network.empty() ? l.alias : l.network) : wifiName;
+        } else
+            hasWired = true;
+    }
+    if (radiosRead && (!wifiPresent || !wifiOn))
+        return Tr(!wifiPresent ? (hasWired ? L"Ethernet" : L"No Wi-Fi adapter") : (hasWired ? L"Off · Ethernet" : L"Off"));
+    std::wstring wifiLabel = privateMode ? std::wstring(Tr(L"Connected")) : std::move(wifiName);
+    if (hasWired && hasWifi)
+        return TrFormat(L"Ethernet · %s", wifiLabel.c_str());
+    return hasWifi ? wifiLabel : Tr(hasWired ? L"Ethernet" : L"Not connected");
+}
+
 void ControlCenter::SetModules(std::vector<std::wstring> ids)
 {
     std::erase_if(ids, [](const std::wstring& id) { return !Spec(id); });

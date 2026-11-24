@@ -33,6 +33,8 @@ namespace atrium {
 struct RadioRead;
 struct AudioRead;
 
+std::wstring WifiTileSubtitle(const SystemStatus& status, bool radiosRead, bool wifiPresent, bool wifiOn, bool privateMode);
+
 class ControlCenter {
 public:
     explicit ControlCenter(HINSTANCE instance);

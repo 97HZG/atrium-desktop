@@ -19,6 +19,12 @@ struct WifiState {
     int signal = 0;         // 0..100
 };
 
+struct WifiConnection {
+    GUID interfaceGuid{};
+    std::wstring ssid;
+    int signal = -1;        // 0..100, or -1 unknown
+};
+
 struct WifiNetwork {
     std::wstring ssid;
     std::wstring profile;   // saved profile name; empty: none
@@ -36,6 +42,7 @@ struct WifiListResult {
 };
 
 WifiState QueryWifi();
+std::vector<WifiConnection> QueryConnectedWifi();
 std::vector<WifiNetwork> MergeWifiNetworks(std::vector<WifiNetwork> networks);
 WifiListStatus ClassifyWifiListStatus(int interfaceCount, bool anySuccess, bool anyAccessDenied, DWORD enumError = ERROR_SUCCESS);
 // Networks in range across all adapters, strongest first, one entry per SSID.

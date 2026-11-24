@@ -4,7 +4,29 @@
 
 #include "localization.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace atrium {
+
+std::wstring FormatNetworkTooltip(const SystemStatus& st)
+{
+    auto wifiLine = [](const std::wstring& n, int s) { return s >= 0 ? TrFormat(L"Wi-Fi %s · signal %d%%", n.c_str(), s) : TrFormat(L"Wi-Fi %s", n.c_str()); };
+    if (st.links.size() < 2)
+        return !st.connected ? Tr(L"No network") : st.wifi ? wifiLine(st.network, st.signal) : st.network;
+    std::wstring out;
+    size_t n = 0;
+    auto add = [&](bool primary) {
+        for (const auto& l : st.links)
+            if (l.primary == primary && n < 3) {
+                const std::wstring& name = l.network.empty() ? l.alias : l.network;
+                out += (n++ ? L"\n" : L"") + (l.kind == NetworkLink::Kind::Wifi ? wifiLine(name, l.signal) : name);
+            }
+    };
+    add(true);
+    add(false);
+    return st.links.size() > 3 ? out + L'\n' + TrFormat(L"+%d more", int(st.links.size() - 3)) : out;
+}
 
 RECT Bar::EntryRect(const std::wstring& key) const
 {
@@ -81,13 +103,7 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
         return Tr(L"Show Desktop");
     if (key == kStatusKey) {
         const SystemStatus& st = status_;
-        std::wstring net;
-        if (!st.connected)
-            net = Tr(L"No network");
-        else if (st.wifi)
-            net = TrFormat(L"Wi-Fi %s · signal %d%%", st.network.c_str(), st.signal);
-        else
-            net = st.network;
+        std::wstring net = FormatNetworkTooltip(st);
         std::wstring more;
         if (st.battery)
             more = st.charging ? TrFormat(L"\nBattery %d%% · plugged in", st.batteryPercent) : TrFormat(L"\nBattery %d%%", st.batteryPercent);

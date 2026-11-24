@@ -45,6 +45,14 @@ public:
             out.push_back(list_->InterfaceInfo[i].InterfaceGuid);
         return ERROR_SUCCESS;
     }
+    const WLAN_INTERFACE_INFO_LIST* InterfaceList()
+    {
+        if (!handle_)
+            return nullptr;
+        if (!list_ && WlanEnumInterfaces(handle_, nullptr, &list_) != ERROR_SUCCESS)
+            return nullptr;
+        return list_;
+    }
     // The connected Wi-Fi interface, or the first if none is connected.
     const GUID* Interface()
     {
@@ -100,6 +108,27 @@ WifiState QueryWifi()
         WlanFreeMemory(conn);
     }
     return s;
+}
+
+std::vector<WifiConnection> QueryConnectedWifi()
+{
+    std::vector<WifiConnection> out;
+    Wlan w;
+    const WLAN_INTERFACE_INFO_LIST* list = w.InterfaceList();
+    for (DWORD i = 0; list && i < list->dwNumberOfItems; ++i) {
+        const GUID& g = list->InterfaceInfo[i].InterfaceGuid;
+        DWORD sz = 0;
+        WLAN_CONNECTION_ATTRIBUTES* c = nullptr;
+        if (list->InterfaceInfo[i].isState != wlan_interface_state_connected ||
+            WlanQueryInterface(w.Handle(), &g, wlan_intf_opcode_current_connection, nullptr, &sz, reinterpret_cast<void**>(&c), nullptr) != ERROR_SUCCESS || !c)
+            continue;
+        if (c->isState == wlan_interface_state_connected) {
+            std::wstring s = Ssid(c->wlanAssociationAttributes.dot11Ssid);
+            out.push_back({g, s.empty() ? c->strProfileName : std::move(s), int(c->wlanAssociationAttributes.wlanSignalQuality)});
+        }
+        WlanFreeMemory(c);
+    }
+    return out;
 }
 
 std::vector<WifiNetwork> MergeWifiNetworks(std::vector<WifiNetwork> networks)

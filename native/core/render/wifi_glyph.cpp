@@ -10,7 +10,7 @@
 
 namespace atrium {
 
-int WifiSteps(int signal) { return signal >= 60 ? 3 : signal >= 30 ? 2 : 1; }
+int WifiSteps(int signal) { return signal < 0 || signal >= 60 ? 3 : signal >= 30 ? 2 : 1; }
 
 void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx, float cy, float radius, int lit, D2D1_COLOR_F on, D2D1_COLOR_F off)
 {

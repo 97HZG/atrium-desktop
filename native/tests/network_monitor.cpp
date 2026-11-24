@@ -1,5 +1,8 @@
+#include "render/wifi_glyph.h"
 #include "shell/network_monitor.h"
+#include "shell/system_status.h"
 #include "shell/wifi.h"
+#include "ui/control_center.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -44,6 +47,35 @@ int main()
               ClassifyWifiListStatus(2, true, true) == WifiListStatus::Ok && ClassifyWifiListStatus(1, false, false) == WifiListStatus::Error &&
               ClassifyWifiListStatus(0, false, false, ERROR_ACCESS_DENIED) == WifiListStatus::AccessDenied,
           "status classification");
+
+    using K = NetworkLink::Kind;
+    Check(PickPrimaryLink({}) == -1 && PickPrimaryLink({{1, K::Ethernet, false, 10}, {2, K::Wifi, true, 50}}) == 1 &&
+              PickPrimaryLink({{1, K::Wifi, true, 25}, {2, K::Ethernet, true, 35}}) == 0 &&
+              PickPrimaryLink({{2, K::Wifi, true, 25}, {1, K::Ethernet, true, 25}}) == 1 && WifiSteps(-1) == 3 && WifiSteps(20) == 1 && WifiSteps(40) == 2 &&
+              WifiSteps(80) == 3,
+          "primary link selection and WifiSteps");
+    SystemStatus legacy,
+        both{.connected = true, .links = {{K::Ethernet, 1, L"Ethernet", L"CorpNet", true, true, -1}, {K::Wifi, 2, L"Wi-Fi", L"Home5G", true, false, 88}}},
+        noPri{.links = {{K::Wifi, 2, L"Wi-Fi", L"Home5G", false, false, -1}, {K::Ethernet, 1, L"Ethernet", L"LAN", false, false, -1}}},
+        single{.connected = true, .network = L"Home", .wifi = true, .signal = -1},
+        wifiOnly{.connected = true, .wifi = true, .links = {{K::Wifi, 2, L"Wi-Fi", L"Home5G", true, true, 80}}},
+        wiredOnly{.connected = true, .links = {{K::Ethernet, 1, L"Ethernet", L"Office", true, true, -1}}};
+    DeriveNetworkStatus(legacy, true, true, L"Dialup", {true, true, L"Home", 75});
+    DeriveNetworkStatus(both, false, true, L"", {});
+    DeriveNetworkStatus(noPri, true, true, L"", {});
+    Check(legacy.online && legacy.connected && legacy.wifi && legacy.signal == 75 && legacy.network == L"Dialup" && both.online && both.connected &&
+              !both.wifi && both.network == L"CorpNet" && both.signal == 0 && noPri.online && noPri.connected && !noPri.wifi && noPri.network == L"LAN",
+          "DeriveNetworkStatus");
+    Check(FormatNetworkTooltip(single) == L"Wi-Fi Home", "single wifi unknown signal omits signal");
+    single.links = {{K::Wifi, 2, L"Wi-Fi", L"", true, false, -1},
+                    {K::Ethernet, 1, L"Ethernet", L"Office", true, true, -1},
+                    {K::Other, 3, L"WWAN", L"5G", false, false, -1},
+                    {K::Wifi, 4, L"Wi-Fi 2", L"Guest", false, false, 60}};
+    Check(FormatNetworkTooltip(single) == L"Office\nWi-Fi Wi-Fi\n5G\n+1 more" && WifiTileSubtitle(both, true, true, true, false) == L"Ethernet · Home5G" &&
+              WifiTileSubtitle(both, true, true, true, true) == L"Ethernet · Connected" &&
+              WifiTileSubtitle(both, true, true, false, false) == L"Off · Ethernet" && WifiTileSubtitle(wifiOnly, true, true, true, false) == L"Home5G" &&
+              WifiTileSubtitle(wiredOnly, true, true, true, false) == L"Ethernet",
+          "tooltip and control centre subtitles");
 
     if (g_failures) {
         std::fprintf(stderr, "%d network monitor check(s) failed\n", g_failures);

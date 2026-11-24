@@ -1,10 +1,15 @@
+// winsock2.h before windows.h: iphlpapi.h requires it and ws2ipdef.h pulls in netioapi.h.
+#include <winsock2.h>
+#include <windows.h>
+#include <ws2ipdef.h>
+#include <iphlpapi.h>
+
 #include "shell/system_status.h"
 
 #include "log.h"
 #include "shell/wifi.h"
 #include "../posted.h"
 
-#include <windows.h>
 #include <endpointvolume.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
@@ -17,6 +22,9 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <optional>
+#include <tuple>
+#include <unordered_map>
 
 namespace atrium {
 
@@ -63,7 +71,170 @@ private:
     UINT msg_;
 };
 
+int KindRank(NetworkLink::Kind k) { return k == NetworkLink::Kind::Ethernet ? 0 : k == NetworkLink::Kind::Wifi ? 1 : 2; }
+
+std::optional<NetworkLink::Kind> UsableKind(const MIB_IF_ROW2& r)
+{
+    if (r.MediaConnectState != MediaConnectStateConnected || r.OperStatus != IfOperStatusUp || !r.InterfaceAndOperStatusFlags.HardwareInterface ||
+        r.InterfaceAndOperStatusFlags.FilterInterface || r.TunnelType != TUNNEL_TYPE_NONE || r.Type == IF_TYPE_SOFTWARE_LOOPBACK)
+        return std::nullopt;
+    return r.Type == IF_TYPE_IEEE80211                                                                                    ? NetworkLink::Kind::Wifi :
+           (r.Type == IF_TYPE_WWANPP || r.Type == IF_TYPE_WWANPP2 || r.PhysicalMediumType == NdisPhysicalMediumBluetooth) ? NetworkLink::Kind::Other :
+           r.Type == IF_TYPE_ETHERNET_CSMACD                                                                              ? NetworkLink::Kind::Ethernet :
+                                                                                                                            NetworkLink::Kind::Other;
+}
+
+std::wstring NetName(INetwork* net)
+{
+    BSTR b = nullptr;
+    std::wstring n = net && SUCCEEDED(net->GetName(&b)) && b ? b : L"";
+    SysFreeString(b);
+    return n;
+}
+
+std::unordered_map<uint64_t, uint64_t> DefaultRouteMetrics()
+{
+    std::unordered_map<uint64_t, uint64_t> best;
+    std::vector<std::tuple<uint64_t, ADDRESS_FAMILY, ULONG>> ifm;
+    if (PMIB_IPINTERFACE_TABLE t = nullptr; GetIpInterfaceTable(AF_UNSPEC, &t) == NO_ERROR && t) {
+        for (ULONG i = 0; i < t->NumEntries; ++i)
+            ifm.emplace_back(t->Table[i].InterfaceLuid.Value, t->Table[i].Family, t->Table[i].Metric);
+        FreeMibTable(t);
+    }
+    if (PMIB_IPFORWARD_TABLE2 t = nullptr; GetIpForwardTable2(AF_UNSPEC, &t) == NO_ERROR && t) {
+        for (ULONG i = 0; i < t->NumEntries; ++i) {
+            const MIB_IPFORWARD_ROW2& r = t->Table[i];
+            if (r.DestinationPrefix.PrefixLength != 0)
+                continue;
+            const uint64_t luid = r.InterfaceLuid.Value;
+            auto it =
+                std::ranges::find_if(ifm, [&](const auto& m) { return std::get<0>(m) == luid && std::get<1>(m) == r.DestinationPrefix.Prefix.si_family; });
+            const uint64_t eff = uint64_t(r.Metric) + (it != ifm.end() ? std::get<2>(*it) : 0);
+            if (auto [bit, ins] = best.emplace(luid, eff); !ins && eff < bit->second)
+                bit->second = eff;
+        }
+        FreeMibTable(t);
+    }
+    return best;
+}
+
+struct NlmAdapter {
+    GUID guid{};
+    std::wstring name;
+    bool internet = false;
+};
+
+void ReadNlm(bool needGlobalNet, bool& online, bool& connected, std::wstring& globalNet, std::vector<NlmAdapter>& byAdapter)
+{
+    winrt::com_ptr<INetworkListManager> nlm;
+    if (FAILED(CoCreateInstance(CLSID_NetworkListManager, nullptr, CLSCTX_ALL, IID_PPV_ARGS(nlm.put()))))
+        return;
+    if (NLM_CONNECTIVITY c{}; SUCCEEDED(nlm->GetConnectivity(&c))) {
+        online = (c & (NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET)) != 0;
+        connected = c != NLM_CONNECTIVITY_DISCONNECTED;
+    }
+    if (winrt::com_ptr<IEnumNetworkConnections> conns; SUCCEEDED(nlm->GetNetworkConnections(conns.put())))
+        for (winrt::com_ptr<INetworkConnection> conn; conns->Next(1, conn.put(), nullptr) == S_OK; conn = nullptr) {
+            VARIANT_BOOL ok = VARIANT_FALSE;
+            GUID gid{};
+            NLM_CONNECTIVITY nc{};
+            if (FAILED(conn->get_IsConnected(&ok)) || !ok || FAILED(conn->GetAdapterId(&gid)) || FAILED(conn->GetConnectivity(&nc)))
+                continue;
+            bool inet = (nc & (NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET)) != 0;
+            winrt::com_ptr<INetwork> net;
+            std::wstring n = SUCCEEDED(conn->GetNetwork(net.put())) ? NetName(net.get()) : L"";
+            if (auto it = std::ranges::find_if(byAdapter, [&](const NlmAdapter& e) { return IsEqualGUID(e.guid, gid); }); it == byAdapter.end())
+                byAdapter.push_back({gid, std::move(n), inet});
+            else if (inet && !it->internet) {
+                it->internet = true;
+                it->name = n.empty() ? it->name : std::move(n);
+            } else if (it->name.empty() && !n.empty())
+                it->name = std::move(n);
+        }
+    if (winrt::com_ptr<IEnumNetworks> nets; needGlobalNet && SUCCEEDED(nlm->GetNetworks(NLM_ENUM_NETWORK_CONNECTED, nets.put())))
+        for (winrt::com_ptr<INetwork> net; nets->Next(1, net.put(), nullptr) == S_OK; net = nullptr) {
+            NLM_CONNECTIVITY nc{};
+            net->GetConnectivity(&nc);
+            std::wstring n = NetName(net.get());
+            if (nc & (NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET)) {
+                globalNet = std::move(n);
+                return;
+            }
+            globalNet = globalNet.empty() ? std::move(n) : globalNet;
+        }
+}
+
+void QueryNetwork(SystemStatus& s)
+{
+    std::vector<GUID> guids;
+    if (PMIB_IF_TABLE2 t = nullptr; GetIfTable2(&t) == NO_ERROR && t) {
+        for (ULONG i = 0; i < t->NumEntries; ++i)
+            if (auto k = UsableKind(t->Table[i])) {
+                s.links.push_back({*k, t->Table[i].InterfaceLuid.Value, t->Table[i].Alias[0] ? t->Table[i].Alias : t->Table[i].Description});
+                guids.push_back(t->Table[i].InterfaceGuid);
+            }
+        FreeMibTable(t);
+    }
+    bool online = false, connected = false;
+    std::wstring globalNet;
+    std::vector<NlmAdapter> nlm;
+    ReadNlm(s.links.empty(), online, connected, globalNet, nlm);
+    if (s.links.empty()) {
+        DeriveNetworkStatus(s, online, connected, globalNet, QueryWifi());
+        return;
+    }
+    const auto wifi = QueryConnectedWifi();
+    const auto metrics = DefaultRouteMetrics();
+    std::vector<LinkRouteInfo> routes;
+    for (size_t i = 0; i < s.links.size(); ++i) {
+        NetworkLink& l = s.links[i];
+        std::wstring nlmName;
+        if (auto it = std::ranges::find_if(nlm, [&](const NlmAdapter& e) { return IsEqualGUID(e.guid, guids[i]); }); it != nlm.end()) {
+            l.internet = it->internet;
+            nlmName = it->name;
+        }
+        if (l.kind == NetworkLink::Kind::Wifi)
+            if (auto it = std::ranges::find_if(wifi, [&](const WifiConnection& w) { return IsEqualGUID(w.interfaceGuid, guids[i]); }); it != wifi.end()) {
+                l.signal = it->signal;
+                l.network = it->ssid;
+            }
+        l.network = !l.network.empty() ? l.network : !nlmName.empty() ? nlmName : l.alias;
+        routes.push_back({l.luid, l.kind, l.internet, metrics.contains(l.luid) ? metrics.at(l.luid) : ~uint64_t{0}});
+    }
+    if (int p = PickPrimaryLink(routes); p >= 0)
+        s.links[size_t(p)].primary = true;
+    std::ranges::sort(s.links, [](const NetworkLink& a, const NetworkLink& b) {
+        return std::tuple(!a.primary, !a.internet, a.luid) < std::tuple(!b.primary, !b.internet, b.luid);
+    });
+    DeriveNetworkStatus(s, online, connected, globalNet, {});
+}
+
 } // namespace
+
+int PickPrimaryLink(const std::vector<LinkRouteInfo>& c)
+{
+    auto k = [](const LinkRouteInfo& x) { return std::tuple(!x.internet, x.routeMetric, KindRank(x.kind), x.luid); };
+    return c.empty() ? -1 : int(std::ranges::min_element(c, [&](const auto& a, const auto& b) { return k(a) < k(b); }) - c.begin());
+}
+
+void DeriveNetworkStatus(SystemStatus& s, bool globalOnline, bool globalConnected, const std::wstring& globalNetwork, const WifiState& fallbackWifi)
+{
+    if (s.links.empty()) {
+        s.online = globalOnline;
+        s.connected = globalConnected;
+        s.wifi = fallbackWifi.connected && s.connected;
+        s.signal = s.wifi ? fallbackWifi.signal : 0;
+        s.network = s.wifi && !fallbackWifi.ssid.empty() && (globalNetwork.empty() || !s.online) ? fallbackWifi.ssid : globalNetwork;
+        return;
+    }
+    auto k = [](const NetworkLink& l) { return std::tuple(!l.primary, !l.internet, KindRank(l.kind), l.luid); };
+    const NetworkLink& p = *std::ranges::min_element(s.links, [&](const auto& a, const auto& b) { return k(a) < k(b); });
+    s.connected = true;
+    s.online = globalOnline || p.internet;
+    s.wifi = p.kind == NetworkLink::Kind::Wifi;
+    s.signal = s.wifi ? p.signal : 0;
+    s.network = !p.network.empty() ? p.network : !p.alias.empty() ? p.alias : globalNetwork;
+}
 
 void SystemStatusReader::UnwatchVolume()
 {
@@ -142,49 +313,7 @@ SystemStatus QuerySystemStatus()
         s.batteryMinutes = s.battery && !s.charging && ps.BatteryLifeTime != DWORD(-1) ? int(ps.BatteryLifeTime / 60) : -1;
     }
     try {
-        winrt::com_ptr<INetworkListManager> nlm;
-        if (SUCCEEDED(CoCreateInstance(CLSID_NetworkListManager, nullptr, CLSCTX_ALL, IID_PPV_ARGS(nlm.put())))) {
-            NLM_CONNECTIVITY c{};
-            if (SUCCEEDED(nlm->GetConnectivity(&c))) {
-                s.online = (c & (NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET)) != 0;
-                s.connected = c != NLM_CONNECTIVITY_DISCONNECTED;
-            }
-            // The network that carries the internet connection (a VPN or a
-            // virtual adapter is often connected too, without internet).
-            winrt::com_ptr<IEnumNetworks> nets;
-            if (SUCCEEDED(nlm->GetNetworks(NLM_ENUM_NETWORK_CONNECTED, nets.put()))) {
-                std::wstring first;
-                for (;;) {
-                    winrt::com_ptr<INetwork> net;
-                    if (nets->Next(1, net.put(), nullptr) != S_OK)
-                        break;
-                    BSTR name = nullptr;
-                    std::wstring n;
-                    if (SUCCEEDED(net->GetName(&name)) && name)
-                        n = name;
-                    SysFreeString(name);
-                    NLM_CONNECTIVITY nc{};
-                    net->GetConnectivity(&nc);
-                    if (first.empty())
-                        first = n;
-                    if (nc & (NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET)) {
-                        s.network = n;
-                        break;
-                    }
-                }
-                if (s.network.empty())
-                    s.network = first;
-            }
-        }
-        // Wi-Fi: the signal, and its SSID where the WLAN API gives it out
-        // (Windows 11 may withhold it from apps without location access).
-        WifiState w = QueryWifi();
-        if (w.connected && s.connected) {
-            s.wifi = true;
-            s.signal = w.signal;
-            if (!w.ssid.empty() && (s.network.empty() || !s.online))
-                s.network = w.ssid;
-        }
+        QueryNetwork(s);
         // Read interactive volume last: a slower network query must not
         // deliver a volume value captured before the user's latest input.
         if (auto v = DefaultVolume(&s.audioDevice)) {

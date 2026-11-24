@@ -12,8 +12,21 @@
 
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace atrium {
+
+struct WifiState;
+
+struct LinkRouteInfo {
+    uint64_t luid = 0;
+    NetworkLink::Kind kind = NetworkLink::Kind::Ethernet;
+    bool internet = false;
+    uint64_t routeMetric = ~uint64_t{0}; // ~0: no default route
+};
+
+int PickPrimaryLink(const std::vector<LinkRouteInfo>& candidates);
+void DeriveNetworkStatus(SystemStatus& status, bool globalOnline, bool globalConnected, const std::wstring& globalNetwork, const WifiState& fallbackWifi);
 
 SystemStatus QuerySystemStatus();
 // One background reader shared by the bar and its panels. A refresh never
