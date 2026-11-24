@@ -132,6 +132,24 @@ void TestIconFlash()
         Check(s.until <= (t - 970) + 4500 && !(s.until > (t - 970) + 4500), "flash is off by +4.5 s after last change");
     }
 }
+
+void TestResolveHostIconRect()
+{
+    const RECT clicked{100, 200, 140, 240};
+    const RECT hovered{-400, 100, -360, 140};
+    const RECT anchor{1800, 1390, 1830, 1430};
+    const RECT empty{};
+    auto eq = [](RECT a, RECT b) { return EqualRect(&a, &b) != FALSE; };
+
+    const RECT unknown = ResolveHostIconRect(L"", L"guid:a", clicked, L"guid:b", hovered, anchor);
+    Check(IsRectEmpty(&unknown), "unknown icon returns empty rect for Explorer forwarding");
+    Check(eq(ResolveHostIconRect(L"guid:a", L"guid:a", clicked, L"guid:b", hovered, anchor), clicked), "clicked icon gets its clicked cell rect");
+    Check(eq(ResolveHostIconRect(L"guid:a", L"guid:a", clicked, L"guid:a", hovered, anchor), clicked), "clicked cell takes priority over hovered cell");
+    Check(eq(ResolveHostIconRect(L"guid:a", L"guid:a", empty, L"guid:a", hovered, anchor), hovered), "empty clicked rect falls back to hovered cell");
+    Check(eq(ResolveHostIconRect(L"guid:b", L"guid:a", clicked, L"guid:b", hovered, anchor), hovered),
+          "hovered icon gets its hovered cell rect including negative monitor coords");
+    Check(eq(ResolveHostIconRect(L"guid:c", L"guid:a", clicked, L"guid:b", hovered, anchor), anchor), "other known icon falls back to bar anchor");
+}
 } // namespace
 
 int main()
@@ -166,6 +184,7 @@ int main()
     TestYieldPolicy();
     TestDecideHostForwardResult();
     TestIconFlash();
+    TestResolveHostIconRect();
 
     if (!g_failures)
         std::printf("tray protocol: all checks passed\n");

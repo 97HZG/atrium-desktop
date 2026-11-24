@@ -1133,18 +1133,18 @@ void TrayModel::SetHostPlaces(RECT anchor)
         host_->SetPlaces(anchor);
 }
 
-void TrayModel::MiddleClick(const TrayIcon& icon)
+void TrayModel::MiddleClick(const TrayIcon& icon, RECT cell)
 {
     POINT at{};
     if (host_ && !icon.hostKey.empty() && GetCursorPos(&at))
-        host_->Hover(L"", at), host_->Send(icon.hostKey, tray::HostAction::Middle, at);
+        host_->Hover(L"", at), host_->Send(icon.hostKey, tray::HostAction::Middle, at, cell);
 }
 
-void TrayModel::Hover(const TrayIcon* icon)
+void TrayModel::Hover(const TrayIcon* icon, RECT cell)
 {
     POINT at{};
     if (host_ && GetCursorPos(&at))
-        host_->Hover(icon ? icon->hostKey : L"", at);
+        host_->Hover(icon ? icon->hostKey : L"", at, cell);
 }
 
 void TrayModel::EnqueueUrgent(Job job)
@@ -1154,7 +1154,7 @@ void TrayModel::EnqueueUrgent(Job job)
     cv_.notify_all();
 }
 
-bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction)
+bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction, RECT cell)
 {
     if (icon.hostKey.empty())
         return false;
@@ -1162,7 +1162,7 @@ bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction)
     GetCursorPos(&at);
     if (host_)
         host_->Hover(L"", at); // a click ends the hover and any popup it asked for
-    if (host_ && host_->Send(icon.hostKey, hostAction, at))
+    if (host_ && host_->Send(icon.hostKey, hostAction, at, cell))
         return true;
     const tray::Action action = hostAction == tray::HostAction::Right              ? tray::Action::Right :
                                 hostAction == tray::HostAction::Double             ? tray::Action::Double :
@@ -1178,15 +1178,15 @@ bool TrayModel::ClickHosted(const TrayIcon& icon, tray::HostAction hostAction)
     return true;
 }
 
-void TrayModel::Click(const TrayIcon& icon, bool right)
+void TrayModel::Click(const TrayIcon& icon, bool right, RECT cell)
 {
-    if (!ClickHosted(icon, right ? tray::HostAction::Right : tray::HostAction::Left))
+    if (!ClickHosted(icon, right ? tray::HostAction::Right : tray::HostAction::Left, cell))
         EnqueueUrgent({false, icon, right ? tray::Action::Right : tray::Action::Left});
 }
 
-void TrayModel::DoubleClick(const TrayIcon& icon, bool continuation)
+void TrayModel::DoubleClick(const TrayIcon& icon, bool continuation, RECT cell)
 {
-    if (!ClickHosted(icon, continuation ? tray::HostAction::DoubleContinuation : tray::HostAction::Double))
+    if (!ClickHosted(icon, continuation ? tray::HostAction::DoubleContinuation : tray::HostAction::Double, cell))
         EnqueueUrgent({false, icon, continuation ? tray::Action::DoubleContinuation : tray::Action::Double});
 }
 void TrayModel::OpenSystemTray() { EnqueueUrgent({false, {}, tray::Action::Left, true}); }

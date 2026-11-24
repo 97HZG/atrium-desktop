@@ -167,10 +167,10 @@ public:
     // Sends the shell's notifications for `action` on `key` at the screen point `at`
     // (the panel's pointer). False when the app cannot be told (gone, no callback,
     // an elevated app's window refusing Atrium's messages).
-    bool Send(const std::wstring& key, tray::HostAction action, POINT at);
+    bool Send(const std::wstring& key, tray::HostAction action, POINT at, RECT cell = {});
     // The pointer rests on `key` (empty: on none): the arrival, and for a version 4
     // app drawing its own tooltip, its popup request after a moment and its close.
-    void Hover(const std::wstring& key, POINT at);
+    void Hover(const std::wstring& key, POINT at, RECT cell = {});
     // Where icons are, for apps that ask (Shell_NotifyIconGetRect): around the last
     // click for the icon clicked, `anchor` (the bar's tray entry) for the others.
     void SetPlaces(RECT anchor);
@@ -211,7 +211,7 @@ private:
     mutable std::mutex mutex_;
     std::map<std::wstring, HostIcon> icons_;
     uint64_t nextAdded_ = 0, nextImage_ = 0;
-    RECT anchor_{}, clicked_{};
+    RECT anchor_{}, clicked_{}, hovered_{};
     std::wstring clickedKey_;
     std::wstring hoverKey_, popupKey_; // host thread: the icon under the pointer, the one asked to show its popup
     POINT hoverAt_{};

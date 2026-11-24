@@ -62,8 +62,8 @@ public:
     bool Loaded() const;
     bool Available() const; // the shell's tray was found in the last read
     // A left click (Invoke) or a right click (the context menu) on `icon`.
-    void Click(const TrayIcon& icon, bool right);
-    void DoubleClick(const TrayIcon& icon, bool continuation = false);
+    void Click(const TrayIcon& icon, bool right, RECT cell = {});
+    void DoubleClick(const TrayIcon& icon, bool continuation = false, RECT cell = {});
     void OpenSystemTray(); // explicit asynchronous fallback
     // GetLastInputInfo time of the last real pointer click sent to a tray button (0: none).
     static DWORD LastSyntheticInput();
@@ -87,8 +87,8 @@ public:
     }
     // A hosted icon only (the shell protocol has these; Explorer's buttons do not):
     // the middle button, and the pointer resting on an icon (null: on none).
-    void MiddleClick(const TrayIcon& icon);
-    void Hover(const TrayIcon* icon);
+    void MiddleClick(const TrayIcon& icon, RECT cell = {});
+    void Hover(const TrayIcon* icon, RECT cell = {});
     void SetHostPlaces(RECT anchor); // the panel's place on screen, for apps that ask where their icon is
     // The programs whose tray icon flashes now (hosted icons only): a message waiting.
     std::vector<std::wstring> Flashing() const;
@@ -104,7 +104,7 @@ private:
         bool systemTray = false;
     };
     void Worker();
-    bool ClickHosted(const TrayIcon& icon, tray::HostAction action);
+    bool ClickHosted(const TrayIcon& icon, tray::HostAction action, RECT cell = {});
     void EnqueueUrgent(Job job);
     HWND notify_;
     UINT msg_;

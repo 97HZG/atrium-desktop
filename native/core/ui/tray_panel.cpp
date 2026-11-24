@@ -111,11 +111,7 @@ POINT MenuPlace(POINT at, int w, int h)
 {
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi);
-    const RECT& wa = mi.rcWork;
-    int left = at.x + w <= wa.right ? at.x : at.x - w, top = at.y - h >= wa.top ? at.y - h : at.y;
-    left = std::clamp(left, int(wa.left), std::max(int(wa.left), int(wa.right) - w));
-    top = std::clamp(top, int(wa.top), std::max(int(wa.top), int(wa.bottom) - h));
-    return POINT{left, top};
+    return tray::PlaceMenu(at, w, h, mi.rcWork);
 }
 
 bool FollowCancelKeyDown()
@@ -175,7 +171,7 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
         return;
     const bool nativeMenu = wcscmp(cls, L"#32768") == 0;
     const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE), ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    const bool customMenu = (style & WS_POPUP) && !(style & WS_CAPTION) && (ex & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST)) && !(ex & WS_EX_APPWINDOW) &&
+    const bool customMenu = (style & WS_POPUP) && (style & WS_CAPTION) != WS_CAPTION && (ex & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST)) && !(ex & WS_EX_APPWINDOW) &&
                             _wcsicmp(cls, L"tooltips_class32") != 0;
     if (!nativeMenu && !customMenu)
         return;
@@ -204,9 +200,9 @@ void CALLBACK MenuShown(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LO
     if (w < 40 || h < 20 || w > (mi.rcWork.right - mi.rcWork.left) * 3 / 5 || h > (mi.rcWork.bottom - mi.rcWork.top) * 19 / 20)
         return; // a mark, a balloon, a window: not a menu
     const POINT at = g_follow.at;
-    if (at.x >= r.left - 48 && at.x <= r.right + 48 && at.y >= r.top - 48 && at.y <= r.bottom + 48) {
+    if (!tray::ShouldMoveFollowedMenu(r, at, mi.rcMonitor, mi.rcWork, nativeMenu)) {
         StopFollow();
-        return; // the app put it by the pointer itself
+        return; // the app put it by the pointer itself and it fits
     }
     const POINT p = MenuPlace(at, w, h);
     if (!SetWindowPos(hwnd, nullptr, p.x, p.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)) {
@@ -383,6 +379,14 @@ void TrayPanel::ArmTip()
     SetTimer(surface_.Hwnd(), kTipTimer, delay ? delay : 500, nullptr);
 }
 
+RECT TrayPanel::CellScreenRect(size_t i) const
+{
+    const RECT win = surface_.Rect();
+    const float s = surface_.Scale();
+    const D2D1_RECT_F cell = CellRect(i);
+    return {win.left + LONG(cell.left * s), win.top + LONG(cell.top * s), win.left + LONG(cell.right * s), win.top + LONG(cell.bottom * s)};
+}
+
 void TrayPanel::ShowTip()
 {
     const std::optional<size_t> idx = IconIndex(tipFor_);
@@ -392,7 +396,7 @@ void TrayPanel::ShowTip()
     const RECT win = surface_.Rect();
     const float s = surface_.Scale();
     const D2D1_RECT_F cell = CellRect(i);
-    const RECT cellPx{win.left + LONG(cell.left * s), win.top + LONG(cell.top * s), win.left + LONG(cell.right * s), win.top + LONG(cell.bottom * s)};
+    const RECT cellPx = CellScreenRect(i);
     const std::wstring& text = icons_[i].tip;
     if (tip_ && IsWindowVisible(tip_) && text == tipText_ && EqualRect(&cellPx, &tipCell_))
         return;
@@ -448,6 +452,19 @@ void TrayPanel::HideTip()
     ti.hwnd = surface_.Hwnd();
     ti.uId = 1;
     SendMessageW(tip_, TTM_TRACKACTIVATE, FALSE, reinterpret_cast<LPARAM>(&ti));
+}
+
+void TrayPanel::HoverAt(POINT pt)
+{
+    const std::wstring h = HitAt(pt);
+    if (h == hover_)
+        return;
+    hover_ = h;
+    const std::optional<size_t> idx = IconIndex(h);
+    const bool hosted = idx && *idx < icons_.size() && !icons_[*idx].hostKey.empty();
+    model_.Hover(hosted ? &icons_[*idx] : nullptr, hosted ? CellScreenRect(*idx) : RECT{});
+    ArmTip();
+    surface_.Invalidate();
 }
 
 void TrayPanel::LeaveHover()
@@ -620,7 +637,8 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
     if (i >= icons_.size())
         return;
     const TrayIcon selected = pressedIcon_.value_or(icons_[i]);
-    if (right && selected.hostKey.empty()) { // a hosted icon's app is told the pointer itself
+    const RECT cell = CellScreenRect(i);
+    if (right) {
         POINT at;
         GetCursorPos(&at);
         FollowMenu(at, selected.exe);
@@ -632,11 +650,11 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
                             GetTickCount64() - lastWhen_ <= GetDoubleClickTime() && std::abs(at.x - lastAt_.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
                             std::abs(at.y - lastAt_.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
         if (second) {
-            model_.DoubleClick(selected, true); // first click already delivered
+            model_.DoubleClick(selected, true, cell); // first click already delivered
             lastClick_.reset();
             Close(); // the panel has done its part
         } else {
-            model_.Click(selected, false); // immediate; no double-click timer
+            model_.Click(selected, false, cell); // immediate; no double-click timer
             lastClick_ = selected;
             lastAt_ = at;
             lastWhen_ = GetTickCount64();
@@ -646,7 +664,7 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
         return;
     }
     lastClick_.reset();
-    model_.Click(selected, right);
+    model_.Click(selected, right, cell);
 }
 
 bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
@@ -699,28 +717,19 @@ bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
                 Close();
         }
         return false;
-    case WM_MOUSEMOVE: {
+    case WM_MOUSEMOVE:
         KillTimer(surface_.Hwnd(), kHoverTimer);
         if (!tracking_) {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
             tracking_ = TrackMouseEvent(&tme) != FALSE;
         }
-        std::wstring h = HitAt(pt);
-        if (h != hover_) {
-            hover_ = h;
-            // A hosted icon's app is told the pointer is on it, as the system tray does.
-            const size_t i = h.starts_with(L"icon:") ? size_t(std::stoul(h.substr(5))) : icons_.size();
-            model_.Hover(i < icons_.size() && !icons_[i].hostKey.empty() ? &icons_[i] : nullptr);
-            ArmTip();
-            surface_.Invalidate();
-        }
+        HoverAt(pt);
         return true;
-    }
     case WM_MBUTTONUP: {
         const std::wstring h = HitAt(pt);
         const size_t i = h.starts_with(L"icon:") ? size_t(std::stoul(h.substr(5))) : icons_.size();
         if (i < icons_.size() && !icons_[i].hostKey.empty())
-            model_.MiddleClick(icons_[i]);
+            model_.MiddleClick(icons_[i], CellScreenRect(i));
         return true;
     }
     case WM_MOUSELEAVE:

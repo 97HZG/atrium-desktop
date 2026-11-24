@@ -1,5 +1,8 @@
 // Tray icon click routing, fallback order and classic toolbar mouse gestures.
 #pragma once
+#include <windows.h>
+
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -81,5 +84,30 @@ template<class Invoke, class Observe> DispatchResult Dispatch(Action action, boo
         }
     }
     return result;
+}
+
+// Next to the click: above and to the right of it, else below or to the left; in `work`.
+inline POINT PlaceMenu(POINT at, int w, int h, const RECT& work)
+{
+    int left = at.x + w <= work.right ? at.x : at.x - w;
+    int top = at.y - h >= work.top ? at.y - h : at.y;
+    left = std::clamp(left, int(work.left), std::max(int(work.left), int(work.right) - w));
+    top = std::clamp(top, int(work.top), std::max(int(work.top), int(work.bottom) - h));
+    return POINT{left, top};
+}
+
+inline bool ExtendsBeyond(const RECT& r, const RECT& bounds, int tolerance)
+{
+    return r.left < bounds.left - tolerance || r.top < bounds.top - tolerance || r.right > bounds.right + tolerance || r.bottom > bounds.bottom + tolerance;
+}
+
+// True when a newly shown menu-shaped popup should be moved next to `at`: either the app did not
+// place it near the pointer (+-48 px), or it extends off-screen (native #32768 allows 8 px of
+// shadow past the monitor; custom popups also check 8 px past the work area).
+inline bool ShouldMoveFollowedMenu(const RECT& r, POINT at, const RECT& monitor, const RECT& work, bool nativeMenu)
+{
+    if (at.x >= r.left - 48 && at.x <= r.right + 48 && at.y >= r.top - 48 && at.y <= r.bottom + 48)
+        return nativeMenu ? ExtendsBeyond(r, monitor, 8) : (ExtendsBeyond(r, monitor, 0) || ExtendsBeyond(r, work, 8));
+    return true;
 }
 } // namespace atrium::tray

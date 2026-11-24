@@ -529,12 +529,14 @@ LRESULT TrayHost::OnIconRect(WPARAM w, const COPYDATASTRUCT* cds)
     const auto* id = static_cast<const NotifyIconIdentifier32*>(cds->lpData);
     if (!id || cds->cbData < sizeof(NotifyIconIdentifier32) || id->signature != kSignature || g_shellQuestions > 0)
         return Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
-    const std::wstring key = KeyOf(Handle(id->hWnd), id->uID, &id->guidItem);
+    const HWND hwnd = Handle(id->hWnd);
     RECT r{};
     {
         std::lock_guard g(mutex_);
-        if (icons_.contains(key))
-            r = key == clickedKey_ && !IsRectEmpty(&clicked_) ? clicked_ : anchor_;
+        auto it = icons_.find(KeyOf(hwnd, id->uID, &id->guidItem));
+        if (it == icons_.end() && id->guidItem == GUID{} && hwnd)
+            it = std::ranges::find_if(icons_, [&](const auto& e) { return e.second.hwnd == hwnd && e.second.uid == id->uID; });
+        r = tray::ResolveHostIconRect(it != icons_.end() ? it->first : std::wstring{}, clickedKey_, clicked_, hoverKey_, hovered_, anchor_);
     }
     if (IsRectEmpty(&r))
         return Forward(WM_COPYDATA, w, reinterpret_cast<LPARAM>(cds));
@@ -722,7 +724,7 @@ void TrayHost::SetPlaces(RECT anchor)
     anchor_ = anchor;
 }
 
-void TrayHost::Hover(const std::wstring& key, POINT at)
+void TrayHost::Hover(const std::wstring& key, POINT at, RECT cell)
 {
     HWND w = window_.load();
     if (!w)
@@ -731,7 +733,7 @@ void TrayHost::Hover(const std::wstring& key, POINT at)
         std::lock_guard g(mutex_);
         if (key == hoverKey_)
             return;
-        hoverKey_ = key, hoverAt_ = at;
+        hoverKey_ = key, hoverAt_ = at, hovered_ = key.empty() ? RECT{} : tray::CellOrBox(cell, at);
     }
     PostMessageW(w, hover_, 0, 0);
 }
@@ -757,7 +759,7 @@ void TrayHost::Popup(bool open)
     }
 }
 
-bool TrayHost::Send(const std::wstring& key, tray::HostAction action, POINT at)
+bool TrayHost::Send(const std::wstring& key, tray::HostAction action, POINT at, RECT cell)
 {
     const bool click = action != tray::HostAction::HoverIn && action != tray::HostAction::PopupOpen && action != tray::HostAction::PopupClose;
     HWND hwnd = nullptr;
@@ -770,7 +772,7 @@ bool TrayHost::Send(const std::wstring& key, tray::HostAction action, POINT at)
             return false;
         hwnd = it->second.hwnd, uid = it->second.uid, callback = it->second.callback, version = it->second.version, pid = it->second.pid;
         if (click)
-            clickedKey_ = key, clicked_ = {at.x - 16, at.y - 16, at.x + 16, at.y + 16};
+            clickedKey_ = key, clicked_ = tray::CellOrBox(cell, at);
     }
     if (!callback || !hwnd || !IsWindow(hwnd))
         return false;

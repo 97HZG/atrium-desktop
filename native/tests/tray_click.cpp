@@ -9,6 +9,46 @@ void Check(bool value, const char* message)
     if (!value)
         throw std::runtime_error(message);
 }
+void TestMenuFollow()
+{
+    const RECT monitor{0, 0, 2160, 1440};
+    const RECT workWithBar{0, 0, 2160, 1380};
+    const POINT click{1615, 1185};
+    const RECT wpsCard{1970, 1120, 2370, 1600};
+    Check(ShouldMoveFollowedMenu(wpsCard, click, monitor, monitor, false), "off-screen WPS card is moved");
+    const POINT placed = PlaceMenu(click, wpsCard.right - wpsCard.left, wpsCard.bottom - wpsCard.top, monitor);
+    Check(placed.x == 1615 && placed.y == 705, "WPS card moves inside 2160x1440 screen next to click");
+    Check(PlaceMenu({2100, 100}, 400, 480, monitor).x == 1700 && PlaceMenu({100, 100}, 400, 480, monitor).y == 100,
+          "PlaceMenu flips left/below when near edges");
+    Check(!ShouldMoveFollowedMenu({1600, 1120, 1800, 1448}, click, monitor, workWithBar, true),
+          "native #32768 near pointer keeps 8 px shadow tolerance past monitor");
+    Check(ShouldMoveFollowedMenu({1600, 1120, 1800, 1449}, click, monitor, workWithBar, true), "native #32768 extending >8 px past monitor is moved");
+    Check(!ShouldMoveFollowedMenu({1600, 1120, 1800, 1388}, click, monitor, workWithBar, false),
+          "custom popup near pointer keeps 8 px tolerance past work area");
+    Check(ShouldMoveFollowedMenu({1600, 1120, 1800, 1389}, click, monitor, workWithBar, false), "custom popup extending >8 px past work area is moved");
+    Check(ShouldMoveFollowedMenu({1600, 1120, 1800, 1441}, click, monitor, monitor, false), "custom popup extending past monitor is moved");
+}
+void TestClassicGesture()
+{
+    for (Action action : {Action::Left, Action::Right, Action::Double}) {
+        const std::vector<MouseEvent> expected =
+            action == Action::Right  ? std::vector{MouseEvent::Move, MouseEvent::RightDown, MouseEvent::RightUp} :
+            action == Action::Double ? std::vector{MouseEvent::Move, MouseEvent::LeftDown, MouseEvent::LeftUp, MouseEvent::LeftDouble, MouseEvent::LeftUp} :
+                                       std::vector{MouseEvent::Move, MouseEvent::LeftDown, MouseEvent::LeftUp};
+        std::vector<MouseEvent> actual;
+        auto posting = PostClassicGesture(action, [&](MouseEvent event) {
+            actual.push_back(event);
+            return true;
+        });
+        Check(actual == expected && posting.complete, "classic message order implements native gesture");
+        for (size_t failure = 0; failure < expected.size(); ++failure) {
+            size_t calls = 0;
+            posting = PostClassicGesture(action, [&](MouseEvent) { return calls++ != failure; });
+            Check(!posting.complete && posting.queued == failure && calls == failure + 1, "posting stops at first failed message");
+            Check(posting.actionQueued == (failure > 1), "failure after button down has uncertain delivery");
+        }
+    }
+}
 int main()
 {
     try {
@@ -125,26 +165,10 @@ int main()
             },
             unseen);
         Check(r.attempts.size() == 1 && duplicateCalls == 1, "a refused second Invoke is not retried through another route");
-        for (Action action : {Action::Left, Action::Right, Action::Double}) {
-            const std::vector<MouseEvent> expected =
-                action == Action::Right  ? std::vector{MouseEvent::Move, MouseEvent::RightDown, MouseEvent::RightUp} :
-                action == Action::Double ? std::vector{MouseEvent::Move, MouseEvent::LeftDown, MouseEvent::LeftUp, MouseEvent::LeftDouble, MouseEvent::LeftUp} :
-                                           std::vector{MouseEvent::Move, MouseEvent::LeftDown, MouseEvent::LeftUp};
-            std::vector<MouseEvent> actual;
-            auto posting = PostClassicGesture(action, [&](MouseEvent event) {
-                actual.push_back(event);
-                return true;
-            });
-            Check(actual == expected && posting.complete, "classic message order implements native gesture");
-            for (size_t failure = 0; failure < expected.size(); ++failure) {
-                size_t calls = 0;
-                posting = PostClassicGesture(action, [&](MouseEvent) { return calls++ != failure; });
-                Check(!posting.complete && posting.queued == failure && calls == failure + 1, "posting stops at first failed message");
-                Check(posting.actionQueued == (failure > 1), "failure after button down has uncertain delivery");
-            }
-        }
+        TestClassicGesture();
         r = Dispatch(Action::Double, true, [](Route) { return int32_t(1); }, unseen);
         Check(r.outcome == Outcome::AcceptedUnconfirmed && r.attempts.size() == 1, "partial toolbar delivery cannot replay a gesture");
+        TestMenuFollow();
         std::cout << "tray dispatch: all scenarios passed\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

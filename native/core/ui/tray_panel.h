@@ -67,9 +67,11 @@ private:
     int Cols() const;
     float Margin() const; // DIP: from the panel's edges to what is seen inside
     D2D1_RECT_F CellRect(size_t i) const; // icon i's cell, DIP
+    RECT CellScreenRect(size_t i) const;  // icon i's cell, physical screen pixels
     void ArmTip();  // the hovered icon's tooltip after the system's delay
     void ShowTip();
     void HideTip();
+    void HoverAt(POINT pt);
     void LeaveHover();
 
     Surface surface_;

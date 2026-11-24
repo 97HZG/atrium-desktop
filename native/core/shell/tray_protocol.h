@@ -7,6 +7,7 @@
 #include <shellapi.h>
 
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace atrium::tray {
@@ -119,5 +120,21 @@ inline bool RecordIconPicture(IconFlashState& state, ULONGLONG now, uint64_t has
         state.until = now + IconFlashState::kHoldMs;
     return state.until > now;
 }
+
+// Which rectangle to return for Shell_NotifyIconGetRect: empty when unknown (forward to Explorer),
+// else the clicked cell, else the hovered cell, else the bar's tray anchor.
+inline RECT ResolveHostIconRect(std::wstring_view matchedKey, std::wstring_view clickedKey, const RECT& clicked, std::wstring_view hoverKey,
+                                const RECT& hovered, const RECT& anchor)
+{
+    if (matchedKey.empty())
+        return {};
+    if (matchedKey == clickedKey && !IsRectEmpty(&clicked))
+        return clicked;
+    if (matchedKey == hoverKey && !IsRectEmpty(&hovered))
+        return hovered;
+    return anchor;
+}
+
+inline RECT CellOrBox(RECT cell, POINT at) { return !IsRectEmpty(&cell) ? cell : RECT{at.x - 16, at.y - 16, at.x + 16, at.y + 16}; }
 
 } // namespace atrium::tray
