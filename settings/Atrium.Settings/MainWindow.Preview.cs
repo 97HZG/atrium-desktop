@@ -162,7 +162,7 @@ public sealed partial class MainWindow
             }
             if (!double.IsNaN(at.Width)) child.Width = at.Width * k;
             if (!double.IsNaN(at.Height)) child.Height = at.Height * k;
-            if (child is TextBlock block) block.FontSize = at.Font * k;
+            if (child is TextBlock block && at.Font > 0) block.FontSize = Math.Max(1.0, at.Font * k);
         }
     }
 

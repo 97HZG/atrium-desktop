@@ -112,9 +112,9 @@ public sealed partial class MainWindow
             Place(_shine, cx - rk * 0.55, y - rk * 0.72, rk * 0.5, rk * 0.28);
             _shine.Opacity = skin;
             _letter.Text = Glyphs[_index];
-            _letter.FontSize = 24 * S * k;
+            _letter.FontSize = Math.Max(1.0, 24 * S * k);
             Place(_letter, cx - rk, y - 16 * S * k, 2 * rk, 32 * S * k);
-            _letter.Opacity = skin;
+            _letter.Opacity = k <= 0.01 ? 0 : skin;
             for (int i = 0; i < _drops.Length; ++i)
             {
                 // Thrown from the rim, slowing, drooping and dissolving.
