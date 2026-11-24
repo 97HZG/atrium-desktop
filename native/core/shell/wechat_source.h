@@ -20,11 +20,16 @@
 #include <windows.h>
 
 #include <atomic>
+#include <cstdint>
 #include <map>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
+
+struct IUIAutomation;
+struct IUIAutomationCondition;
 
 namespace atrium {
 
@@ -47,7 +52,8 @@ bool IsCollapsedWeChatRow(const std::wstring& chat);
 // WeChat lists its official accounts' messages in rows of their own name (its UI Automation names a row
 // by its chat's shown name only, so a service account listed as a chat of its own is not told apart).
 bool IsOfficialWeChatRow(const std::wstring& chat);
-WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackText = {});
+WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackText = {}, const std::wstring& itemStatus = {});
+bool MatchesWeChatCellName(const std::wstring& cellName, const std::wstring& chat);
 std::vector<Notice> DiffWeChatRows(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool baseline, bool blockOfficial,
                                    std::map<std::wstring, WeChatChatState>& states);
 int SumWeChatUnread(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool blockOfficial);
@@ -64,7 +70,10 @@ struct WeChatThrottleInput {
     bool sampledWhileBusy = false;
     bool flashWake = false;
     ULONGLONG followUpTick = 0;
+    bool breakCooldown = false;
 };
+
+bool ShouldBreakWeChatCooldown(WeChatBusyState prev, WeChatBusyState now);
 
 struct WeChatThrottleOutput {
     DWORD waitMs = 0;
@@ -101,6 +110,7 @@ public:
             SetEvent(wake_);
     }
     void SetPostCards(bool on) { postCards_ = on; }
+    void OpenChat(const std::wstring& chat);
 
 private:
     void Run();
@@ -113,8 +123,19 @@ private:
     std::atomic<bool> postCards_{true};
     std::atomic<int> unread_{0};
     std::atomic<bool> wakePending_{false};
+    std::mutex openMu_;
+    std::wstring pendingOpenChat_;
     HANDLE wake_ = nullptr;
     std::thread thread_;
 };
+
+namespace detail {
+WeChatBusyState QueryWeChatBusyState(const std::vector<std::pair<DWORD, std::wstring>>& procs);
+bool ShouldReadWeChatWindow(HWND h, DWORD pid, bool* hung = nullptr);
+std::vector<HWND> WeChatWindows(DWORD pid, bool& anyHung);
+void DiscoverWeChatProcesses(std::vector<std::pair<DWORD, std::wstring>>& procs);
+void HandlePendingWeChatOpen(IUIAutomation* uia, IUIAutomationCondition* cells, HANDLE wake, const std::atomic<bool>& stop, std::mutex& openMu,
+                             std::wstring& pendingOpenChat, std::vector<std::pair<DWORD, std::wstring>>& procs, HWND& lastMainHwnd, uint32_t& loggedMask);
+} // namespace detail
 
 } // namespace atrium

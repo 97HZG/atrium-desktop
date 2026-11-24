@@ -93,6 +93,32 @@ void CheckWeChatRows()
 
     const WeChatRow numericSummary = ParseWeChatRow(L"Alice\n[1条] 666\n17:06");
     Require(numericSummary.unread == 1 && numericSummary.summary == L"666", "pure numeric summary is not dropped as time");
+
+    Require(ParseWeChatRow(L"通知群\n[2条] hi\n10:00 消息免打扰").muted, "substring mute on line");
+    Require(ParseWeChatRow(L"通知群\n已置顶 免打扰\n[2条] hi").muted, "short mute variant");
+    Require(ParseWeChatRow(L"通知群\n訊息免打擾\n[2条] hi").muted, "traditional mute variant");
+    Require(ParseWeChatRow(L"通知群\n免打擾\n[2条] hi").muted, "traditional short mute variant");
+    Require(ParseWeChatRow(L"Team\n[1 unread] hi\nMute Notifications").muted, "English Mute Notifications");
+    Require(ParseWeChatRow(L"Team\nnotifications muted\n10:00").muted, "English Notifications Muted case-insensitive");
+    Require(ParseWeChatRow(L"Team\nMuted\n10:00").muted, "English Muted line");
+    Require(!ParseWeChatRow(L"免打扰群\n[1条] hi\n10:00").muted, "a chat named with the mark is not muted");
+    const WeChatRow saysMute = ParseWeChatRow(L"Alice\n[1条] 我把群设成免打扰了\n10:00");
+    Require(!saysMute.muted && saysMute.summary == L"我把群设成免打扰了", "a summary mentioning the mark is not muted");
+    Require(!ParseWeChatRow(L"Team\n[1 unread] I muted the call\n10:00").muted, "an English summary mentioning muted is not muted");
+
+    const WeChatRow mutedFallback = ParseWeChatRow(L"通知群\n[1条] 周报\n10:00", L"消息免打扰");
+    Require(mutedFallback.muted && mutedFallback.summary == L"周报", "fallback mute applies even when summary is present");
+    Require(ParseWeChatRow(L"Team\n[1 unread] hi\n10:00", L"Notifications Muted").muted, "fallback English mute");
+
+    const WeChatRow mutedStatus = ParseWeChatRow(L"通知群\n[1条] 周报\n10:00", L"", L"免打扰");
+    Require(mutedStatus.muted && mutedStatus.summary == L"周报", "itemStatus mute applies");
+    Require(ParseWeChatRow(L"Team\n[1 unread] hi\n10:00", L"", L"muted").muted, "itemStatus English mute");
+
+    Require(MatchesWeChatCellName(L"Alice\n[1条] hi\n10:00", L"Alice"), "cell match exact");
+    Require(MatchesWeChatCellName(L"Alice\n已置顶\n[2条] hello\n消息免打扰\n10:00", L"Alice"), "cell match with badges");
+    Require(!MatchesWeChatCellName(L"Alice Smith\n[1条] hi\n10:00", L"Alice"), "cell match is not substring");
+    Require(!MatchesWeChatCellName(L"Alice\n[1条] hi\n10:00", L""), "cell match rejects empty chat");
+    Require(!MatchesWeChatCellName(L"", L"Alice"), "cell match rejects empty cell name");
 }
 
 void CheckWeChatDiff()
@@ -115,6 +141,12 @@ void CheckWeChatDiff()
     Require(SumWeChatUnread(rows, false) == 5, "sum excludes muted and collapsed");
     Require(SumWeChatUnread(rows, true) == 3, "sum excludes official when blocked");
     Require(SumWeChatUnread({}, true) == 0, "empty rows sum to 0");
+
+    // Unmuting a previously muted chat alerts again (no sticky lastMuted).
+    std::map<std::wstring, WeChatChatState> muteStates;
+    Require(DiffWeChatRows({{L"g", {L"Group", L"m1", 1, true}}}, true, false, muteStates).empty(), "muted chat suppressed");
+    auto unmuted = DiffWeChatRows({{L"g", {L"Group", L"m2", 2, false}}}, true, false, muteStates);
+    Require(unmuted.size() == 1 && unmuted[0].unread && unmuted[0].title == L"Group", "unmuted chat alerts again");
 }
 
 void CheckWeChatThrottle()
@@ -146,6 +178,23 @@ void CheckWeChatThrottle()
         WeChatThrottleInput dlg{WeChatBusyState::Dialog, true, 3, 5000, 1000, 0, true, false, 0};
         const auto out = EvaluateWeChatThrottle(dlg);
         Require(out.waitMs == 1000 && out.clearReadingAndBaseline, "dialog state never polls UIA");
+    }
+    // Cool-down break transitions and throttle bypass.
+    {
+        Require(ShouldBreakWeChatCooldown(WeChatBusyState::None, WeChatBusyState::ForegroundShown), "None -> ForegroundShown breaks");
+        Require(ShouldBreakWeChatCooldown(WeChatBusyState::ForegroundShown, WeChatBusyState::None), "ForegroundShown -> None breaks");
+        Require(ShouldBreakWeChatCooldown(WeChatBusyState::Foreground, WeChatBusyState::None), "Foreground -> None breaks");
+        Require(!ShouldBreakWeChatCooldown(WeChatBusyState::None, WeChatBusyState::Foreground), "None -> Foreground does not break");
+        Require(!ShouldBreakWeChatCooldown(WeChatBusyState::ForegroundShown, WeChatBusyState::ForegroundShown), "same state does not break");
+        Require(!ShouldBreakWeChatCooldown(WeChatBusyState::Dialog, WeChatBusyState::None), "Dialog -> None does not break");
+
+        WeChatThrottleInput enter{WeChatBusyState::ForegroundShown, true, 3, 1500, 1000, 0, true, false, 0, true};
+        const auto enterOut = EvaluateWeChatThrottle(enter);
+        Require(enterOut.waitMs == 0 && enterOut.nextSampledWhileBusy && enterOut.clearReadingAndBaseline, "breakCooldown bypasses 2s wait on ForegroundShown");
+
+        WeChatThrottleInput leave{WeChatBusyState::None, true, 3, 1500, 1000, 1700, true, false, 0, true};
+        const auto leaveOut = EvaluateWeChatThrottle(leave);
+        Require(leaveOut.waitMs == 0, "breakCooldown bypasses busyUntilTick and 1s gap on None");
     }
 }
 

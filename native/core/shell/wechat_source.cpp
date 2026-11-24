@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <map>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -46,9 +47,30 @@ bool EndsWithNoCase(const std::wstring& s, const wchar_t* suffix)
     return s.size() >= n && _wcsicmp(s.c_str() + s.size() - n, suffix) == 0;
 }
 
-bool IsMutedLine(const std::wstring& line)
+// A line that marks a muted chat: 消息免打扰 (or a variant) as a word of its own, as WeChat may put it beside
+// the time; the English marks only as the whole line. Never a substring: a summary may well say 免打扰.
+bool IsMutedText(const std::wstring& line)
 {
-    return line == L"消息免打扰" || _wcsicmp(line.c_str(), L"Mute Notifications") == 0 || _wcsicmp(line.c_str(), L"Muted") == 0;
+    constexpr std::wstring_view kWords[] = {L"消息免打扰", L"免打扰", L"訊息免打擾", L"免打擾"};
+    constexpr const wchar_t* kLines[] = {L"Mute Notifications", L"Notifications Muted", L"Muted"};
+    const std::wstring t = Trim(line);
+    if (std::ranges::any_of(kLines, [&](const wchar_t* m) { return _wcsicmp(t.c_str(), m) == 0; }))
+        return true;
+    for (size_t from = 0; from < t.size();) {
+        const size_t end = std::min(t.find(L' ', from), t.size());
+        const std::wstring_view word(t.data() + from, end - from);
+        if (std::ranges::find(kWords, word) != std::end(kWords))
+            return true;
+        from = end + 1;
+    }
+    return false;
+}
+
+// UIA's ItemStatus is the cell's own state, not message text: the marker anywhere in it.
+bool ContainsMuteStatus(const std::wstring& status)
+{
+    return status.find(L"\u514d\u6253\u6270") != std::wstring::npos || status.find(L"\u514d\u6253\u64fe") != std::wstring::npos ||
+           FoldCase(status).find(L"mute") != std::wstring::npos;
 }
 
 bool IsPinLine(const std::wstring& line) { return line == L"已置顶" || _wcsicmp(line.c_str(), L"Pinned") == 0; }
@@ -129,6 +151,10 @@ bool IsWeChatPid(const std::vector<std::pair<DWORD, std::wstring>>& procs, DWORD
     return pid != 0 && std::ranges::any_of(procs, [pid](const auto& p) { return p.first == pid; });
 }
 
+} // namespace
+
+namespace detail {
+
 WeChatBusyState QueryWeChatBusyState(const std::vector<std::pair<DWORD, std::wstring>>& procs)
 {
     struct Ctx {
@@ -163,7 +189,7 @@ WeChatBusyState QueryWeChatBusyState(const std::vector<std::pair<DWORD, std::wst
     return WeChatBusyState::None;
 }
 
-bool ShouldReadWeChatWindow(HWND h, DWORD pid, bool* hung = nullptr)
+bool ShouldReadWeChatWindow(HWND h, DWORD pid, bool* hung)
 {
     if (WindowPid(h) != pid || GetWindow(h, GW_OWNER) != nullptr)
         return false;
@@ -212,7 +238,7 @@ void DiscoverWeChatProcesses(std::vector<std::pair<DWORD, std::wstring>>& procs)
         CloseHandle(snap);
 }
 
-} // namespace
+} // namespace detail
 
 std::vector<Notice> DiffWeChatRows(const std::vector<std::pair<std::wstring, WeChatRow>>& rows, bool baseline, bool blockOfficial,
                                    std::map<std::wstring, WeChatChatState>& states)
@@ -300,7 +326,12 @@ void ReadRow(IUIAutomationElement* e, std::vector<std::pair<std::wstring, WeChat
                 fallback = help;
             SysFreeString(help);
         }
-        WeChatRow r = ParseWeChatRow(name, fallback);
+        std::wstring itemStatus;
+        BSTR status = nullptr;
+        if (SUCCEEDED(e->get_CachedItemStatus(&status)) && status && *status)
+            itemStatus = status;
+        SysFreeString(status);
+        WeChatRow r = ParseWeChatRow(name, fallback, itemStatus);
         std::wstring key = id && *id ? id : r.chat;
         if (!r.chat.empty())
             rows.emplace_back(std::move(key), std::move(r));
@@ -341,12 +372,12 @@ bool ReadLiveWindows(IUIAutomation* uia, IUIAutomationCondition* cells, IUIAutom
 {
     if (lastMainHwnd) {
         auto it = std::ranges::find_if(procs, [pid = WindowPid(lastMainHwnd)](const auto& p) { return p.first == pid; });
-        if (it != procs.end() && ShouldReadWeChatWindow(lastMainHwnd, it->first, &anyHung) &&
+        if (it != procs.end() && detail::ShouldReadWeChatWindow(lastMainHwnd, it->first, &anyHung) &&
             ReadLiveWindow(uia, cells, cache, lastMainHwnd, it->second, rows, held, heldProgram, exe, lastMainHwnd))
             return true;
     }
     for (const auto& [p, program] : procs)
-        for (HWND h : WeChatWindows(p, anyHung))
+        for (HWND h : detail::WeChatWindows(p, anyHung))
             if (h != lastMainHwnd && ReadLiveWindow(uia, cells, cache, h, program, rows, held, heldProgram, exe, lastMainHwnd))
                 return true;
     return false;
@@ -407,7 +438,7 @@ bool IsOfficialWeChatRow(const std::wstring& chat)
 // A row's name, line by line: the chat; optional tag/pin lines; "[N条] summary" or
 // "[N条]" and the summary on the following line, or only the summary when read; the time;
 // and "消息免打扰" for a muted chat.
-WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackText)
+WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackText, const std::wstring& itemStatus)
 {
     std::vector<std::wstring> lines;
     size_t from = 0;
@@ -424,7 +455,7 @@ WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackT
     r.chat = lines[0];
     r.collapsed = IsCollapsedWeChatRow(r.chat);
     r.official = IsOfficialWeChatRow(r.chat);
-    r.muted = r.collapsed;
+    r.muted = r.collapsed || IsMutedText(fallbackText) || ContainsMuteStatus(itemStatus);
     bool sawUnread = false;
     bool summaryAfterUnread = false;
     std::wstring preTag;
@@ -432,7 +463,7 @@ WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackT
         const std::wstring& l = lines[i];
         if (l.empty() || IsPinLine(l))
             continue;
-        if (IsMutedLine(l)) {
+        if (IsMutedText(l)) {
             r.muted = true;
             continue;
         }
@@ -462,7 +493,7 @@ WeChatRow ParseWeChatRow(const std::wstring& name, const std::wstring& fallbackT
     }
     if (r.summary.empty()) {
         const std::wstring fb = Trim(fallbackText);
-        if (!fb.empty() && fb != r.chat && !IsWeChatTime(fb) && !IsMutedLine(fb) && !IsPinLine(fb))
+        if (!fb.empty() && fb != r.chat && !IsWeChatTime(fb) && !IsMutedText(fb) && !IsPinLine(fb))
             r.summary = fb;
         else if (!preTag.empty())
             r.summary = std::move(preTag);
@@ -487,6 +518,12 @@ WeChatSource::~WeChatSource()
     CloseHandle(wake_);
 }
 
+bool ShouldBreakWeChatCooldown(WeChatBusyState prev, WeChatBusyState now)
+{
+    return (prev == WeChatBusyState::None && now == WeChatBusyState::ForegroundShown) ||
+           ((prev == WeChatBusyState::ForegroundShown || prev == WeChatBusyState::Foreground) && now == WeChatBusyState::None);
+}
+
 WeChatThrottleOutput EvaluateWeChatThrottle(const WeChatThrottleInput& in)
 {
     constexpr ULONGLONG kForegroundUnreadGapMs = 2000;
@@ -496,6 +533,16 @@ WeChatThrottleOutput EvaluateWeChatThrottle(const WeChatThrottleInput& in)
     out.nextBusyUntilTick = in.busyUntilTick;
     out.nextSampledWhileBusy = in.sampledWhileBusy;
     out.nextFollowUpTick = in.followUpTick;
+
+    if (in.breakCooldown && (in.busy == WeChatBusyState::ForegroundShown || in.busy == WeChatBusyState::None)) {
+        if (in.busy == WeChatBusyState::ForegroundShown) {
+            out.nextSampledWhileBusy = true;
+            out.nextBusyUntilTick = in.tick + 300;
+            out.clearReadingAndBaseline = true;
+        }
+        out.nextFollowUpTick = 0;
+        return out;
+    }
 
     const bool initialSample = in.busy == WeChatBusyState::ForegroundShown && !in.hasHeld && !in.sampledWhileBusy;
     const bool foregroundUnreadSample = in.busy == WeChatBusyState::ForegroundShown && in.unread > 0;
@@ -545,10 +592,13 @@ DWORD WeChatPollWait(int state, ULONGLONG followUpTick)
 
 DWORD WeChatBusyOrThrottleWait(const std::vector<std::pair<DWORD, std::wstring>>& procs, bool hasHeld, int unread, ULONGLONG tick, ULONGLONG& busyUntilTick,
                                ULONGLONG lastRead, ULONGLONG& followUpTick, bool& sampledWhileBusy, std::atomic<bool>& reading, std::atomic<bool>& wakePending,
-                               bool& baseline)
+                               bool& baseline, WeChatBusyState& prevBusy)
 {
-    const WeChatThrottleInput input{QueryWeChatBusyState(procs), hasHeld,     unread, tick, lastRead, busyUntilTick, sampledWhileBusy,
-                                    wakePending.exchange(false), followUpTick};
+    const WeChatBusyState busy = detail::QueryWeChatBusyState(procs);
+    const bool breakCooldown = ShouldBreakWeChatCooldown(prevBusy, busy);
+    prevBusy = busy;
+    const WeChatThrottleInput input{busy,         hasHeld,      unread, tick, lastRead, busyUntilTick, sampledWhileBusy, wakePending.exchange(false),
+                                    followUpTick, breakCooldown};
     const WeChatThrottleOutput out = EvaluateWeChatThrottle(input);
     busyUntilTick = out.nextBusyUntilTick;
     sampledWhileBusy = out.nextSampledWhileBusy;
@@ -583,7 +633,8 @@ void WeChatSource::Run()
         VariantClear(&v);
         if (FAILED(hr))
             return hr;
-        return CreateRawCache(u, {UIA_AutomationIdPropertyId, UIA_NamePropertyId, UIA_ValueValuePropertyId, UIA_HelpTextPropertyId}, cache, true);
+        return CreateRawCache(u, {UIA_AutomationIdPropertyId, UIA_NamePropertyId, UIA_ValueValuePropertyId, UIA_HelpTextPropertyId, UIA_ItemStatusPropertyId},
+                              cache, true);
     });
     std::map<std::wstring, WeChatChatState> states;
     bool baseline = false;
@@ -600,6 +651,8 @@ void WeChatSource::Run()
     ULONGLONG lastRead = 0;
     ULONGLONG followUpTick = 0;
     bool sampledWhileBusy = false;
+    WeChatBusyState prevBusy = WeChatBusyState::None;
+    uint32_t openLoggedMask = 0;
     HWND lastMainHwnd = nullptr;
     // The chat rows last found in a shown window. Closed to the tray, WeChat's window leaves its
     // rows out of the tree (Qt skips hidden controls), but rows already held still read via
@@ -612,15 +665,17 @@ void WeChatSource::Run()
             try {
                 const ULONGLONG tick = GetTickCount64();
                 if (!listed || tick - listed >= 10000 || (state < 2 && tick - listed >= 2000)) {
-                    DiscoverWeChatProcesses(procs);
+                    detail::DiscoverWeChatProcesses(procs);
                     listed = tick;
                     windows.SetProcesses(procs);
                 }
+                detail::HandlePendingWeChatOpen(uia.get(), cells.get(), wake_, stop_, openMu_, pendingOpenChat_, procs, lastMainHwnd, openLoggedMask);
                 if (procs.empty()) {
                     busyUntilTick = 0;
                     lastRead = 0;
                     followUpTick = 0;
                     sampledWhileBusy = wakePending_ = false;
+                    prevBusy = WeChatBusyState::None;
                     lastMainHwnd = nullptr;
                     report(0, L"WeChat is not running");
                     held.clear();
@@ -630,7 +685,7 @@ void WeChatSource::Run()
                     continue;
                 }
                 if (const DWORD skipMs = WeChatBusyOrThrottleWait(procs, !held.empty(), unread_.load(), tick, busyUntilTick, lastRead, followUpTick,
-                                                                  sampledWhileBusy, reading_, wakePending_, baseline)) {
+                                                                  sampledWhileBusy, reading_, wakePending_, baseline, prevBusy)) {
                     WaitForUiaWake(wake_, skipMs);
                     continue;
                 }
