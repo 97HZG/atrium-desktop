@@ -25,13 +25,22 @@ struct WifiNetwork {
     int signal = 0;         // 0..100
     bool secured = false;
     bool connected = false;
+    GUID interfaceGuid{};
+};
+
+enum class WifiListStatus { Ok, NoAdapter, AccessDenied, Error };
+
+struct WifiListResult {
+    WifiListStatus status = WifiListStatus::Ok;
+    std::vector<WifiNetwork> networks;
 };
 
 WifiState QueryWifi();
-// Networks in range, strongest first, one entry per SSID. rescan: ask the
-// adapter for a fresh scan first (waits up to ~4 s unless stopEvent is signaled).
-std::vector<WifiNetwork> ListWifi(bool rescan, HANDLE stopEvent = nullptr);
+std::vector<WifiNetwork> MergeWifiNetworks(std::vector<WifiNetwork> networks);
+WifiListStatus ClassifyWifiListStatus(int interfaceCount, bool anySuccess, bool anyAccessDenied, DWORD enumError = ERROR_SUCCESS);
+// Networks in range across all adapters, strongest first, one entry per SSID.
+WifiListResult ListWifi(bool rescan, HANDLE stopEvent = nullptr);
 bool ConnectWifi(const WifiNetwork& network);
-bool DisconnectWifi();
+bool DisconnectWifi(const GUID* interfaceGuid = nullptr);
 
 } // namespace atrium

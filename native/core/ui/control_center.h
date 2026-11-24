@@ -118,6 +118,7 @@ private:
     void Paint(Canvas& c);
     void PaintMain(Canvas& c, const Theme& t);
     void PaintWifi(Canvas& c, const Theme& t, D2D1_RECT_F card);
+    void PaintWifiEmpty(Canvas& c, const Theme& t, float w, float& y);
     void PaintBluetooth(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintSound(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintCast(Canvas& c, const Theme& t, D2D1_RECT_F card);
@@ -150,11 +151,11 @@ private:
         fastWorker_.Post(L"vol", [v] { SetVolume(v); });
         return true;
     }
-    void WifiOp(std::optional<WifiNetwork> n, UINT delayMs)
+    void WifiOp(WifiNetwork n, bool connect, UINT delayMs)
     {
         KillTimer(surface_.Hwnd(), kWifiAgainTimer);
-        wifiWorker_.Post({}, [this, n = std::move(n), gen = scanGen_, delayMs] {
-            n ? ConnectWifi(*n) : DisconnectWifi();
+        wifiWorker_.Post({}, [this, n = std::move(n), connect, gen = scanGen_, delayMs] {
+            connect ? ConnectWifi(n) : DisconnectWifi(&n.interfaceGuid);
             PostResult(WM_APP + 0x51, [] {}, gen, LPARAM(delayMs));
         });
     }
@@ -168,6 +169,7 @@ private:
     void OnProjected();
     void OnRadiosResult();
     void OnAudioResult();
+    void OnWifiList();
     bool ActivateSubpage(const std::wstring& id);
     bool OnAsync(UINT m, WPARAM w, LPARAM l)
     {
@@ -254,6 +256,7 @@ private:
     // (most desktop monitors) or is not read yet.
     bool CanSetBrightness() const { return brightness_ >= 0; }
     std::vector<WifiNetwork> networks_;
+    WifiListStatus wifiStatus_ = WifiListStatus::Ok;
     bool scanning_ = false, scanned_ = false;
     unsigned scanGen_ = 0, acceptedGen_ = 0;
     bool scanBusy_ = false, scanPending_ = false, scanRescan_ = false;
@@ -309,7 +312,7 @@ private:
     bool resultStop_ = false;
     std::unique_ptr<RadioRead> radioSlot_;
     std::unique_ptr<AudioRead> audioSlot_;
-    std::optional<std::pair<unsigned, std::vector<WifiNetwork>>> wifiListSlot_;
+    std::optional<std::pair<unsigned, WifiListResult>> wifiListSlot_;
     std::optional<std::pair<WPARAM, std::wstring>> castSlot_;
     HANDLE stopEvent_ = nullptr;
     Worker fastWorker_, slowWorker_, wifiWorker_;

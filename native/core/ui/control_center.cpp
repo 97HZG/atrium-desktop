@@ -23,13 +23,14 @@ namespace {
 
 using control::kGap;
 using control::kPad;
+using control::kRowH;
 using control::kTopH;
 using control::kW;
-constexpr float kSliderH = 68, kHeader = 58, kRowH = 44, kFooter = 46;
+constexpr float kSliderH = 68, kHeader = 58, kFooter = 46;
 constexpr float kSection = 30, kAppRowH = 50, kModeH = 78;
 constexpr int kMaxRows = 6, kMaxOutputs = 4, kMaxApps = 5, kMaxDisplays = 4;
 constexpr double kPageMs = 320;
-constexpr UINT WM_WIFI_LIST = WM_APP + 0x50;   // wParam generation, lParam std::vector<WifiNetwork>*
+constexpr UINT WM_WIFI_LIST = WM_APP + 0x50;   // wParam generation, lParam WifiListResult*
 constexpr UINT WM_CC_RADIOS = WM_APP + 0x52;   // lParam RadioRead*
 constexpr UINT WM_CC_BRIGHT = WM_APP + 0x53;   // the brightness worker is done (wParam: the value it set last)
 constexpr UINT WM_CC_AUDIO = WM_APP + 0x54;    // lParam AudioRead*
@@ -115,6 +116,8 @@ float ControlCenter::PageHeight(Page page) const
     size_t n = page == Page::Wifi ? networks_.size() : devices_.size();
     bool off = page == Page::Wifi ? radiosRead_ && !radios_.wifiOn : !radios_.btOn;
     int rows = off ? 1 : std::clamp(int(n), 1, kMaxRows);
+    if (page == Page::Wifi && !off && networks_.empty() && scanned_ && wifiStatus_ == WifiListStatus::AccessDenied)
+        rows = 2;
     return kHeader + float(rows) * kRowH + kFooter + 6;
 }
 
@@ -241,8 +244,8 @@ void ControlCenter::Scan(bool rescan)
     rescan = std::exchange(scanRescan_, false);
     unsigned gen = ++scanGen_;
     wifiWorker_.Post(L"scan", [this, rescan, gen] {
-        std::vector<WifiNetwork> list = ListWifi(rescan, stopEvent_);
-        PostResult(WM_WIFI_LIST, [this, gen, &list] { wifiListSlot_ = {gen, std::move(list)}; });
+        WifiListResult res = ListWifi(rescan, stopEvent_);
+        PostResult(WM_WIFI_LIST, [this, gen, &res] { wifiListSlot_ = {gen, std::move(res)}; });
     });
 }
 
@@ -637,21 +640,16 @@ void ControlCenter::PaintWifi(Canvas& c, const Theme& t, D2D1_RECT_F card)
         hits_.push_back({rescan, L"rescan"});
     }
     float y = card.top + kHeader;
-    auto message = [&](const wchar_t* text) {
-        c.Text(text, D2D1::RectF(kPad, y, w - kPad, y + kRowH), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
-        y += kRowH;
-    };
     const bool on = !radiosRead_ || radios_.wifiOn;
-    if (!on)
-        message(Tr(L"Wi-Fi is off"));
-    else if (networks_.empty())
-        message(scanned_ ? Tr(L"No Wi-Fi networks found") : Tr(L"Searching for networks…"));
+    if (!on || networks_.empty())
+        PaintWifiEmpty(c, t, w, y);
     const int maxRows = std::clamp(int((card.bottom - y - kFooter - 6) / kRowH), 1, kMaxRows);
     for (int i = 0; on && i < maxRows && i < int(networks_.size()); ++i) {
         const WifiNetwork& n = networks_[size_t(i)];
         D2D1_RECT_F row = D2D1::RectF(kPad - 4, y + 2, w - kPad + 4, y + kRowH - 2);
         std::wstring id = L"net:" + std::to_wstring(i);
-        bool hot = hover_ == id || (hover_ == L"disconnect" && n.connected);
+        std::wstring disId = L"disconnect:" + std::to_wstring(i);
+        bool hot = hover_ == id || (hover_ == disId && n.connected);
         float hv = Hover(c, id, hot);
         if (hv > 0.001f)
             c.Fill(row, (row.bottom - row.top) / 2, Alpha(pressed_ == id ? t.press : t.hover, hv));
@@ -669,10 +667,10 @@ void ControlCenter::PaintWifi(Canvas& c, const Theme& t, D2D1_RECT_F card)
                 float bw = c.TextWidth(label, 12) + 24;
                 D2D1_RECT_F b = D2D1::RectF(right - bw, cy - 14, right, cy + 14);
                 c.BeginGroup(hv, 1, (b.left + b.right) / 2, cy);
-                c.Fill(b, 14, Alpha(hover_ == L"disconnect" ? t.press : t.hover, 1.4f));
+                c.Fill(b, 14, Alpha(hover_ == disId ? t.press : t.hover, 1.4f));
                 c.Text(label, b, 12, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
                 c.EndGroup();
-                hits_.push_back({b, L"disconnect"});
+                hits_.push_back({b, disId});
             } else {
                 c.Text(Tr(L"Connected"), D2D1::RectF(right - 80, row.top, right, row.bottom), 12, t.accent, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
             }
@@ -978,8 +976,8 @@ std::wstring ControlCenter::HitAt(POINT pt) const
     float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s - cardTop_;
     // Small controls first: they sit on larger rows.
     for (const Hit& h : hits_)
-        if ((h.id == L"disconnect" || h.id == L"mute" || h.id == L"wifi" || h.id == L"bt" || h.id == L"rescan" || h.id == L"castoff" || h.id == L"castscan" ||
-             h.id.starts_with(L"amute:")) &&
+        if ((h.id.starts_with(L"disconnect:") || h.id == L"mute" || h.id == L"wifi" || h.id == L"bt" || h.id == L"rescan" || h.id == L"castoff" ||
+             h.id == L"castscan" || h.id.starts_with(L"amute:")) &&
             In(h.rect, x, y))
             return h.id;
     for (const Hit& h : hits_)
@@ -1203,6 +1201,22 @@ void ControlCenter::OnAudioResult()
     surface_.Invalidate();
 }
 
+void ControlCenter::OnWifiList()
+{
+    auto r = TakeResult(wifiListSlot_);
+    scanBusy_ = false;
+    bool again = scanPending_;
+    if (again && surface_.Visible())
+        Scan(scanRescan_);
+    if (r && r->first > acceptedGen_ && surface_.Visible() && (r->first == scanGen_ || !r->second.networks.empty())) {
+        acceptedGen_ = r->first;
+        wifiStatus_ = r->second.status;
+        networks_ = std::move(r->second.networks);
+        scanned_ = true;
+        scanning_ = again || r->first != scanGen_;
+        surface_.Invalidate();
+    }
+}
 bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
 {
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
@@ -1260,21 +1274,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
         else
             brightPending_ = -1;
         return true;
-    case WM_WIFI_LIST: {
-        auto r = TakeResult(wifiListSlot_);
-        scanBusy_ = false;
-        bool again = scanPending_;
-        if (again && surface_.Visible())
-            Scan(scanRescan_);
-        if (r && r->first == scanGen_ && r->first > acceptedGen_ && surface_.Visible()) {
-            acceptedGen_ = r->first;
-            networks_ = std::move(r->second);
-            scanned_ = true;
-            scanning_ = again;
-            surface_.Invalidate();
-        }
-        return true;
-    }
+    case WM_WIFI_LIST: OnWifiList(); return true;
     case WM_MOUSEMOVE: {
         if (!tracking_) {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};

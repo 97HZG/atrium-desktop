@@ -148,7 +148,7 @@ int main()
     if (!Require(canceled != nullptr, "CreateEventW must succeed"))
         return 1;
     const auto t0 = std::chrono::steady_clock::now();
-    const std::vector<WifiNetwork> nets = ListWifi(true, canceled);
+    const std::vector<WifiNetwork> nets = ListWifi(true, canceled).networks;
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
     CloseHandle(canceled);
     if (!Require(nets.empty() && ms < 1000, "ListWifi(true, signaled) must return empty without 3.5s sleep"))

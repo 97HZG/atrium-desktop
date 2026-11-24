@@ -20,6 +20,7 @@ namespace {
 using control::kGap;
 using control::kModuleH;
 using control::kPad;
+using control::kRowH;
 using control::kTopH;
 using control::kW;
 
@@ -237,8 +238,15 @@ bool ControlCenter::ActivateSubpage(const std::wstring& id)
         }
         return true;
     }
-    if (id == L"disconnect") {
-        WifiOp(std::nullopt, 1500);
+    if (id == L"locsettings") {
+        Close();
+        ShellExecuteW(nullptr, L"open", L"ms-settings:privacy-location", nullptr, nullptr, SW_SHOWNORMAL);
+        return true;
+    }
+    if (id.starts_with(L"disconnect:")) {
+        size_t i = size_t(std::stoul(id.substr(11)));
+        if (i < networks_.size() && networks_[i].connected)
+            WifiOp(networks_[i], false, 1500);
         return true;
     }
     if (id.starts_with(L"net:")) {
@@ -250,13 +258,35 @@ bool ControlCenter::ActivateSubpage(const std::wstring& id)
             Close();
             ShellExecuteW(nullptr, L"open", L"ms-availablenetworks:", nullptr, nullptr, SW_SHOWNORMAL);
         } else {
-            WifiOp(n, 4000);
+            WifiOp(n, true, 4000);
             scanning_ = true;
             surface_.Invalidate();
         }
         return true;
     }
     return false;
+}
+
+void ControlCenter::PaintWifiEmpty(Canvas& c, const Theme& t, float w, float& y)
+{
+    auto message = [&](const wchar_t* text) {
+        c.Text(text, D2D1::RectF(kPad, y, w - kPad, y + kRowH), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        y += kRowH;
+    };
+    if (radiosRead_ && !radios_.wifiOn)
+        message(Tr(L"Wi-Fi is off"));
+    else if (!scanned_)
+        message(Tr(L"Searching for networks…"));
+    else if (wifiStatus_ == WifiListStatus::AccessDenied) {
+        message(Tr(L"Location access is needed to list Wi-Fi networks"));
+        D2D1_RECT_F row = D2D1::RectF(kPad - 4, y + 2, w - kPad + 4, y + kRowH - 2);
+        if (float hv = Hover(c, L"locsettings", hover_ == L"locsettings"); hv > 0.001f)
+            c.Fill(row, (row.bottom - row.top) / 2, Alpha(pressed_ == L"locsettings" ? t.press : t.hover, hv));
+        c.Text(Tr(L"Open location settings"), D2D1::RectF(row.left + 12, row.top, row.right - 12, row.bottom), 13, t.accent, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        hits_.push_back({row, L"locsettings"});
+        y += kRowH;
+    } else
+        message(Tr(wifiStatus_ == WifiListStatus::Error ? L"Could not read Wi-Fi networks" : L"No Wi-Fi networks found"));
 }
 
 } // namespace atrium

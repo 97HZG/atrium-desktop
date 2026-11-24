@@ -6,6 +6,8 @@
 #include <wlanapi.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <map>
 
 namespace atrium {
@@ -19,7 +21,8 @@ public:
     Wlan()
     {
         DWORD version = 0;
-        if (WlanOpenHandle(2, nullptr, &version, &handle_) != ERROR_SUCCESS)
+        openError_ = WlanOpenHandle(2, nullptr, &version, &handle_);
+        if (openError_ != ERROR_SUCCESS)
             handle_ = nullptr;
     }
     ~Wlan()
@@ -32,6 +35,16 @@ public:
     Wlan(const Wlan&) = delete;
     Wlan& operator=(const Wlan&) = delete;
     HANDLE Handle() const { return handle_; }
+    DWORD EnumInterfaces(std::vector<GUID>& out)
+    {
+        if (!handle_)
+            return openError_;
+        if (DWORD r = list_ ? ERROR_SUCCESS : WlanEnumInterfaces(handle_, nullptr, &list_); r != ERROR_SUCCESS)
+            return r;
+        for (DWORD i = 0; list_ && i < list_->dwNumberOfItems; ++i)
+            out.push_back(list_->InterfaceInfo[i].InterfaceGuid);
+        return ERROR_SUCCESS;
+    }
     // The connected Wi-Fi interface, or the first if none is connected.
     const GUID* Interface()
     {
@@ -49,6 +62,7 @@ public:
 
 private:
     HANDLE handle_ = nullptr;
+    DWORD openError_ = ERROR_SUCCESS;
     WLAN_INTERFACE_INFO_LIST* list_ = nullptr;
 };
 
@@ -88,55 +102,121 @@ WifiState QueryWifi()
     return s;
 }
 
-std::vector<WifiNetwork> ListWifi(bool rescan, HANDLE stopEvent)
+std::vector<WifiNetwork> MergeWifiNetworks(std::vector<WifiNetwork> networks)
 {
-    std::vector<WifiNetwork> out;
-    if (stopEvent && WaitForSingleObject(stopEvent, 0) == WAIT_OBJECT_0)
-        return out;
-    Wlan w;
-    const GUID* itf = w.Interface();
-    if (!itf)
-        return out;
-    if (rescan && WlanScan(w.Handle(), itf, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-        // results arrive within about 4 s (no notification needed for a list)
-        HANDLE waitEvent = stopEvent ? stopEvent : CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        const bool stopped = waitEvent && WaitForSingleObject(waitEvent, 3500) == WAIT_OBJECT_0;
-        if (!stopEvent && waitEvent)
-            CloseHandle(waitEvent);
-        if (stopped)
-            return out;
-    }
-    WLAN_AVAILABLE_NETWORK_LIST* list = nullptr;
-    if (WlanGetAvailableNetworkList(w.Handle(), itf, 0, nullptr, &list) != ERROR_SUCCESS || !list)
-        return out;
     std::map<std::wstring, WifiNetwork> bySsid;
-    for (DWORD i = 0; i < list->dwNumberOfItems; ++i) {
-        const WLAN_AVAILABLE_NETWORK& a = list->Network[i];
-        WifiNetwork n;
-        n.ssid = Ssid(a.dot11Ssid);
+    for (WifiNetwork& n : networks) {
         if (n.ssid.empty())
-            continue; // hidden network
-        n.signal = int(a.wlanSignalQuality);
-        n.secured = a.bSecurityEnabled != FALSE;
-        n.connected = (a.dwFlags & WLAN_AVAILABLE_NETWORK_CONNECTED) != 0;
-        if (a.dwFlags & WLAN_AVAILABLE_NETWORK_HAS_PROFILE)
-            n.profile = a.strProfileName;
-        // The list has one entry per profile and one without: merge by SSID.
-        WifiNetwork& m = bySsid[n.ssid];
-        if (m.ssid.empty()) {
-            m = n;
-        } else {
-            m.signal = std::max(m.signal, n.signal);
-            m.connected |= n.connected;
-            if (m.profile.empty())
-                m.profile = n.profile;
-        }
+            continue;
+        auto [it, inserted] = bySsid.emplace(n.ssid, n);
+        if (inserted)
+            continue;
+        WifiNetwork& m = it->second;
+        int sig = std::max(m.signal, n.signal);
+        if (n.connected && !m.connected)
+            m = std::move(n);
+        else if (n.connected == m.connected && m.profile.empty() && !n.profile.empty())
+            m = {m.ssid, std::move(n.profile), sig, n.secured, m.connected, n.interfaceGuid};
+        else
+            m.secured |= n.secured;
+        m.signal = sig;
     }
-    WlanFreeMemory(list);
+    std::vector<WifiNetwork> out;
+    out.reserve(bySsid.size());
     for (auto& [ssid, n] : bySsid)
-        out.push_back(n);
+        out.push_back(std::move(n));
     std::ranges::sort(out, [](const WifiNetwork& a, const WifiNetwork& b) { return a.connected != b.connected ? a.connected : a.signal > b.signal; });
     return out;
+}
+
+WifiListStatus ClassifyWifiListStatus(int interfaceCount, bool anySuccess, bool anyAccessDenied, DWORD enumError)
+{
+    if (enumError != ERROR_SUCCESS)
+        return enumError == ERROR_ACCESS_DENIED ? WifiListStatus::AccessDenied : WifiListStatus::Error;
+    if (interfaceCount <= 0)
+        return WifiListStatus::NoAdapter;
+    if (anySuccess)
+        return WifiListStatus::Ok;
+    return anyAccessDenied ? WifiListStatus::AccessDenied : WifiListStatus::Error;
+}
+
+namespace {
+
+void ReadInterface(HANDLE h, const GUID& guid, std::vector<WifiNetwork>& raw, bool& anyOk, bool& denied, DWORD& err)
+{
+    auto note = [&](DWORD r) {
+        denied |= (r == ERROR_ACCESS_DENIED);
+        err = r;
+    };
+    DWORD size = 0;
+    WLAN_CONNECTION_ATTRIBUTES* conn = nullptr;
+    DWORD qr = WlanQueryInterface(h, &guid, wlan_intf_opcode_current_connection, nullptr, &size, reinterpret_cast<void**>(&conn), nullptr);
+    if (qr == ERROR_SUCCESS && conn) {
+        anyOk = true;
+        if (conn->isState == wlan_interface_state_connected) {
+            std::wstring ssid = Ssid(conn->wlanAssociationAttributes.dot11Ssid);
+            if (ssid.empty())
+                ssid = conn->strProfileName;
+            if (!ssid.empty())
+                raw.push_back({std::move(ssid), conn->strProfileName, int(conn->wlanAssociationAttributes.wlanSignalQuality),
+                               conn->wlanSecurityAttributes.bSecurityEnabled != FALSE, true, guid});
+        }
+        WlanFreeMemory(conn);
+    } else if (qr != ERROR_INVALID_STATE)
+        note(qr);
+    WLAN_AVAILABLE_NETWORK_LIST* list = nullptr;
+    DWORD lr = WlanGetAvailableNetworkList(h, &guid, WLAN_AVAILABLE_NETWORK_INCLUDE_ALL_MANUAL_HIDDEN_PROFILES, nullptr, &list);
+    if (lr == ERROR_SUCCESS && list) {
+        anyOk = true;
+        for (DWORD i = 0; i < list->dwNumberOfItems; ++i) {
+            const WLAN_AVAILABLE_NETWORK& a = list->Network[i];
+            if (std::wstring ssid = Ssid(a.dot11Ssid); !ssid.empty())
+                raw.push_back({std::move(ssid), (a.dwFlags & WLAN_AVAILABLE_NETWORK_HAS_PROFILE) ? a.strProfileName : L"", int(a.wlanSignalQuality),
+                               a.bSecurityEnabled != FALSE, (a.dwFlags & WLAN_AVAILABLE_NETWORK_CONNECTED) != 0, guid});
+        }
+        WlanFreeMemory(list);
+    } else
+        note(lr);
+}
+
+} // namespace
+
+WifiListResult ListWifi(bool rescan, HANDLE stopEvent)
+{
+    WifiListResult result;
+    if (stopEvent && WaitForSingleObject(stopEvent, 0) == WAIT_OBJECT_0)
+        return result;
+    Wlan w;
+    std::vector<GUID> itfs;
+    DWORD enumErr = w.EnumInterfaces(itfs), lastErr = enumErr;
+    bool anySuccess = false, anyAccessDenied = false, anyScanOk = false;
+    if (enumErr == ERROR_SUCCESS && !itfs.empty()) {
+        if (rescan) {
+            for (const GUID& guid : itfs)
+                if (DWORD sr = WlanScan(w.Handle(), &guid, nullptr, nullptr, nullptr); sr == ERROR_SUCCESS)
+                    anyScanOk = true;
+                else if (lastErr = sr; sr == ERROR_ACCESS_DENIED)
+                    anyAccessDenied = true;
+            if (anyScanOk) {
+                HANDLE waitEvent = stopEvent ? stopEvent : CreateEventW(nullptr, TRUE, FALSE, nullptr);
+                const bool stopped = waitEvent && WaitForSingleObject(waitEvent, 3500) == WAIT_OBJECT_0;
+                if (!stopEvent && waitEvent)
+                    CloseHandle(waitEvent);
+                if (stopped)
+                    return result;
+            }
+        }
+        std::vector<WifiNetwork> raw;
+        for (const GUID& guid : itfs)
+            ReadInterface(w.Handle(), guid, raw, anySuccess, anyAccessDenied, lastErr);
+        result.networks = MergeWifiNetworks(std::move(raw));
+    }
+    result.status = ClassifyWifiListStatus(int(itfs.size()), anySuccess, anyAccessDenied, enumErr);
+    DWORD logErr = result.status == WifiListStatus::Ok ? ERROR_SUCCESS : (result.status == WifiListStatus::AccessDenied ? ERROR_ACCESS_DENIED : lastErr);
+    static std::atomic<uint64_t> lastLogged{~uint64_t{0}};
+    if (uint64_t key = (uint64_t(result.status) << 32) | uint64_t(logErr); lastLogged.exchange(key) != key)
+        Log(L"wifi: list status=%d err=%lu", int(result.status), logErr);
+    return result;
 }
 
 bool ConnectWifi(const WifiNetwork& network)
@@ -144,7 +224,7 @@ bool ConnectWifi(const WifiNetwork& network)
     if (network.profile.empty())
         return false;
     Wlan w;
-    const GUID* itf = w.Interface();
+    const GUID* itf = !IsEqualGUID(network.interfaceGuid, GUID{}) ? &network.interfaceGuid : w.Interface();
     if (!itf)
         return false;
     WLAN_CONNECTION_PARAMETERS p{};
@@ -156,10 +236,10 @@ bool ConnectWifi(const WifiNetwork& network)
     return r == ERROR_SUCCESS;
 }
 
-bool DisconnectWifi()
+bool DisconnectWifi(const GUID* interfaceGuid)
 {
     Wlan w;
-    const GUID* itf = w.Interface();
+    const GUID* itf = interfaceGuid && !IsEqualGUID(*interfaceGuid, GUID{}) ? interfaceGuid : w.Interface();
     DWORD r = itf ? WlanDisconnect(w.Handle(), itf, nullptr) : ERROR_NOT_FOUND;
     Log(L"wifi: disconnect: %lu", r);
     return r == ERROR_SUCCESS;
