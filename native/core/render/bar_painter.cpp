@@ -173,7 +173,7 @@ void BarPainter::StepWave(const BarScene& scene, double dt, BarAnimation& anim)
     const float curWidth = wave_.Width();
     const float curHeight = wave_.Height(scene.magnifyLift);
     const float curMag = wave_.Scale(curCentre, 1.f);
-    if (curRise != prevRise || curHeight != prevHeight || (curRise > 0.f && (curCentre != prevCentre || curWidth != prevWidth)))
+    if (curRise != prevRise || curHeight != prevHeight || curMag != prevMag || (curRise > 0.f && (curCentre != prevCentre || curWidth != prevWidth)))
         anim.glass = true;
     if (curMag != prevMag || curMag > 1.0001f)
         anim.body = true;
@@ -484,7 +484,7 @@ void BarPainter::Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, 
             d2d->Clear(D2D1::ColorF(0, 0, 0, 0));
             DrawContent(d2d, scene, ink, time, date);
             d2d->SetTarget(target.get());
-            layerKey_ = (anim.body || forceBody) ? std::wstring() : contentKey;
+            layerKey_ = anim.body ? std::wstring() : contentKey;
             layerEdge_ = scene.edge;
         }
     }

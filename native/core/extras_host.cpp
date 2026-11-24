@@ -109,10 +109,11 @@ void ExtrasHost::Apply(const Settings& s, float radius)
         const std::shared_ptr<std::atomic<bool>> wakeQueued = wakeQueued_;
         const HWND host = host_;
         bool wasAudible = false;
-        media_ = std::make_unique<MediaSessionWatcher>(host_, WM_MEDIA_STATE, [feed, wakeQueued, host, wasAudible](float peak, bool playing) mutable {
+        media_ = std::make_unique<MediaSessionWatcher>(host_, WM_MEDIA_STATE, [feed, wakeQueued, host, wasAudible](float peak, bool sampling) mutable {
             feed->peak.store(peak, std::memory_order_relaxed);
-            feed->playing.store(playing, std::memory_order_relaxed);
-            const bool audible = playing && MusicBars::Loudness(feed->EffectivePeak()) > 0.f;
+            if (sampling)
+                feed->playing.store(true, std::memory_order_relaxed);
+            const bool audible = feed->playing.load(std::memory_order_relaxed) && MusicBars::Loudness(feed->EffectivePeak()) > 0.f;
             if (audible && (!wasAudible || feed->needWake.exchange(false, std::memory_order_acq_rel)) && host &&
                 !wakeQueued->exchange(true, std::memory_order_acq_rel)) {
                 if (!PostMessageW(host, WM_MEDIA_WAKE, 0, 0))
@@ -129,6 +130,7 @@ void ExtrasHost::Apply(const Settings& s, float radius)
         media_->SetFilter(s.nowPlayingShowPaused, s.nowPlayingAppMode, s.nowPlayingApps);
         UpdateSampling();
     }
+    feed_->playing.store(musicOn_ && last_.active && last_.state == MediaPlaybackState::Playing, std::memory_order_relaxed);
     if (motionChanged || rhythmChanged)
         WakeMusic();
     const bool stacksChanged =

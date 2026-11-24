@@ -14,6 +14,7 @@
 #include <deque>
 #include <functional>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace atrium {
@@ -111,9 +112,10 @@ private:
     void ExtendBackdropEdges(ID3D11Texture2D* frame, const D3D11_TEXTURE2D_DESC& source, int x, int y);
     void EnsureBackBufferRtv();
     void EnsureGlassCache();
-    std::vector<GlassParams> NormalizeShapes(const std::vector<GlassParams>& shapes) const;
-    void RenderGlassShapes(ID3D11RenderTargetView* target, const std::vector<GlassParams>& shapes);
+    void NormalizeShapes(std::span<const GlassParams> shapes);
+    void RenderGlassShapes(ID3D11RenderTargetView* target, std::span<const GlassParams> shapes);
     bool DrawOverlay(const std::function<void(ID2D1DeviceContext2*)>& overlay);
+    bool PresentSpan(std::span<const GlassParams> shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty);
 
     Gpu gpu_;
     int w_, h_;
@@ -162,7 +164,7 @@ private:
     winrt::com_ptr<ID3D11ShaderResourceView> roiSrv_, presentedSrv_;
     winrt::com_ptr<ID3D11Texture2D> glassCache_;
     winrt::com_ptr<ID3D11RenderTargetView> glassCacheRtv_;
-    std::vector<GlassParams> cachedGlassParams_;
+    std::vector<GlassParams> normParams_, cachedGlassParams_;
     bool glassCacheValid_ = false;
     bool lastGlassDrawn_ = false;
     bool hasPresented_ = false;

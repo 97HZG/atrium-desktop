@@ -271,6 +271,7 @@ void GlassRenderer::CreateSizeDependent()
     gpu_.context->UpdateSubresource(cmpCb_.get(), 0, nullptr, cp, 0, 0);
     glassCache_ = nullptr;
     glassCacheRtv_ = nullptr;
+    normParams_.clear();
     cachedGlassParams_.clear();
     glassCacheValid_ = false;
     hasPresented_ = false;
@@ -513,10 +514,10 @@ void GlassRenderer::EnsureGlassCache()
     glassCacheValid_ = false;
 }
 
-std::vector<GlassParams> GlassRenderer::NormalizeShapes(const std::vector<GlassParams>& shapes) const
+void GlassRenderer::NormalizeShapes(std::span<const GlassParams> shapes)
 {
-    std::vector<GlassParams> norm = shapes;
-    for (auto& p : norm) {
+    normParams_.assign(shapes.begin(), shapes.end());
+    for (auto& p : normParams_) {
         p.sizeX = float(w_);
         p.sizeY = float(h_);
         p.roiOriginX = float(roiOrigin_.x);
@@ -529,10 +530,9 @@ std::vector<GlassParams> GlassRenderer::NormalizeShapes(const std::vector<GlassP
             p.shapeB = float(h_) - p.inset;
         }
     }
-    return norm;
 }
 
-void GlassRenderer::RenderGlassShapes(ID3D11RenderTargetView* target, const std::vector<GlassParams>& shapes)
+void GlassRenderer::RenderGlassShapes(ID3D11RenderTargetView* target, std::span<const GlassParams> shapes)
 {
     auto* ctx = gpu_.context.get();
     const float clear[4] = {0, 0, 0, 0};
@@ -587,24 +587,30 @@ bool GlassRenderer::DrawOverlay(const std::function<void(ID2D1DeviceContext2*)>&
 
 bool GlassRenderer::Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty)
 {
-    return Present(std::vector<GlassParams>{params}, overlay, backdropDirty);
+    return PresentSpan(std::span<const GlassParams>(&params, 1), overlay, backdropDirty);
 }
 
 bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty)
 {
+    return PresentSpan(shapes, overlay, backdropDirty);
+}
+
+bool GlassRenderer::PresentSpan(std::span<const GlassParams> shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty)
+{
     auto* ctx = gpu_.context.get();
     EnsureBackBufferRtv();
-    std::vector<GlassParams> norm = NormalizeShapes(shapes);
+    NormalizeShapes(shapes);
     if (overlay && d2d_) {
-        const bool paramsChanged = norm.size() != cachedGlassParams_.size() ||
-                                   (!norm.empty() && std::memcmp(norm.data(), cachedGlassParams_.data(), norm.size() * sizeof(GlassParams)) != 0);
-        const bool needGlass = backdropDirty || !glassCacheValid_ || !glassCache_ || paramsChanged;
         EnsureGlassCache();
+        const bool paramsChanged =
+            normParams_.size() != cachedGlassParams_.size() ||
+            (!normParams_.empty() && std::memcmp(normParams_.data(), cachedGlassParams_.data(), normParams_.size() * sizeof(GlassParams)) != 0);
+        const bool needGlass = backdropDirty || !glassCacheValid_ || paramsChanged;
         lastGlassDrawn_ = needGlass;
         if (needGlass) {
             PrepareBackdrop();
-            RenderGlassShapes(glassCacheRtv_.get(), norm);
-            cachedGlassParams_ = std::move(norm);
+            RenderGlassShapes(glassCacheRtv_.get(), normParams_);
+            cachedGlassParams_.assign(normParams_.begin(), normParams_.end());
             glassCacheValid_ = true;
             ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
             hasPresented_ = hasBackdrop_;
@@ -616,7 +622,7 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
             return false;
     } else {
         PrepareBackdrop(); // a present can need the newest glass before its comparison completes
-        RenderGlassShapes(rtv_.get(), norm);
+        RenderGlassShapes(rtv_.get(), normParams_);
         lastGlassDrawn_ = true;
         ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
         hasPresented_ = hasBackdrop_;

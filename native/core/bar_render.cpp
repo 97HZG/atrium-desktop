@@ -395,7 +395,8 @@ struct BarRender {
         const ULONGLONG now = GetTickCount64();
         const bool backdropDirty = forceGlass || changed || pendingBackdropDirty;
         const bool needPresent = backdropDirty || snap.generation != drawnGeneration || textKey != drawnText || dark != drawnDark ||
-                                 darkIcons != drawnDarkIcons || anim.Any() || wasGlass || wasBody || wasMusic || barOwed || now - lastPresent > kStaleMs;
+                                 darkIcons != drawnDarkIcons || anim.Any() || wasGlass || wasBody || wasMusic || barOwed || owedBody || owedMusic ||
+                                 now - lastPresent > kStaleMs;
         if (!needPresent) {
             ++stats.skipped; // echo of our own present, or nothing new under the glass
             if (hadBackdrop)
@@ -453,7 +454,7 @@ struct BarRender {
     bool StepFrame(const Gpu& gpu, BackdropSource& capture, GlassRenderer& renderer, BarPainter& painter, PanelGlassHost& panelHost, const HANDLE* handles,
                    bool& pendingSnap, Bar::SessionEnd& stop)
     {
-        const bool owed = barOwed || panelHost.InkDue() || panelHost.AnyOwed();
+        const bool owed = barOwed || owedBody || owedMusic || panelHost.InkDue() || panelHost.AnyOwed();
         const bool paced = animating || panelsMoving || owed;
         const bool readback = renderer.ReadbackPending() || panelHost.AnyReadbackPending();
         if (WaitNextRenderTick(paced, readback, paused, snap.settings.showClock, snap.settings.showClockSeconds, pendingSnap, handles, tick) == WAIT_OBJECT_0) {
