@@ -110,11 +110,16 @@ public sealed partial class MainWindow
             cards.StopAnimation("Opacity");
             cards.Opacity = 0;
         }
-        string caption = corner
-            ? s.NotifyHideBody ? "Main screen corner · new notifications slide in · hides after {0:0} s · content hidden"
-                               : "Main screen corner · new notifications slide in · hides after {0:0} s"
-            : s.NotifyHideBody ? "Follow the taskbar · hides after {0:0} s · content hidden" : "Follow the taskbar · hides after {0:0} s";
-        NotifyCaption.Text = Loc.F(caption, s.NotifyTimeout);
+        string caption = s.NotifyAlways
+            ? corner
+                ? s.NotifyHideBody ? "Main screen corner · new notifications slide in · stays until dismissed · content hidden"
+                                   : "Main screen corner · new notifications slide in · stays until dismissed"
+                : s.NotifyHideBody ? "Follow the taskbar · stays until dismissed · content hidden" : "Follow the taskbar · stays until dismissed"
+            : corner
+                ? s.NotifyHideBody ? "Main screen corner · new notifications slide in · hides after {0:0} s · content hidden"
+                                   : "Main screen corner · new notifications slide in · hides after {0:0} s"
+                : s.NotifyHideBody ? "Follow the taskbar · hides after {0:0} s · content hidden" : "Follow the taskbar · hides after {0:0} s";
+        NotifyCaption.Text = s.NotifyAlways ? Loc.T(caption) : Loc.F(caption, s.NotifyTimeout);
 
         // Their glass: rendered over the picture where they rest; each card carries its own piece.
         PostTiles(NotifyCards, w, h, 1, [back, front], null, f =>

@@ -93,6 +93,7 @@ internal sealed class BarSettings
     // system's ("run as administrator", "properties").
     public bool WindowsContextMenu { get; set; } = true;
     public double NotifyTimeout { get; set; } = 6;    // seconds a popup stays
+    public bool NotifyAlways { get; set; }            // popups stay until dismissed
     public string NotifyPlacement { get; set; } = "dock"; // dock (default) | topLeft | topRight | bottomLeft | bottomRight
     public static readonly string[] NotifyCorners = ["topLeft", "topRight", "bottomLeft", "bottomRight"];
     public bool NotifyHideBody { get; set; }           // privacy: no message text, excluded from capture
@@ -245,6 +246,7 @@ internal sealed class BarSettings
             ["taskbarRightPrimaryOnly"] = TaskbarRightPrimaryOnly,
             ["windowsContextMenu"] = WindowsContextMenu,
             ["notifyTimeout"] = NotifyTimeout,
+            ["notifyAlways"] = NotifyAlways,
             ["notifyPlacement"] = NotifyPlacement,
             ["notifyHideBody"] = NotifyHideBody,
             ["notifyFullscreen"] = NotifyFullscreen,
@@ -365,6 +367,7 @@ internal sealed class BarSettings
         s.AutoWidth = Flag("autoWidth", f.AutoWidth);
         s.ShowRunning = Flag("showRunning", f.ShowRunning);
         s.NotifyTimeout = Math.Clamp(Num("notifyTimeout", f.NotifyTimeout), 3, 30);
+        s.NotifyAlways = Flag("notifyAlways", f.NotifyAlways);
         s.NotifyHideBody = Flag("notifyHideBody", f.NotifyHideBody);
         s.NotifyFullscreen = Flag("notifyFullscreen", f.NotifyFullscreen);
         s.ImeStatus = Flag("imeStatus", f.ImeStatus);
@@ -554,6 +557,7 @@ internal sealed class BarSettings
         TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
         BarReserve == o.BarReserve && BarFullscreenHide == o.BarFullscreenHide &&
         BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && ControlModules.SequenceEqual(o.ControlModules) && NotifyTimeout == o.NotifyTimeout &&
+        NotifyAlways == o.NotifyAlways &&
         NotifyHideBody == o.NotifyHideBody && NotifyFullscreen == o.NotifyFullscreen &&
         ImeStatus == o.ImeStatus && ImeBubble == o.ImeBubble &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat &&

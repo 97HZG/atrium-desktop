@@ -171,7 +171,7 @@ foreach (var edit in new Action<BarSettings>[]
 {
     s => s.DockDisplayMode = "fixed", s => s.DockDisplayDelay += 50, s => s.DockDisplay += "other",
     s => s.DesktopDisplay += "other", s => s.TaskbarApps = "all", s => s.NotifyPlacement = "dock",
-    s => s.NotifyFullscreen = true, s => s.TaskbarRightPrimaryOnly = false,
+    s => s.NotifyFullscreen = true, s => s.NotifyAlways = true, s => s.NotifyTimeout = 15, s => s.TaskbarRightPrimaryOnly = false,
     s => s.HoverRise = true, s => s.NearEnter += 2, s => s.NearLeave += 2,
 })
 {
@@ -192,6 +192,13 @@ Require(parsed.NotifyFullscreen && BarSettings.FromJson(parsed.ToJson(), new()).
         BarSettings.FromJson([], parsed).NotifyFullscreen &&
         BarSettings.FromJson(JsonNode.Parse("""{"notifyFullscreen":"bad"}""")!.AsObject(), parsed).NotifyFullscreen,
     "Fullscreen notification popups survive round-trip, partial update and malformed input.");
+Require(!new BarSettings().NotifyAlways && !BarSettings.FromJson([], new()).NotifyAlways,
+    "Always-visible notification popups are off by default.");
+parsed = BarSettings.FromJson(JsonNode.Parse("""{"notifyAlways":true,"notifyTimeout":15}""")!.AsObject(), new());
+Require(parsed.NotifyAlways && parsed.NotifyTimeout == 15 && BarSettings.FromJson(parsed.ToJson(), new()).SameAs(parsed) &&
+        BarSettings.FromJson([], parsed).NotifyAlways &&
+        BarSettings.FromJson(JsonNode.Parse("""{"notifyAlways":"bad"}""")!.AsObject(), parsed).NotifyAlways,
+    "NotifyAlways and NotifyTimeout survive round-trip, partial update and malformed input.");
 var displays = DesktopDisplay.Read();
 Require(displays.Count > 0 && displays.Any(d => d.Primary), "Connected displays and system primary must be discoverable.");
 Require(displays.All(d => d.Id.Length > 0 && d.Scale > 0 && d.Width > 0 && d.WorkWidth > 0), "Display IDs, geometry and scale must be valid.");

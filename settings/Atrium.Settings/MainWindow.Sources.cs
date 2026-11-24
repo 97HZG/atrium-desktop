@@ -121,8 +121,28 @@ public sealed partial class MainWindow
 
     internal BarSettings CurrentSettings => _session.Draft;
 
+    private SliderTile? _notifyDurationTile;
+
     private void InitSources()
     {
+        _notifyDurationTile = new SliderTile { Flat = true };
+        _notifyDurationTile.Configure(Loc.T("Popup duration"), 3, 31, 1, "s", Loc.T("Always"));
+        _notifyDurationTile.UserValueChanged += v =>
+        {
+            if (_loading) return;
+            if (Math.Round(v) >= 31)
+            {
+                CurrentSettings.NotifyAlways = true;
+            }
+            else
+            {
+                CurrentSettings.NotifyAlways = false;
+                CurrentSettings.NotifyTimeout = Math.Round(v);
+            }
+            Changed();
+        };
+        _notifyDurationTile.Engaged += on => OnEngage(Loc.T("Popup duration"), on);
+        NotifyRows.Children.Insert(0, _notifyDurationTile);
         _sources.Add(new SourceVm(this, "WeChat",
             "Reads WeChat's chat list while its window is open or minimized; closed to the tray, a card only says there is a new message. Muted chats are ignored.",
             "\ue8bd", ["Weixin.exe", "WeChat.exe"], s => s.NotifyWeChat, (s, v) => s.NotifyWeChat = v)
@@ -156,6 +176,7 @@ public sealed partial class MainWindow
 
     private void RefreshSources()
     {
+        _notifyDurationTile?.SetValue(CurrentSettings.NotifyAlways ? 31 : CurrentSettings.NotifyTimeout);
         foreach (var vm in _sources) vm.Refresh();
     }
 

@@ -536,6 +536,42 @@ std::string WideToUtf8(std::wstring_view wide)
     return bytes;
 }
 
+void CheckNotificationWithdrawAndMerge()
+{
+    Settings defaults;
+    Require(!defaults.notifyAlways && defaults.notifyTimeout == 6, "notifyAlways defaults to false");
+    Settings always;
+    always.notifyAlways = true;
+    always.notifyTimeout = 15;
+    Settings parsed;
+    Require(Settings::FromJson(always.ToJson(), Settings{}, parsed) && parsed.notifyAlways && parsed.notifyTimeout == 15,
+            "notifyAlways and notifyTimeout survive round trip");
+    Require(Settings::FromJson(LR"({})", always, parsed) && parsed.notifyAlways, "partial update keeps notifyAlways");
+    Require(Settings::FromJson(LR"({"notifyAlways":"bad"})", always, parsed) && parsed.notifyAlways, "malformed notifyAlways keeps current value");
+
+    Notice merged;
+    merged.source = L"windows";
+    merged.title = L"Alice";
+    notification::AddExternalId(merged, 101);
+    notification::AddExternalId(merged, 102);
+    Require(notification::HasExternalId(merged, 101) && notification::HasExternalId(merged, 102) && !notification::HasExternalId(merged, 103),
+            "merged card tracks every externalId");
+
+    Notice otherSource{0, L"wechat", L"", L"", L"Alice", L"", L"", 101, {}, 0, 1, false};
+    Require(!notification::WithdrawNotice(merged, otherSource), "withdraw from different source does not match");
+
+    Notice w101{0, L"windows", L"", L"", L"", L"", L"", 101, {}, 0, 1, false};
+    Require(!notification::WithdrawNotice(merged, w101), "withdrawing one merged toast keeps the card");
+    Require(!notification::HasExternalId(merged, 101) && notification::HasExternalId(merged, 102), "withdrawn id is removed while remaining id stays");
+
+    Notice w102{0, L"windows", L"", L"", L"", L"", L"", 102, {}, 0, 1, false};
+    Require(notification::WithdrawNotice(merged, w102), "withdrawing the last merged toast removes the card");
+
+    Notice wechat{0, L"wechat", L"", L"", L"Bob", L"", L"", 0, {}, 0, 1, true};
+    Notice wechatWithdraw{0, L"wechat", L"", L"", L"Bob", L"", L"", 0, {}, 0, 1, false};
+    Require(notification::WithdrawNotice(wechat, wechatWithdraw), "title-based withdraw still removes matching card");
+}
+
 void RunNormalizer()
 {
     namespace json = winrt::Windows::Data::Json;
@@ -627,6 +663,7 @@ int main(int argc, char** argv)
         CheckNotificationLayout();
         CheckNotificationQuietState();
         CheckWidgetStacking();
+        CheckNotificationWithdrawAndMerge();
         std::cout << "Display, fullscreen auto-hide, notification placement and animated reflow checks passed.\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

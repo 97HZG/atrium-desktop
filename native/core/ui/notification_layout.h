@@ -1,6 +1,8 @@
 // Stable popup viewport: arrivals move cards instead of resizing their glass window.
 #pragma once
 
+#include "notice.h"
+
 #include <shellapi.h>
 #include <windows.h>
 #include <algorithm>
@@ -50,5 +52,11 @@ inline bool AcceptsNotificationPopup(QUERY_USER_NOTIFICATION_STATE state, bool q
     default: return false;
     }
 }
+
+bool HasExternalId(const Notice& notice, uint32_t externalId);
+void AddExternalId(Notice& notice, uint32_t externalId);
+// True when `existing` should be removed by `withdrawal` (`unread == false`).
+// For `externalId != 0`, removes that id from `existing.externalIds` and returns true only once none remain.
+bool WithdrawNotice(Notice& existing, const Notice& withdrawal);
 
 } // namespace atrium::notification

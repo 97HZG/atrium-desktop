@@ -100,6 +100,7 @@ struct Settings {
     bool windowsContextMenu = true;
     // Notifications (Atrium's own cards above the bell).
     double notifyTimeout = 6;        // seconds a popup stays (3..30)
+    bool notifyAlways = false;       // popups stay until dismissed (ignores notifyTimeout)
     std::wstring notifyPlacement = L"dock"; // dock (default) | topLeft | topRight | bottomLeft | bottomRight (the main screen's)
     bool notifyHideBody = false;     // privacy: no message text; cards excluded from screen capture
     bool notifyFullscreen = false;   // popups also over full-screen apps (never games)

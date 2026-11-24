@@ -25,7 +25,7 @@ constexpr float kW = 384, kGap = 10, kPeek = 10, kPill = 44;
 constexpr double kMakeRoomMs = 170; // a corner card waits this long for the others to move aside
 constexpr int kMaxNotices = 50;
 constexpr ULONGLONG kMergeMs = 120000;
-constexpr UINT_PTR kPopupTimer = 1, kSweepTimer = 2, kHoldTimer = 3;
+constexpr UINT_PTR kSweepTimer = 2, kHoldTimer = 3;
 constexpr UINT kHoldMs = 250;
 constexpr double kLeaveMs = 340, kRippleMs = 520;
 // The stack under the wheel: a notch pushes it this fast (cards per second);
@@ -153,7 +153,7 @@ Notifications::Notifications(HINSTANCE instance)
     center_.surface->onDismiss = [this] { center_.surface->Hide(), centerClosed_ = GetTickCount64(); };
 }
 
-void Notifications::SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement, bool notifyFullscreen)
+void Notifications::SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement, bool notifyFullscreen, bool notifyAlways)
 {
     // A corner of the main screen (topLeft, topRight, bottomLeft, bottomRight), else over the bar.
     const bool corner = placement == L"topLeft" || placement == L"topRight" || placement == L"bottomLeft" || placement == L"bottomRight";
@@ -166,6 +166,7 @@ void Notifications::SetOptions(double timeoutSeconds, bool hideBody, const std::
         bottom_ = bottom;
     }
     timeout_ = std::clamp(timeoutSeconds, 3.0, 30.0);
+    ApplyAlways(notifyAlways);
     hideBody_ = hideBody;
     notifyFullscreen_ = notifyFullscreen;
     // With their text hidden, the cards stay out of screenshots too.
@@ -234,20 +235,18 @@ void Notifications::ClearPreparedUpdate()
 
 void Notifications::Post(Notice n, bool silent)
 {
-    if (!n.unread) { // the sender reports the conversation read: its cards go
-        std::vector<uint64_t> ids;
-        for (const Notice& o : notices_)
-            if (o.source == n.source && o.title == n.title)
-                ids.push_back(o.id);
-        for (uint64_t id : ids)
-            Remove(id);
+    if (!n.unread) {
+        // The sender reports the notification/conversation read: withdraw matching cards
+        // (by externalId for listener toasts, keeping merged cards until every id is gone).
+        Withdraw(n);
         return;
     }
     n.time = GetTickCount64();
+    notification::AddExternalId(n, n.externalId);
     // Repeats of the listener's notices, and bursts of the same title from one
     // app, become one card with a count.
     for (auto it = notices_.begin(); it != notices_.end(); ++it) {
-        bool sameExternal = n.externalId && it->externalId == n.externalId && it->source == n.source;
+        bool sameExternal = n.externalId && notification::HasExternalId(*it, n.externalId) && it->source == n.source;
         bool burst =
             it->source == n.source && FoldCase(it->appId) == FoldCase(n.appId) && it->app == n.app && it->title == n.title && n.time - it->time < kMergeMs;
         if (sameExternal && it->title == n.title && it->body == n.body)
@@ -258,6 +257,7 @@ void Notifications::Post(Notice n, bool silent)
                 merged.title = n.title;
             else
                 merged.count += 1;
+            notification::AddExternalId(merged, n.externalId);
             merged.body = n.body;
             if (!sameExternal && !n.action.empty())
                 merged.action = n.action;
@@ -309,7 +309,7 @@ void Notifications::Post(Notice n, bool silent)
     }
     if (wasVisible)
         SetWindowPos(popup_.surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-    SetTimer(popup_.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
+    ArmPopupTimer();
     Changed();
 }
 
@@ -432,8 +432,8 @@ void Notifications::Sweep()
             KillTimer(popup_.surface->Hwnd(), kPopupTimer);
             popup_.surface->Hide(false);
             Log(L"notify: popup hidden (last card closed)");
-        } else if (!popup_.tracking) {
-            SetTimer(popup_.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
+        } else {
+            ArmPopupTimer();
         }
     }
     if (swept)
@@ -520,8 +520,8 @@ void Notifications::Layout(Mode mode)
                 work.bottom = std::max(work.top + 1, std::min(work.bottom, bar.top));
         }
         const float scale = PopupScale(work);
-        const auto layout = notification::CornerLayout(work, scale, kW, CardHeight(), kGap, kPopupGapDip, shown.size(), mode == Mode::Center ? kPill + kGap : 0,
-                                                       left_, bottom_);
+        const auto layout =
+            notification::CornerLayout(work, scale, kW, CardHeight(), kGap, kPopupGapDip, shown.size(), ShowControls(mode) ? kPill + kGap : 0, left_, bottom_);
         v.contentH = layout.contentHeight;
         v.viewH = layout.viewHeight;
         v.contentTop = layout.contentTop;
@@ -567,7 +567,7 @@ void Notifications::Layout(Mode mode)
     // never resize it: a resize is slow and makes the glass and the text
     // jump. At rest, the window's region ends at the outer card, so clicks
     // beyond it reach what is under it.
-    float pill = mode == Mode::Center ? kPill + kGap : 0;
+    float pill = ShowControls(mode) ? kPill + kGap : 0;
     v.contentTop = fromTop ? pill : 0;
     int gap = int(std::lround(kPopupGapDip * s)), margin = int(std::lround(8 * s));
     int minH = int(std::lround((card + pill) * s));
@@ -919,7 +919,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
         v.hits.push_back({all, shown.size() > 1 ? L"stack" : L"card:0"});
     }
 
-    if (mode == Mode::Center) {
+    if (ShowControls(mode)) {
         // Controls stay on the bar's or corner's side so scrolling never hides them.
         const float pillTop = fromTop ? 0 : listTop + listH + kGap;
         D2D1_RECT_F pill = D2D1::RectF(0, pillTop, w, pillTop + kPill);
@@ -929,7 +929,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
         shapes.push_back({pill, pr});
         if (c.panel)
             c.Fill(pill, pr, t.panel);
-        size_t live = shown.size() - std::min(shown.size(), leaving_.size());
+        size_t live = LiveCount(mode, shown.size());
         std::wstring label = live ? TrFormat(L"Notifications  ·  %d", int(live)) : Tr(L"No new notifications");
         c.Text(label, D2D1::RectF(pill.left + 20, pill.top, w / 2 + 40, pill.bottom), 13.5f, live ? t.text : t.subtext,
                live ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
@@ -945,7 +945,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
         };
         if (live)
             button(L"clear", Tr(L"Clear All"));
-        if (!column && expanded_ && shown.size() > 1)
+        if (CanCollapse(mode, column) && expanded_ && shown.size() > 1)
             button(L"collapse", Tr(L"Collapse"));
     }
     // Every card faded out (the last one closing): no glass, rather than no shapes, which would be the whole
@@ -1020,7 +1020,7 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
     switch (m) {
     case WM_TIMER:
         if (w == kPopupTimer && mode == Mode::Popup) {
-            HidePopup(L"timeout");
+            OnPopupTimer();
             return true;
         }
         if (w == kHoldTimer && mode == Mode::Popup) {
@@ -1028,7 +1028,7 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
                 KillTimer(v.surface->Hwnd(), kHoldTimer);
                 if (!popupIds_.empty()) {
                     Layout(Mode::Popup);
-                    SetTimer(v.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
+                    ArmPopupTimer();
                     Log(L"notify: popup shown after the panel closed");
                 }
             }
@@ -1069,7 +1069,7 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
         v.hover.clear();
         v.pressed.clear();
         if (mode == Mode::Popup && v.surface->Visible())
-            SetTimer(v.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
+            ArmPopupTimer();
         v.surface->Invalidate();
         return true;
     case WM_LBUTTONDOWN:

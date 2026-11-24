@@ -84,6 +84,7 @@ void ReadBarSettingsJson(const json::JsonObject& o, Settings& s)
     flag(L"autoWidth", s.autoWidth);
     flag(L"showRunning", s.showRunning);
     num(L"notifyTimeout", s.notifyTimeout);
+    flag(L"notifyAlways", s.notifyAlways);
     num(L"nearEnter", s.nearEnter);
     num(L"nearLeave", s.nearLeave);
     flag(L"notifyHideBody", s.notifyHideBody);
@@ -354,6 +355,7 @@ void WriteSystemJson(const json::JsonObject& o, const Settings& s)
     flag(L"taskbarRightPrimaryOnly", s.taskbarRightPrimaryOnly);
     flag(L"windowsContextMenu", s.windowsContextMenu);
     num(L"notifyTimeout", s.notifyTimeout);
+    flag(L"notifyAlways", s.notifyAlways);
     num(L"nearEnter", s.nearEnter);
     num(L"nearLeave", s.nearLeave);
     str(L"notifyPlacement", s.notifyPlacement);

@@ -74,8 +74,6 @@ public sealed partial class MainWindow : Window, IDisposable
         new("near", Loc.T("Leave distance"), 2, 200, 2, "px",
             s => s.NearLeave, (s, v) => s.NearLeave = v, false),
 
-        new("notify", Loc.T("Popup duration"), 3, 30, 1, "s",
-            s => s.NotifyTimeout, (s, v) => s.NotifyTimeout = v, false),
     ];
 
     private static string[] PageTitles =>
@@ -1271,6 +1269,8 @@ public sealed partial class MainWindow : Window, IDisposable
         }
         if (group == "notify")
         {
+            CurrentSettings.NotifyTimeout = d.NotifyTimeout;
+            CurrentSettings.NotifyAlways = d.NotifyAlways;
             CurrentSettings.NotifyHideBody = d.NotifyHideBody;
             CurrentSettings.NotifyFullscreen = d.NotifyFullscreen;
             CurrentSettings.NotifyPlacement = d.NotifyPlacement;

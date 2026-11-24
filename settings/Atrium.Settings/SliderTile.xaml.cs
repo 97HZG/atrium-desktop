@@ -9,6 +9,7 @@ namespace Atrium.Settings;
 public sealed partial class SliderTile : UserControl
 {
     private string _unit = "";
+    private string? _maxLabel;
     private double _min, _max;
 
     public event Action<double>? UserValueChanged;
@@ -21,9 +22,9 @@ public sealed partial class SliderTile : UserControl
         LostFocus += (_, _) => SetEngaged(false);
     }
 
-    public void Configure(string title, double min, double max, double step, string unit)
+    public void Configure(string title, double min, double max, double step, string unit, string? maxLabel = null)
     {
-        _unit = unit; _min = min; _max = max;
+        _unit = unit; _maxLabel = maxLabel; _min = min; _max = max;
         TitleText.Text = title;
         Track.Minimum = min; Track.Maximum = max; Track.StepFrequency = step;
         AutomationProperties.SetName(Track, title);
@@ -50,6 +51,12 @@ public sealed partial class SliderTile : UserControl
 
     private void Refresh(double v)
     {
+        if (_maxLabel != null && Math.Round(v) >= _max)
+        {
+            ValueRun.Text = _maxLabel;
+            UnitRun.Text = "";
+            return;
+        }
         ValueRun.Text = Math.Round(v).ToString(System.Globalization.CultureInfo.InvariantCulture);
         UnitRun.Text = _unit is "" or "%" ? _unit : " " + _unit;
     }

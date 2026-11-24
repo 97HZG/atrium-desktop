@@ -43,7 +43,7 @@ public:
     void ToggleCenter(bool expand = false);
     bool CenterVisible() const { return center_.surface && center_.surface->Visible(); }
     void Clear();
-    void SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement, bool notifyFullscreen = false);
+    void SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement, bool notifyFullscreen = false, bool notifyAlways = false);
     // Corner radius (DIP), the bar's; the cards are concentric with it.
     void SetRadius(float dip);
     int Unread() const;
@@ -113,6 +113,13 @@ private:
     int QuietState() const;
     bool BodyHidden() const;
     void HidePopup(const wchar_t* why);
+    void ApplyAlways(bool notifyAlways);
+    void ArmPopupTimer();
+    void OnPopupTimer();
+    bool ShowControls(Mode mode) const;
+    bool CanCollapse(Mode mode, bool column) const;
+    size_t LiveCount(Mode mode, size_t shownCount) const;
+    void Withdraw(const Notice& withdrawal);
     void ResetView(View& v);
     View& ViewOf(Mode mode) { return mode == Mode::Popup ? popup_ : center_; }
     const View& ViewOf(Mode mode) const { return mode == Mode::Popup ? popup_ : center_; }
@@ -122,7 +129,9 @@ private:
     std::vector<uint64_t> popupIds_; // shown by the popup, newest first
     bool expanded_ = false;
     uint64_t nextId_ = 1;
+    static constexpr UINT_PTR kPopupTimer = 1;
     double timeout_ = 6;
+    bool always_ = false;
     bool hideBody_ = false;
     bool notifyFullscreen_ = false;
     bool corner_ = false, left_ = false, bottom_ = false; // notifyPlacement: a corner of the main screen
