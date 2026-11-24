@@ -362,7 +362,7 @@
   "Hide the system taskbar": "隐藏系统任务栏",
   "Hide system banners": "隐藏系统通知横幅",
   "Hide notification content": "隐藏通知正文",
-  "Limited by what each player lets other apps do: NetEase Cloud Music's progress can't be dragged, QQ Music's tracks can't be liked, Spotify's can be neither liked nor shown with lyrics, and Apple Music's progress can't be dragged, nor its tracks liked or shown with lyrics.": "受各播放器开放接口的限制：网易云音乐无法拖动进度，QQ 音乐无法收藏，Spotify 无法收藏也无法显示歌词，Apple Music 无法拖动进度、收藏和显示歌词。",
+  "Limited by each player's interface:\nNetEase Cloud Music's progress can't be dragged, QQ Music's tracks can't be liked, Spotify's can be neither liked nor shown with lyrics, and Apple Music's progress can't be dragged, nor its tracks liked or shown with lyrics.": "受各播放器接口的限制：\n网易云音乐无法拖动进度，QQ 音乐无法收藏，Spotify 无法收藏也无法显示歌词，Apple Music 无法拖动进度、收藏和显示歌词。",
   "Limited by what WeChat lets other apps read: chat names and text are read only after WeChat's window has been opened once (until then a card only says there is a new message), and only from the chats near the top of its list.": "受微信开放接口的限制：微信窗口打开过一次后才能读到会话名和消息内容（在此之前卡片只提示“新消息”），并且只能读到聊天列表靠前的会话。",
   "Over full-screen apps": "在全屏应用上显示",
   "Show notifications over full-screen apps": "在全屏应用上显示通知",
