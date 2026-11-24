@@ -75,8 +75,11 @@ bool SessionMatchesApp(IAudioSessionControl2* control, const std::wstring& targe
     const ScopedHandle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)};
     if (!process.handle)
         return false;
+    // A packaged player's sound may come from another app of its package (Apple Music plays from
+    // AMPLibraryAgent, "…!LibraryServer", while its media session is the window's "…!App"): the package counts.
     const std::wstring aumid = FoldCase(ProcessAumid(process.handle));
-    if (!aumid.empty() && aumid == targetFolded)
+    const size_t bang = targetFolded.find(L'!');
+    if (!aumid.empty() && (aumid == targetFolded || (bang != std::wstring::npos && aumid.compare(0, bang + 1, targetFolded, 0, bang + 1) == 0)))
         return true;
     const std::wstring path = FoldCase(ProcessImagePath(process.handle));
     if (path.empty())

@@ -40,7 +40,7 @@ public sealed partial class MainWindow
         }
         var title = new TextBlock { Text = Loc.T("Players"), Style = (Style)res["SectionStyle"], Margin = new Thickness(4, 0, 0, 6) };
         var limits = LimitNote(
-            Loc.T("Limited by what each player lets other apps do: NetEase Cloud Music's progress can't be dragged, QQ Music's tracks can't be liked, and Spotify's can be neither liked nor shown with lyrics."));
+            Loc.T("Limited by what each player lets other apps do: NetEase Cloud Music's progress can't be dragged, QQ Music's tracks can't be liked, Spotify's can be neither liked nor shown with lyrics, and Apple Music's progress can't be dragged, nor its tracks liked or shown with lyrics."));
         var group = new Border { Style = (Style)res["GroupStyle"], Child = rows };
         return new StackPanel { Margin = new Thickness(0, 14, 0, 0), Children = { title, limits, group } };
     }
