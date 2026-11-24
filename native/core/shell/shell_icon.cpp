@@ -163,27 +163,20 @@ bool HIconToImage(HICON icon, IconImage& out)
     return ok;
 }
 
-IconImage FitToSquare(const IconImage& src, int size)
+namespace {
+
+void ResampleRect(const IconImage& src, int sx0, int sy0, int sw, int sh, IconImage& out, int ox, int oy, int dw, int dh)
 {
-    if (src.width == size && src.height == size)
-        return src;
-    IconImage out;
-    out.width = out.height = size;
-    out.bgra.assign(size_t(size) * size_t(size) * 4, 0);
-    double scale = double(size) / double(std::max(src.width, src.height));
-    int dw = std::max(1, int(std::lround(src.width * scale)));
-    int dh = std::max(1, int(std::lround(src.height * scale)));
-    int ox = (size - dw) / 2, oy = (size - dh) / 2;
     auto at = [&](int x, int y, int c) {
-        x = std::clamp(x, 0, src.width - 1);
-        y = std::clamp(y, 0, src.height - 1);
+        x = std::clamp(x, sx0, sx0 + sw - 1);
+        y = std::clamp(y, sy0, sy0 + sh - 1);
         return double(src.bgra[(size_t(y) * size_t(src.width) + size_t(x)) * 4 + size_t(c)]);
     };
     for (int dy = 0; dy < dh; ++dy) {
-        double y0 = double(dy) * src.height / dh, y1 = double(dy + 1) * src.height / dh;
+        double y0 = sy0 + double(dy) * sh / dh, y1 = sy0 + double(dy + 1) * sh / dh;
         for (int dx = 0; dx < dw; ++dx) {
-            double x0 = double(dx) * src.width / dw, x1 = double(dx + 1) * src.width / dw;
-            uint8_t* d = &out.bgra[(size_t(dy + oy) * size_t(size) + size_t(dx + ox)) * 4];
+            double x0 = sx0 + double(dx) * sw / dw, x1 = sx0 + double(dx + 1) * sw / dw;
+            uint8_t* d = &out.bgra[(size_t(dy + oy) * size_t(out.width) + size_t(dx + ox)) * 4];
             for (int c = 0; c < 4; ++c) {
                 double v = 0;
                 if (x1 - x0 <= 1.0 && y1 - y0 <= 1.0) {
@@ -210,6 +203,40 @@ IconImage FitToSquare(const IconImage& src, int size)
             }
         }
     }
+}
+
+} // namespace
+
+IconImage FitToSquare(const IconImage& src, int size)
+{
+    if (src.Empty() || size <= 0)
+        return {};
+    if (src.width == size && src.height == size)
+        return src;
+    IconImage out;
+    out.width = out.height = size;
+    out.bgra.assign(size_t(size) * size_t(size) * 4, 0);
+    double scale = double(size) / double(std::max(src.width, src.height));
+    int dw = std::max(1, int(std::lround(src.width * scale)));
+    int dh = std::max(1, int(std::lround(src.height * scale)));
+    int ox = (size - dw) / 2, oy = (size - dh) / 2;
+    ResampleRect(src, 0, 0, src.width, src.height, out, ox, oy, dw, dh);
+    return out;
+}
+
+IconImage CropToSquare(const IconImage& src, int size)
+{
+    if (src.Empty() || size <= 0)
+        return {};
+    if (src.width == size && src.height == size)
+        return src;
+    IconImage out;
+    out.width = out.height = size;
+    out.bgra.assign(size_t(size) * size_t(size) * 4, 0);
+    const int side = std::min(src.width, src.height);
+    const int sx0 = (src.width - side) / 2;
+    const int sy0 = (src.height - side) / 2;
+    ResampleRect(src, sx0, sy0, side, side, out, 0, 0, size, size);
     return out;
 }
 

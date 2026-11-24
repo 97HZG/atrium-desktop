@@ -114,6 +114,47 @@ private:
     double anchorMs_ = 0;
 };
 
+// Smooths GSMTC timeline updates: freezes on pause, resumes without pause time, anchors once when
+// LastUpdatedTime is 0, clamps negative skew to 0, and takes any raw change at once.
+struct GsmtcTimelineTracker {
+    bool initialized = false;
+    int64_t rawStartUs = 0, rawEndUs = 0, rawPosUs = 0, rawUpdated100Ns = 0;
+    MediaTimeline current;
+
+    void Reset() { *this = {}; }
+
+    MediaTimeline Update(int64_t startUs, int64_t endUs, int64_t posUs, int64_t updated100Ns, int64_t fileTime100Ns, double nowMs, double rate, bool playing)
+    {
+        startUs = std::max<int64_t>(0, startUs);
+        if (endUs <= startUs || endUs - startUs > 86400LL * 1'000'000 * 30)
+            endUs = 0;
+        posUs = std::max<int64_t>(0, posUs);
+        if (!initialized || startUs != rawStartUs || endUs != rawEndUs || posUs != rawPosUs || updated100Ns != rawUpdated100Ns) {
+            rawStartUs = startUs;
+            rawEndUs = endUs;
+            rawPosUs = posUs;
+            rawUpdated100Ns = updated100Ns;
+            initialized = true;
+            double anchorMs = nowMs;
+            if (updated100Ns > 0) {
+                const double ageMs = std::max(0.0, static_cast<double>(fileTime100Ns - updated100Ns) / 10000.0);
+                if (ageMs < 86400000.0)
+                    anchorMs = nowMs - ageMs;
+            }
+            return current = {startUs, endUs, posUs, anchorMs, rate, playing};
+        }
+        if (current.playing && (!playing || rate != current.rate)) {
+            current.anchorPosUs = current.PositionUs(nowMs);
+            current.anchorMs = nowMs;
+        } else if (!current.playing && playing) {
+            current.anchorMs = nowMs;
+        }
+        current.playing = playing;
+        current.rate = rate;
+        return current;
+    }
+};
+
 struct MediaSessionSummary {
     std::wstring id;
     std::wstring appId;

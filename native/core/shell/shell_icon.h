@@ -25,6 +25,8 @@ std::wstring AppExecutable(const std::wstring& path);
 bool HIconToImage(HICON icon, IconImage& out);
 // Scales a premultiplied image into a size x size square (aspect kept, centred).
 IconImage FitToSquare(const IconImage& src, int size);
+// Crops a premultiplied image to a centred square and scales it to size x size (cover).
+IconImage CropToSquare(const IconImage& src, int size);
 inline bool IsLink(const std::wstring& path) { return path.size() > 4 && _wcsicmp(path.c_str() + path.size() - 4, L".lnk") == 0; }
 
 } // namespace atrium

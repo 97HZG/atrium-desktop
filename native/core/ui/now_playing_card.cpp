@@ -412,9 +412,11 @@ void NowPlayingCard::PaintControls(Canvas& c, const Theme& t)
     }
     // Either side: the heart (the player's own like) and its lyrics, where the player takes them.
     for (const auto& [part, at, enabled] : {std::tuple{Part::Like, -2, media_.canLike}, {Part::Lyrics, 2, media_.canLyrics}}) {
+        if (!enabled)
+            continue;
         // The lyrics on: a plate behind the mark, as a pressed toggle (the mark stays in the ink).
-        const float plateMin = part == Part::Lyrics && lyricsOn_ && enabled ? 1.f : 0.f;
-        const D2D1_RECT_F box = BeginControl(c, t, part, at, kControlR, enabled, plateMin);
+        const float plateMin = part == Part::Lyrics && lyricsOn_ ? 1.f : 0.f;
+        const D2D1_RECT_F box = BeginControl(c, t, part, at, kControlR, true, plateMin);
         if (part == Part::Like) {
             c.Glyph(liked_ ? L"\uEB52" : L"\uEB51", box, 16, liked_ ? kHeart : t.text); // HeartFill, Heart
         } else {

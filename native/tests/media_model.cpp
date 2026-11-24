@@ -1,6 +1,7 @@
 #include "shell/media_players.h"
 #include "shell/media_timeline.h"
 #include "shell/netease_tracks.h"
+#include "shell/shell_icon.h"
 
 #include <roapi.h>
 
@@ -26,8 +27,10 @@ void CheckPlayers()
     Require(PlayerOf(L"cloudmusic.exe") == MediaPlayer::Netease, "NetEase Cloud Music by its exe");
     Require(PlayerOf(L"QQMusic.exe") == MediaPlayer::QqMusic && PlayerOf(L"Tencent.QQMusic") == MediaPlayer::QqMusic, "QQ Music, old and new names");
     Require(PlayerOf(L"Tencent.QQ") == MediaPlayer::Other && PlayerOf(L"QQMusic.exe.bak") == MediaPlayer::Other, "not QQ Music");
-    Require(PlayerOf(L"Spotify.exe") == MediaPlayer::Spotify && PlayerOf(L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify") == MediaPlayer::Spotify,
-            "Spotify, desktop and Store");
+    Require(PlayerOf(L"Spotify.exe") == MediaPlayer::Spotify && PlayerOf(L"C:\\Users\\u\\AppData\\Roaming\\Spotify\\Spotify.exe") == MediaPlayer::Spotify &&
+                PlayerOf(L"SPOTIFY.EXE") == MediaPlayer::Spotify && PlayerOf(L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify") == MediaPlayer::Spotify,
+            "Spotify, desktop path and Store AUMID");
+    Require(PlayerOf(L"SpotifyAB.SpotifyMusicFake") == MediaPlayer::Other && PlayerOf(L"spot.exe") == MediaPlayer::Other, "not Spotify");
     Require(PlayerOf(L"AppleInc.AppleMusicWin_nzyj5cx40ttqa!App") == MediaPlayer::AppleMusic, "Apple Music");
     Require(PlayerOf(L"msedge.exe") == MediaPlayer::Other, "a browser is another player");
     std::wstring artist = L"\u738B\u83F2 \u2014 \u53EA\u7231\u964C\u751F\u4EBA", album;
@@ -152,6 +155,10 @@ void CheckAppFilter()
     Require(MediaAppAllowed(L"cloudmusic", L"allow", list), "appId without .exe matches .exe entry");
     Require(MediaAppAllowed(L"microsoft.zunemusic_8wekyb3d8bbwe!App", L"allow", list), "trailing underscore package prefix matches");
     Require(MediaAppAllowed(L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", L"allow", list), "package name prefix matches before underscore");
+    Require(MediaAppAllowed(L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", L"allow", {L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!"}),
+            "Store package family prefix with ! matches");
+    Require(!MediaAppAllowed(L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", L"block", {L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!"}),
+            "block mode rejects Store package family prefix");
     Require(MediaAppAllowed(L"c:\\apps\\\u00e9diteur\\player.exe", L"allow", list), "non-ASCII path matches case-insensitively");
 
     Require(!MediaAppAllowed(L"D:\\Other\\Player.exe", L"allow", list), "full path entry does not match different path");
@@ -218,6 +225,40 @@ void CheckNeteaseQueueCache()
         RoUninitialize();
 }
 
+void CheckSparseGsmtcTimeline()
+{
+    GsmtcTimelineTracker tr;
+    MediaTimeline tl = tr.Update(0, 180'000'000, 10'000'000, 100'000'000, 120'000'000, 5000.0, 1.0, true);
+    Require(tl.PositionUs(8000.0) == 15'000'000, "sparse GSMTC advances linearly from LastUpdatedTime");
+    tl = tr.Update(0, 180'000'000, 10'000'000, 100'000'000, 150'000'000, 8000.0, 1.5, true);
+    Require(tl.PositionUs(10'000.0) == 18'000'000, "podcast rate 1.5x advances from rebased position");
+    tl = tr.Update(0, 180'000'000, 10'000'000, 100'000'000, 170'000'000, 10'000.0, 1.5, false);
+    Require(!tl.playing && tl.PositionUs(50'000.0) == 18'000'000, "pause freezes at extrapolated position");
+    tl = tr.Update(0, 180'000'000, 10'000'000, 100'000'000, 570'000'000, 50'000.0, 1.0, true);
+    Require(tl.PositionUs(55'000.0) == 23'000'000, "resume continues from frozen position without pause time");
+    tl = tr.Update(0, 180'000'000, 0, 600'000'000, 599'000'000, 60'000.0, 1.0, true);
+    Require(tl.PositionUs(60'000.0) == 0 && tl.PositionUs(61'000.0) == 1'000'000, "raw change resets and negative age clamps to 0");
+    tr.Reset();
+    tl = tr.Update(0, 120'000'000, 5'000'000, 0, 100'000'000, 1000.0, 1.0, true);
+    tl = tr.Update(0, 120'000'000, 5'000'000, 0, 105'000'000, 1500.0, 1.0, true);
+    Require(tl.PositionUs(2000.0) == 6'000'000, "updated==0 keeps single anchor across refreshes");
+    tl = tr.Update(0, 0, 0, 0, 110'000'000, 3000.0, 1.0, true);
+    Require(!tl.Seekable(), "endUs==0 is not seekable");
+}
+
+void CheckCropToSquare()
+{
+    for (const auto& [w, h] : {std::pair{8, 8}, std::pair{16, 8}, std::pair{8, 16}}) {
+        IconImage img{w, h, std::vector<uint8_t>(size_t(w) * size_t(h) * 4, 255)};
+        const int side = std::min(w, h), x0 = (w - side) / 2, y0 = (h - side) / 2;
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                img.bgra[(size_t(y) * size_t(w) + size_t(x)) * 4 + 2] = (x >= x0 && x < x0 + side && y >= y0 && y < y0 + side) ? 220 : 10;
+        const IconImage out = CropToSquare(img, 4);
+        Require(out.width == 4 && out.height == 4 && out.bgra[2] == 220 && out.bgra[3] == 255, "CropToSquare crops centred square");
+    }
+}
+
 } // namespace
 
 int main()
@@ -228,6 +269,8 @@ int main()
     CheckAppFilter();
     CheckPickSession();
     CheckNeteaseQueueCache();
+    CheckSparseGsmtcTimeline();
+    CheckCropToSquare();
     if (g_failures > 0)
         return 1;
     std::cout << "media model: all checks passed\n";

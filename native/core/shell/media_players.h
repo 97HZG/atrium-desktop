@@ -26,7 +26,7 @@ inline MediaPlayer PlayerOf(std::wstring appId)
         return MediaPlayer::Netease;
     if (file == L"qqmusic" || file == L"qqmusic.exe" || file == L"tencent.qqmusic" || file.starts_with(L"tencent.qqmusic_"))
         return MediaPlayer::QqMusic;
-    if (file == L"spotify.exe" || file == L"spotify" || file.starts_with(L"spotifyab.spotifymusic"))
+    if (file == L"spotify.exe" || file == L"spotify" || file.starts_with(L"spotifyab.spotifymusic_"))
         return MediaPlayer::Spotify;
     if (file == L"applemusic.exe" || file.starts_with(L"appleinc.applemusicwin"))
         return MediaPlayer::AppleMusic;

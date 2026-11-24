@@ -203,7 +203,7 @@ bool DecodeWicSquare(IWICImagingFactory* wic, std::vector<uint8_t>& bytes, IconI
     raw.bgra.resize(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
     if (FAILED(converter->CopyPixels(nullptr, w * 4, static_cast<UINT>(raw.bgra.size()), raw.bgra.data())))
         return false;
-    out = FitToSquare(raw, kArtworkSizePx);
+    out = CropToSquare(raw, kArtworkSizePx);
     return !out.Empty();
 }
 
@@ -233,6 +233,7 @@ struct TrackedSession {
     std::shared_ptr<const IconImage> artwork;
     uint64_t artworkHash = 0;
     size_t artworkBytes = 0;
+    GsmtcTimelineTracker gsmtc;
     NeteaseTimeline netease; // NetEase Cloud Music's, which it does not report
 };
 
@@ -457,12 +458,12 @@ private:
 
     void ReadMediaProperties(TrackedSession& ts)
     {
-        ts.mediaDirty.store(false, std::memory_order_release);
         winrt::com_ptr<MediaPropsOp> op;
         winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSessionMediaProperties> props;
         if (FAILED(ts.session->TryGetMediaPropertiesAsync(op.put())) || !op || !AwaitAsync<MediaPropsHandler>(op.get(), stopEvent_.handle, kAsyncTimeoutMs) ||
             stop_.load(std::memory_order_acquire) || FAILED(op->GetResults(props.put())) || !props)
             return;
+        ts.mediaDirty.store(false, std::memory_order_release);
 
         auto readStr = [&](HRESULT (STDMETHODCALLTYPE Wmc::IGlobalSystemMediaTransportControlsSessionMediaProperties::*fn)(HSTRING*)) {
             HSTRING hs = nullptr;
@@ -531,6 +532,7 @@ private:
         outSnap.album = ts.album;
         outSnap.artwork = ts.artwork;
 
+        double rate = 1.0;
         winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSessionPlaybackInfo> pb;
         if (SUCCEEDED(ts.session->GetPlaybackInfo(pb.put())) && pb) {
             Wmc::GlobalSystemMediaTransportControlsSessionPlaybackStatus rawStatus{};
@@ -539,7 +541,7 @@ private:
             winrt::com_ptr<__FIReference_1_double> rateRef;
             double r = 1.0;
             if (SUCCEEDED(pb->get_PlaybackRate(rateRef.put())) && rateRef && SUCCEEDED(rateRef->get_Value(&r)) && std::isfinite(r) && r > 0.0 && r <= 16.0)
-                outSnap.timeline.rate = r;
+                rate = r;
             winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSessionPlaybackControls> ctrl;
             if (SUCCEEDED(pb->get_Controls(ctrl.put())) && ctrl) {
                 boolean play = FALSE, pause = FALSE, toggle = FALSE, next = FALSE, prev = FALSE, seek = FALSE;
@@ -557,9 +559,9 @@ private:
         }
 
         const double nowMs = ClockMs();
-        if (outSnap.state == MediaPlaybackState::Playing)
+        const bool playing = outSnap.state == MediaPlaybackState::Playing;
+        if (playing)
             ts.lastPlayingMs = nowMs;
-        outSnap.timeline.playing = (outSnap.state == MediaPlaybackState::Playing);
 
         winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSessionTimelineProperties> tl;
         if (SUCCEEDED(ts.session->GetTimelineProperties(tl.put())) && tl) {
@@ -569,27 +571,18 @@ private:
             tl->get_EndTime(&end);
             tl->get_Position(&pos);
             tl->get_LastUpdatedTime(&updated);
-            const int64_t rawStartUs = std::max<int64_t>(0, start.Duration / 10);
-            int64_t rawEndUs = end.Duration / 10;
-            constexpr int64_t kMaxDurationUs = 86400LL * 1'000'000 * 30;
-            if (rawEndUs <= rawStartUs || rawEndUs - rawStartUs > kMaxDurationUs)
-                rawEndUs = 0;
-            outSnap.timeline.startUs = rawStartUs;
-            outSnap.timeline.endUs = rawEndUs;
-            outSnap.timeline.anchorPosUs = std::max<int64_t>(0, pos.Duration / 10);
-            double anchorMs = nowMs;
-            if (updated.UniversalTime > 0) {
-                const double ageMs = static_cast<double>(CurrentFileTime100Ns() - updated.UniversalTime) / 10000.0;
-                if (ageMs >= 0.0 && ageMs < 86400000.0)
-                    anchorMs = nowMs - ageMs;
-            }
-            outSnap.timeline.anchorMs = anchorMs;
+            outSnap.timeline =
+                ts.gsmtc.Update(start.Duration / 10, end.Duration / 10, pos.Duration / 10, updated.UniversalTime, CurrentFileTime100Ns(), nowMs, rate, playing);
+        } else {
+            ts.gsmtc.Reset();
+            outSnap.timeline.rate = rate;
+            outSnap.timeline.playing = playing;
         }
 
         // NetEase Cloud Music reports no timeline: its own (netease_tracks.h).
         const MediaPlayer player = PlayerOf(ts.appId);
         if (!outSnap.timeline.Seekable() && player == MediaPlayer::Netease)
-            ts.netease.Fill(ts.title, ts.artist, outSnap.state == MediaPlaybackState::Playing, nowMs, outSnap.timeline);
+            ts.netease.Fill(ts.title, ts.artist, playing, nowMs, outSnap.timeline);
         // What the players do beyond Windows' controls (media_players.h).
         outSnap.canLike = PlayerLikes(player);
         if (player == MediaPlayer::Netease)
@@ -599,6 +592,8 @@ private:
             outSnap.canSeek = outSnap.canSeek || outSnap.timeline.Seekable(); // /seekto, where Windows' seek is refused
         if (player == MediaPlayer::AppleMusic)
             SplitAppleArtist(outSnap.artist, outSnap.album);
+        if (outSnap.artist.empty())
+            outSnap.artist = outSnap.album;
         outSummary = {ts.id, ts.appId, ts.title, outSnap.state, isSystemCurrent, ts.lastPlayingMs};
         return timelineUpdated;
     }
@@ -621,7 +616,21 @@ private:
             return;
         TrackedSession& active = *sessions_[activeIdx];
         switch (action.command) {
-        case MediaCommand::PlayPause: RunBoolCommand(active.session.get(), &Wmc::IGlobalSystemMediaTransportControlsSession::TryTogglePlayPauseAsync); break;
+        case MediaCommand::PlayPause: {
+            auto fn = &Wmc::IGlobalSystemMediaTransportControlsSession::TryTogglePlayPauseAsync;
+            winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSessionPlaybackInfo> pb;
+            winrt::com_ptr<Wmc::IGlobalSystemMediaTransportControlsSessionPlaybackControls> ctrl;
+            boolean toggle = TRUE;
+            if (SUCCEEDED(active.session->GetPlaybackInfo(pb.put())) && pb && SUCCEEDED(pb->get_Controls(ctrl.put())) && ctrl &&
+                SUCCEEDED(ctrl->get_IsPlayPauseToggleEnabled(&toggle)) && toggle == FALSE) {
+                Wmc::GlobalSystemMediaTransportControlsSessionPlaybackStatus status{};
+                const bool playing =
+                    SUCCEEDED(pb->get_PlaybackStatus(&status)) && status == Wmc::GlobalSystemMediaTransportControlsSessionPlaybackStatus_Playing;
+                fn = playing ? &Wmc::IGlobalSystemMediaTransportControlsSession::TryPauseAsync : &Wmc::IGlobalSystemMediaTransportControlsSession::TryPlayAsync;
+            }
+            RunBoolCommand(active.session.get(), fn);
+            break;
+        }
         case MediaCommand::Next: RunBoolCommand(active.session.get(), &Wmc::IGlobalSystemMediaTransportControlsSession::TrySkipNextAsync); break;
         case MediaCommand::Previous: RunBoolCommand(active.session.get(), &Wmc::IGlobalSystemMediaTransportControlsSession::TrySkipPreviousAsync); break;
         case MediaCommand::Seek: {
