@@ -34,6 +34,7 @@ add_library(atrium_core_lib STATIC
     bar_input.cpp
     bar_stacking.cpp
     desktop_helpers.cpp
+    notice_actions.cpp
     extras_host.cpp
     guard_process.cpp
     near_hover.cpp
@@ -79,6 +80,7 @@ add_library(atrium_core_lib STATIC
     shell/jump_list.cpp
     shell/folder_stacks.cpp
     shell/wechat_source.cpp
+    shell/wechat_open.cpp
     shell/feishu_source.cpp
     ui/surface.cpp
     ui/popup_theme.cpp
@@ -86,11 +88,13 @@ add_library(atrium_core_lib STATIC
     ui/start_menu.cpp
     ui/start_menu_menus.cpp
     ui/notifications.cpp
+    ui/notification_popup.cpp
     ui/tray_panel.cpp
     ui/calendar_panel.cpp
     ui/control_center.cpp
     ui/control_modules.cpp
     ui/desktop_widgets.cpp
+    ui/widget_stacking.cpp
     ui/folder_stack_popup.cpp
     ui/genie_minimize.cpp
     ui/glass_menu.cpp
