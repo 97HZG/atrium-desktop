@@ -6,6 +6,8 @@
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 
+#include <utility>
+
 namespace wgc = winrt::Windows::Graphics::Capture;
 namespace wgd = winrt::Windows::Graphics::DirectX;
 
@@ -71,22 +73,49 @@ void SetCaptureExclusion(HWND hwnd, bool visible)
 
 // ---- Windows.Graphics.Capture -------------------------------------------------
 
-MonitorCapture::MonitorCapture(const Gpu& gpu, HMONITOR monitor, HANDLE frameEvent)
+MonitorCapture::MonitorCapture(Gpu gpu, HMONITOR monitor, HANDLE frameEvent) : gpu_(std::move(gpu)), monitor_(monitor), frameEvent_(frameEvent) { Start(true); }
+
+MonitorCapture::~MonitorCapture() { Stop(); }
+
+bool MonitorCapture::Start(bool throwOnError)
 {
     auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
     wgc::GraphicsCaptureItem item{nullptr};
-    winrt::check_hresult(interop->CreateForMonitor(monitor, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(item)));
+    HRESULT hr = interop->CreateForMonitor(monitor_, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(item));
+    if (FAILED(hr) || !item) {
+        if (throwOnError)
+            winrt::check_hresult(FAILED(hr) ? hr : E_FAIL);
+        Log(L"capture: CreateForMonitor failed on resume (0x%08X)", static_cast<unsigned>(hr));
+        lost_ = true;
+        return false;
+    }
 
-    auto dxgi = gpu.device.as<IDXGIDevice>();
+    auto dxgi = gpu_.device.as<IDXGIDevice>();
     winrt::com_ptr<::IInspectable> inspectable;
-    winrt::check_hresult(CreateDirect3D11DeviceFromDXGIDevice(dxgi.get(), inspectable.put()));
+    hr = CreateDirect3D11DeviceFromDXGIDevice(dxgi.get(), inspectable.put());
+    if (FAILED(hr)) {
+        if (throwOnError)
+            winrt::check_hresult(hr);
+        Log(L"capture: CreateDirect3D11DeviceFromDXGIDevice failed on resume (0x%08X)", static_cast<unsigned>(hr));
+        lost_ = true;
+        return false;
+    }
     device_ = inspectable.as<wgd::Direct3D11::IDirect3DDevice>();
 
     size_ = item.Size();
+    if (!throwOnError && (size_.Width <= 0 || size_.Height <= 0)) {
+        device_ = nullptr;
+        lost_ = true;
+        return false;
+    }
     // One buffer: each frame is closed right after its ROI is copied, and a
     // full-monitor buffer costs 4 bytes per pixel (25 MB at 3200x2000).
     pool_ = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, kBuffers, size_);
-    token_ = pool_.FrameArrived([frameEvent](auto&&, auto&&) { SetEvent(frameEvent); });
+    active_ = std::make_shared<std::atomic<bool>>(true);
+    token_ = pool_.FrameArrived([active = active_, frameEvent = frameEvent_](auto&&, auto&&) {
+        if (active->load(std::memory_order_acquire))
+            SetEvent(frameEvent);
+    });
     session_ = pool_.CreateCaptureSession(item);
     session_.IsCursorCaptureEnabled(false);
     try {
@@ -96,10 +125,13 @@ MonitorCapture::MonitorCapture(const Gpu& gpu, HMONITOR monitor, HANDLE frameEve
     }
     session_.StartCapture();
     Log(L"capture: monitor %dx%d started (Windows.Graphics.Capture)", size_.Width, size_.Height);
+    return true;
 }
 
-MonitorCapture::~MonitorCapture()
+void MonitorCapture::Stop()
 {
+    if (active_)
+        active_->store(false, std::memory_order_release);
     MonitorCapture::Release();
     if (pool_)
         pool_.FrameArrived(token_);
@@ -107,11 +139,32 @@ MonitorCapture::~MonitorCapture()
         session_.Close();
     if (pool_)
         pool_.Close();
+    session_ = nullptr;
+    pool_ = nullptr;
+    device_ = nullptr;
+    token_ = {};
+    active_.reset();
+}
+
+void MonitorCapture::SetPaused(bool paused)
+{
+    if (paused == paused_)
+        return;
+    paused_ = paused;
+    if (paused_) {
+        Stop();
+        Log(L"capture: paused (Windows.Graphics.Capture)");
+        return;
+    }
+    if (!Start(false))
+        lost_ = true;
 }
 
 ID3D11Texture2D* MonitorCapture::Acquire()
 {
     Release();
+    if (paused_ || !pool_)
+        return nullptr;
     wgc::Direct3D11CaptureFrame latest{nullptr};
     while (auto f = pool_.TryGetNextFrame()) {
         if (latest)

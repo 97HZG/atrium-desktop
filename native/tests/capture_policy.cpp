@@ -32,8 +32,8 @@ bool CheckInitialSelection()
         !Require(!policy.ShouldProbeDuplication(true, true, false, 0, 31000), "does not probe in remote mode") ||
         !Require(!policy.ShouldProbeDuplication(true, false, true, 0, 31000), "does not probe when capture already keeps own windows out") ||
         !Require(policy.ShouldProbeDuplication(true, false, false, 0, 31000), "probes once 30 s backoff elapses") ||
-        !Require(!policy.ShouldProbeDuplication(true, false, false, 0, 31001), "failed probe arms another 30 s backoff") ||
-        !Require(policy.ShouldProbeDuplication(true, false, false, 0, 61000), "probes again after second 30 s backoff")) {
+        !Require(!policy.ShouldProbeDuplication(true, false, false, 0, 90999), "failed probe arms 60 s backoff") ||
+        !Require(policy.ShouldProbeDuplication(true, false, false, 0, 91000), "probes again after 60 s backoff")) {
         return false;
     }
 
@@ -126,12 +126,103 @@ bool CheckEscalationAndRecovery()
                    "recovery cleared prior black generation so temporary unavailability can retry on generation 2");
 }
 
+bool CheckElsewhereSuppressionAndSwitch()
+{
+    constexpr uintptr_t kMonA = 0x1001;
+    constexpr uintptr_t kMonB = 0x2002;
+    constexpr uint64_t kHourMs = 3600ULL * 1000ULL;
+
+    CapturePolicy policy;
+    policy.BeginSession(kMonA, 1);
+    policy.OnDuplicationUnavailable(1000, CapturePolicy::DuplicationFailure::Elsewhere, kMonA, 1);
+
+    if (!Require(policy.ChooseInitialSource(false, 1000) == CapturePolicy::InitialSource::MonitorCapture, "Elsewhere failure falls back to MonitorCapture") ||
+        !Require(!policy.ShouldProbeDuplication(true, false, false, kMonA, 1, 31000), "Elsewhere suppresses probe after 30 s on same monitor and generation") ||
+        !Require(!policy.ShouldProbeDuplication(true, false, false, kMonA, 1, 1000 + kHourMs),
+                 "Elsewhere suppresses probe after 1 hour on same monitor and generation") ||
+        !Require(!policy.ShouldProbeDuplication(true, false, false, kMonA, 1, 1000 + 24 * kHourMs),
+                 "Elsewhere suppresses probe after 24 hours on same monitor and generation")) {
+        return false;
+    }
+
+    // Same monitor and generation on a new session stays on MonitorCapture.
+    policy.BeginSession(kMonA, 1);
+    if (!Require(policy.ChooseInitialSource(false, 1000 + 24 * kHourMs) == CapturePolicy::InitialSource::MonitorCapture,
+                 "Elsewhere persists across sessions on the same monitor and generation")) {
+        return false;
+    }
+
+    // Follow Mode moves to a different monitor in the same display generation.
+    policy.BeginSession(kMonB, 1);
+    if (!Require(policy.ChooseInitialSource(false, 2000 + 24 * kHourMs) == CapturePolicy::InitialSource::Duplication,
+                 "moving to another monitor immediately retries Duplication")) {
+        return false;
+    }
+
+    // Elsewhere on monitor A clears when display topology generation changes.
+    policy.BeginSession(kMonA, 1);
+    policy.OnDuplicationUnavailable(5000, CapturePolicy::DuplicationFailure::Elsewhere, kMonA, 1);
+    policy.BeginSession(kMonA, 2);
+    if (!Require(policy.ChooseInitialSource(false, 6000) == CapturePolicy::InitialSource::Duplication,
+                 "display topology change immediately retries Duplication")) {
+        return false;
+    }
+
+    // If MonitorCapture hits black-over-lit while Elsewhere is set on gen 1, keep pinned on gen 1 across monitor switch.
+    policy.BeginSession(kMonA, 1);
+    policy.OnDuplicationUnavailable(7000, CapturePolicy::DuplicationFailure::Elsewhere, kMonA, 1);
+    return Require(policy.OnBlackOverLitScreen(1, 8000) == CapturePolicy::BlackAction::RestartCapture,
+                   "first black strike on Elsewhere MonitorCapture restarts capture") &&
+           Require(policy.OnBlackOverLitScreen(1, 9000) == CapturePolicy::BlackAction::FallbackToWallpaper,
+                   "second black strike on Elsewhere MonitorCapture falls back to wallpaper") &&
+           Require(!policy.ShouldProbeDuplication(true, false, false, kMonA, 1, 100000), "Elsewhere MonitorCapture still suppresses Duplication probes");
+}
+
+bool CheckTransientBackoffProgression()
+{
+    constexpr uintptr_t kMonA = 0x1001;
+    CapturePolicy policy;
+    policy.BeginSession(kMonA, 1);
+    policy.OnDuplicationUnavailable(1000, CapturePolicy::DuplicationFailure::Transient, kMonA, 1);
+
+    uint64_t t = 1000;
+    const uint64_t expectedSteps[] = {30000, 60000, 120000, 240000, 300000, 300000};
+    for (uint64_t step : expectedSteps) {
+        if (!Require(!policy.ShouldProbeDuplication(true, false, false, kMonA, 1, t + step - 1), "does not probe before exponential backoff expires") ||
+            !Require(policy.ShouldProbeDuplication(true, false, false, kMonA, 1, t + step), "probes once exponential backoff expires")) {
+            return false;
+        }
+        t += step;
+    }
+
+    policy.OnDuplicationRecovered();
+    policy.OnDuplicationUnavailable(t + 1000, CapturePolicy::DuplicationFailure::Transient, kMonA, 1);
+    return Require(!policy.ShouldProbeDuplication(true, false, false, kMonA, 1, t + 1000 + 29999), "recovery reset backoff to 30 s (before boundary)") &&
+           Require(policy.ShouldProbeDuplication(true, false, false, kMonA, 1, t + 1000 + 30000), "recovery reset backoff to 30 s (at boundary)");
+}
+
+bool CheckResetBlackTimer()
+{
+    CapturePolicy policy;
+    if (!Require(!policy.PollBlackBackdrop(true, 0.f, 1000), "arms black timer before hide") ||
+        !Require(!policy.PollBlackBackdrop(true, 0.f, 2400), "stays below 1500 ms before hide")) {
+        return false;
+    }
+
+    policy.ResetBlackTimer();
+    return Require(!policy.PollBlackBackdrop(true, 0.f, 2600), "ResetBlackTimer clears prior armed timer across hide/show") &&
+           Require(!policy.PollBlackBackdrop(true, 0.f, 4100), "requires full 1500 ms after re-arm on show") &&
+           Require(policy.PollBlackBackdrop(true, 0.f, 4101), "triggers 1501 ms after re-arm on show");
+}
+
 } // namespace
 
 int main()
 {
-    if (!CheckInitialSelection() || !CheckBlackPollAndThresholds() || !CheckEscalationAndRecovery())
+    if (!CheckInitialSelection() || !CheckBlackPollAndThresholds() || !CheckEscalationAndRecovery() || !CheckElsewhereSuppressionAndSwitch() ||
+        !CheckTransientBackoffProgression() || !CheckResetBlackTimer()) {
         return 1;
+    }
     std::cout << "capture policy: all checks passed\n";
     return 0;
 }

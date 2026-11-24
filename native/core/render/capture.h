@@ -43,16 +43,27 @@ public:
 
 class MonitorCapture : public BackdropSource {
 public:
-    MonitorCapture(const Gpu& gpu, HMONITOR monitor, HANDLE frameEvent);
+    MonitorCapture(Gpu gpu, HMONITOR monitor, HANDLE frameEvent);
     ~MonitorCapture() override;
     MonitorCapture(const MonitorCapture&) = delete;
     MonitorCapture& operator=(const MonitorCapture&) = delete;
 
     ID3D11Texture2D* Acquire() override;
     void Release() override;
+    bool Lost() const override { return lost_; }
     bool KeepsOwnWindowsOut() const override { return false; }
+    void SetPaused(bool paused) override;
 
 private:
+    bool Start(bool throwOnError);
+    void Stop();
+
+    Gpu gpu_;
+    HMONITOR monitor_ = nullptr;
+    HANDLE frameEvent_ = nullptr;
+    bool paused_ = false;
+    bool lost_ = false;
+    std::shared_ptr<std::atomic<bool>> active_;
     winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice device_{nullptr};
     winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool pool_{nullptr};
     winrt::Windows::Graphics::Capture::GraphicsCaptureSession session_{nullptr};
