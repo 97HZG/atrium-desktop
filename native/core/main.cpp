@@ -644,7 +644,7 @@ void ApplySettings(const Settings& s)
     g_app.start->SetPreferredSize(s.startSize);
     g_app.start->SetPreferredIcon(s.startIcon);
     g_app.notes->SetRadius(radius);
-    g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody, s.notifyPlacement);
+    g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody, s.notifyPlacement, s.notifyFullscreen);
     ApplyNotificationSources(s, badgesChanged);
     g_app.tasks->SetPins(s.pins.value_or(std::vector<PinnedApp>{}));
     g_app.tasks->SetShowRunning(s.showRunning);

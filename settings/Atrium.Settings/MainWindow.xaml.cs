@@ -647,6 +647,7 @@ public sealed partial class MainWindow : Window, IDisposable
         UpdateRiseNearDependent();
         RunningSwitch.IsOn = CurrentSettings.ShowRunning;
         HideBodySwitch.IsOn = CurrentSettings.NotifyHideBody;
+        NotifyFullscreenSwitch.IsOn = CurrentSettings.NotifyFullscreen;
         ImeStatusSwitch.IsOn = CurrentSettings.ImeStatus;
         ImeBubbleSwitch.IsOn = CurrentSettings.ImeBubble;
         ImeBubbleSwitch.IsEnabled = CurrentSettings.ImeStatus;
@@ -847,13 +848,6 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_loading) return;
         CurrentSettings.ShowRunning = RunningSwitch.IsOn;
-        Changed();
-    }
-
-    private void OnHideBodyToggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading) return;
-        CurrentSettings.NotifyHideBody = HideBodySwitch.IsOn;
         Changed();
     }
 
@@ -1278,6 +1272,7 @@ public sealed partial class MainWindow : Window, IDisposable
         if (group == "notify")
         {
             CurrentSettings.NotifyHideBody = d.NotifyHideBody;
+            CurrentSettings.NotifyFullscreen = d.NotifyFullscreen;
             CurrentSettings.NotifyPlacement = d.NotifyPlacement;
         }
         if (group is "clarity" or "edge" or "light")

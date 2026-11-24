@@ -132,6 +132,12 @@ void CheckSettings()
     Require(Settings::FromJson(LR"({"dockDisplayDelay":"bad","dockDisplay":false})", settings, parsed) && parsed.dockDisplayDelay == 750 &&
                 parsed.dockDisplay == settings.dockDisplay,
             "malformed keys retain current values");
+    Require(!Settings{}.notifyFullscreen && Settings::FromJson(LR"({})", Settings{}, parsed) && !parsed.notifyFullscreen, "notifyFullscreen defaults to false");
+    settings.notifyFullscreen = true;
+    Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.notifyFullscreen, "notifyFullscreen survives saving");
+    Require(Settings::FromJson(LR"({})", settings, parsed) && parsed.notifyFullscreen, "partial updates retain notifyFullscreen");
+    Require(Settings::FromJson(LR"({"notifyFullscreen":"bad"})", settings, parsed) && parsed.notifyFullscreen,
+            "malformed notifyFullscreen retains the current value");
 }
 
 void CheckStageDragMerge()
@@ -490,6 +496,21 @@ void CheckNotificationLayout()
             "the bottom left corner supports negative coordinates and monitor DPI");
 }
 
+void CheckNotificationQuietState()
+{
+    const QUERY_USER_NOTIFICATION_STATE states[] = {
+        QUNS_ACCEPTS_NOTIFICATIONS, QUNS_APP, QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE, QUNS_NOT_PRESENT, QUNS_QUIET_TIME,
+    };
+    for (QUERY_USER_NOTIFICATION_STATE s : states) {
+        for (int mask = 0; mask < 16; ++mask) {
+            const bool ours = (mask & 1) != 0, fs = (mask & 2) != 0, opt = (mask & 4) != 0, game = (mask & 8) != 0;
+            const bool expected =
+                s == QUNS_ACCEPTS_NOTIFICATIONS || s == QUNS_APP || (s == QUNS_QUIET_TIME && ours) || (s == QUNS_BUSY && (!fs || (opt && !game)));
+            Require(notification::AcceptsNotificationPopup(s, ours, fs, opt, game) == expected, "notification quiet-state decision matches rule");
+        }
+    }
+}
+
 std::wstring Utf8ToWide(std::string_view bytes)
 {
     if (bytes.empty())
@@ -563,6 +584,7 @@ int main(int argc, char** argv)
         CheckFullscreenCoverage();
         CheckTaskbarReshowGuard();
         CheckNotificationLayout();
+        CheckNotificationQuietState();
         std::cout << "Display, fullscreen auto-hide, notification placement and animated reflow checks passed.\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

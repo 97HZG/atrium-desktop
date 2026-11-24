@@ -43,7 +43,7 @@ public:
     void ToggleCenter(bool expand = false);
     bool CenterVisible() const { return center_.surface && center_.surface->Visible(); }
     void Clear();
-    void SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement);
+    void SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement, bool notifyFullscreen = false);
     // Corner radius (DIP), the bar's; the cards are concentric with it.
     void SetRadius(float dip);
     int Unread() const;
@@ -113,6 +113,7 @@ private:
     int QuietState() const;
     bool BodyHidden() const;
     void HidePopup(const wchar_t* why);
+    void ResetView(View& v);
     View& ViewOf(Mode mode) { return mode == Mode::Popup ? popup_ : center_; }
     const View& ViewOf(Mode mode) const { return mode == Mode::Popup ? popup_ : center_; }
 
@@ -123,6 +124,7 @@ private:
     uint64_t nextId_ = 1;
     double timeout_ = 6;
     bool hideBody_ = false;
+    bool notifyFullscreen_ = false;
     bool corner_ = false, left_ = false, bottom_ = false; // notifyPlacement: a corner of the main screen
     BarEdge barEdge_ = BarEdge::Bottom;
     ULONGLONG centerClosed_ = 0;

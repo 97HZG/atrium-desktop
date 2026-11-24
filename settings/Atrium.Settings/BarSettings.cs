@@ -96,6 +96,7 @@ internal sealed class BarSettings
     public string NotifyPlacement { get; set; } = "dock"; // dock (default) | topLeft | topRight | bottomLeft | bottomRight
     public static readonly string[] NotifyCorners = ["topLeft", "topRight", "bottomLeft", "bottomRight"];
     public bool NotifyHideBody { get; set; }           // privacy: no message text, excluded from capture
+    public bool NotifyFullscreen { get; set; }         // popups also over full-screen apps (never games)
     public bool ImeStatus { get; set; } = true;        // the status icon shows the foreground window's input language
     public bool ImeBubble { get; set; } = true;        // with ImeStatus: a bubble from the bottom announces a change while the bar is hidden
     public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
@@ -246,6 +247,7 @@ internal sealed class BarSettings
             ["notifyTimeout"] = NotifyTimeout,
             ["notifyPlacement"] = NotifyPlacement,
             ["notifyHideBody"] = NotifyHideBody,
+            ["notifyFullscreen"] = NotifyFullscreen,
             ["imeStatus"] = ImeStatus,
             ["imeBubble"] = ImeBubble,
             ["notifyListener"] = NotifyListener,
@@ -364,6 +366,7 @@ internal sealed class BarSettings
         s.ShowRunning = Flag("showRunning", f.ShowRunning);
         s.NotifyTimeout = Math.Clamp(Num("notifyTimeout", f.NotifyTimeout), 3, 30);
         s.NotifyHideBody = Flag("notifyHideBody", f.NotifyHideBody);
+        s.NotifyFullscreen = Flag("notifyFullscreen", f.NotifyFullscreen);
         s.ImeStatus = Flag("imeStatus", f.ImeStatus);
         s.ImeBubble = Flag("imeBubble", f.ImeBubble);
         // Version 1 files saved the old default (off): from version 2 it is on (as in the core).
@@ -551,7 +554,8 @@ internal sealed class BarSettings
         TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide &&
         BarReserve == o.BarReserve && BarFullscreenHide == o.BarFullscreenHide &&
         BarEdge == o.BarEdge && StatusStyle == o.StatusStyle && ControlModules.SequenceEqual(o.ControlModules) && NotifyTimeout == o.NotifyTimeout &&
-        NotifyHideBody == o.NotifyHideBody && ImeStatus == o.ImeStatus && ImeBubble == o.ImeBubble &&
+        NotifyHideBody == o.NotifyHideBody && NotifyFullscreen == o.NotifyFullscreen &&
+        ImeStatus == o.ImeStatus && ImeBubble == o.ImeBubble &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat &&
         WeChatBlockOfficial == o.WeChatBlockOfficial && NotifyFeishu == o.NotifyFeishu &&
         NotifyQQ == o.NotifyQQ && NotifyWeCom == o.NotifyWeCom && NotifyDingTalk == o.NotifyDingTalk &&

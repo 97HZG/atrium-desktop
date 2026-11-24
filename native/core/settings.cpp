@@ -87,6 +87,7 @@ void ReadBarSettingsJson(const json::JsonObject& o, Settings& s)
     num(L"nearEnter", s.nearEnter);
     num(L"nearLeave", s.nearLeave);
     flag(L"notifyHideBody", s.notifyHideBody);
+    flag(L"notifyFullscreen", s.notifyFullscreen);
     flag(L"imeStatus", s.imeStatus);
     flag(L"imeBubble", s.imeBubble);
 }
@@ -357,6 +358,7 @@ void WriteSystemJson(const json::JsonObject& o, const Settings& s)
     num(L"nearLeave", s.nearLeave);
     str(L"notifyPlacement", s.notifyPlacement);
     flag(L"notifyHideBody", s.notifyHideBody);
+    flag(L"notifyFullscreen", s.notifyFullscreen);
     flag(L"imeStatus", s.imeStatus);
     flag(L"imeBubble", s.imeBubble);
     flag(L"notifyListener", s.notifyListener);

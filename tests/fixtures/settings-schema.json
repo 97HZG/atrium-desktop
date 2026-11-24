@@ -66,6 +66,7 @@
     "notifyTimeout": {"type": "number", "default": 6, "min": 3, "max": 30, "uiMin": 3, "uiMax": 30, "uiScale": 1, "sliderProp": "NotifyTimeout"},
     "notifyPlacement": {"type": "enum", "default": "dock", "values": ["dock", "topLeft", "topRight", "bottomLeft", "bottomRight"], "fallback": "dock"},
     "notifyHideBody": {"type": "bool", "default": false},
+    "notifyFullscreen": {"type": "bool", "default": false},
     "notifyListener": {"type": "bool", "default": true},
     "notifyWeChat": {"type": "bool", "default": true},
     "wechatBlockOfficial": {"type": "bool", "default": false},

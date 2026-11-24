@@ -6,6 +6,7 @@
 #include "log.h"
 #include "motion.h"
 #include "shell/displays.h"
+#include "shell/games.h"
 #include "ui/notification_layout.h"
 #include "win32_path.h"
 
@@ -83,6 +84,12 @@ void SyncToastRegion(HWND hwnd, int& curTop, int& curBottom, const RECT& rr, int
     }
 }
 
+void ClearRegion(HWND hwnd, int& regionTop, int& regionBottom)
+{
+    SetWindowRgn(hwnd, nullptr, FALSE);
+    regionTop = regionBottom = -1;
+}
+
 struct CardTarget {
     float y = 0, inset = 0, alpha = 1, content = 1;
 };
@@ -146,7 +153,7 @@ Notifications::Notifications(HINSTANCE instance)
     center_.surface->onDismiss = [this] { center_.surface->Hide(), centerClosed_ = GetTickCount64(); };
 }
 
-void Notifications::SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement)
+void Notifications::SetOptions(double timeoutSeconds, bool hideBody, const std::wstring& placement, bool notifyFullscreen)
 {
     // A corner of the main screen (topLeft, topRight, bottomLeft, bottomRight), else over the bar.
     const bool corner = placement == L"topLeft" || placement == L"topRight" || placement == L"bottomLeft" || placement == L"bottomRight";
@@ -160,15 +167,12 @@ void Notifications::SetOptions(double timeoutSeconds, bool hideBody, const std::
     }
     timeout_ = std::clamp(timeoutSeconds, 3.0, 30.0);
     hideBody_ = hideBody;
+    notifyFullscreen_ = notifyFullscreen;
     // With their text hidden, the cards stay out of screenshots too.
     popup_.surface->SetPrivate(hideBody);
     center_.surface->SetPrivate(hideBody);
     if (placementChanged && center_.surface->Visible()) {
-        center_.cards.clear();
-        center_.scroll = center_.scrollTarget = 0;
-        center_.stackPos = center_.stackVel = 0;
-        center_.stackGoal = -1;
-        center_.stackMoving = false;
+        ResetView(center_);
         expanded_ = corner_ || notices_.size() <= 1;
         Layout(Mode::Center); // an open centre follows a changed placement immediately
     }
@@ -190,15 +194,34 @@ int Notifications::QuietState() const
     QUERY_USER_NOTIFICATION_STATE state = QUNS_ACCEPTS_NOTIFICATIONS;
     if (FAILED(SHQueryUserNotificationState(&state)))
         return QUNS_ACCEPTS_NOTIFICATIONS;
-    if (state == QUNS_QUIET_TIME && quietIsOurs && quietIsOurs())
-        return QUNS_ACCEPTS_NOTIFICATIONS;
-    // With Windows' taskbar hidden, a maximized window covers its screen and reports QUNS_BUSY (#80).
-    if (state == QUNS_BUSY && !FullScreenInFront(MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY)))
-        return QUNS_ACCEPTS_NOTIFICATIONS;
-    return int(state);
+    const HMONITOR fgMon = state == QUNS_BUSY ? MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY) : nullptr;
+    const bool fs = fgMon && FullScreenInFront(fgMon);
+    bool game = false;
+    if (fs && notifyFullscreen_) {
+        const RECT bar = corner_ ? RECT{} : (barRect ? barRect() : (bellRect ? bellRect() : RECT{}));
+        const HMONITOR popMon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
+        game = GameInFront(fgMon) || (popMon != fgMon && GameInFront(popMon));
+    }
+    const bool ours = state == QUNS_QUIET_TIME && quietIsOurs && quietIsOurs();
+    return notification::AcceptsNotificationPopup(state, ours, fs, notifyFullscreen_, game) ? QUNS_ACCEPTS_NOTIFICATIONS : int(state);
 }
 
-bool Notifications::BodyHidden() const { return hideBody_ || QuietState() == QUNS_PRESENTATION_MODE; }
+void Notifications::ResetView(View& v)
+{
+    v.cards.clear();
+    v.glow.clear();
+    v.lastPaint = 0;
+    v.scroll = v.scrollTarget = 0;
+    v.stackPos = v.stackVel = 0;
+    v.stackGoal = -1;
+    v.stackMoving = false;
+}
+
+bool Notifications::BodyHidden() const
+{
+    QUERY_USER_NOTIFICATION_STATE state = QUNS_ACCEPTS_NOTIFICATIONS;
+    return hideBody_ || (SUCCEEDED(SHQueryUserNotificationState(&state)) && state == QUNS_PRESENTATION_MODE);
+}
 
 float Notifications::CardHeight() const { return 16 + 16 + 6 + 20 + 4 + 36 + 14; }
 
@@ -243,10 +266,7 @@ void Notifications::Post(Notice n, bool silent)
             ShiftStack(Mode::Center, size_t(it - notices_.begin()), -1);
             notices_.erase(it);
             n = merged;
-            if (sameExternal)
-                Log(L"notify: %llu updated by its sender", n.id);
-            else
-                Log(L"notify: merged into %llu (x%d)", n.id, n.count);
+            Log(sameExternal ? L"notify: %llu updated by its sender" : L"notify: merged into %llu (x%d)", n.id, n.count);
             break;
         }
     }
@@ -268,8 +288,7 @@ void Notifications::Post(Notice n, bool silent)
         Changed();
         return;
     }
-    int quiet = QuietState();
-    if (quiet != QUNS_ACCEPTS_NOTIFICATIONS && quiet != QUNS_APP) {
+    if (int quiet = QuietState(); quiet != QUNS_ACCEPTS_NOTIFICATIONS && quiet != QUNS_APP) {
         Log(L"notify: popup suppressed (user notification state %d)", quiet);
         Changed();
         return;
@@ -282,9 +301,15 @@ void Notifications::Post(Notice n, bool silent)
     if (corner_)
         popup_.scroll = popup_.scrollTarget = 0; // a new arrival takes the corner's slot
     ShiftStack(Mode::Popup, 0, +1);
+    const bool wasVisible = popup_.surface->Visible();
     Layout(Mode::Popup);
-    if (popup_.surface->Visible())
-        SetTimer(popup_.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
+    if (!popup_.surface->Visible()) {
+        Changed();
+        return;
+    }
+    if (wasVisible)
+        SetWindowPos(popup_.surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    SetTimer(popup_.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
     Changed();
 }
 
@@ -484,24 +509,15 @@ void Notifications::Layout(Mode mode)
         // A corner on the bar's edge stands clear of the bar where it is on this screen (Windows'
         // taskbar hidden, the work area reaches the screen's edge, under the bar).
         if (RECT bar = barRect ? barRect() : RECT{}; !IsRectEmpty(&bar) && MonitorFromRect(&bar, MONITOR_DEFAULTTONULL) == main) {
-            switch (EdgeOf(bar)) {
-            case BarEdge::Top:
-                if (!bottom_)
-                    work.top = std::min(work.bottom - 1, std::max(work.top, bar.bottom));
-                break;
-            case BarEdge::Left:
-                if (left_)
-                    work.left = std::min(work.right - 1, std::max(work.left, bar.right));
-                break;
-            case BarEdge::Right:
-                if (!left_)
-                    work.right = std::max(work.left + 1, std::min(work.right, bar.left));
-                break;
-            case BarEdge::Bottom:
-                if (bottom_)
-                    work.bottom = std::max(work.top + 1, std::min(work.bottom, bar.top));
-                break;
-            }
+            const BarEdge e = EdgeOf(bar);
+            if (e == BarEdge::Top && !bottom_)
+                work.top = std::min(work.bottom - 1, std::max(work.top, bar.bottom));
+            else if (e == BarEdge::Left && left_)
+                work.left = std::min(work.right - 1, std::max(work.left, bar.right));
+            else if (e == BarEdge::Right && !left_)
+                work.right = std::max(work.left + 1, std::min(work.right, bar.left));
+            else if (e == BarEdge::Bottom && bottom_)
+                work.bottom = std::max(work.top + 1, std::min(work.bottom, bar.top));
         }
         const float scale = PopupScale(work);
         const auto layout = notification::CornerLayout(work, scale, kW, CardHeight(), kGap, kPopupGapDip, shown.size(), mode == Mode::Center ? kPill + kGap : 0,
@@ -509,24 +525,18 @@ void Notifications::Layout(Mode mode)
         v.contentH = layout.contentHeight;
         v.viewH = layout.viewHeight;
         v.contentTop = layout.contentTop;
-        const float maxScroll = std::max(0.f, v.contentH - v.viewH);
-        v.scrollTarget = std::clamp(v.scrollTarget, 0.f, maxScroll);
-        v.scroll = std::clamp(v.scroll, 0.f, maxScroll);
+        v.scrollTarget = std::clamp(v.scrollTarget, 0.f, std::max(0.f, v.contentH - v.viewH));
+        v.scroll = std::clamp(v.scroll, 0.f, std::max(0.f, v.contentH - v.viewH));
         if (!v.surface->Visible()) {
-            v.cards.clear();
-            v.glow.clear();
-            v.lastPaint = 0;
-            SetWindowRgn(v.surface->Hwnd(), nullptr, FALSE);
-            v.regionTop = v.regionBottom = -1;
+            ResetView(v);
+            ClearRegion(v.surface->Hwnd(), v.regionTop, v.regionBottom);
             // The centre opens at the same corner; arrivals still animate card by card.
             const POINT at{left_ ? layout.rect.left : layout.rect.right, bottom_ ? layout.rect.bottom : layout.rect.top};
             v.surface->Show(layout.rect, mode == Mode::Center, at, mode == Mode::Center);
         } else {
             const RECT old = v.surface->Rect();
-            if (!EqualRect(&old, &layout.rect)) {
-                SetWindowRgn(v.surface->Hwnd(), nullptr, FALSE);
-                v.regionTop = v.regionBottom = -1;
-            }
+            if (!EqualRect(&old, &layout.rect))
+                ClearRegion(v.surface->Hwnd(), v.regionTop, v.regionBottom);
             v.surface->Move(layout.rect);
             v.surface->Invalidate();
         }
@@ -581,12 +591,7 @@ void Notifications::Layout(Mode mode)
     int bottom = fromTop ? std::min(int(wa.bottom) - margin, anchorY + h) : anchorY;
     RECT r{left, top, left + w, bottom};
     if (!v.surface->Visible()) {
-        v.cards.clear(); // the cards arrive afresh
-        v.lastPaint = 0;
-        v.glow.clear();
-        v.stackPos = v.stackVel = 0;
-        v.stackGoal = -1;
-        v.stackMoving = false;
+        ResetView(v); // the cards arrive afresh
         bool handoff = mode == Mode::Center && handoffPending_;
         if (handoff) {
             // From the popup's stack: each card starts where it was on screen.
@@ -599,21 +604,16 @@ void Notifications::Layout(Mode mode)
             handoff_.clear();
             handoffPending_ = false;
         }
-        if (v.regionTop != -1 || v.regionBottom != -1) {
-            SetWindowRgn(v.surface->Hwnd(), nullptr, FALSE);
-            v.regionTop = -1;
-            v.regionBottom = -1;
-        }
+        if (v.regionTop != -1 || v.regionBottom != -1)
+            ClearRegion(v.surface->Hwnd(), v.regionTop, v.regionBottom);
         // Pops out of the bell (unless the stack turns into the list in place).
         v.surface->Show(r, mode == Mode::Center, PopupOrigin(bar, r, bell), !handoff);
     } else {
         // The window's top moves when the list grows or shrinks: the cards
         // keep their place on screen and glide from there.
         RECT old = v.surface->Rect();
-        if (!EqualRect(&old, &r)) {
-            SetWindowRgn(v.surface->Hwnd(), nullptr, FALSE);
-            v.regionTop = v.regionBottom = -1;
-        }
+        if (!EqualRect(&old, &r))
+            ClearRegion(v.surface->Hwnd(), v.regionTop, v.regionBottom);
         float dy = float(old.top - r.top) / s;
         if (dy != 0)
             for (auto& [id, a] : v.cards)
@@ -992,14 +992,12 @@ void Notifications::Click(Mode mode, const std::wstring& id)
         }
         Log(L"notify: expanded");
     } else if (id.starts_with(L"close:")) {
-        size_t i = index(6);
-        if (i < shown.size()) {
+        if (size_t i = index(6); i < shown.size()) {
             Log(L"notify: closed %llu", shown[i]->id);
             Remove(shown[i]->id);
         }
     } else if (id.starts_with(L"card:")) {
-        size_t i = index(5);
-        if (i < shown.size())
+        if (size_t i = index(5); i < shown.size())
             Activate(shown[i]->id);
     }
 }

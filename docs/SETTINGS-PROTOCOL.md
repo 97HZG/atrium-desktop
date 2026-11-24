@@ -76,6 +76,7 @@
 | `notifyTimeout` | number | 3–30 s | 6 | 通知弹出后停留的时间（指针停在卡片上时不计时） |
 | `notifyPlacement` | string | `dock` / `topLeft` / `topRight` / `bottomLeft` / `bottomRight` | `dock` | 默认在任务栏上方堆叠；角落模式下，弹窗和铃铛打开的通知中心均固定在系统主屏工作区的该角，最新的一条贴着角落，新通知从所在一侧的屏幕边缘淡入，已有通知平滑让位（上方的角向下、下方的角向上）；通知中心的操作区在靠角的一端（上方的角在列表上方，下方的角在列表下方），超出屏幕高度可滚动 |
 | `notifyHideBody` | bool | | false | 隐藏通知正文；同时把通知窗口排除在截图和屏幕共享之外 |
+| `notifyFullscreen` | bool | | false | 全屏应用在前（例如全屏视频、浏览器 F11）时也弹出通知卡片；游戏在前时不弹出 |
 | `notifyListener` | bool | | true | 通过 UserNotificationListener 把其他应用的 Windows 通知显示为 Atrium 卡片（系统横幅仍会出现，除非用户在 Windows 里关闭该应用的横幅）；微信、QQ、飞书、企业微信、钉钉的通知由各自的开关决定 |
 | `notifyWeChat` | bool | | true | 读取微信的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片；窗口打开过一次后，关到托盘也能读到会话名与摘要；读不到时，微信为消息闪烁即显示“微信 · 新消息” |
 | `wechatBlockOfficial` | bool | | false | 屏蔽微信公众号通知（设置里微信那一行开关旁的“屏蔽公众号”，微信通知打开时才可勾选）：会话列表里“公众号”“订阅号”“服务号”这几行有新消息时不显示卡片。微信的界面只给出会话的显示名，单独列成一个会话的服务号仍按普通会话提醒 |

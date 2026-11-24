@@ -102,6 +102,7 @@ struct Settings {
     double notifyTimeout = 6;        // seconds a popup stays (3..30)
     std::wstring notifyPlacement = L"dock"; // dock (default) | topLeft | topRight | bottomLeft | bottomRight (the main screen's)
     bool notifyHideBody = false;     // privacy: no message text; cards excluded from screen capture
+    bool notifyFullscreen = false;   // popups also over full-screen apps (never games)
     bool imeStatus = true;           // the status icon shows the foreground window's input language (issue #56)
     bool imeBubble = true;           // with imeStatus: a change is announced by a bubble rising from the bottom while the bar is hidden
     bool notifyListener = true;      // Windows notifications as Atrium cards (UserNotificationListener)

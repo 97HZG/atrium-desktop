@@ -163,14 +163,15 @@ settings.ApplyMaterial(BarSettings.Frosted());
 Require(settings.DockDisplayMode == original.DockDisplayMode && settings.DockDisplay == original.DockDisplay &&
     settings.DesktopDisplay == original.DesktopDisplay && settings.DockDisplayDelay == original.DockDisplayDelay &&
     settings.TaskbarApps == original.TaskbarApps && settings.TaskbarRightPrimaryOnly == original.TaskbarRightPrimaryOnly &&
-    settings.NotifyPlacement == original.NotifyPlacement && settings.HoverRise == original.HoverRise &&
+    settings.NotifyPlacement == original.NotifyPlacement && settings.NotifyFullscreen == original.NotifyFullscreen &&
+    settings.HoverRise == original.HoverRise &&
     settings.WindowsContextMenu == original.WindowsContextMenu,
     "Material presets must preserve monitor, notification and hover-rise choices.");
 foreach (var edit in new Action<BarSettings>[]
 {
     s => s.DockDisplayMode = "fixed", s => s.DockDisplayDelay += 50, s => s.DockDisplay += "other",
     s => s.DesktopDisplay += "other", s => s.TaskbarApps = "all", s => s.NotifyPlacement = "dock",
-    s => s.TaskbarRightPrimaryOnly = false,
+    s => s.NotifyFullscreen = true, s => s.TaskbarRightPrimaryOnly = false,
     s => s.HoverRise = true, s => s.NearEnter += 2, s => s.NearLeave += 2,
 })
 {
@@ -184,6 +185,13 @@ Require(!menuOff.WindowsContextMenu && BarSettings.FromJson(menuOff.ToJson(), ne
 Require(new BarSettings().WindowsContextMenu && BarSettings.FromJson([], new()).WindowsContextMenu,
     "The Windows-style context menu is on by default, also for files written before it existed.");
 Require(!new BarSettings().SameAs(menuOff), "The Windows-style context menu must participate in the Save/Revert dirty state.");
+Require(!new BarSettings().NotifyFullscreen && !BarSettings.FromJson([], new()).NotifyFullscreen,
+    "Fullscreen notification popups are off by default.");
+parsed = BarSettings.FromJson(JsonNode.Parse("""{"notifyFullscreen":true}""")!.AsObject(), new());
+Require(parsed.NotifyFullscreen && BarSettings.FromJson(parsed.ToJson(), new()).SameAs(parsed) &&
+        BarSettings.FromJson([], parsed).NotifyFullscreen &&
+        BarSettings.FromJson(JsonNode.Parse("""{"notifyFullscreen":"bad"}""")!.AsObject(), parsed).NotifyFullscreen,
+    "Fullscreen notification popups survive round-trip, partial update and malformed input.");
 var displays = DesktopDisplay.Read();
 Require(displays.Count > 0 && displays.Any(d => d.Primary), "Connected displays and system primary must be discoverable.");
 Require(displays.All(d => d.Id.Length > 0 && d.Scale > 0 && d.Width > 0 && d.WorkWidth > 0), "Display IDs, geometry and scale must be valid.");

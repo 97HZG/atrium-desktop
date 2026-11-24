@@ -1,6 +1,7 @@
 // Stable popup viewport: arrivals move cards instead of resizing their glass window.
 #pragma once
 
+#include <shellapi.h>
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
@@ -35,5 +36,19 @@ inline PopupLayout TopRightLayout(const RECT& work, float scale, float width, fl
 }
 
 inline float CardTop(size_t index, float card, float gap, float scroll) { return float(index) * (card + gap) - scroll; }
+
+inline bool AcceptsNotificationPopup(QUERY_USER_NOTIFICATION_STATE state, bool quietIsOurs, bool fullScreenInFront, bool notifyFullscreen, bool gameInFront)
+{
+    switch (state) {
+    case QUNS_ACCEPTS_NOTIFICATIONS:
+    case QUNS_APP: return true;
+    case QUNS_QUIET_TIME: return quietIsOurs;
+    case QUNS_BUSY: return !fullScreenInFront || (notifyFullscreen && !gameInFront);
+    case QUNS_RUNNING_D3D_FULL_SCREEN:
+    case QUNS_PRESENTATION_MODE:
+    case QUNS_NOT_PRESENT:
+    default: return false;
+    }
+}
 
 } // namespace atrium::notification

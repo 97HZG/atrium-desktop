@@ -16,9 +16,7 @@
         <!-- Both scrolling columns start below this fixed title bar. -->
         <Border Grid.ColumnSpan="2" Background="{ThemeResource PageBrush}" BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnSpacing="16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="144" />
-                </Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="144" /></Grid.ColumnDefinitions>
                 <Grid x:Name="AppTitleBar" Background="Transparent">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="232" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" Spacing="10" Margin="22,0,0,0" VerticalAlignment="Center">
@@ -115,9 +113,7 @@
                         </Border>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <local:SegmentTrack>
                                 <RadioButton x:Name="BgSpecimen" GroupName="herobg" Content="Flow" Tag="flow" Style="{StaticResource SegmentStyle}"
@@ -984,6 +980,10 @@
                                     <local:ToggleTile x:Name="HideBodySwitch" Title="Hide notification content" SwitchName="Hide notification content"
                                                       Toggled="OnHideBodyToggled" Flat="True"
                                                       Note="Cards show only the app and the title; the notification window is also excluded from screen capture and sharing." />
+                                    <local:ToggleTile x:Name="NotifyFullscreenSwitch" Title="Over full-screen apps"
+                                                      SwitchName="Show notifications over full-screen apps"
+                                                      Toggled="OnNotifyFullscreenToggled" Flat="True"
+                                                      Note="Videos and browsers in full screen; never over games." />
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>

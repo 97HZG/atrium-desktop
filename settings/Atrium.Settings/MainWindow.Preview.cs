@@ -651,4 +651,18 @@ public sealed partial class MainWindow
             if (kind.Length > 0) yield return (kind, size, col, row, cities);
         }
     }
+
+    private void OnHideBodyToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        CurrentSettings.NotifyHideBody = HideBodySwitch.IsOn;
+        Changed();
+    }
+
+    private void OnNotifyFullscreenToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        CurrentSettings.NotifyFullscreen = NotifyFullscreenSwitch.IsOn;
+        Changed();
+    }
 }
