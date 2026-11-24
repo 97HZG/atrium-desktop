@@ -22,6 +22,9 @@ struct MusicFeed {
     std::atomic<bool> playing{false}; // the session is playing
     std::atomic<float> intensity{1};  // the motion setting: 0 still .. 1.5 vivid
     std::atomic<bool> loop{false};    // nowPlayingRhythm loop: a steady level, the bars on their own rhythms
+    mutable std::atomic<bool> needWake{true}; // set when bars settle while playing so incoming audio wakes UI
+
+    float EffectivePeak() const { return loop.load(std::memory_order_relaxed) ? 0.35f : peak.load(std::memory_order_relaxed); }
 };
 
 class MusicBars {
@@ -43,7 +46,9 @@ public:
         const bool live = playing && safeIntensity > 0.f;
         const float loud = live ? Loudness(peak) : 0.f;
         level_ += (loud - level_) * (1.f - std::exp(-dt * (loud > level_ ? kAttack : kRelease)));
-        bool moving = live;
+        if (loud == 0.f && level_ < 0.001f)
+            level_ = 0.f;
+        bool moving = live && (loud > 0.f || level_ > 0.f);
         for (size_t i = 0; i < kCount; ++i) {
             phase_[i] = std::fmod(phase_[i] + dt * kRate[i] * (0.55f + 0.6f * level_), 1.f);
             const float target = Target(i, live, safeIntensity);

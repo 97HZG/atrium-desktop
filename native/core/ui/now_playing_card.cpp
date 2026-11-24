@@ -207,6 +207,12 @@ void NowPlayingCard::Update(const MediaSnapshot& snapshot)
         surface_.Invalidate();
 }
 
+void NowPlayingCard::WakeBars()
+{
+    if (surface_.Visible())
+        surface_.Invalidate();
+}
+
 void NowPlayingCard::TakeArtwork()
 {
     artVersion_ = media_.artworkVersion;
@@ -336,9 +342,11 @@ void NowPlayingCard::PaintHeader(Canvas& c, const Theme& t)
     // The five bars, live, in the art's colour.
     const double dt = lastBarsMs_ == 0 ? 16 : c.now - lastBarsMs_;
     lastBarsMs_ = c.now;
-    const float peak = feed_ ? feed_->peak.load() : 0.f, intensity = feed_ ? feed_->intensity.load() : 1.f;
+    const float peak = feed_ ? feed_->EffectivePeak() : 0.f, intensity = feed_ ? feed_->intensity.load() : 1.f;
     if (bars_.Step(peak, Playing(), intensity, dt))
         c.Continue();
+    else if (feed_ && Playing() && intensity > 0.f)
+        feed_->needWake.store(true, std::memory_order_release);
     const float bw = kBarsW / 9, gap = (kBarsW - 5 * bw) / 4, cy = several ? kPad + 12 : kBarsY;
     const D2D1_COLOR_F ink = tint_ ? *tint_ : t.text;
     c.BeginInkArea(D2D1::RectF(kBarsRight - kBarsW, cy - kBarsW / 2, kBarsRight, cy + kBarsW / 2));

@@ -126,6 +126,7 @@ public:
     // The now-playing entry, right of the status entry, while `shown` (a player has a session); its
     // bars move with `feed`; `tip` its tooltip (the track). Every call wakes the render thread.
     void SetMusic(std::shared_ptr<const MusicFeed> feed, bool shown, std::wstring tip);
+    void WakeRender();
     // The overflow entry: apps that did not fit, in bar order.
     std::function<void(const std::vector<std::wstring>& keys, RECT anchor)> onOverflow;
     // Drag and drop of an app to visible position `toIndex` (0-based, in the

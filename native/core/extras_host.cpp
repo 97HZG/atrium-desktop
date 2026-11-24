@@ -12,6 +12,7 @@ namespace {
 // The workers' news, on ExtrasHost's own window.
 constexpr UINT WM_MEDIA_STATE = WM_APP + 1; // lParam: MediaSnapshot*
 constexpr UINT WM_STACKS_READY = WM_APP + 2;
+constexpr UINT WM_MEDIA_WAKE = WM_APP + 3;
 constexpr wchar_t kWindowClass[] = L"AtriumExtras";
 
 // nowPlayingMotion as the bars' reach.
@@ -56,6 +57,11 @@ LRESULT CALLBACK ExtrasHost::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         self->stacks_.Refresh();
         return 0;
     }
+    if (self && m == WM_MEDIA_WAKE) {
+        self->wakeQueued_->store(false, std::memory_order_release);
+        self->WakeMusic();
+        return 0;
+    }
     return DefWindowProcW(h, m, w, l);
 }
 
@@ -91,17 +97,28 @@ ExtrasHost::~ExtrasHost()
 
 void ExtrasHost::Apply(const Settings& s, float radius)
 {
-    feed_->intensity.store(Intensity(s.nowPlayingMotion));
-    feed_->loop.store(s.nowPlayingRhythm == L"loop");
-    liveRhythm_ = s.nowPlayingMotion != L"off" && s.nowPlayingRhythm != L"loop";
+    const float intensity = Intensity(s.nowPlayingMotion);
+    const bool loop = s.nowPlayingRhythm == L"loop";
+    const bool motionChanged = intensity != feed_->intensity.exchange(intensity, std::memory_order_relaxed);
+    const bool rhythmChanged = loop != feed_->loop.exchange(loop, std::memory_order_relaxed);
+    liveRhythm_ = s.nowPlayingMotion != L"off" && !loop;
     musicOn_ = s.showNowPlaying;
     if (musicOn_ && !media_) {
         samplingActive_.reset();
         const std::shared_ptr<MusicFeed> feed = feed_;
-        media_ = std::make_unique<MediaSessionWatcher>(host_, WM_MEDIA_STATE, [feed](float peak, bool playing) {
-            // A steady animation: a song's usual level, whatever the sound (each bar keeps its own pace).
-            feed->peak.store(feed->loop.load() ? 0.35f : peak);
-            feed->playing.store(playing);
+        const std::shared_ptr<std::atomic<bool>> wakeQueued = wakeQueued_;
+        const HWND host = host_;
+        bool wasAudible = false;
+        media_ = std::make_unique<MediaSessionWatcher>(host_, WM_MEDIA_STATE, [feed, wakeQueued, host, wasAudible](float peak, bool playing) mutable {
+            feed->peak.store(peak, std::memory_order_relaxed);
+            feed->playing.store(playing, std::memory_order_relaxed);
+            const bool audible = playing && MusicBars::Loudness(feed->EffectivePeak()) > 0.f;
+            if (audible && (!wasAudible || feed->needWake.exchange(false, std::memory_order_acq_rel)) && host &&
+                !wakeQueued->exchange(true, std::memory_order_acq_rel)) {
+                if (!PostMessageW(host, WM_MEDIA_WAKE, 0, 0))
+                    wakeQueued->store(false, std::memory_order_release);
+            }
+            wasAudible = audible;
         });
     } else if (!musicOn_ && media_) {
         media_.reset();
@@ -112,6 +129,8 @@ void ExtrasHost::Apply(const Settings& s, float radius)
         media_->SetFilter(s.nowPlayingShowPaused, s.nowPlayingAppMode, s.nowPlayingApps);
         UpdateSampling();
     }
+    if (motionChanged || rhythmChanged)
+        WakeMusic();
     const bool stacksChanged =
         !stacksCached_ || stacksOn_ != s.showFolderStacks || lastFolderStacks_ != s.folderStacks || lastFolderStackFiles_ != s.folderStackFiles;
     stacksCached_ = true;
@@ -166,6 +185,12 @@ void ExtrasHost::UpdateSampling()
         return;
     samplingActive_ = want;
     media_->SetSamplingActive(want);
+}
+
+void ExtrasHost::WakeMusic()
+{
+    forBars_([](Bar& b) { b.WakeRender(); });
+    card_.WakeBars();
 }
 
 void ExtrasHost::Click(Bar& bar, const std::wstring& key, RECT entry)

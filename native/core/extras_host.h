@@ -14,6 +14,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -55,11 +56,13 @@ private:
     void OnMedia(const MediaSnapshot& snapshot);
     std::wstring MusicTip() const; // the entry's tooltip: the track
     void UpdateSampling();   // the player's level is read only while a bar shows it
+    void WakeMusic();        // wakes bar render threads and the card on audio or rhythm changes
     void PrewarmLaunchpad(); // every app's icon, for the main display
 
     ForEachBar forBars_;
     HWND host_; // message-only: the media watcher's and the stack's news
     std::shared_ptr<MusicFeed> feed_;
+    std::shared_ptr<std::atomic<bool>> wakeQueued_{std::make_shared<std::atomic<bool>>(false)};
     Launchpad launchpad_;
     NowPlayingCard card_;
     FolderStackModel stackModel_;

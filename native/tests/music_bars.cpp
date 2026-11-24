@@ -98,6 +98,35 @@ int main()
                 "heights stay finite and bounded after NaN/Inf inputs");
     Require(!Run(bad, 0.f, false, 1.f, 2500), "bars settle normally after NaN/Inf inputs");
 
+    MusicFeed feed;
+    Require(feed.EffectivePeak() == 0.f, "EffectivePeak starts at zero");
+    feed.peak.store(0.6f);
+    Require(feed.EffectivePeak() == 0.6f, "EffectivePeak returns peak when loop is off");
+    feed.peak.store(0.f);
+    feed.loop.store(true);
+    Require(feed.EffectivePeak() == 0.35f, "EffectivePeak returns 0.35 when loop is on even with zero peak");
+
+    MusicBars silent;
+    Require(Run(silent, 0.7f, true, 1.f, 600), "loud playback starts moving");
+    Require(!Run(silent, 0.f, true, 1.f, 2500), "playing during silence settles and stops asking for frames");
+    Require(silent.Level() == 0.f, "playing during silence snaps level to zero");
+    for (size_t i = 0; i < MusicBars::kCount; ++i)
+        Require(std::abs(silent.Height(i) - MusicBars::kRest) < 0.003f, "playing during silence settles heights to kRest");
+    Require(silent.Step(0.5f, true, 1.f, 0.5), "sound returning from silence immediately moves even on a 0.5 ms step");
+
+    MusicBars subtleQuiet;
+    bool subtleMovedEveryFrame = true;
+    for (int t = 0; t < 200; ++t)
+        subtleMovedEveryFrame = subtleMovedEveryFrame && subtleQuiet.Step(0.00631f, true, 0.55f, 16);
+    Require(subtleMovedEveryFrame && subtleQuiet.Step(0.00631f, true, 0.55f, 0.5),
+            "quiet -44 dB playback with subtle motion keeps moving without dropping frames");
+
+    MusicBars pausedAfterLoud;
+    Require(Run(pausedAfterLoud, 0.8f, true, 1.f, 600), "loud playback animates before pausing");
+    Require(!Run(pausedAfterLoud, 0.8f, false, 1.f, 2500), "pausing after loud playback settles and stops");
+    for (size_t i = 0; i < MusicBars::kCount; ++i)
+        Require(std::abs(pausedAfterLoud.Height(i) - MusicBars::StillHeight(i)) < 0.005f, "pausing after loud playback settles to StillHeight");
+
     std::cout << (g_failures ? "music_bars: FAILED" : "music_bars: ok") << '\n';
     return g_failures ? 1 : 0;
 }

@@ -83,6 +83,12 @@ void Bar::SetMusic(std::shared_ptr<const MusicFeed> feed, bool shown, std::wstri
     }
 }
 
+void Bar::WakeRender()
+{
+    if (wake_)
+        SetEvent(wake_);
+}
+
 std::wstring Bar::TooltipText(const std::wstring& key) const
 {
     if (key == kStartKey)

@@ -32,6 +32,7 @@ public:
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
     void Update(const MediaSnapshot& snapshot);
+    void WakeBars();
     // The playing app's level and the motion setting, as the bar's entry reads them.
     void SetFeed(std::shared_ptr<const MusicFeed> feed) { feed_ = std::move(feed); }
     // The bar's popup corner, made rounder (the Dynamic Island's): at least kMinRadius.
