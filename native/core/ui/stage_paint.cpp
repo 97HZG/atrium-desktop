@@ -277,33 +277,51 @@ void StageManager::PaintFlights(Canvas& c)
     }
 }
 
+void StageManager::PaintMore(Canvas& c, Entry& e, int index)
+{
+    // The fade follows the front picture's bottom edge as the tilt shows it (slanted, lower at the
+    // near side), not the card's upright box: across the box, the far side's bottom stopped half way
+    // through the cross-fade and read as a blurred band in the card's middle.
+    const D2D1_RECT_F box = Box(e);
+    D2D1_POINT_2F bl{box.left, box.bottom}, br{box.right, box.bottom}, top{(box.left + box.right) / 2, box.top};
+    std::wstring key;
+    if (auto p = e.windows.empty() ? nullptr : PictureOf(e.windows.front(), e.keys.front(), key); p && p->ok && p->width > 0 && p->height > 0) {
+        const Pose pose = PoseOf(e, 0, *p, (onRight_ ? -1.f : 1.f) * kTilt);
+        const D2D1::Matrix4x4F m = Tilt(pose.cx, pose.cy, pose.ox, pose.oy, pose.angle, kDepth, pose.z);
+        bl = Project(m, pose.rect.left, pose.rect.bottom), br = Project(m, pose.rect.right, pose.rect.bottom);
+        top = Project(m, (pose.rect.left + pose.rect.right) / 2, pose.rect.top);
+    }
+    const float ex = br.x - bl.x, ey = br.y - bl.y, len = std::max(std::hypot(ex, ey), 1.f);
+    const D2D1_POINT_2F n{-ey / len, ex / len}, mid{(bl.x + br.x) / 2, (bl.y + br.y) / 2}; // n: down, across the bottom edge
+    const float height = std::max((mid.x - top.x) * n.x + (mid.y - top.y) * n.y, 1.f);
+    const D2D1_POINT_2F from{mid.x - n.x * height, mid.y - n.y * height}, to{mid.x + n.x * kMoreReach, mid.y + n.y * kMoreReach};
+    const D2D1_RECT_F fadeBounds = D2D1::RectF(-12.f, box.top - 28.f, size_.width + 12.f, box.bottom + 34.f);
+    // Sharp down to a little past the middle, then blurred, then gone just below the bottom edge.
+    static constexpr D2D1_GRADIENT_STOP kSharp[] = {{0.f, {1, 1, 1, 1}}, {0.5f, {1, 1, 1, 1}}, {0.75f, {1, 1, 1, 0}}};
+    static constexpr D2D1_GRADIENT_STOP kBlurred[] = {{0.5f, {1, 1, 1, 0}}, {0.75f, {1, 1, 1, 0.9f}}, {1.f, {1, 1, 1, 0}}};
+    c.BeginFade(from, to, kSharp, fadeBounds);
+    PaintEntry(c, e, index, true);
+    c.EndFade();
+    c.BeginBlur();
+    c.BeginFade(from, to, kBlurred, fadeBounds);
+    PaintEntry(c, e, index, true);
+    c.EndFade();
+    c.EndBlur(kMoreBlur);
+}
+
 void StageManager::Paint(Canvas& c)
 {
     const bool moving = Animate(c.now);
     for (Entry& e : leaving_)
         PaintEntry(c, e, -1, false);
     // More sets than the strip holds (the wheel pages through them): the last card goes from sharp at
-    // its top to blurred, and is gone at its bottom, so the strip reads as one that goes on (#112). A
-    // sharp and a blurred copy cross-fade down the card.
+    // its top to blurred, and is gone at its bottom, so the strip reads as one that goes on (#112).
     const bool more = scrollCount_ > entries_.size();
     for (size_t i = 0; i < entries_.size(); ++i) {
-        if (!more || i + 1 < entries_.size()) {
+        if (more && i + 1 == entries_.size())
+            PaintMore(c, entries_[i], int(i));
+        else
             PaintEntry(c, entries_[i], int(i), true);
-            continue;
-        }
-        const D2D1_RECT_F box = Box(entries_[i]);
-        const D2D1_RECT_F fadeBounds = D2D1::RectF(-12.f, box.top - 28.f, size_.width + 12.f, box.bottom + 34.f);
-        const D2D1_POINT_2F from{0, box.top - kMoreReach}, to{0, box.bottom + kMoreReach};
-        static constexpr D2D1_GRADIENT_STOP kSharp[] = {{0.f, {1, 1, 1, 1}}, {0.2f, {1, 1, 1, 1}}, {0.7f, {1, 1, 1, 0}}};
-        static constexpr D2D1_GRADIENT_STOP kBlurred[] = {{0.2f, {1, 1, 1, 0}}, {0.6f, {1, 1, 1, 0.85f}}, {1.f, {1, 1, 1, 0}}};
-        c.BeginFade(from, to, kSharp, fadeBounds);
-        PaintEntry(c, entries_[i], int(i), true);
-        c.EndFade();
-        c.BeginBlur();
-        c.BeginFade(from, to, kBlurred, fadeBounds);
-        PaintEntry(c, entries_[i], int(i), true);
-        c.EndFade();
-        c.EndBlur(kMoreBlur);
     }
     UpdateRegion(moving);
     if (moving)

@@ -252,6 +252,7 @@ private:
     void Hide();
     void Paint(Canvas& c);
     void PaintEntry(Canvas& c, Entry& e, int index, bool live);
+    void PaintMore(Canvas& c, Entry& e, int index); // the last card, when more sets follow: blurred away at its bottom
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
     bool OnTimerMessage(WPARAM w);
     void ProcessOpenIntent();
