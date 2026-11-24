@@ -1,7 +1,4 @@
 {
-  "core/bar.cpp|complexity|Bar::Relayout()": 96,
-  "core/bar.cpp|file-lines": 1049,
-  "core/bar.cpp|function-lines|Bar::Relayout()": 316,
   "core/bar.cpp|try": 2,
   "core/localization.cpp|catch-all": 1,
   "core/localization.cpp|try": 1,

@@ -201,7 +201,16 @@ private:
     void HandleMouseWheel(HWND h, WPARAM w, LPARAM l);
     void HandleRightButtonUp(HWND h, POINT pt);
     void ReadDisplays();
+    struct RelayoutTarget;
+    struct LayoutMetrics;
     HMONITOR ResolveRelayoutMonitor(MONITORINFO& mi);
+    bool ResolveLayoutTarget(RelayoutTarget& out);
+    void FitAppStrip(LayoutMetrics& m, float scale, int screenW, int maxW, int rightPlates, int statusExtra);
+    LayoutMetrics ComputeLayoutMetrics(const RelayoutTarget& target);
+    BarScene InitLayoutScene(const RelayoutTarget& target, const LayoutMetrics& m) const;
+    void ResolveTaskIcon(const TaskItem& t, int iconPx, std::map<std::wstring, CachedIcon>& keep, SceneItem& it);
+    void BuildLayoutScene(const RelayoutTarget& target, const LayoutMetrics& m);
+    void ApplyLayout(const RelayoutTarget& target, const LayoutMetrics& m);
     void Bounce(const std::wstring& key);
     POINT LayoutPoint(POINT client) const;
     RECT EdgeZone() const;

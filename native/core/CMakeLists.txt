@@ -32,6 +32,7 @@ add_library(atrium_core_lib STATIC
     bar_drop.cpp
     bar_entries.cpp
     bar_input.cpp
+    bar_layout.cpp
     bar_render.cpp
     bar_stacking.cpp
     desktop_helpers.cpp
