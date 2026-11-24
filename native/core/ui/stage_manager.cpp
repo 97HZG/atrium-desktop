@@ -45,7 +45,7 @@ constexpr ULONGLONG kDesktopMs = 250; // the desktop in front this long: it was 
 constexpr UINT WM_STAGE_PICTURE = WM_APP + 0x5C; // a window's picture was taken
 // The pointer at the screen's edge for kEdgeMs brings the strip out; away from it for kPeekLeaveMs
 // sends it back. Whether a window covers the strip's place is looked at every kCoverMs.
-constexpr ULONGLONG kEdgeMs = 40, kPeekLeaveMs = 350, kCoverMs = 150, kSettleMs = 2000;
+constexpr ULONGLONG kEdgeMs = 40, kPeekLeaveMs = 350, kCoverMs = 150;
 constexpr double kRevealInMs = 380, kRevealOutMs = 210, kRevealStagger = 32;
 constexpr int kLargeMax = 4096, kLargeOld = 1440;
 constexpr size_t kLargeKept = 4;
@@ -63,20 +63,6 @@ std::wstring StatePath()
 // hangs must not hang the bar.
 // Up again without taking the foreground. A window minimized from maximized comes back maximized:
 // SW_SHOWNOACTIVATE alone restores its normal size, a maximized app back at half the screen (#19).
-} // namespace
-
-void StageManager::ShowQuietly(HWND h)
-{
-    WINDOWPLACEMENT wp{sizeof(wp)};
-    if (IsIconic(h) && GetWindowPlacement(h, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED)) {
-        ShowWindowAsync(h, SW_SHOWMAXIMIZED);
-        return;
-    }
-    ShowWindowAsync(h, SW_SHOWNOACTIVATE);
-}
-
-namespace {
-
 bool OnMonitor(HWND h, HMONITOR m) { return MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) == m; }
 
 } // namespace
@@ -690,7 +676,9 @@ void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std:
     const ULONGLONG now = GetTickCount64();
     for (const auto& [seq, h] : mine) {
         parked_.erase(h);
-        if (!Flying(h))
+        if (Flying(h))
+            restoring_[h] = now; // wait out the flight until StepFlight triggers restore
+        else
             UnparkDirect(h, h != front, now);
     }
     if (!front)
@@ -863,8 +851,7 @@ bool StageManager::AdoptMinimized()
     Set gone;
     std::vector<HWND> flyIn;
     const ULONGLONG now = GetTickCount64();
-    std::erase_if(restoring_,
-                  [now](const auto& kv) { return !IsWindow(kv.first) || !IsWindowVisible(kv.first) || !IsIconic(kv.first) || now - kv.second > kSettleMs; });
+    PruneRestoring(now);
     for (const TaskItem& t : items_) {
         if (!Has(stage_, t.key))
             continue;
@@ -873,7 +860,7 @@ bool StageManager::AdoptMinimized()
         for (HWND h : t.windows) {
             const bool iconic = IsIconic(h);
             const auto action = DecideStageAdopt(parked_.contains(h), IsWindowVisible(h) != FALSE, iconic, !iconic && OnMonitor(h, monitor_), up_.contains(h),
-                                                 restoring_.contains(h));
+                                                 IsRestoring(h, now));
             if (action == StageAdoptAction::Up) {
                 anyUp = true;
                 RECT r{};
@@ -1400,7 +1387,7 @@ bool StageManager::NeedsAdopt(ULONGLONG now) const
 {
     if (!minimizeToStrip_)
         return false;
-    if (std::ranges::any_of(up_, [this](const auto& u) { return !parked_.contains(u.first) && IsIconic(u.first); }))
+    if (std::ranges::any_of(up_, [this, now](const auto& u) { return !parked_.contains(u.first) && IsIconic(u.first) && !IsRestoring(u.first, now); }))
         return true;
     for (const TaskItem& t : items_) {
         if (!Has(stage_, t.key))
@@ -1409,8 +1396,7 @@ bool StageManager::NeedsAdopt(ULONGLONG now) const
             if (parked_.contains(h) || !IsWindowVisible(h))
                 continue;
             if (IsIconic(h)) {
-                auto r = restoring_.find(h);
-                if (r == restoring_.end() || now - r->second > kSettleMs)
+                if (!IsRestoring(h, now))
                     return true;
             } else if (!up_.contains(h) && OnMonitor(h, monitor_)) {
                 return true;

@@ -103,6 +103,13 @@ int main()
         require(DecideStageAdopt(false, true, true, false, true, false) == StageAdoptAction::Adopt, "minimized in up_ at -32000 off-monitor is adopted");
         require(DecideStageAdopt(false, true, true, false, false, false) == StageAdoptAction::Adopt, "minimized stage window that missed up_ is adopted");
         require(DecideStageAdopt(false, true, true, false, false, true) == StageAdoptAction::Wait, "minimized window still restoring waits");
+        require(ShouldWaitStageRestore(true, 5000, 2000, true), "outbound strip flight keeps waiting beyond settle timeout");
+        require(ShouldWaitStageRestore(false, 0, 2000, true), "outbound strip flight waits even without prior restoring entry");
+        require(DecideStageAdopt(false, true, true, false, false, ShouldWaitStageRestore(true, 100, 2000, false)) == StageAdoptAction::Wait,
+                "post-flight restoring window within settle window waits");
+        require(DecideStageAdopt(false, true, true, false, false, ShouldWaitStageRestore(true, 2001, 2000, false)) == StageAdoptAction::Adopt,
+                "restoring window exceeding settle window after flight ends is adopted");
+        require(!ShouldWaitStageRestore(false, 0, 2000, false), "inbound flight does not suppress adoption when not restoring");
         require(DecideStageAdopt(true, true, true, true, true, false) == StageAdoptAction::Drop, "already parked window is skipped");
         require(DecideStageAdopt(false, false, true, true, true, false) == StageAdoptAction::Drop, "hidden window is skipped");
 

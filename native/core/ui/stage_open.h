@@ -28,6 +28,13 @@ inline StageAdoptAction DecideStageAdopt(bool parked, bool visible, bool iconic,
     return StageAdoptAction::Adopt;
 }
 
+// Restoring a picked strip window keeps it out of re-adoption while its outbound flight
+// (`flyingFromStrip`) is active, and for `settleMs` after restore is dispatched.
+inline bool ShouldWaitStageRestore(bool hasRestoringEntry, uint64_t ageMs, uint64_t settleMs, bool flyingFromStrip)
+{
+    return flyingFromStrip || (hasRestoringEntry && ageMs <= settleMs);
+}
+
 inline uint64_t StagePictureRetryMs(int misses)
 {
     if (misses <= 0)

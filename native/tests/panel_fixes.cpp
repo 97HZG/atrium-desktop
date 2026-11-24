@@ -14,6 +14,50 @@ using namespace atrium;
 
 namespace {
 
+struct TimerPumpStats {
+    int timerTicks = 0;
+    int messages = 0;
+};
+
+TimerPumpStats PumpTimersWithHiddenOverlay(HINSTANCE inst, const std::function<void(Surface&, Surface&)>& exercise)
+{
+    Surface regular(inst, L"Atrium Timer Check Regular", false, 0);
+    Surface overlay(inst, L"Atrium Timer Check Overlay", false, 0, false, true);
+    if (exercise)
+        exercise(regular, overlay);
+
+    constexpr UINT_PTR kTimerId = 0x7711;
+    TimerPumpStats stats{};
+    regular.message = [&](UINT m, WPARAM w, LPARAM, LRESULT&) {
+        if (m == WM_TIMER && w == kTimerId) {
+            ++stats.timerTicks;
+            return true;
+        }
+        return false;
+    };
+    if (!regular.Hwnd() || !overlay.Hwnd() || !SetTimer(regular.Hwnd(), kTimerId, 20, nullptr))
+        return stats;
+
+    const ULONGLONG deadline = GetTickCount64() + 500;
+    while (GetTickCount64() < deadline && stats.timerTicks < 4 && stats.messages < 400) {
+        MSG msg{};
+        if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            ++stats.messages;
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+            continue;
+        }
+        if (stats.timerTicks >= 4)
+            break;
+        const ULONGLONG now = GetTickCount64();
+        if (now >= deadline)
+            break;
+        MsgWaitForMultipleObjects(0, nullptr, FALSE, static_cast<DWORD>(std::min<ULONGLONG>(50, deadline - now)), QS_ALLINPUT);
+    }
+    KillTimer(regular.Hwnd(), kTimerId);
+    return stats;
+}
+
 void CheckClickThroughAndPeek(auto& check)
 {
     const HINSTANCE inst = GetModuleHandleW(nullptr);
@@ -64,6 +108,16 @@ void CheckClickThroughAndPeek(auto& check)
     GenieMinimize genie(inst, [](HWND) -> std::optional<RECT> { return std::nullopt; }, [](HWND) { return false; });
     genie.SetEnabled(true);
     genie.SetEnabled(false);
+
+    const TimerPumpStats hiddenStats = PumpTimersWithHiddenOverlay(inst, {});
+    check(hiddenStats.timerTicks >= 4 && hiddenStats.messages < 400, "hidden click-through layered Surface does not spin WM_PAINT or starve WM_TIMER");
+
+    const TimerPumpStats showHideStats = PumpTimersWithHiddenOverlay(inst, [](Surface&, Surface& overlay) {
+        overlay.Show(RECT{10, 10, 110, 110}, false, POINT{10, 10}, false);
+        overlay.Hide(false);
+    });
+    check(showHideStats.timerTicks >= 4 && showHideStats.messages < 400,
+          "click-through layered Surface after Show/Hide does not spin WM_PAINT or starve WM_TIMER");
 }
 
 } // namespace

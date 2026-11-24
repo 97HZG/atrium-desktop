@@ -177,9 +177,18 @@ public:
     // Only `dip` (content coordinates) and the shadow margin round it are on screen and take
     // clicks, which elsewhere reach the windows below; an empty rectangle: the whole window. A
     // popup whose pieces change size inside a window that does not (the start menu).
-    void SetRegion(D2D1_RECT_F dip);
+    void SetRegion(D2D1_RECT_F dip)
+    {
+        region_ = dip;
+        regionNone_ = false;
+        ApplyRegion();
+    }
     // Nothing of the window on screen or taking clicks until SetRegion again: a layer kept ready, out of the way.
-    void SetRegionNone();
+    void SetRegionNone()
+    {
+        regionNone_ = true;
+        ApplyRegion();
+    }
     // Keep backing buffers stable during a resize; {0,0} releases the reserve.
     // Input bounds and glass shape keep their actual size.
     void ReserveResize(D2D1_SIZE_F sizeDip);
@@ -201,8 +210,8 @@ public:
     void SetShapes(const std::vector<ShapeDip>& shapes, bool animating = false);
     // A press at (x, y) DIP in content coordinates: the glass ripples from there.
     void Ripple(float x, float y);
-    POINT ScreenToContent(POINT screen) const;
-    POINT ContentToScreen(POINT content) const;
+    POINT ScreenToContent(POINT screen) const { return POINT{screen.x - rect_.left, screen.y - rect_.top}; }
+    POINT ContentToScreen(POINT content) const { return POINT{content.x + rect_.left, content.y + rect_.top}; }
     // Drops an image Canvas::Image cached under `key` (it is replaced by another).
     void ForgetImage(const std::wstring& key) { bitmaps_.erase(key); }
 

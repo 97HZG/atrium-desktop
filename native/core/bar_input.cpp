@@ -367,7 +367,7 @@ void Bar::FileDragLeave()
 
 void Bar::WatchPointer()
 {
-    if (!covered_) {
+    if (!covered_ || !visible_) {
         KillTimer(input_, kPointerTimer);
         return;
     }
@@ -526,6 +526,20 @@ void Bar::UpdateTooltips()
 {
     if (tooltip_->Visible() || previewShown_)
         ShowTooltip(); // e.g. the window count changed while hovering
+}
+
+void Bar::SetVisible(bool visible)
+{
+    const bool changed = visible_ != visible;
+    visible_ = visible;
+    if (!visible_)
+        UpdateCover();
+    Relayout();
+    if (visible_)
+        UpdateCover();
+    UpdateNearWatch();
+    if (changed && onTuckChanged)
+        onTuckChanged();
 }
 
 } // namespace atrium

@@ -195,6 +195,13 @@ bool Bar::MonitorCoveredByApp() const
 
 void Bar::UpdateCover()
 {
+    if (!visible_) {
+        covered_ = revealed_ = false;
+        leftAt_ = 0;
+        KillTimer(input_, kPointerTimer);
+        UpdateAutoHide();
+        return;
+    }
     // Apply the hide mode independently on each display.
     const std::wstring& mode = settings_.autoHide;
     const bool allowFullscreenHide = mode != L"never" || settings_.barFullscreenHide;

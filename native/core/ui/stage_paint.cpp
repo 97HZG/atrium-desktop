@@ -220,6 +220,7 @@ bool StageManager::StepFlight(Canvas& c, Flight& f)
     }
     if (!f.toStrip && t >= kRestoreAt && !f.restored) {
         f.restored = true;
+        restoring_[f.window] = GetTickCount64();
         EnqueueAction({f.activate ? Action::Kind::Activate : Action::Kind::ShowQuietly, f.window});
     }
     const double over = f.elapsed - kFlightMs - kFlightHoldMs;

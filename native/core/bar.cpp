@@ -554,16 +554,6 @@ void Bar::SetItems(std::vector<TaskItem> items)
     }
 }
 
-void Bar::SetVisible(bool visible)
-{
-    const bool changed = visible_ != visible;
-    visible_ = visible;
-    Relayout();
-    UpdateNearWatch();
-    if (changed && onTuckChanged)
-        onTuckChanged();
-}
-
 HMONITOR Bar::ResolveRelayoutMonitor(MONITORINFO& mi)
 {
     const std::wstring& id = !displayOverride_.empty()              ? displayOverride_ :
@@ -1049,7 +1039,8 @@ void Bar::UpdateAutoHide()
         Publish();
     }
     UpdateNearWatch();
-    Raise();
+    if (visible_)
+        Raise();
 }
 
 void Bar::SetStatus(const SystemStatus& status)

@@ -149,9 +149,6 @@ D2D1_SIZE_U Surface::BufferSize() const
                        UINT32(std::max({1, int(window_.bottom - window_.top), int(std::lround(resizeReserve_.height * scale_)) + inset})));
 }
 
-POINT Surface::ScreenToContent(POINT screen) const { return POINT{screen.x - rect_.left, screen.y - rect_.top}; }
-POINT Surface::ContentToScreen(POINT content) const { return POINT{content.x + rect_.left, content.y + rect_.top}; }
-
 void Surface::SetRadius(float dip)
 {
     if (radius_ == dip)
@@ -347,10 +344,13 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     switch (m) {
     case WM_MOUSEACTIVATE: return self->activatable_ ? MA_ACTIVATE : MA_NOACTIVATE;
-    case WM_PAINT:
-        ValidateRect(h, nullptr);
+    case WM_PAINT: {
+        PAINTSTRUCT ps{};
+        BeginPaint(h, &ps);
+        EndPaint(h, &ps);
         self->Paint();
         return 0;
+    }
     case WM_ERASEBKGND: return 1;
     case WM_DPICHANGED:
         self->Place(self->rect_);
@@ -401,19 +401,6 @@ void Surface::ApplyPlacement()
         return;
     }
     SetWindowPos(hwnd_, HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top, SWP_NOACTIVATE);
-    ApplyRegion();
-}
-
-void Surface::SetRegion(D2D1_RECT_F dip)
-{
-    region_ = dip;
-    regionNone_ = false;
-    ApplyRegion();
-}
-
-void Surface::SetRegionNone()
-{
-    regionNone_ = true;
     ApplyRegion();
 }
 
