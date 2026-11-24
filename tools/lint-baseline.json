@@ -87,7 +87,7 @@
   "core/ui/notifications.cpp|function-lines|Notifications::Paint(Mode,Canvas&)": 174,
   "core/ui/stage_manager.cpp|complexity|StageManager::AdoptMinimized()": 42,
   "core/ui/stage_manager.cpp|complexity|StageManager::Stage(const Set&,bool,HWND,bool,const std::unordered_map<HWND,Pose>*)": 55,
-  "core/ui/stage_manager.cpp|file-lines": 1670,
+  "core/ui/stage_manager.cpp|file-lines": 1560,
   "core/ui/start_menu.cpp|complexity|StartMenu::Message(UINT,WPARAM,LPARAM,LRESULT&)": 189,
   "core/ui/start_menu.cpp|complexity|StartMenu::PaintRows(Canvas&,const Theme&,const std::vector<Row>&,float)": 59,
   "core/ui/start_menu.cpp|complexity|StartMenu::PaintShelf(Canvas&,const Theme&)": 53,

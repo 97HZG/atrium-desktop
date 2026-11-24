@@ -404,6 +404,19 @@ void Surface::ApplyPlacement()
     ApplyRegion();
 }
 
+void Surface::SetRegion(D2D1_RECT_F dip)
+{
+    region_ = dip;
+    regionNone_ = false;
+    ApplyRegion();
+}
+
+void Surface::SetRegionNone()
+{
+    regionNone_ = true;
+    ApplyRegion();
+}
+
 void Surface::ApplyRegion()
 {
     if (desktopLayer_)

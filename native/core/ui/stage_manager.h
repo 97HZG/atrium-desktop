@@ -149,6 +149,7 @@ private:
     };
 
     static constexpr UINT_PTR kRaiseTimer = 0x5C03, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
+    static constexpr UINT kRaiseMs = 220;
     static constexpr ULONGLONG kPendingMs = 1200;
     static constexpr double kFlightMs = 400;
     static constexpr float kBoxW = 172, kBoxH = 112, kTilt = 22;
@@ -205,15 +206,7 @@ private:
         lk.unlock();
         actionCv_.notify_one();
     }
-    static void ShowQuietly(HWND h)
-    {
-        WINDOWPLACEMENT wp{sizeof(wp)};
-        if (IsIconic(h) && GetWindowPlacement(h, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED)) {
-            ShowWindowAsync(h, SW_SHOWMAXIMIZED);
-            return;
-        }
-        ShowWindowAsync(h, SW_SHOWNOACTIVATE);
-    }
+    static void ShowQuietly(HWND h);
     void ActionWorker()
     {
         for (;;) {
@@ -287,19 +280,8 @@ private:
     {
         return std::ranges::any_of(flights_, [window](const Flight& f) { return f.window == window && !f.toStrip; });
     }
-    bool IsRestoring(HWND window, ULONGLONG now) const
-    {
-        const auto it = restoring_.find(window);
-        const bool hasEntry = it != restoring_.end();
-        const uint64_t ageMs = hasEntry && now >= it->second ? now - it->second : 0;
-        return ShouldWaitStageRestore(hasEntry, ageMs, kSettleMs, FlyingFromStrip(window));
-    }
-    void PruneRestoring(ULONGLONG now)
-    {
-        std::erase_if(restoring_, [this, now](const auto& kv) {
-            return !IsWindow(kv.first) || !IsWindowVisible(kv.first) || !IsIconic(kv.first) || (!FlyingFromStrip(kv.first) && now - kv.second > kSettleMs);
-        });
-    }
+    bool IsRestoring(HWND window, ULONGLONG now) const;
+    void PruneRestoring(ULONGLONG now);
     bool HasPicture(HWND window) const
     {
         auto it = pictures_.find(window);
