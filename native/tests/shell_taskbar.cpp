@@ -113,11 +113,44 @@ bool TestPendingRestoresAndHiddenWindows()
     return true;
 }
 
+bool TestModalRestoreAndActivation()
+{
+    using atrium::ActivationCandidate;
+    using atrium::DecideWindowRestoreMethod;
+    using atrium::SelectActivationTarget;
+    using atrium::WindowRestoreMethod;
+    if (DecideWindowRestoreMethod(false, true, false, false) != WindowRestoreMethod::None ||
+        DecideWindowRestoreMethod(false, false, true, true) != WindowRestoreMethod::None ||
+        DecideWindowRestoreMethod(true, true, false, false) != WindowRestoreMethod::SysCommand ||
+        DecideWindowRestoreMethod(true, true, false, true) != WindowRestoreMethod::SysCommand ||
+        DecideWindowRestoreMethod(true, false, false, false) != WindowRestoreMethod::AsyncRestore ||
+        DecideWindowRestoreMethod(true, false, false, true) != WindowRestoreMethod::AsyncShowMaximized ||
+        DecideWindowRestoreMethod(true, true, true, false) != WindowRestoreMethod::AsyncRestore ||
+        DecideWindowRestoreMethod(true, false, true, true) != WindowRestoreMethod::AsyncShowMaximized) {
+        std::fprintf(stderr, "FAIL: shell_taskbar DecideWindowRestoreMethod check failed\n");
+        return false;
+    }
+    const HWND owner = reinterpret_cast<HWND>(uintptr_t{0x101});
+    const HWND modal = reinterpret_cast<HWND>(uintptr_t{0x202});
+    const HWND popup = reinterpret_cast<HWND>(uintptr_t{0x303});
+    if (SelectActivationTarget(owner, false, {modal, true, true}, {popup, true, false}) != modal ||
+        SelectActivationTarget(owner, false, {modal, false, true}, {popup, true, true}) != popup ||
+        SelectActivationTarget(owner, false, {owner, true, true}, {popup, true, true}) != popup ||
+        SelectActivationTarget(owner, false, {modal, true, false}, {popup, false, true}) != owner ||
+        SelectActivationTarget(owner, true, {modal, true, true}, {owner, true, true}) != owner ||
+        SelectActivationTarget(owner, true, {modal, true, true}, {popup, true, true}) != popup ||
+        SelectActivationTarget(owner, true, {modal, true, true}, {popup, true, false}) != owner) {
+        std::fprintf(stderr, "FAIL: shell_taskbar SelectActivationTarget check failed\n");
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main()
 {
-    if (!TestWindowResponsive() || !TestGamePredicates() || !TestPendingRestoresAndHiddenWindows())
+    if (!TestWindowResponsive() || !TestGamePredicates() || !TestPendingRestoresAndHiddenWindows() || !TestModalRestoreAndActivation())
         return 1;
     std::printf("ok: shell_taskbar checks passed\n");
     return 0;

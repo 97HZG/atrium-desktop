@@ -437,7 +437,8 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, c
             // A window filling the screen (a game, a video) is left alone: minimized, a full-screen
             // game comes back to its screen mode first, and flashes up before it goes.
             for (auto h = t.windows.rbegin(); h != t.windows.rend(); ++h)
-                if (!parked_.contains(*h) && IsWindowVisible(*h) && !IsIconic(*h) && OnMonitor(*h, monitor_) && !Transient(*h) && !FillsScreen(*h)) {
+                if (ShouldParkStageWindow(parked_.contains(*h), IsWindowVisible(*h) != FALSE, IsIconic(*h) != FALSE, OnMonitor(*h, monitor_), Transient(*h),
+                                          FillsScreen(*h), IsWindowEnabled(*h) != FALSE)) {
                     Park(*h, t.key);
                     any = true;
                 }
@@ -971,13 +972,11 @@ void StageManager::Load()
 // moved, the picture would land beside the strip and the window then come up over all of the screen.
 void StageManager::MoveBeside(HWND window)
 {
-    if (!window || !IsWindow(window) || IsZoomed(window) || !OnMonitor(window, monitor_))
-        return;
-    WINDOWPLACEMENT wp{sizeof(wp)};
-    if (IsIconic(window) && GetWindowPlacement(window, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED))
+    if (!window || !IsWindow(window) || !IsWindowEnabled(window) || IsZoomed(window) || !OnMonitor(window, monitor_))
         return;
     const bool down = IsIconic(window) != FALSE;
-    if (!down && Transient(window))
+    WINDOWPLACEMENT wp{sizeof(wp)};
+    if (down ? (GetWindowPlacement(window, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED)) : Transient(window))
         return;
     auto parked = parked_.find(window);
     RECT frame{};

@@ -226,7 +226,8 @@ private:
                 continue;
             }
             WINDOWPLACEMENT wp{sizeof(wp)};
-            if (!IsIconic(a.window) || IsZoomed(a.window) || !GetWindowPlacement(a.window, &wp) || (wp.flags & WPF_RESTORETOMAXIMIZED))
+            if (!IsIconic(a.window) || !IsWindowEnabled(a.window) || IsZoomed(a.window) || !GetWindowPlacement(a.window, &wp) ||
+                (wp.flags & WPF_RESTORETOMAXIMIZED))
                 continue;
             RECT frame = IsRectEmpty(&a.frame) ? wp.rcNormalPosition : a.frame, to = frame;
             if (!StageBesideRect(to, a.zone, a.workArea, a.onRight))

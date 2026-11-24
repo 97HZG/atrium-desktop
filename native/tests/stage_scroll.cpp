@@ -97,6 +97,15 @@ int main()
         require(scroll.Offset() == 0 && scroll.Index(4, 0) == 0, "empty rebuild is safe");
         CheckMerge();
 
+        // Park predicate: disabled windows (e.g. blocked by a modal dialog) stay where they are.
+        require(ShouldParkStageWindow(false, true, false, true, false, false, true), "enabled non-transient window on monitor parks");
+        require(!ShouldParkStageWindow(false, true, false, true, false, false, false), "disabled window is never parked");
+        require(!ShouldParkStageWindow(true, true, false, true, false, false, true) && !ShouldParkStageWindow(false, false, false, true, false, false, true) &&
+                    !ShouldParkStageWindow(false, true, true, true, false, false, true) &&
+                    !ShouldParkStageWindow(false, true, false, false, false, false, true) &&
+                    !ShouldParkStageWindow(false, true, false, true, true, false, true) && !ShouldParkStageWindow(false, true, false, true, false, true, true),
+                "parked, hidden, iconic, off-monitor, transient, and fullscreen windows do not park");
+
         // Adopt / wait / drop decisions for stage windows.
         require(DecideStageAdopt(false, true, false, true, false, false) == StageAdoptAction::Up, "visible non-iconic on monitor stays up");
         require(DecideStageAdopt(false, true, false, false, true, false) == StageAdoptAction::Drop, "non-iconic moved off monitor is dropped");

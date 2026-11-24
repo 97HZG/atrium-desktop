@@ -422,8 +422,19 @@ void RaiseTaskWindow(HWND h, HWND ui, UINT restoreMsg, const std::function<void(
                 deferActivate(h);
             return;
         }
-        const bool hung = SendTaskSysCommand(h, SC_RESTORE);
-        if (!hung && IsIconic(h)) {
+        const bool enabled = IsWindowEnabled(h) != FALSE;
+        bool restoreToMaximized = false;
+        if (!enabled) {
+            WINDOWPLACEMENT wp{sizeof(wp)};
+            restoreToMaximized = GetWindowPlacement(h, &wp) && (wp.flags & WPF_RESTORETOMAXIMIZED) != 0;
+        }
+        switch (DecideWindowRestoreMethod(true, enabled, IsHungAppWindow(h) != FALSE, restoreToMaximized)) {
+        case WindowRestoreMethod::None: break;
+        case WindowRestoreMethod::SysCommand: SendTaskSysCommand(h, SC_RESTORE); break;
+        case WindowRestoreMethod::AsyncRestore: ShowWindowAsync(h, SW_RESTORE); break;
+        case WindowRestoreMethod::AsyncShowMaximized: ShowWindowAsync(h, SW_SHOWMAXIMIZED); break;
+        }
+        if (IsIconic(h)) {
             if (onUi) {
                 if (deferActivate)
                     deferActivate(h);
@@ -433,9 +444,10 @@ void RaiseTaskWindow(HWND h, HWND ui, UINT restoreMsg, const std::function<void(
             return;
         }
     }
-    HWND target = GetLastActivePopup(h);
-    if (!target || target == h || !IsWindowVisible(target))
-        target = h;
+    const bool ownerEnabled = IsWindowEnabled(h) != FALSE;
+    auto candidate = [](HWND w) -> ActivationCandidate { return {w, w && IsWindowVisible(w) != FALSE, w && IsWindowEnabled(w) != FALSE}; };
+    const HWND enabledPopup = ownerEnabled ? nullptr : GetWindow(h, GW_ENABLEDPOPUP);
+    const HWND target = SelectActivationTarget(h, ownerEnabled, candidate(enabledPopup), candidate(GetLastActivePopup(h)));
     auto isFront = [&] {
         HWND fg = GetForegroundWindow();
         return fg == target || fg == h || (fg && GetAncestor(fg, GA_ROOTOWNER) == h);

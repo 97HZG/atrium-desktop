@@ -62,6 +62,11 @@ inline bool ShouldTakeStagePicture(bool hasPicture, bool titleBar, int misses, u
     return pictureAgeMs >= StagePictureRetryMs(misses);
 }
 
+inline bool ShouldParkStageWindow(bool parked, bool visible, bool iconic, bool onMonitor, bool transient, bool fillsScreen, bool enabled)
+{
+    return !parked && visible && !iconic && onMonitor && !transient && !fillsScreen && enabled;
+}
+
 class StageOpenIntent {
 public:
     void Arm(const std::wstring& app, uint64_t now) { apps_[app] = now + 10000; }

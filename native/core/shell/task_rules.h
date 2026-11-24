@@ -55,6 +55,35 @@ template<class ShowOf> std::vector<HWND> TakeRestored(std::vector<PendingRestore
     return restored;
 }
 
+enum class WindowRestoreMethod { None, SysCommand, AsyncRestore, AsyncShowMaximized };
+
+inline WindowRestoreMethod DecideWindowRestoreMethod(bool iconic, bool enabled, bool hung, bool restoreToMaximized)
+{
+    if (!iconic)
+        return WindowRestoreMethod::None;
+    if (!enabled)
+        return restoreToMaximized ? WindowRestoreMethod::AsyncShowMaximized : WindowRestoreMethod::AsyncRestore;
+    if (hung)
+        return WindowRestoreMethod::AsyncRestore;
+    return WindowRestoreMethod::SysCommand;
+}
+
+struct ActivationCandidate {
+    HWND hwnd = nullptr;
+    bool visible = false;
+    bool enabled = false;
+};
+
+inline HWND SelectActivationTarget(HWND owner, bool ownerEnabled, ActivationCandidate enabledPopup, ActivationCandidate lastActivePopup)
+{
+    auto usable = [owner](const ActivationCandidate& c) { return c.hwnd && c.hwnd != owner && c.visible && c.enabled; };
+    if (!ownerEnabled && usable(enabledPopup))
+        return enabledPopup.hwnd;
+    if (usable(lastActivePopup))
+        return lastActivePopup.hwnd;
+    return owner;
+}
+
 inline bool IsSystemHelperWindowClass(std::wstring_view className) { return className == L"IME" || className == L"MSCTFIME UI" || className == L"GDI+ Window"; }
 
 inline bool IsHiddenMainWindowCandidate(bool visible, bool owned, DWORD exStyle, bool enabled, bool cloaked, std::wstring_view title,
