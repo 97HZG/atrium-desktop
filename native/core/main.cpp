@@ -14,6 +14,7 @@
 #include "launch_args.h"
 #include "localization.h"
 #include "log.h"
+#include "notice_actions.h"
 #include "resource.h"
 #include "settings.h"
 #include "settings_server.h"
@@ -408,69 +409,14 @@ void ShowMenu(POINT pt) { ShowBarContextMenu(MenuEnv(), pt); }
 
 void ShowStartMenu(POINT pt) { ShowStartContextMenu(MenuEnv(), pt); }
 
-// The tray icon of a notice's sender: its program's file name or the start of
-// its tooltip is the sender's name or id ("QQ" -> qq.exe, "QQ: 12345").
-std::optional<TrayIcon> TrayIconOf(const Notice& n)
+NoticeActionEnv NoticeEnv()
 {
-    std::vector<std::wstring> names;
-    for (const std::wstring& s : {n.app, n.appId}) {
-        std::wstring v = FoldCase(s);
-        if (const size_t bang = v.find(L'!'); bang != std::wstring::npos) // packaged: "publisher.app_hash!App"
-            v = v.substr(0, bang);
-        if (const size_t slash = v.find_last_of(L"\\/"); slash != std::wstring::npos) // a path
-            v = v.substr(slash + 1);
-        if (v.size() > 4 && v.ends_with(L".exe"))
-            v.resize(v.size() - 4);
-        if (v.size() >= 2)
-            names.push_back(std::move(v));
-    }
-    for (const TrayIcon& icon : g_app.tray->Icons()) {
-        std::wstring stem = FoldCase(icon.exe.substr(icon.exe.find_last_of(L'\\') + 1));
-        if (stem.size() > 4 && stem.ends_with(L".exe"))
-            stem.resize(stem.size() - 4);
-        const std::wstring tip = FoldCase(TrayModel::Title(icon.tip));
-        for (const std::wstring& name : names)
-            if ((!icon.exe.empty() && stem == name) || (tip.starts_with(name) && (tip.size() == name.size() || !iswalnum(tip[name.size()]))))
-                return icon;
-    }
-    return std::nullopt;
-}
-
-// What clicking a notification does: open its link, or bring its app to the
-// front (start it if it is not running).
-bool RunNoticeAction(const Notice& n)
-{
-    if (n.action == L"settings:updates") {
-        OpenSettings(L"about");
-        return true;
-    }
-    if (n.action.starts_with(L"uri:")) {
-        std::wstring target = n.action.substr(4);
-        return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
-    }
-    if (n.action.starts_with(L"app:")) {
-        const std::wstring aumid = n.action.substr(4);
-        const std::wstring key = FoldCase(aumid);
-        // An app living in the tray (QQ, WeChat, Feishu): its own tray click
-        // opens what is new, the chat of the unread message. Starting it again
-        // would open a second instance's login window instead.
-        if (const std::optional<TrayIcon> icon = TrayIconOf(n)) {
-            AllowSetForegroundWindow(ASFW_ANY);
-            g_app.tray->Click(*icon, false);
-            Log(L"notify: action through the tray icon of %s", n.app.c_str());
-            return true;
-        }
-        for (const TaskItem& t : g_app.tasks->Snapshot())
-            if (t.key == key && !t.windows.empty()) {
-                g_app.tasks->Show(key);
-                return true;
-            }
-        // A program path (WeChat): starting it again shows its running instance.
-        bool exe = aumid.size() > 2 && aumid[1] == L':';
-        std::wstring path = exe ? aumid : L"shell:AppsFolder\\" + aumid;
-        return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
-    }
-    return true; // nothing to run: the click just dismisses it
+    return {
+        g_app.tray.get(),
+        g_app.tasks.get(),
+        g_app.wechat.get(),
+        [](const wchar_t* page) { OpenSettings(page); },
+    };
 }
 
 // The chat apps' own switches (Settings ▸ Notifications ▸ Sources); other apps' Windows
@@ -550,6 +496,8 @@ void ApplyNotificationSources(const Settings& s, bool badgesChanged)
         g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
     else if (!(s.bar && toasts) && g_app.listener)
         g_app.listener.reset();
+    if (g_app.listener)
+        g_app.listener->SetAlways(s.notifyAlways);
     const bool needWeChat = s.bar && (s.notifyWeChat || s.barBadges);
     if (needWeChat && !g_app.wechat)
         g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE, WM_BADGES);
@@ -915,6 +863,11 @@ void HandleWinKeyMessage(WPARAM w)
 void HandleNoticeMessage(LPARAM l)
 {
     if (auto n = TakePosted<Notice>(l)) {
+        if (!n->unread) {
+            if (g_app.notes)
+                g_app.notes->Post(*n);
+            return;
+        }
         const Messenger messenger = MessengerOfNotice(n->source, n->app, n->appId);
         bool on = n->source == L"atrium" ? g_app.barOn.value_or(true) :
                   n->source == L"wechat" ? bool(g_app.wechat) :
@@ -1312,11 +1265,7 @@ std::optional<RECT> GenieIconTarget(HWND window)
 void OnTasksChanged()
 {
     const double t0 = ClockMs();
-    if (HWND fg = GetForegroundWindow(); fg && MessengerOfProgram(ProgramOf(fg)) == Messenger::WeChat) {
-        g_app.alerts.Cancel(Messenger::WeChat);
-        if (g_app.notes)
-            g_app.notes->Post(Notice{.source = L"wechat", .title = Tr(L"New message"), .unread = false});
-    }
+    WithdrawForegroundMessenger(g_app.alerts, g_app.notes.get());
     const std::vector<TaskItem> all = g_app.tasks->Snapshot(true);
     if (g_app.stage)
         g_app.stage->Update(all);
@@ -1393,7 +1342,7 @@ void InitializeSubsystems(HINSTANCE instance, Settings& settings)
     g_app.notes->bellRect = [] { return ActiveBar().EntryRect(L"#notify"); };
     g_app.notes->barRect = [] { return ActiveBar().BarRect(); };
     g_app.notes->onUnread = [](int n) { ForBars([&](Bar& bar) { bar.SetUnread(n); }); };
-    g_app.notes->onActivate = RunNoticeAction;
+    g_app.notes->onActivate = [](const Notice& n) { return RunNoticeAction(NoticeEnv(), n); };
     g_app.notes->quietIsOurs = [] { return g_app.chrome && g_app.chrome->QuietIsOurs(); };
     g_app.notes->held = BarPopupOpen;
     g_app.preview = std::make_unique<WindowPreview>(instance);

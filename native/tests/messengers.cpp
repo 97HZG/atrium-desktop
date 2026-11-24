@@ -1,4 +1,6 @@
+#include "notice_actions.h"
 #include "shell/messengers.h"
+#include "shell/notification_listener.h"
 #include "shell/wechat_source.h"
 
 #include <iostream>
@@ -198,6 +200,32 @@ void CheckWeChatThrottle()
     }
 }
 
+void CheckNoticeRouting()
+{
+    Require(ChooseNoticeAppRoute({true, true, true, true, true, true}) == NoticeAppRoute::ActivateTitleWindow &&
+                ChooseNoticeAppRoute({false, true, true, true, true, true}) == NoticeAppRoute::WeChatOpenChat &&
+                ChooseNoticeAppRoute({false, false, true, true, true, false}) == NoticeAppRoute::ClickTrayIcon &&
+                ChooseNoticeAppRoute({false, false, true, false, false, false}) == NoticeAppRoute::ClickTrayIcon &&
+                ChooseNoticeAppRoute({false, false, true, false, true, false}) == NoticeAppRoute::ShowAppWindow &&
+                ChooseNoticeAppRoute({false, false, false, false, true, true}) == NoticeAppRoute::ShowAppWindow &&
+                ChooseNoticeAppRoute({false, false, false, false, false, true}) == NoticeAppRoute::ActivateAumid &&
+                ChooseNoticeAppRoute({}) == NoticeAppRoute::ShellOpen,
+            "notice app routing");
+}
+
+void CheckToastDiff()
+{
+    const std::map<uint32_t, SeenToast> seen{{1, {10, true, L"QQ", L"QQ"}}, {2, {20, false, L"Mail", L"mail"}}, {3, {30, true, L"WeCom", L"wxwork.exe"}}};
+    const std::map<uint32_t, SeenToast> now{{3, {30, true, L"WeCom", L"wxwork.exe"}}};
+    auto never = [](const SeenToast&) { return false; };
+    const auto normal = DiffGoneToasts(seen, now, false, false, never);
+    const auto front = DiffGoneToasts(seen, now, false, true, [](const SeenToast& t) { return t.appId == L"QQ"; });
+    Require(DiffGoneToasts(seen, now, true, false, never).empty() && DiffGoneToasts({}, now, false, false, never).empty() && normal.size() == 1 &&
+                normal[0].source == L"windows" && normal[0].externalId == 1 && !normal[0].unread && DiffGoneToasts(seen, now, false, true, never).empty() &&
+                front.size() == 1 && front[0].externalId == 1 && !front[0].unread,
+            "toast diff");
+}
+
 } // namespace
 
 int main()
@@ -243,6 +271,8 @@ int main()
         CheckWeChatRows();
         CheckWeChatDiff();
         CheckWeChatThrottle();
+        CheckNoticeRouting();
+        CheckToastDiff();
         std::cout << "messengers: all checks passed\n";
         return 0;
     } catch (const std::exception& e) {
