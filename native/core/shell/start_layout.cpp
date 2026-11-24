@@ -109,17 +109,12 @@ std::wstring StartLayout::NewFolderId() const
     return L"folder:" + std::to_wstring(next);
 }
 
-StartLayout LoadStartLayout()
+bool ParseStartLayoutJson(std::wstring_view text, StartLayout& layout)
 {
-    StartLayout layout;
-    std::wstring text = ReadTextFile(LayoutPath());
+    layout = {};
     json::JsonObject o{nullptr};
-    if (text.empty())
-        return layout;
-    if (!json::JsonObject::TryParse(text, o)) {
-        Log(L"start: %s is not valid JSON, using the Windows pins", LayoutPath().c_str());
-        return layout;
-    }
+    if (text.empty() || !json::JsonObject::TryParse(text, o))
+        return false;
     const std::wstring size = Str(o, L"size");
     layout.size = SizeOf(size);
     layout.icon = SizeOf(Str(o, L"icon"));
@@ -132,11 +127,13 @@ StartLayout LoadStartLayout()
         layout.icon = StartLayout::kMedium; // the icons had no size of their own then
     }
     auto tile = [](const json::JsonObject& e) {
-        StartTile t{Str(e, L"id"), Str(e, L"name"), {}};
+        StartTile t{Str(e, L"id"), Str(e, L"name"), {}, Str(e, L"alias")};
         if (e.HasKey(L"apps") && e.GetNamedValue(L"apps").ValueType() == json::JsonValueType::Array)
             for (const auto& v : e.GetNamedArray(L"apps"))
-                if (v.ValueType() == json::JsonValueType::Object)
-                    t.apps.push_back({Str(v.GetObject(), L"id"), Str(v.GetObject(), L"name"), {}});
+                if (v.ValueType() == json::JsonValueType::Object) {
+                    const auto a = v.GetObject();
+                    t.apps.push_back({Str(a, L"id"), Str(a, L"name"), {}, Str(a, L"alias")});
+                }
         return t;
     };
     if (o.HasKey(L"tiles") && o.GetNamedValue(L"tiles").ValueType() == json::JsonValueType::Array) {
@@ -156,10 +153,19 @@ StartLayout LoadStartLayout()
                 layout.windowsPins.emplace_back(v.GetString());
     }
     layout.Clamp();
+    return true;
+}
+
+StartLayout LoadStartLayout()
+{
+    StartLayout layout;
+    std::wstring text = ReadTextFile(LayoutPath());
+    if (!text.empty() && !ParseStartLayoutJson(text, layout))
+        Log(L"start: %s is not valid JSON, using the Windows pins", LayoutPath().c_str());
     return layout;
 }
 
-bool SaveStartLayout(const StartLayout& layout)
+std::wstring SerializeStartLayoutJson(const StartLayout& layout)
 {
     json::JsonObject o;
     o.SetNamedValue(L"version", json::JsonValue::CreateNumberValue(2));
@@ -169,6 +175,8 @@ bool SaveStartLayout(const StartLayout& layout)
         json::JsonObject e;
         e.SetNamedValue(L"id", json::JsonValue::CreateStringValue(t.id));
         e.SetNamedValue(L"name", json::JsonValue::CreateStringValue(t.name));
+        if (!t.alias.empty())
+            e.SetNamedValue(L"alias", json::JsonValue::CreateStringValue(t.alias));
         return e;
     };
     if (layout.custom) {
@@ -197,7 +205,12 @@ bool SaveStartLayout(const StartLayout& layout)
             hidden.Append(json::JsonValue::CreateStringValue(id));
         o.SetNamedValue(L"hidden", hidden);
     }
-    if (WriteTextFile(LayoutPath(), std::wstring(o.Stringify())))
+    return std::wstring(o.Stringify());
+}
+
+bool SaveStartLayout(const StartLayout& layout)
+{
+    if (WriteTextFile(LayoutPath(), SerializeStartLayoutJson(layout)))
         return true;
     Log(L"start: could not save %s", LayoutPath().c_str());
     return false;
@@ -476,6 +489,26 @@ bool UngroupStartFolder(std::vector<StartTile>& tiles, const std::wstring& folde
         return false;
     auto apps = std::move(at->apps);
     return tiles.insert(tiles.erase(at), std::make_move_iterator(apps.begin()), std::make_move_iterator(apps.end())), true;
+}
+
+bool ApplyTileAlias(std::vector<StartTile>& tiles, const std::wstring& id, const std::wstring& alias)
+{
+    for (StartTile& t : tiles) {
+        if (!t.Folder()) {
+            if (t.id == id) {
+                t.alias = alias;
+                return true;
+            }
+        } else {
+            for (StartTile& a : t.apps) {
+                if (!a.Folder() && a.id == id) {
+                    a.alias = alias;
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 } // namespace atrium

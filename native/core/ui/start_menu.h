@@ -128,7 +128,8 @@ private:
     void PaintTiles(Canvas& c, const Theme& t, float shown);
     // A tile in `r`: its icon (a folder: its first apps, small) and name. target: a carried app would go into it.
     void PaintTileFace(Canvas& c, const Theme& t, const Tile& tile, D2D1_RECT_F r, const std::wstring& id, bool selected, bool target);
-    void DrawIcon(Canvas& c, const std::wstring& id, int px, D2D1_RECT_F r, float radius);
+    void DrawIcon(Canvas& c, const std::wstring& id, int px, D2D1_RECT_F r, float radius, const std::wstring& name = L"");
+    void PaintHoverTip(Canvas& c, const Theme& t);
     void PaintRows(Canvas& c, const Theme& t, const std::vector<Row>& rows, float shown);
     void PaintIndex(Canvas& c, const Theme& t); // the A-Z list's letters, and the one being picked
     void PaintFolder(Canvas& c, const Theme& t, D2D1_RECT_F card, float shown);
@@ -207,7 +208,7 @@ private:
     // Folders.
     void OpenFolder(int tile);
     void CloseFolder();
-    void StartNaming();
+    void StartNaming(const std::wstring& key = L"");
     void FinishNaming(bool keep);
 
     // Dragging tiles; resizing.
@@ -291,7 +292,10 @@ private:
     int folderPage_ = 0;
     float folderPageShown_ = 0;
     bool naming_ = false;
-    std::wstring nameDraft_;
+    std::wstring nameDraft_, namingKey_, namingHit_;
+    D2D1_RECT_F namingRect_{};
+    std::wstring tipText_;
+    D2D1_RECT_F tipRect_{};
     // Dragging and resizing.
     Drag drag_;
     POINT pressPt_{};

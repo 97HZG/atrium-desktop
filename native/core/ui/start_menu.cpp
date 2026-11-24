@@ -597,14 +597,17 @@ void StartMenu::BuildCustomTiles(const std::map<std::wstring, const CatalogApp*>
         Tile tile{t.id, t.name, {}, {}, t.Folder()};
         if (tile.folder) {
             for (const StartTile& a : t.apps)
-                if (CatalogApp app; resolve(a, app))
+                if (CatalogApp app; resolve(a, app)) {
+                    if (!a.alias.empty())
+                        app.name = a.alias;
                     tile.apps.push_back(std::move(app));
+                }
             if (tile.apps.empty())
                 continue;
         } else {
             if (!resolve(t, tile.app))
                 continue;
-            tile.name = tile.app.name;
+            tile.name = t.alias.empty() ? tile.app.name : t.alias;
         }
         tiles_.push_back(std::move(tile));
     }
@@ -912,7 +915,7 @@ void StartMenu::PaintPowerCard(Canvas& c, const Theme& t, std::vector<ShapeDip>&
 
 void StartMenu::Paint(Canvas& c)
 {
-    visibleIcons_.clear();
+    visibleIcons_.clear(), tipText_.clear();
     const Theme& t = c.theme;
     const double now = c.now;
     hits_.clear();
@@ -995,6 +998,7 @@ void StartMenu::Paint(Canvas& c)
         c.EndBlur(6 * open);
     if (folder_ >= 0)
         PaintFolder(c, t, card, open);
+    PaintHoverTip(c, t);
     PaintShelf(c, t);
     PaintGrip(c, t);
     if (drag_.on)
@@ -1063,7 +1067,7 @@ void StartMenu::PaintSearch(Canvas& c, const Theme& t)
 // `px` is always the largest icon size (IconPx): one bitmap per app serves
 // every icon size, drawn into `r` at the size asked for. Changing the size
 // therefore never reads an icon file or waits on the catalog.
-void StartMenu::DrawIcon(Canvas& c, const std::wstring& id, int px, D2D1_RECT_F r, float radius)
+void StartMenu::DrawIcon(Canvas& c, const std::wstring& id, int px, D2D1_RECT_F r, float radius, const std::wstring& name)
 {
     static const IconImage kNone;
     visibleIcons_.emplace_back(id, px);
@@ -1073,10 +1077,17 @@ void StartMenu::DrawIcon(Canvas& c, const std::wstring& id, int px, D2D1_RECT_F 
     if (!cached)
         fetched = catalog_.Icon(id, px);
     const IconImage& icon = cached ? kNone : fetched;
-    if (cached || !icon.Empty())
+    if (cached || !icon.Empty()) {
         c.Image(cacheKey, icon, r);
-    else
-        c.Fill(r, radius, c.theme.hover);
+        return;
+    }
+    c.Fill(r, radius, c.theme.hover);
+    for (wchar_t ch : name)
+        if (!iswspace(ch)) {
+            c.Text(std::wstring(1, iswalpha(ch) ? wchar_t(towupper(ch)) : ch), r, std::max(9.f, (r.bottom - r.top) * 0.45f), c.theme.text,
+                   DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+            break;
+        }
 }
 
 void StartMenu::PaintTileFace(Canvas& c, const Theme& t, const Tile& tile, D2D1_RECT_F r, const std::wstring& id, bool selected, bool target)
@@ -1117,15 +1128,30 @@ void StartMenu::PaintTileFace(Canvas& c, const Theme& t, const Tile& tile, D2D1_
         for (size_t k = 0; k < std::min<size_t>(4, tile.apps.size()); ++k) {
             const size_t row = k / 2;
             float x = ir.left + pad + float(k % 2) * (m + gap), y = ir.top + pad + float(row) * (m + gap);
-            DrawIcon(c, tile.apps[k].id, px, D2D1::RectF(x, y, x + m, y + m), 4);
+            DrawIcon(c, tile.apps[k].id, px, D2D1::RectF(x, y, x + m, y + m), 4, tile.apps[k].name);
         }
     } else {
-        DrawIcon(c, tile.app.id, IconPx(), ir, 10);
+        DrawIcon(c, tile.app.id, IconPx(), ir, 10, tile.name);
     }
     c.EndGroup();
-    // The name under the icon, in the room the cell leaves below it; the type
-    // follows the icon's size.
-    c.Text(tile.name, D2D1::RectF(r.left + 2, ir.bottom + 4, r.right - 2, r.bottom + 2), LabelSize(), t.text, DWRITE_FONT_WEIGHT_NORMAL, 1, true);
+    const D2D1_RECT_F lr = D2D1::RectF(r.left + 2, ir.bottom + 4, r.right - 2, r.bottom + 2);
+    if (naming_ && id == namingHit_) {
+        const D2D1_RECT_F field = D2D1::RectF(r.left, lr.top - 1, r.right, std::min(r.bottom, lr.top + LabelH() + 4));
+        namingRect_ = field;
+        c.Fill(field, 7, Alpha(t.card, 1));
+        c.Stroke(field, 7, Alpha(t.accent, 0.85f), 1.5f);
+        const std::wstring& shown = nameDraft_.empty() ? tile.app.name : nameDraft_;
+        const float tw = std::min(c.TextWidth(shown, LabelSize()), field.right - field.left - 8);
+        c.Text(shown, field, LabelSize(), nameDraft_.empty() ? t.faint : t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        const float caretX = nameDraft_.empty() ? cx - tw / 2 : cx + tw / 2 + 1;
+        c.Line(caretX, field.top + 3, caretX, field.bottom - 3, Alpha(t.accent, 0.9f), 1.5f);
+        return;
+    }
+    const bool twoLines = 2.f * (c.Caret(L"A", lr, LabelSize(), DWRITE_FONT_WEIGHT_NORMAL, 0).bottom - lr.top) <= (lr.bottom - lr.top) + 0.5f;
+    c.Text(tile.name, lr, LabelSize(), t.text, DWRITE_FONT_WEIGHT_NORMAL, 1, twoLines);
+    if (hover_ == id && id != L"#carried" && (folder_ < 0 || id.starts_with(L"fapp:")) && c.TextWidth(tile.name, LabelSize()) > (lr.right - lr.left) &&
+        (!twoLines || c.Caret(tile.name, lr, LabelSize(), DWRITE_FONT_WEIGHT_NORMAL, tile.name.size()).bottom > lr.bottom + 0.5f))
+        tipText_ = tile.name, tipRect_ = lr;
 }
 
 // The tiles, cols x rows per page; pages slide sideways. Tiles glide to new
@@ -1279,12 +1305,12 @@ void StartMenu::PaintRows(Canvas& c, const Theme& t, const std::vector<Row>& row
             for (size_t k = 0; k < std::min<size_t>(4, f.apps.size()); ++k) {
                 const size_t line = k / 2;
                 float x = ir.left + pad + float(k % 2) * (m + gap), yy = ir.top + pad + float(line) * (m + gap);
-                DrawIcon(c, f.apps[k].id, px, D2D1::RectF(x, yy, x + m, yy + m), 3);
+                DrawIcon(c, f.apps[k].id, px, D2D1::RectF(x, yy, x + m, yy + m), 3, f.apps[k].name);
             }
             name = f.name;
             note = TrFormat(L"%d apps", int(f.apps.size()));
         } else {
-            DrawIcon(c, row.app.id, rowPx, ir, 7);
+            DrawIcon(c, row.app.id, rowPx, ir, 7, row.app.name);
             name = row.app.name;
         }
         c.EndGroup();
@@ -1678,37 +1704,6 @@ void StartMenu::CloseFolder()
     surface_.Invalidate();
 }
 
-void StartMenu::StartNaming()
-{
-    if (folder_ < 0 || folderClosing_)
-        return;
-    naming_ = true;
-    nameDraft_ = tiles_[size_t(folder_)].name;
-    surface_.Invalidate();
-}
-
-// keep: the new name is taken (an empty one keeps the old).
-void StartMenu::FinishNaming(bool keep)
-{
-    if (!naming_)
-        return;
-    naming_ = false;
-    std::wstring name = nameDraft_;
-    while (!name.empty() && iswspace(name.back()))
-        name.pop_back();
-    while (!name.empty() && iswspace(name.front()))
-        name.erase(name.begin());
-    if (keep && folder_ >= 0 && !name.empty() && name != tiles_[size_t(folder_)].name) {
-        const std::wstring key = tiles_[size_t(folder_)].key;
-        Arrange([&](std::vector<StartTile>& tiles) {
-            if (StartTile* f = Find(tiles, key))
-                f->name = name;
-        });
-        Log(L"start: folder renamed to '%s'", name.c_str());
-    }
-    surface_.Invalidate();
-}
-
 // ---- Carrying tiles ----
 
 std::vector<int> StartMenu::Order() const
@@ -1738,6 +1733,8 @@ std::vector<int> StartMenu::FolderOrder() const
 
 void StartMenu::BeginDrag()
 {
+    if (naming_)
+        return;
     const float s = surface_.Scale(), px = float(pressPt_.x) / s, py = float(pressPt_.y) / s;
     Drag d;
     d.on = true;
@@ -2053,6 +2050,8 @@ void StartMenu::RunPower(int index)
 
 void StartMenu::Activate(const std::wstring& id)
 {
+    if (naming_ && id == namingHit_)
+        return;
     if (id.starts_with(L"tile:")) {
         const int i = Index(id, 5);
         if (i >= 0 && i < int(tiles_.size())) {
@@ -2190,8 +2189,9 @@ void StartMenu::PlaceIme()
         POINT origin{surface_.Rect().left - win.left + OffsetXPx(), surface_.Rect().top - win.top + OffsetPx()};
         // Below the field being typed in: the search, or the folder's name.
         const D2D1_RECT_F f = FolderRect();
-        const float x = naming_ ? (f.left + f.right) / 2 - 60 : (caretX_ > 0 ? caretX_ : kSearchX + 46);
-        const float y = naming_ ? f.top + 50 : kSearchTop + kSearchH + 4;
+        const bool appNaming = naming_ && !namingKey_.starts_with(L"folder:");
+        const float x = appNaming ? namingRect_.left : naming_ ? (f.left + f.right) / 2 - 60 : (caretX_ > 0 ? caretX_ : kSearchX + 46);
+        const float y = appNaming ? namingRect_.bottom + 4 : naming_ ? f.top + 50 : kSearchTop + kSearchH + 4;
         const POINT pos{origin.x + LONG(x * s), origin.y + LONG(y * s)};
         COMPOSITIONFORM cf{CFS_POINT, pos, {}};
         ImmSetCompositionWindow(imc, &cf);
@@ -2264,7 +2264,7 @@ bool StartMenu::NamingChar(wchar_t ch)
         FinishNaming(true);
     else if (ch == 8 && !nameDraft_.empty())
         nameDraft_.pop_back();
-    else if (ch >= 32 && nameDraft_.size() < 24)
+    else if (ch >= 32 && nameDraft_.size() < (namingKey_.starts_with(L"folder:") ? 24u : 64u))
         nameDraft_ += ch;
     surface_.Invalidate();
     return true;
@@ -2344,7 +2344,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             searchFocused_ = pressed_ == L"search";
         if (powerOpen_ && pressed_ != L"power" && !pressed_.starts_with(L"pw:"))
             powerOpen_ = false; // a press elsewhere folds the power card away
-        if (naming_ && pressed_ != L"ftitle")
+        if (naming_ && pressed_ != namingHit_)
             FinishNaming(true);
         const float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;
         // A press beside the open folder closes it (the capsule's buttons and the grip still work).

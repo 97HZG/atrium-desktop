@@ -159,12 +159,14 @@ std::vector<MenuEntry> StartMenu::BuildContextEntries(const std::wstring& id, Ca
         }
         entries.push_back({});
         entries.push_back({Tr(L"Pin to taskbar"), kPinBar});
-        if (!OnStart(app.id))
+        if (!OnStart(app.id)) {
             entries.push_back({Tr(L"Pin to Start"), kPinStart});
-        if (inFolder)
-            entries.push_back({Tr(L"Remove from folder"), kOutOfFolder});
-        if (OnStart(app.id))
+        } else {
+            entries.push_back({Tr(L"Rename"), kRename});
+            if (inFolder)
+                entries.push_back({Tr(L"Remove from folder"), kOutOfFolder});
             entries.push_back({Tr(L"Remove from Start"), kRemove});
+        }
         entries.push_back(Hidden(app.id) ? MenuEntry{Tr(L"Unhide"), kUnhide} : MenuEntry{Tr(L"Hide"), kHide});
     } else if (!folderKey.empty()) {
         entries = {{Tr(L"Open"), kOpen}, {Tr(L"Rename"), kRename}, {}, {Tr(L"Ungroup folder"), kUngroup}, {Tr(L"Remove from Start"), kRemoveFolder}};
@@ -253,8 +255,9 @@ void StartMenu::RunContextCommand(int cmd, const CatalogApp& app, const std::wst
         });
         break;
     case kRename:
-        OpenFolder(tileOf(folderKey));
-        StartNaming();
+        if (!folderKey.empty())
+            OpenFolder(tileOf(folderKey));
+        StartNaming(folderKey.empty() ? app.id : L"");
         break;
     case kUngroup:
     case kRemoveFolder:
@@ -284,6 +287,7 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
 {
     if (!menu)
         return;
+    FinishNaming(true);
     CatalogApp app;
     std::wstring folderKey;
     std::vector<MenuEntry> entries = BuildContextEntries(id, app, folderKey);
@@ -295,6 +299,88 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
         std::move(entries), screen, MenuPlace::Below, [this, app, folderKey, openKey](int cmd) { RunContextCommand(cmd, app, folderKey, openKey); },
         [this] { FinishMenuClose(surface_, menu, menuOpen_, [this] { Close(false); }); });
     surface_.Invalidate();
+}
+
+void StartMenu::StartNaming(const std::wstring& key)
+{
+    auto begin = [&](const std::wstring& k, const std::wstring& hit, const std::wstring& draft) {
+        naming_ = true, namingKey_ = k, namingHit_ = hit, nameDraft_ = draft;
+        surface_.Invalidate();
+    };
+    if (key.empty() || key.starts_with(L"folder:")) {
+        if (folder_ >= 0 && !folderClosing_)
+            begin(tiles_[size_t(folder_)].key, L"ftitle", tiles_[size_t(folder_)].name);
+        return;
+    }
+    if (Listing())
+        query_.clear(), composition_.clear(), results_.clear(), allApps_ = searchFocused_ = false;
+    for (size_t i = 0; i < tiles_.size(); ++i) {
+        if (!tiles_[i].folder && tiles_[i].key == key) {
+            if (folder_ >= 0)
+                CloseFolder();
+            SetPage(int(i) / std::max(1, PerPage()));
+            begin(key, L"tile:" + std::to_wstring(i), tiles_[i].name);
+            return;
+        }
+        if (tiles_[i].folder)
+            for (size_t k = 0; k < tiles_[i].apps.size(); ++k)
+                if (tiles_[i].apps[k].id == key) {
+                    if (folder_ != int(i) || folderClosing_)
+                        OpenFolder(int(i));
+                    begin(key, L"fapp:" + std::to_wstring(k), tiles_[i].apps[k].name);
+                    return;
+                }
+    }
+}
+
+void StartMenu::FinishNaming(bool keep)
+{
+    if (!naming_)
+        return;
+    naming_ = false;
+    std::wstring name = nameDraft_;
+    while (!name.empty() && iswspace(name.back()))
+        name.pop_back();
+    while (!name.empty() && iswspace(name.front()))
+        name.erase(name.begin());
+    const std::wstring key = std::move(namingKey_);
+    namingKey_.clear();
+    namingHit_.clear();
+    if (keep) {
+        if (key.starts_with(L"folder:")) {
+            if (folder_ >= 0 && !name.empty() && name != tiles_[size_t(folder_)].name) {
+                Arrange([&](std::vector<StartTile>& tiles) {
+                    if (auto it = std::ranges::find_if(tiles, [&](const StartTile& t) { return t.id == key; }); it != tiles.end())
+                        it->name = name;
+                });
+                Log(L"start: folder renamed to '%s'", name.c_str());
+            }
+        } else {
+            std::wstring orig;
+            for (const Tile& t : tiles_)
+                if (!t.folder && t.key == key)
+                    orig = t.app.name;
+            const std::wstring alias = (!name.empty() && name == orig) ? L"" : name;
+            Arrange([&](std::vector<StartTile>& tiles) { ApplyTileAlias(tiles, key, alias); });
+        }
+    }
+    surface_.Invalidate();
+}
+
+void StartMenu::PaintHoverTip(Canvas& c, const Theme& t)
+{
+    if (tipText_.empty() || drag_.on || menuOpen_)
+        return;
+    const D2D1_RECT_F b = MainRect();
+    const float sz = std::max(11.5f, LabelSize());
+    const float capH = (c.Caret(L"A", b, sz, DWRITE_FONT_WEIGHT_NORMAL, 0).bottom - b.top) + 8.f;
+    const float capW = std::min(std::max(40.f, (b.right - b.left) - 16.f), c.TextWidth(tipText_, sz) + 20.f);
+    const float left = std::clamp((tipRect_.left + tipRect_.right - capW) / 2.f, b.left + 8.f, b.right - 8.f - capW);
+    const float top = std::clamp(tipRect_.top - 2.f, b.top + 8.f, b.bottom - 8.f - capH);
+    const D2D1_RECT_F cap = D2D1::RectF(left, top, left + capW, top + capH);
+    c.Fill(cap, capH / 2.f, t.card);
+    c.Stroke(cap, capH / 2.f, t.border, 1.f);
+    c.Text(tipText_, D2D1::RectF(cap.left + 10.f, cap.top, cap.right - 10.f, cap.bottom), sz, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
 }
 
 } // namespace atrium

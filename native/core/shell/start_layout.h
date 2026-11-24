@@ -16,6 +16,7 @@ struct StartTile {
     std::wstring id;   // an app: its catalog id (CatalogApp::id); a folder: "folder:<n>"
     std::wstring name; // an app: its name when saved (shown when it is not found); a folder: its name
     std::vector<StartTile> apps; // a folder's apps, in order
+    std::wstring alias; // optional display name override for an app
     bool Folder() const { return id.starts_with(L"folder:"); }
 };
 
@@ -40,6 +41,8 @@ struct StartLayout {
 
 StartLayout LoadStartLayout();
 bool SaveStartLayout(const StartLayout& layout);
+bool ParseStartLayoutJson(std::wstring_view text, StartLayout& layout);
+std::wstring SerializeStartLayoutJson(const StartLayout& layout);
 
 struct StartPinItem {
     enum class Kind { PackagedAppId, DesktopAppLink, DesktopAppId } kind = Kind::PackagedAppId;
@@ -53,6 +56,7 @@ struct StartPinGroup {
 std::vector<StartPinGroup> ParseStartLayoutXml(std::wstring_view xml);
 bool RemoveStartFolder(std::vector<StartTile>& tiles, const std::wstring& folderId);
 bool UngroupStartFolder(std::vector<StartTile>& tiles, const std::wstring& folderId);
+bool ApplyTileAlias(std::vector<StartTile>& tiles, const std::wstring& id, const std::wstring& alias);
 
 // The first letter of each word, and for each Chinese character the first
 // letter of its pinyin (the 3755 common characters of GB2312), lower case:

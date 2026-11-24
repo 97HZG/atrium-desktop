@@ -96,6 +96,20 @@ void TestJumpListAndStart(int& f)
           !atrium::RemoveStartFolder(ft, L"folder:9") && atrium::RemoveStartFolder(ft, L"folder:1") && ft.size() == 2 &&
               !atrium::UngroupStartFolder(ft, L"folder:9") && atrium::UngroupStartFolder(ft, L"folder:2") && ft.size() == 2 && ft[1].id == L"d",
           "folder ops");
+    std::vector<atrium::StartTile> at = {{L"a", L"A", {}}, {L"folder:1", L"F1", {{L"b", L"B", {}}}}};
+    Check(f, !atrium::ApplyTileAlias(at, L"missing", L"X") && atrium::ApplyTileAlias(at, L"a", L"A2") && at[0].alias == L"A2", "ApplyTileAlias top");
+    Check(f, atrium::ApplyTileAlias(at, L"b", L"B2") && at[1].apps[0].alias == L"B2" && atrium::ApplyTileAlias(at, L"a", L"") && at[0].alias.empty(),
+          "ApplyTileAlias folder/clear");
+    atrium::StartLayout src{.size = 1, .icon = 2, .custom = true, .tiles = at}, dst, legacy;
+    const std::wstring j = atrium::SerializeStartLayoutJson(src);
+    Check(f,
+          j.find(L"\"alias\":\"B2\"") != std::wstring::npos && atrium::ParseStartLayoutJson(j, dst) && dst.tiles.size() == 2 && dst.tiles[0].alias.empty() &&
+              dst.tiles[1].apps[0].alias == L"B2",
+          "StartLayout alias round-trip");
+    Check(f,
+          atrium::ParseStartLayoutJson(L"{\"version\":2,\"size\":\"medium\",\"tiles\":[{\"id\":\"a\",\"name\":\"A\"}]}", legacy) && legacy.tiles.size() == 1 &&
+              legacy.tiles[0].alias.empty(),
+          "StartLayout legacy");
 }
 void TestTitleBadges(int& f)
 {
