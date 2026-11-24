@@ -65,8 +65,10 @@ void CheckMerge()
 void CheckFade()
 {
     Require(StageFadeOpacity(0) == 1 && StageFadeOpacity(1) == 0 && StageFadeBlur(0) == 0 && StageFadeBlur(1) == 1, "the fade's ends");
-    for (float v = 0; v < 1; v += 0.05f)
-        Require(StageFadeOpacity(v + 0.05f) <= StageFadeOpacity(v) && StageFadeBlur(v + 0.05f) >= StageFadeBlur(v), "blurs more and fades more along");
+    for (int i = 0; i < 20; ++i) {
+        const float v = float(i) / 20, next = float(i + 1) / 20;
+        Require(StageFadeOpacity(next) <= StageFadeOpacity(v) && StageFadeBlur(next) >= StageFadeBlur(v), "blurs more and fades more along");
+    }
     IconImage white{40, 40, std::vector<uint8_t>(40 * 40 * 4, 255)};
     const StageFade f = StageFadeFor(40, 40);
     Require(f.width == 40 && f.margin > f.maxBlur && f.maxBlur > 0, "a small picture kept at its size, room for the blur");

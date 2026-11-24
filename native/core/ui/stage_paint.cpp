@@ -107,8 +107,7 @@ StageManager::Pose StageManager::PlacePose(const RECT& frame) const
     return pose;
 }
 
-void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow, bool image,
-                               int fade)
+void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, float shadow, bool image, int fade)
 {
     if (!p.ok || p.width <= 0 || p.height <= 0 || opacity < 0.004f)
         return;
@@ -129,8 +128,8 @@ void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wst
 
 // An end card's picture and shadow faded away (stage_fade.h): made once a picture, in its own px,
 // so they turn with the card. `fade` 1: away down (the last card), -1: away up (the first).
-void StageManager::DrawFaded(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, const D2D1::Matrix4x4F& m, float opacity, float shadow,
-                              int fade)
+void StageManager::DrawFaded(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, const D2D1::Matrix4x4F& m, float opacity,
+                             float shadow, int fade)
 {
     const D2D1_RECT_F& r = pose.rect;
     const float f = (r.right - r.left) / float(p.width), sp = float(kShadowPad) * f;
@@ -139,8 +138,7 @@ void StageManager::DrawFaded(Canvas& c, const WindowPicture& p, const std::wstri
     if (shadow > 0.004f && !p.shadow.Empty()) {
         const float k = float(p.shadow.height) / float(p.height + 2 * kShadowPad); // shadow px a picture px
         const StageFade plain{p.shadow.width, 0, 0};
-        const IconImage made = c.Cached(faded + L"|s") ? IconImage{}
-                                                       : FadeAway(p.shadow, float(kShadowPad) * k, float(kShadowPad + p.height) * k, plain, up);
+        const IconImage made = c.Cached(faded + L"|s") ? IconImage{} : FadeAway(p.shadow, float(kShadowPad) * k, float(kShadowPad + p.height) * k, plain, up);
         c.ImagePerspective(faded + L"|s", made, D2D1::RectF(r.left - sp, r.top - sp, r.right + sp, r.bottom + sp),
                            m * D2D1::Matrix4x4F::Translation(0, kShadowDrop * c.scale, 0), kShadowAlpha * opacity * shadow);
     }
@@ -150,8 +148,7 @@ void StageManager::DrawFaded(Canvas& c, const WindowPicture& p, const std::wstri
     c.ImagePerspective(faded, made, D2D1::RectF(r.left - pp, r.top - pp, r.right + pp, r.bottom + pp), m, opacity);
 }
 
-void StageManager::PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_RECT_F box, float slide, float k, float hv, int index, bool live,
-                                   bool icons)
+void StageManager::PaintEntryIcons(Canvas& c, Entry& e, const Pose& front, D2D1_RECT_F box, float slide, float k, float hv, int index, bool live, bool icons)
 {
     const float s = c.scale, dir = onRight_ ? -1.f : 1.f;
     const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
