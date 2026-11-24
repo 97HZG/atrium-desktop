@@ -1,4 +1,5 @@
 #include "bar_edge.h"
+#include "bar_stacking.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -126,6 +127,26 @@ void CheckBarWindowPlacement()
         }
     }
 }
+
+void CheckTopmostCoverPolicy()
+{
+    Require(ShouldIgnoreTopmostCover(L"#32768", 0, 0, false, false), "native menu class is ignored");
+    Require(ShouldIgnoreTopmostCover(L"tooltips_class32", 0, 0, false, false), "tooltip class is ignored");
+    Require(ShouldIgnoreTopmostCover(L"CustomOverlay", 0, WS_EX_TRANSPARENT | WS_EX_LAYERED, false, false), "click-through overlay is ignored");
+
+    // Foreign menu-shaped popups (including single-bit border/dlgframe, since WS_CAPTION is two bits).
+    Require(ShouldIgnoreTopmostCover(L"Qt5QWindowPopupDropShadowSaveBits", WS_POPUP | WS_BORDER, WS_EX_TOOLWINDOW, false, false),
+            "toolwindow popup with 1px border is ignored");
+    Require(ShouldIgnoreTopmostCover(L"WpsSyncPopup", WS_POPUP | WS_DLGFRAME, WS_EX_NOACTIVATE, false, false), "noactivate popup with dlgframe is ignored");
+    Require(ShouldIgnoreTopmostCover(L"Chrome_WidgetWin_1", WS_POPUP, 0, true, false), "foreground popup menu is ignored");
+    Require(ShouldIgnoreTopmostCover(L"CustomTrayMenu", WS_POPUP, 0, false, true), "popup whose owner is foreground is ignored");
+
+    // Non-menu windows must not be ignored.
+    Require(!ShouldIgnoreTopmostCover(L"CustomPopup", WS_POPUP, 0, false, false), "background popup without tool/noactivate is not ignored");
+    Require(!ShouldIgnoreTopmostCover(L"CustomDialog", WS_POPUP | WS_CAPTION, WS_EX_TOOLWINDOW, true, true), "popup with full WS_CAPTION is not ignored");
+    Require(!ShouldIgnoreTopmostCover(L"CustomApp", WS_POPUP, WS_EX_APPWINDOW | WS_EX_TOOLWINDOW, true, true), "WS_EX_APPWINDOW is not ignored");
+    Require(!ShouldIgnoreTopmostCover(L"OverlappedApp", WS_OVERLAPPEDWINDOW, WS_EX_TOOLWINDOW, true, true), "non-popup window is not ignored");
+}
 } // namespace
 
 int main()
@@ -136,6 +157,7 @@ int main()
         CheckAxes();
         CheckEdgeOf();
         CheckBarWindowPlacement();
+        CheckTopmostCoverPolicy();
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';
         return 1;

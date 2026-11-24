@@ -482,7 +482,7 @@ void Bar::RefreshDisplays(bool workAreaOnly)
     if (dragging_)
         EndDrag(false);
     Relayout();
-    UpdateCover();
+    GuardStacking(L"display");
 }
 
 void Bar::WatchDisplays()
@@ -879,15 +879,8 @@ void Bar::Relayout()
 
     // The window only changes when the bar's size does (not on every drag move).
     const bool shown = visible_ && !slidOut_;
-    if (!dragging_ || !EqualRect(&win, &applied_) || shown != appliedVisible_) {
-        SetWindowPos(visual_, HWND_TOPMOST, win.left, win.top, win.right - win.left, win.bottom - win.top,
-                     SWP_NOACTIVATE | (shown ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
-        // Input window right below the visual one, region = the rounded shape.
-        SetWindowPos(input_, visual_, win.left, win.top, win.right - win.left, win.bottom - win.top,
-                     SWP_NOACTIVATE | (shown ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
-        applied_ = win;
-        appliedVisible_ = shown;
-    }
+    if (!dragging_ || !EqualRect(&win, &applied_) || shown != appliedVisible_)
+        PlaceWindows(win, shown);
     window_ = win, monitor_ = mi.rcMonitor, hmonitor_ = mon;
     UpdateAppBar(mon, mi.rcMonitor, reserve);
     scale_ = s, insetX_ = insetX, insetTop_ = insetTop, rise_ = rise, radius_ = radius;

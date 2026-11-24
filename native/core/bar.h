@@ -244,6 +244,7 @@ private:
     void WatchDisplays();  // summon the shared Dock on another display, after the hover delay
     void WatchDisplaysIfNeeded(); // its timer, in the follow mode with several displays
     void Raise();
+    void PlaceWindows(const RECT& win, bool shown);
 
     bool debugCapturable_ = false;
     bool ShowOwnWindowsToCapture(bool visible); // render thread; waits for the UI thread

@@ -2,6 +2,7 @@
 // unless a full-screen or maximized app covers its monitor, or the user is
 // interacting with a revealed system taskbar.
 #include "bar.h"
+#include "bar_stacking.h"
 
 #include "log.h"
 #include "shell/games.h"
@@ -28,30 +29,13 @@ enum class TrayAction { None, Done, Raise };
 // surfaces, input method windows.
 bool IgnoredCover(HWND w)
 {
-    static const wchar_t* const kClasses[] = {L"#32768",
-                                              L"tooltips_class32",
-                                              L"Shell_SecondaryTrayWnd",
-                                              L"NotifyIconOverflowWindow",
-                                              L"TopLevelWindowForOverflowXamlIsland",
-                                              L"Xaml_WindowedPopupClass",
-                                              L"XamlExplorerHostIslandWindow",
-                                              L"Windows.UI.Core.CoreWindow",
-                                              L"SysShadow",
-                                              L"IME",
-                                              L"MSCTFIME UI",
-                                              L"ForegroundStaging",
-                                              L"MultitaskingViewFrame",
-                                              L"Shell_InputSwitchTopLevelWindow",
-                                              L"Progman",
-                                              L"WorkerW"};
     wchar_t cls[96] = {};
     GetClassNameW(w, cls, 96);
-    for (const wchar_t* c : kClasses)
-        if (wcscmp(cls, c) == 0)
-            return true;
-    const LONG ex = GetWindowLongW(w, GWL_EXSTYLE);
-    if ((ex & WS_EX_TRANSPARENT) && (ex & WS_EX_LAYERED))
-        return true; // click-through overlays
+    const LONG_PTR style = GetWindowLongPtrW(w, GWL_STYLE);
+    const LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+    const HWND fg = GetForegroundWindow();
+    if (ShouldIgnoreTopmostCover(cls, style, ex, fg && w == fg, fg && GetWindow(w, GW_OWNER) == fg))
+        return true;
     BOOL cloaked = FALSE;
     DwmGetWindowAttribute(w, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
     return cloaked != FALSE;
@@ -245,6 +229,44 @@ void Bar::Raise()
 {
     SetWindowPos(visual_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     SetWindowPos(input_, visual_, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
+void Bar::PlaceWindows(const RECT& win, bool shown)
+{
+    const UINT show = shown ? SWP_SHOWWINDOW : SWP_HIDEWINDOW;
+    const UINT visualZ = (shown && !appliedVisible_) ? 0 : SWP_NOZORDER;
+    SetWindowPos(visual_, HWND_TOPMOST, win.left, win.top, win.right - win.left, win.bottom - win.top, SWP_NOACTIVATE | show | visualZ);
+    // Input window right below the visual one, region = the rounded shape.
+    SetWindowPos(input_, visual_, win.left, win.top, win.right - win.left, win.bottom - win.top, SWP_NOACTIVATE | show);
+    applied_ = win;
+    appliedVisible_ = shown;
+}
+
+bool ShouldIgnoreTopmostCover(std::wstring_view cls, LONG_PTR style, LONG_PTR exStyle, bool isForeground, bool ownerIsForeground)
+{
+    static const wchar_t* const kClasses[] = {L"#32768",
+                                              L"tooltips_class32",
+                                              L"Shell_SecondaryTrayWnd",
+                                              L"NotifyIconOverflowWindow",
+                                              L"TopLevelWindowForOverflowXamlIsland",
+                                              L"Xaml_WindowedPopupClass",
+                                              L"XamlExplorerHostIslandWindow",
+                                              L"Windows.UI.Core.CoreWindow",
+                                              L"SysShadow",
+                                              L"IME",
+                                              L"MSCTFIME UI",
+                                              L"ForegroundStaging",
+                                              L"MultitaskingViewFrame",
+                                              L"Shell_InputSwitchTopLevelWindow",
+                                              L"Progman",
+                                              L"WorkerW"};
+    for (const wchar_t* c : kClasses)
+        if (cls == c)
+            return true;
+    if ((exStyle & WS_EX_TRANSPARENT) && (exStyle & WS_EX_LAYERED))
+        return true; // click-through overlays
+    const bool menuPopup = (style & WS_POPUP) && (style & WS_CAPTION) != WS_CAPTION && !(exStyle & WS_EX_APPWINDOW);
+    return menuPopup && ((exStyle & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) || isForeground || ownerIsForeground);
 }
 
 // Keeps the bar on top: hidden behind a full-screen app, below a revealed

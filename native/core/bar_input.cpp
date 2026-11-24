@@ -228,10 +228,17 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     }
     switch (m) {
-    case WM_BAR_LAYOUT:
+    case WM_BAR_LAYOUT: {
         layoutPending_ = false;
+        const HMONITOR beforeMon = hmonitor_;
+        const RECT beforeRect = monitor_;
+        const float beforeScale = scale_;
+        const BarEdge beforeEdge = edge_;
         Relayout();
+        if (beforeMon && (hmonitor_ != beforeMon || !EqualRect(&monitor_, &beforeRect) || scale_ != beforeScale || edge_ != beforeEdge))
+            GuardStacking(L"display");
         return 0;
+    }
     case WM_MOUSEACTIVATE: return HandleMouseActivate(h, l);
     case WM_CLOSE:
         if (onCloseRequest)
