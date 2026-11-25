@@ -20,16 +20,17 @@ inline constexpr const wchar_t* kControlModules[] = {L"stage", L"energysaver", L
 struct Settings {
     static constexpr int kVersion = 2; // 2: Windows notifications on by default (v1 files are migrated)
 
-    // Material (presets change only these). Liquid follows macOS Liquid Glass:
-    // nearly clear centre, strong lensing over a wide rim, visible dispersion.
-    std::wstring preset = L"liquid"; // liquid | frosted | custom (informational)
-    double transparency = 0.95;      // 0 = fully tinted, 1 = clear glass
-    double blur = 0.50;              // 0 = sharp backdrop, 1 = fully frosted
-    double refraction = 30;          // max sample displacement at the rim
-    double edge = 24;                // width of the refracting rim
-    double dispersion = 0.30;        // relative channel spread of the refraction
-    double highlight = 0.80;
-    double shadow = 0.30;
+    // Material (presets change only these). Liquid is a clear centre with a short rim,
+    // closer to OriginOS than to a wide dispersive lens. natural / frosted / chroma
+    // are the other three fixed looks.
+    std::wstring preset = L"liquid"; // liquid | natural | frosted | chroma | custom
+    double transparency = 0.98;      // 0 = fully tinted, 1 = clear glass
+    double blur = 0.06;              // 0 = sharp backdrop, 1 = fully frosted
+    double refraction = 32;          // max sample displacement at the rim
+    double edge = 15;                // width of the refracting rim
+    double dispersion = 0.14;        // relative channel spread of the refraction
+    double highlight = 0.88;
+    double shadow = 0.42;
     uint32_t tint = 0xFFFFFF;        // 0xRRGGBB
 
     // Layout and content.

@@ -94,13 +94,17 @@ public sealed partial class MainWindow
                 icon.SetBinding(Image.SourceProperty, new Microsoft.UI.Xaml.Data.Binding { Path = new PropertyPath(nameof(PinVm.Icon)) });
         }
 
-        // The two presets are fixed swatches; the custom one follows the current material.
+        // The fixed presets are swatches; the custom one follows the current material.
         var liquid = BarSettings.Liquid();
+        var natural = BarSettings.Natural();
         var frosted = BarSettings.Frosted();
+        var chroma = BarSettings.Chroma();
         _fixedSwatchWorker = new LatestWorker<SwatchPhoto>(photo =>
         {
             RenderSwatch(liquid, SwatchLiquid, photo);
+            RenderSwatch(natural, SwatchNatural, photo);
             RenderSwatch(frosted, SwatchFrosted, photo);
+            RenderSwatch(chroma, SwatchChroma, photo);
         });
         _fixedSwatchWorker.Post(new SwatchPhoto(Photo.Generation, Photo.Capture()));
         // A new picture: the swatches again, over it.

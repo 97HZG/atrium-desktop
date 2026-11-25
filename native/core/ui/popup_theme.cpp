@@ -17,7 +17,7 @@ namespace {
 D2D1_COLOR_F Rgba(uint32_t rgb, float a) { return D2D1::ColorF(rgb, a); }
 
 uint32_t g_tint = 0xFFFFFF;
-double g_transparency = 0.95;
+double g_transparency = 0.98;
 
 } // namespace
 

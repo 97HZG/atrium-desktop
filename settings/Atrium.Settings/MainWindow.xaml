@@ -142,6 +142,7 @@
                             <Grid ColumnSpacing="12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <RadioButton x:Name="PresetLiquid" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="liquid"
                                              AutomationProperties.Name="Liquid glass" Checked="OnPresetChecked">
@@ -150,14 +151,28 @@
                                         <TextBlock Text="Liquid glass" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
                                     </StackPanel>
                                 </RadioButton>
-                                <RadioButton x:Name="PresetFrosted" Grid.Column="1" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="frosted"
+                                <RadioButton x:Name="PresetNatural" Grid.Column="1" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="natural"
+                                             AutomationProperties.Name="Natural" Checked="OnPresetChecked">
+                                    <StackPanel Spacing="10">
+                                        <Border x:Name="SwatchNatural" Height="76" CornerRadius="14" Background="#FFCBD3DD" />
+                                        <TextBlock Text="Natural" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton x:Name="PresetFrosted" Grid.Column="2" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="frosted"
                                              AutomationProperties.Name="Frosted glass" Checked="OnPresetChecked">
                                     <StackPanel Spacing="10">
                                         <Border x:Name="SwatchFrosted" Height="76" CornerRadius="14" Background="#FFCBD3DD" />
                                         <TextBlock Text="Frosted glass" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
                                     </StackPanel>
                                 </RadioButton>
-                                <RadioButton x:Name="PresetCustom" Grid.Column="2" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="custom"
+                                <RadioButton x:Name="PresetChroma" Grid.Column="3" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="chroma"
+                                             AutomationProperties.Name="Chroma" Checked="OnPresetChecked">
+                                    <StackPanel Spacing="10">
+                                        <Border x:Name="SwatchChroma" Height="76" CornerRadius="14" Background="#FFCBD3DD" />
+                                        <TextBlock Text="Chroma" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton x:Name="PresetCustom" Grid.Column="4" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="custom"
                                              AutomationProperties.Name="Custom" Checked="OnPresetChecked">
                                     <StackPanel Spacing="10">
                                         <Border x:Name="SwatchCustom" Height="76" CornerRadius="14" Background="#FFCBD3DD" />

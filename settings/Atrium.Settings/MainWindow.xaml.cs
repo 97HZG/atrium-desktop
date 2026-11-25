@@ -617,7 +617,14 @@ public sealed partial class MainWindow : Window, IDisposable
         _loading = true;
         foreach (var (d, card) in _rows)
             card.SetValue(d.Get(CurrentSettings));
-        (CurrentSettings.Preset switch { "liquid" => PresetLiquid, "frosted" => PresetFrosted, _ => PresetCustom }).IsChecked = true;
+        (CurrentSettings.Preset switch
+        {
+            "liquid" => PresetLiquid,
+            "natural" => PresetNatural,
+            "frosted" => PresetFrosted,
+            "chroma" => PresetChroma,
+            _ => PresetCustom,
+        }).IsChecked = true;
         (Photo.Selected switch
         { "wallpaper" => BgWallpaper, "paper" => BgPaper, "geometry" => BgGeometry, "layers" => BgLayers, _ => BgSpecimen }).IsChecked = true;
         ClockSwitch.IsOn = CurrentSettings.ShowClock;
@@ -733,7 +740,9 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
         if (tag == "liquid") CurrentSettings.ApplyMaterial(BarSettings.Liquid());
+        else if (tag == "natural") CurrentSettings.ApplyMaterial(BarSettings.Natural());
         else if (tag == "frosted") CurrentSettings.ApplyMaterial(BarSettings.Frosted());
+        else if (tag == "chroma") CurrentSettings.ApplyMaterial(BarSettings.Chroma());
         else CurrentSettings.Preset = "custom";
         LoadIntoControls();
         Changed();
@@ -1278,7 +1287,9 @@ public sealed partial class MainWindow : Window, IDisposable
         if (group is "clarity" or "edge" or "light")
         {
             CurrentSettings.Preset = CurrentSettings.SameMaterial(BarSettings.Liquid()) ? "liquid"
-                : CurrentSettings.SameMaterial(BarSettings.Frosted()) ? "frosted" : "custom";
+                : CurrentSettings.SameMaterial(BarSettings.Natural()) ? "natural"
+                : CurrentSettings.SameMaterial(BarSettings.Frosted()) ? "frosted"
+                : CurrentSettings.SameMaterial(BarSettings.Chroma()) ? "chroma" : "custom";
         }
         LoadIntoControls();
         Changed();

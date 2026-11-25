@@ -6,17 +6,17 @@
 
 `%LOCALAPPDATA%\Atrium\settings.json`，UTF-8，一个扁平 JSON 对象，原子替换写入。缺少的键取默认值，超出范围的值被截断，格式错误的文件整体回退到默认值（Core 日志会记录）。
 
-| 键 | 类型 | 范围 | 默认（液态，参照 macOS Liquid Glass） | 说明 |
+| 键 | 类型 | 范围 | 默认（液态：中心清、窄边、少色散） | 说明 |
 | --- | --- | --- | --- | --- |
 | `version` | number | 1–2 | 2 | 架构版本。2（v0.6）：读取版本 1 的文件时忽略其中的 `notifyListener`（版本 1 保存的是旧默认值“关”），即迁移为开启；没有 `version` 的输入（管道的部分更新）不迁移 |
-| `preset` | string | `liquid` / `frosted` / `custom` | `liquid` | 仅用于界面显示 |
-| `transparency` | number | 0–1 | 0.95 | 1 = 完全不染色；着色混合 = 1 − transparency |
-| `blur` | number | 0–1 | 0.50 | 模糊强度：主要决定 mip 级别（1 + 4.5 × blur），低值时与清晰采样混合 |
-| `refraction` | number | 0–60 DIP | 30 | 边缘最大采样偏移 |
-| `edge` | number | 1–80 DIP | 24 | 发生折射的边缘宽度 |
-| `dispersion` | number | 0–0.5 | 0.30 | 通道分离比例 |
-| `highlight` | number | 0–1 | 0.80 | 边缘高光与玻璃下内容的鲜艳度 |
-| `shadow` | number | 0–1 | 0.30 | 投影浓度 |
+| `preset` | string | `liquid` / `natural` / `frosted` / `chroma` / `custom` | `liquid` | 仅用于界面显示。液态、自然、磨砂、透彩四套预设；改滑块后变为 `custom` |
+| `transparency` | number | 0–1 | 0.98 | 1 = 完全不染色；着色混合 = 1 − transparency |
+| `blur` | number | 0–1 | 0.06 | 模糊强度：主要决定 mip 级别（1 + 4.5 × blur），低值时与清晰采样混合 |
+| `refraction` | number | 0–60 DIP | 32 | 边缘最大采样偏移 |
+| `edge` | number | 1–80 DIP | 15 | 发生折射的边缘宽度 |
+| `dispersion` | number | 0–0.5 | 0.14 | 通道分离比例 |
+| `highlight` | number | 0–1 | 0.88 | 边缘高光与玻璃下内容的鲜艳度 |
+| `shadow` | number | 0–1 | 0.42 | 投影浓度 |
 | `tint` | string | `#RRGGBB` | `#FFFFFF` | 染色 |
 | `cornerRadius` | number | 0–200 DIP | 30 | 绘制时不超过高度的一半 |
 | `width` | number | 200–4000 DIP | 1200 | 最大宽度，不超过工作区；`autoWidth` 关闭时为固定宽度 |

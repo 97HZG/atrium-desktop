@@ -489,7 +489,7 @@ void Settings::Clamp()
     NormalizeControlModules(controlModules);
     if (pins && pins->size() > 64)
         pins->resize(64);
-    if (preset != L"liquid" && preset != L"frosted")
+    if (preset != L"liquid" && preset != L"natural" && preset != L"frosted" && preset != L"chroma")
         preset = L"custom";
 }
 

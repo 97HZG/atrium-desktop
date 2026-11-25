@@ -23,14 +23,14 @@ internal sealed class BarSettings
     public const int CurrentVersion = 2;
 
     public string Preset { get; set; } = "liquid";
-    public double Transparency { get; set; } = 0.95;
+    public double Transparency { get; set; } = 0.98;
     public double CornerRadius { get; set; } = 30;
-    public double Blur { get; set; } = 0.50;
-    public double Refraction { get; set; } = 30;
-    public double Edge { get; set; } = 24;
-    public double Dispersion { get; set; } = 0.30;
-    public double Highlight { get; set; } = 0.80;
-    public double Shadow { get; set; } = 0.30;
+    public double Blur { get; set; } = 0.06;
+    public double Refraction { get; set; } = 32;
+    public double Edge { get; set; } = 15;
+    public double Dispersion { get; set; } = 0.14;
+    public double Highlight { get; set; } = 0.88;
+    public double Shadow { get; set; } = 0.42;
     public uint Tint { get; set; } = 0xFFFFFF;
     public double Width { get; set; } = 1200;
     public double Height { get; set; } = 60;
@@ -143,17 +143,43 @@ internal sealed class BarSettings
 
     public static BarSettings Liquid() => new();
 
+    public static BarSettings Natural() => new()
+    {
+        Preset = "natural",
+        Transparency = 0.86,
+        Blur = 0.40,
+        Refraction = 16,
+        Edge = 14,
+        Dispersion = 0.10,
+        Highlight = 0.58,
+        Shadow = 0.34,
+        Tint = 0xF7F7FB,
+    };
+
     public static BarSettings Frosted() => new()
     {
         Preset = "frosted",
-        Transparency = 0.80,
+        Transparency = 0.68,
         Blur = 1.0,
-        Refraction = 6,
-        Edge = 10,
-        Dispersion = 0.04,
-        Highlight = 0.45,
+        Refraction = 2,
+        Edge = 6,
+        Dispersion = 0.01,
+        Highlight = 0.30,
+        Shadow = 0.40,
+        Tint = 0xF2F2F7,
+    };
+
+    public static BarSettings Chroma() => new()
+    {
+        Preset = "chroma",
+        Transparency = 0.92,
+        Blur = 0.15,
+        Refraction = 24,
+        Edge = 20,
+        Dispersion = 0.40,
+        Highlight = 0.80,
         Shadow = 0.30,
-        Tint = 0xF5F5FA,
+        Tint = 0xE3F2FF,
     };
 
     // Copies the material of `preset`, keeping layout and content options.
@@ -321,7 +347,7 @@ internal sealed class BarSettings
         double Num(string k, double d) => o?[k] is JsonValue v && v.TryGetValue(out double x) && double.IsFinite(x) ? x : d;
         string Str(string key, string value) => o?[key] is JsonValue v && v.TryGetValue(out string? text) && text != null ? text : value;
         string preset = Str("preset", f.Preset);
-        s.Preset = preset is "liquid" or "frosted" ? preset : "custom";
+        s.Preset = preset is "liquid" or "natural" or "frosted" or "chroma" ? preset : "custom";
         s.Transparency = Math.Clamp(Num("transparency", f.Transparency), 0, 1);
         s.CornerRadius = Math.Clamp(Num("cornerRadius", f.CornerRadius), 0, 200);
         s.Blur = Math.Clamp(Num("blur", f.Blur), 0, 1);
