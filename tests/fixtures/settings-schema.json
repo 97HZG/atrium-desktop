@@ -90,7 +90,7 @@
     "stageDragMerge": {"type": "bool", "default": true},
     "stageAvoid": {"type": "bool", "default": true},
     "stageCloseButton": {"type": "bool", "default": true},
-    "stageExcluded": {"type": "stringArray", "default": ["snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_"]},
+    "stageExcluded": {"type": "stringArray", "default": ["snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_", "wechatappex.exe", "tencent.wmpf."]},
     "imeStatus": {"type": "bool", "default": true},
     "imeBubble": {"type": "bool", "default": true},
     "hideTaskbar": {"type": "bool", "default": true},

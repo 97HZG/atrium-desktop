@@ -36,6 +36,10 @@ int main()
     run("case does not matter",
         [&] { require(StageAppExcluded({L"WeChat.EXE"}, L"D:\\Apps\\WeChat\\wechat.exe"), "entries and app keys compare without case"); });
     run("a full path entry matches exactly", [&] { require(StageAppExcluded({L"d:\\apps\\tool.exe"}, L"d:\\apps\\tool.exe"), "a full key must match"); });
+    run("a trailing dot is an app-key prefix", [&] {
+        require(StageAppExcluded({L"tencent.wmpf."}, L"tencent.wmpf.2!miniprogram"), "a dotted family prefix must match its AUMID");
+        require(!StageAppExcluded({L"tencent.wmpf"}, L"tencent.wmpf.2!miniprogram"), "without the trailing dot it is an exact key, not a prefix");
+    });
     run("folder prefixes require a trailing separator", [&] {
         require(StageAppExcluded({L"c:\\games\\hero\\"}, L"c:\\games\\hero\\bin\\run.exe"), "a trailing-backslash folder matches apps inside it");
         require(StageAppExcluded({L"c:/games/hero/"}, L"c:/games/hero/bin/run.exe"), "a trailing-slash folder matches apps inside it");
@@ -51,7 +55,9 @@ int main()
         require(StageAppExcluded(defaults, L"c:\\windows\\system32\\snippingtool.exe"), "Windows Snipping Tool");
         require(StageAppExcluded(defaults, L"c:\\windows\\system32\\screenclippinghost.exe"), "Screen Clipping Host");
         require(StageAppExcluded(defaults, L"microsoft.screensketch_8wekyb3d8bbwe!app"), "packaged Snipping Tool");
-        require(!StageAppExcluded(defaults, L"d:\\apps\\wechat\\wechat.exe"), "other screenshot tools are opt-in");
+        require(StageAppExcluded(defaults, L"c:\\program files\\tencent\\wechat\\wechatappex.exe"), "WeChat mini-program host");
+        require(StageAppExcluded(defaults, L"tencent.wmpf.2!miniprogram"), "WeChat mini-program package");
+        require(!StageAppExcluded(defaults, L"d:\\apps\\wechat\\wechat.exe"), "the main WeChat client stays in Stage Manager");
         require(!StageAppExcluded(defaults, L"c:\\windows\\notepad.exe"), "ordinary apps stay managed");
     });
     run("non-ASCII letters compare as Windows compares paths",

@@ -89,8 +89,9 @@ Require(!dragMergeOff.StageDragMerge && !BarSettings.FromJson(dragMergeOff.ToJso
 var excludedDefault = new BarSettings();
 Require(excludedDefault.StageExcluded.SequenceEqual(BarSettings.StageExcludedDefaults) &&
         excludedDefault.StageExcluded.Contains("snippingtool.exe") && excludedDefault.StageExcluded.Contains("microsoft.screensketch_") &&
+        excludedDefault.StageExcluded.Contains("wechatappex.exe") && excludedDefault.StageExcluded.Contains("tencent.wmpf.") &&
         !excludedDefault.StageExcluded.Contains("wechat.exe") && !excludedDefault.StageExcluded.Contains("notepad.exe"),
-    "The Stage Manager blacklist must start with the Windows screenshot tools.");
+    "The Stage Manager blacklist must start with the Windows screenshot tools and the WeChat mini-program host, not the main WeChat client.");
 var excluded = BarSettings.FromJson(JsonNode.Parse("""{"stageExcluded":["wechat.exe","tencent.qq_"]}""")!.AsObject(), new());
 Require(excluded.StageExcluded.SequenceEqual(["wechat.exe", "tencent.qq_"]) &&
         BarSettings.FromJson(excluded.ToJson(), new()).SameAs(excluded) && !new BarSettings().SameAs(excluded),

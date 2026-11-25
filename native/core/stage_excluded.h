@@ -1,6 +1,6 @@
-// Entries are executable names (wechat.exe), package prefixes (microsoft.screensketch_) or
-// complete app keys. An app is excluded when its key matches any of them; comparison is
-// case-insensitive. Excluded apps are left out of Stage Manager entirely.
+// Entries are executable names (wechat.exe), package prefixes (microsoft.screensketch_ or
+// tencent.wmpf.) or complete app keys. An app is excluded when its key matches any of them;
+// comparison is case-insensitive. Excluded apps are left out of Stage Manager entirely.
 #pragma once
 
 #include <windows.h>
@@ -31,15 +31,24 @@ inline bool StageAppExcluded(const std::vector<std::wstring>& excluded, const st
     const std::wstring file = slash == std::wstring::npos ? app : app.substr(slash + 1);
     return std::ranges::any_of(excluded, [&](const std::wstring& raw) {
         const std::wstring entry = LowerAppKey(raw);
-        // Prefix matching is limited to directory ('\' or '/') and package ('_') prefixes.
+        // Prefix matching is limited to directory ('\' or '/'), package ('_') and dotted
+        // family ('tencent.wmpf.') prefixes. A dot in the middle of a name is not enough.
         return !entry.empty() &&
-               (app == entry || file == entry || ((entry.back() == L'\\' || entry.back() == L'/' || entry.back() == L'_') && app.starts_with(entry)));
+               (app == entry || file == entry ||
+                ((entry.back() == L'\\' || entry.back() == L'/' || entry.back() == L'_' || entry.back() == L'.') && app.starts_with(entry)));
     });
 }
 
 // The Windows screenshot tools that must not be swallowed by the stage while they record or
 // capture: their own overlays/control bars are separate windows, and putting them away hides
 // pause/stop from the user. Other screenshot apps can be added in Settings.
-inline std::vector<std::wstring> DefaultStageExcluded() { return {L"snippingtool.exe", L"screenclippinghost.exe", L"microsoft.screensketch_"}; }
+// Screenshot tools stay up so their pause/stop controls remain visible. The WeChat
+// mini-program host (WeChatAppEx / tencent.wmpf.) is a separate process from the main
+// client; parking it clears the stage whenever a mini program is focused. The main
+// WeChat executable is not in this list.
+inline std::vector<std::wstring> DefaultStageExcluded()
+{
+    return {L"snippingtool.exe", L"screenclippinghost.exe", L"microsoft.screensketch_", L"wechatappex.exe", L"tencent.wmpf."};
+}
 
 } // namespace atrium

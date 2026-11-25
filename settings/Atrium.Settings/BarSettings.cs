@@ -121,12 +121,13 @@ internal sealed class BarSettings
     public bool StageDragMerge { get; set; } = true;   // a window released over a group in the strip joins it
     public bool StageAvoid { get; set; } = true;       // always shown, a window taking the stage over the strip moves beside it
     public bool StageCloseButton { get; set; } = true; // a card in the strip shows a close button under the pointer
-    // Apps Stage Manager leaves alone; the default is the Windows Snipping Tool, whose overlay
-    // and control bar must stay on screen while recording. Other tools can be added.
+    // Apps Stage Manager leaves alone. Defaults: the Windows Snipping Tool (its overlay and
+    // control bar must stay up while recording) and the WeChat mini-program host. The main
+    // WeChat client is not excluded. Other tools can be added.
     // Keep in step with DefaultStageExcluded() in native/core/stage_excluded.h.
     public static readonly string[] StageExcludedDefaults =
     [
-        "snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_",
+        "snippingtool.exe", "screenclippinghost.exe", "microsoft.screensketch_", "wechatappex.exe", "tencent.wmpf.",
     ];
     public List<string> StageExcluded { get; set; } = [.. StageExcludedDefaults];
     public string WidgetMaterial { get; set; } = "glass"; // glass (the bar's) | dusk (dimmed glass, white ink) | color (their own faces)
