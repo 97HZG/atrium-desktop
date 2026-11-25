@@ -1,5 +1,7 @@
 #include "shell/quick_toggles.h"
 
+#include "log.h"
+
 #include <windows.h>
 #include <asyncinfo.h>
 #include <powrprof.h>
@@ -422,6 +424,73 @@ bool SetMobileHotspot(bool on)
     if (FAILED(hr))
         return false;
     return AwaitTetheringOp(op.Get());
+}
+
+namespace {
+
+constexpr CLSID kRadioManagementApi = {0x581333f6, 0x28db, 0x41be, {0xbc, 0x7a, 0xff, 0x20, 0x1f, 0x12, 0xf3, 0xf6}};
+constexpr IID kIRadioManager = {0xdb3afbfb, 0x08e6, 0x46c6, {0xaa, 0x70, 0xbf, 0x9a, 0x34, 0xc3, 0x0a, 0xb7}};
+
+struct IRadioManager;
+struct IRadioManagerVtbl {
+    HRESULT(STDMETHODCALLTYPE* QueryInterface)(IRadioManager*, REFIID, void**);
+    ULONG(STDMETHODCALLTYPE* AddRef)(IRadioManager*);
+    ULONG(STDMETHODCALLTYPE* Release)(IRadioManager*);
+    HRESULT(STDMETHODCALLTYPE* IsRMSupported)(IRadioManager*, DWORD*);
+    HRESULT(STDMETHODCALLTYPE* GetUIRadioInstances)(IRadioManager*, IUnknown**);
+    HRESULT(STDMETHODCALLTYPE* GetSystemRadioState)(IRadioManager*, int*, int*, DWORD*);
+    HRESULT(STDMETHODCALLTYPE* SetSystemRadioState)(IRadioManager*, int);
+    HRESULT(STDMETHODCALLTYPE* Refresh)(IRadioManager*);
+    HRESULT(STDMETHODCALLTYPE* OnHardwareSliderChange)(IRadioManager*, int, int);
+};
+struct IRadioManager {
+    IRadioManagerVtbl* lpVtbl;
+};
+
+struct RadioManagerPtr {
+    IRadioManager* p = nullptr;
+    RadioManagerPtr() { CoCreateInstance(kRadioManagementApi, nullptr, CLSCTX_INPROC_SERVER, kIRadioManager, reinterpret_cast<void**>(&p)); }
+    ~RadioManagerPtr()
+    {
+        if (p)
+            p->lpVtbl->Release(p);
+    }
+    explicit operator bool() const { return p != nullptr; }
+    IRadioManager* get() const { return p; }
+};
+
+} // namespace
+
+std::optional<bool> ReadAirplane()
+{
+    try {
+        RadioManagerPtr rm;
+        if (!rm)
+            return std::nullopt;
+        int radiosOn = 1, unused = 0;
+        DWORD reason = 0;
+        if (FAILED(rm.get()->lpVtbl->GetSystemRadioState(rm.get(), &radiosOn, &unused, &reason)))
+            return std::nullopt;
+        return radiosOn == 0;
+    } catch (...) {
+        Log(L"quick: reading airplane mode failed");
+        return std::nullopt;
+    }
+}
+
+bool SetAirplane(bool on)
+{
+    try {
+        RadioManagerPtr rm;
+        if (!rm)
+            return false;
+        const HRESULT hr = rm.get()->lpVtbl->SetSystemRadioState(rm.get(), on ? 0 : 1);
+        Log(L"quick: airplane %s (%s)", on ? L"on" : L"off", SUCCEEDED(hr) ? L"ok" : L"failed");
+        return SUCCEEDED(hr);
+    } catch (...) {
+        Log(L"quick: setting airplane failed");
+        return false;
+    }
 }
 
 } // namespace atrium

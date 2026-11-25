@@ -260,13 +260,15 @@ void CheckExtrasSettings()
             "folderStackFiles trims, drops empty, and caps at 32");
 
     Settings modules;
-    Require(modules.controlModules == std::vector<std::wstring>{L"stage"}, "controlModules defaults to Stage Manager");
+    Require(modules.controlModules == std::vector<std::wstring>{L"stage", L"airplane", L"nightlight", L"hotspot"},
+            "controlModules defaults to stage, airplane, night light and hotspot");
     modules.controlModules = {L" darkmode ", L"wifi", L"stage", L"darkmode", L"", L"hotspot"};
     modules.Clamp();
     Require(modules.controlModules == std::vector<std::wstring>{L"darkmode", L"stage", L"hotspot"}, "controlModules keeps known modules once, in order");
     modules.controlModules = {L"nightlight", L"stage", L"darkmode"};
     modules.Clamp();
-    Require(modules.controlModules == std::vector<std::wstring>{L"darkmode", L"stage"}, "controlModules: night light is dark mode now");
+    Require(modules.controlModules == std::vector<std::wstring>{L"nightlight", L"stage", L"darkmode"},
+            "controlModules keeps night light as its own module");
     Settings modulesParsed;
     Require(Settings::FromJson(modules.ToJson(), Settings{}, modulesParsed) && modulesParsed.controlModules == modules.controlModules &&
                 Settings::FromJson(LR"({"controlModules":[]})", Settings{}, modulesParsed) && modulesParsed.controlModules.empty(),

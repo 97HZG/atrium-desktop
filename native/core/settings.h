@@ -15,7 +15,7 @@
 namespace atrium {
 
 // The control centre's optional modules (controlModules), in the settings app's order.
-inline constexpr const wchar_t* kControlModules[] = {L"stage", L"energysaver", L"darkmode", L"hotspot"};
+inline constexpr const wchar_t* kControlModules[] = {L"stage", L"airplane", L"nightlight", L"hotspot", L"darkmode", L"energysaver"};
 
 struct Settings {
     static constexpr int kVersion = 2; // 2: Windows notifications on by default (v1 files are migrated)
@@ -87,7 +87,7 @@ struct Settings {
     bool barFullscreenHide = true;   // always shown: a full-screen app in front (a video, F11) has the screen, the bar goes (#134)
     std::wstring barEdge = L"bottom"; // bottom | top | left | right
     std::wstring statusStyle = L"ring"; // the status entry: ring (a ring round the Wi-Fi fan) | icons (network, volume, battery)
-    std::vector<std::wstring> controlModules{L"stage"}; // the control centre's optional modules, in order (kControlModules)
+    std::vector<std::wstring> controlModules{L"stage", L"airplane", L"nightlight", L"hotspot"}; // optional modules, in order (kControlModules)
     // One Dock, summoned at another display's bottom edge, as on macOS.
     std::wstring dockDisplayMode = L"primary"; // primary (as before several displays were known) | follow | fixed | all
     double dockDisplayDelay = 450;   // milliseconds at another display's bottom edge (100..2000)

@@ -204,18 +204,17 @@ void NormalizeStringList(std::vector<std::wstring>& list, size_t maxCount = SIZE
         list.resize(maxCount);
 }
 
-// Known modules only, each once, in the order given. The night light module that was (“夜间模式”, read as a
-// dark theme) is dark mode now.
+// Known modules only, each once, in the order given. Night light is its own switch, not dark mode.
 void NormalizeControlModules(std::vector<std::wstring>& list)
 {
     NormalizeStringList(list);
     std::vector<std::wstring> kept;
-    for (std::wstring& id : list)
-        if (id == L"nightlight")
-            id = L"darkmode";
-    for (std::wstring& id : list)
+    for (std::wstring& id : list) {
+        if (kept.size() >= 6)
+            break;
         if (std::ranges::any_of(kControlModules, [&](const wchar_t* m) { return id == m; }) && std::ranges::find(kept, id) == kept.end())
             kept.push_back(std::move(id));
+    }
     list = std::move(kept);
 }
 

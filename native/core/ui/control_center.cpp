@@ -460,8 +460,7 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
 {
     const float colW = (kW - kGap) / 2;
     const D2D1_RECT_F conn = D2D1::RectF(0, 0, colW, kTopH);
-    const D2D1_RECT_F batt = D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2);
-    const D2D1_RECT_F cast = D2D1::RectF(colW + kGap, batt.bottom + kGap, kW, kTopH);
+    const D2D1_RECT_F batt = D2D1::RectF(colW + kGap, 0, kW, kTopH);
     float y = kTopH + kGap + ModulesHeight();
     const D2D1_RECT_F bright = D2D1::RectF(0, y, kW, y + kSliderH);
     y = bright.bottom + kGap;
@@ -536,19 +535,6 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
             c.Text(Tr(L"Plugged in"), D2D1::RectF(cx + 24, cy + 1, batt.right - 8, cy + 18), 11.5f, t.subtext);
         }
         hits_.push_back({batt, L"battery"});
-    }
-    // Casting, like macOS's screen mirroring: its page lists the wireless displays.
-    {
-        float ch = Hover(c, L"cast", hover_ == L"cast");
-        if (ch > 0.001f || pressed_ == L"cast")
-            c.Fill(cast, modR, pressed_ == L"cast" ? t.press : Alpha(t.hover, ch));
-        float cx = cast.left + 32, cy = (cast.top + cast.bottom) / 2;
-        c.Circle(cx, cy, 16, Alpha(t.text, 0.16f));
-        c.Glyph(L"\uE7F4", D2D1::RectF(cx - 14, cy - 14, cx + 14, cy + 14), 13, t.text);
-        c.Text(Tr(L"Cast"), D2D1::RectF(cx + 24, cy - 18, cast.right - 8, cy + 1), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        c.Text(projecting_.empty() ? Tr(L"Wireless display") : Tr(L"Connected"), D2D1::RectF(cx + 24, cy + 1, cast.right - 8, cy + 18), 11.5f,
-               projecting_.empty() ? t.subtext : t.accent);
-        hits_.push_back({cast, L"cast"});
     }
     PaintModules(c, t);
     PaintSlider(c, t, bright, L"bright", Tr(L"Displays"), L"\uE706", std::max(brightness_, 0), false,

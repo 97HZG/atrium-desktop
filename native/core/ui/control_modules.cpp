@@ -31,9 +31,11 @@ struct ModuleSpec {
 };
 constexpr ModuleSpec kSpecs[] = {
     {L"stage", L"\uE7C4", L"Stage Manager"},
-    {L"energysaver", L"\uEC0A", L"Energy saver"},
-    {L"darkmode", L"\uE708", L"Dark mode"},
+    {L"airplane", L"\uE709", L"Airplane mode"},
+    {L"nightlight", L"\uE793", L"Night light"},
     {L"hotspot", L"\uE88A", L"Mobile hotspot"},
+    {L"darkmode", L"\uE708", L"Dark mode"},
+    {L"energysaver", L"\uEC0A", L"Energy saver"},
 };
 
 const ModuleSpec* Spec(const std::wstring& id)
@@ -53,6 +55,10 @@ std::optional<bool> ReadSwitch(const std::wstring& id)
         return ReadDarkMode();
     if (id == L"hotspot")
         return ReadMobileHotspot();
+    if (id == L"airplane")
+        return ReadAirplane();
+    if (id == L"nightlight")
+        return ReadNightLight().value_or(false); // a short CloudStore blob still leaves a switch
     return std::nullopt;
 }
 
@@ -62,6 +68,10 @@ bool SetSwitch(const std::wstring& id, bool on)
         return SetEnergySaver(on);
     if (id == L"darkmode")
         return SetDarkMode(on);
+    if (id == L"airplane")
+        return SetAirplane(on);
+    if (id == L"nightlight")
+        return SetNightLight(on);
     return id == L"hotspot" && SetMobileHotspot(on);
 }
 
@@ -184,8 +194,11 @@ void ControlCenter::FlipModule(const std::wstring& id)
     moduleBusy_.insert(id);
     surface_.Invalidate();
     slowWorker_.Post({}, [this, id, want] {
-        if (!SetSwitch(id, want))
+        if (!SetSwitch(id, want)) {
             Log(L"control: %s could not be switched %s", id.c_str(), want ? L"on" : L"off");
+            if (id == L"nightlight")
+                ShellExecuteW(nullptr, L"open", L"ms-settings:nightlight", nullptr, nullptr, SW_SHOWNORMAL);
+        }
         std::optional<bool> now = ReadSwitch(id);
         // Plugged in, Windows keeps energy saver to its own switch (the threshold only counts on battery):
         // the threshold goes back and its settings page opens instead.

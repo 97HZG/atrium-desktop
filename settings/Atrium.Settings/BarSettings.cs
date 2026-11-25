@@ -81,8 +81,8 @@ internal sealed class BarSettings
     public string BarEdge { get; set; } = "bottom"; // bottom | top | left | right
     public string StatusStyle { get; set; } = "ring"; // ring | icons (network, volume, battery as on the Windows taskbar)
     // The control centre's optional modules, in order; kControlModules in native/core/settings.h.
-    public static readonly string[] ControlModuleIds = ["stage", "energysaver", "darkmode", "hotspot"];
-    public List<string> ControlModules { get; set; } = ["stage"];
+    public static readonly string[] ControlModuleIds = ["stage", "airplane", "nightlight", "hotspot", "darkmode", "energysaver"];
+    public List<string> ControlModules { get; set; } = ["stage", "airplane", "nightlight", "hotspot"];
     public string DockDisplayMode { get; set; } = "primary"; // primary | follow | fixed | all
     public double DockDisplayDelay { get; set; } = 450; // milliseconds at another display's bottom edge
     public string DockDisplay { get; set; } = "";
@@ -431,9 +431,8 @@ internal sealed class BarSettings
         s.Language = !LocalizationValidation.ValidTag(language) ? "auto" : language == "zh" ? "zh-Hans" : language;
         string statusStyle = Str("statusStyle", f.StatusStyle);
         s.StatusStyle = statusStyle == "icons" ? "icons" : "ring";
-        // Known modules only, each once, in the order given; the night light module that was is dark mode now.
-        s.ControlModules = [.. ReadStringArray(o, "controlModules", f.ControlModules).Select(id => id == "nightlight" ? "darkmode" : id)
-            .Where(ControlModuleIds.Contains).Distinct()];
+        // Known modules only, each once, in the order given. Night light stays night light.
+        s.ControlModules = [.. ReadStringArray(o, "controlModules", f.ControlModules).Where(ControlModuleIds.Contains).Distinct()];
         s.Pins = f.Pins == null ? null : [.. f.Pins];
         if (o?["pins"] is JsonArray arr)
         {

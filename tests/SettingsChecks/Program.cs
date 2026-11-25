@@ -214,14 +214,14 @@ Require(new PinnedApp("Explorer", "", "", "Microsoft.Windows.Explorer").AllowsMu
     "The Explorer AUMID must default to allowing multiple windows.");
 {
     var modulesDefault = new BarSettings();
-    Require(modulesDefault.ControlModules.SequenceEqual(["stage"]), "Control centre modules must default to Stage Manager.");
+    Require(modulesDefault.ControlModules.SequenceEqual(["stage", "airplane", "nightlight", "hotspot"]), "Control centre modules must default to stage, airplane, night light and hotspot.");
     var modules = BarSettings.FromJson(JsonNode.Parse("""{"controlModules":[" darkmode ","wifi","stage","darkmode","","hotspot"]}""")!.AsObject(), new());
     Require(modules.ControlModules.SequenceEqual(["darkmode", "stage", "hotspot"]) && BarSettings.FromJson(modules.ToJson(), new()).SameAs(modules) &&
             !modules.SameAs(modulesDefault),
         "Control centre modules must keep known ids once, in order, and survive a round trip.");
     var nightLight = BarSettings.FromJson(JsonNode.Parse("""{"controlModules":["nightlight","stage","darkmode"]}""")!.AsObject(), new());
-    Require(nightLight.ControlModules.SequenceEqual(["darkmode", "stage"]),
-        "The night light module must become dark mode.");
+    Require(nightLight.ControlModules.SequenceEqual(["nightlight", "stage", "darkmode"]),
+        "Night light stays its own control-centre module.");
     var stackFiles = BarSettings.FromJson(
         JsonNode.Parse("""{"folderStackFiles":[" C:\\Docs\\Plan.pdf ","c:/docs/plan.pdf","","D:\\Notes.txt"]}""")!.AsObject(), new());
     Require(stackFiles.FolderStackFiles.SequenceEqual([@"C:\Docs\Plan.pdf", @"D:\Notes.txt"]),
@@ -1306,7 +1306,7 @@ finally
             Require(fsfCap.Draft.FolderStackFiles.Count == 32, "FolderStackFiles 3-way merge must cap at 32 items.");
         }
 
-        // ControlModules 3-way merge (dedupe, max 4, filtered by ControlModuleIds)
+        // ControlModules 3-way merge (dedupe, cap 6, filtered by ControlModuleIds)
         {
             var cm = new SettingsSession();
             cm.ApplyInitialState(
@@ -1325,8 +1325,8 @@ finally
                 "i1", 1);
             cmDrop.Draft.ControlModules = ["darkmode"];
             cmDrop.ApplyExternalChange(new BarSettings { ControlModules = ["stage", "nightlight", "energysaver"] }, 2);
-            Require(cmDrop.Draft.ControlModules.SequenceEqual(["darkmode", "energysaver"]),
-                "ControlModules 3-way merge must drop locally removed module and normalize nightlight.");
+            Require(cmDrop.Draft.ControlModules.SequenceEqual(["nightlight", "energysaver"]),
+                "ControlModules 3-way merge must drop a locally removed module and keep night light.");
 
             var cmAll = new SettingsSession();
             cmAll.ApplyInitialState(
@@ -1335,9 +1335,9 @@ finally
                 "i1", 1);
             cmAll.Draft.ControlModules = ["darkmode", "stage", "energysaver"];
             cmAll.ApplyConflict(new BarSettings { ControlModules = ["stage", "darkmode", "hotspot"] }, 2, "i1");
-            Require(cmAll.Draft.ControlModules.Count <= 4 &&
+            Require(cmAll.Draft.ControlModules.Count <= 6 &&
                     cmAll.Draft.ControlModules.SequenceEqual(["darkmode", "stage", "energysaver", "hotspot"]),
-                "ControlModules 3-way merge must preserve reorder and cap at 4 known modules.");
+                "ControlModules 3-way merge must preserve reorder and stay within the known modules.");
         }
 
         // 8. ReleaseInstaller.ReadPreparedRecovering: corrupt ready.json, missing files, and escaping path auto-clean and return null

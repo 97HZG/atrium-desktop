@@ -415,7 +415,7 @@
                         <StackPanel Spacing="8" Margin="0,8,0,0">
                             <TextBlock Text="Control centre modules" Style="{StaticResource SectionStyle}" Margin="4,0,0,0" />
                             <TextBlock
-                                Text="Click a module to add it to the control centre, and again to take it away. Wi-Fi, Bluetooth, battery, casting, brightness and sound always stay."
+                                Text="Click a module to add it to the control centre, and again to take it away. Wi-Fi, Bluetooth, battery, brightness and sound always stay."
                                 Style="{StaticResource FootnoteStyle}" TextWrapping="Wrap" Margin="4,0,0,0" />
                             <local:ResponsiveGrid x:Name="ModuleGallery" MinCellWidth="240" Gap="12" />
                         </StackPanel>

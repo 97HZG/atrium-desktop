@@ -177,7 +177,7 @@ internal sealed class SettingsSession
             NormalizeControlModules(targetSaved.ControlModules),
             NormalizeControlModules(draft.ControlModules),
             TrimAsciiKey,
-            BarSettings.ControlModuleIds.Length);
+            6);
         return result;
     }
 
@@ -219,10 +219,10 @@ internal sealed class SettingsSession
     private static string NormalizeFileKey(string s) => s.AsSpan().Trim(AsciiWs).ToString().Replace('/', '\\');
 
     private static List<string> NormalizeControlModules(IEnumerable<string> list) =>
-        [.. list.Select(id => TrimAsciiKey(id) is "nightlight" ? "darkmode" : TrimAsciiKey(id))
+        [.. list.Select(TrimAsciiKey)
                 .Where(BarSettings.ControlModuleIds.Contains)
                 .Distinct(StringComparer.Ordinal)
-                .Take(BarSettings.ControlModuleIds.Length)];
+                .Take(6)];
 
     private static bool IsFolderRootSlash(ReadOnlySpan<char> path)
     {
