@@ -217,8 +217,21 @@ public sealed partial class MainWindow : Window, IDisposable
         // `--page widgets` (the widgets' menu): open on that page.
         int page = startPage >= 0 ? startPage : App.PageFromArgs(Environment.GetCommandLineArgs()) ?? 0;
         SelectPage(page);
+        ApplyReadingBackdrop();
         _ = ConnectAndLoadAsync();
         if (!Environment.GetCommandLineArgs().Contains("--development")) _ = CheckForUpdatesAsync();
+    }
+
+    // Notifications, displays, system, design language and about are text. Mica behind
+    // that much type fights the wallpaper. The material, shape, taskbar, widget and
+    // Stage Manager pages keep Mica because their previews are the point.
+    private void ApplyReadingBackdrop()
+    {
+        bool reading = _page is 3 or 6 or 7 or 8 or 9;
+        if (reading)
+            SystemBackdrop = null;
+        else if (SystemBackdrop is null && MicaController.IsSupported())
+            SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
     }
 
     private void UpdateWindowMinimumSize(uint dpi = 0, IntPtr suggestedRect = 0)

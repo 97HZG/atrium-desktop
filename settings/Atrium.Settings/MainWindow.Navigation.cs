@@ -28,6 +28,7 @@ public sealed partial class MainWindow
     {
         if (_page == 8 && index != 8) StopDesignAnimations();
         _page = index;
+        ApplyReadingBackdrop();
         for (int i = 0; i < _mains.Length; i++)
         {
             _mains[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
