@@ -62,6 +62,10 @@ The glass bends what is behind it, with a touch of highlight and dispersion at t
 
 ### Start menu
 
+<p align="center">
+  <img src="docs/images/readme/start.jpg" alt="The start menu: search and app tiles above, a capsule with the account, network, volume, battery and power below" width="100%">
+</p>
+
 Opened from the Windows logo at the left of the bar, or optionally the Windows key, at the left or in the middle of the screen. The menu is a few separate pieces of glass: a panel with the search box and the app tiles, and below it a capsule shaped like the bar with your account, network, volume, battery, the tray and power; power's choices (shut down, restart, sleep and so on) open in another piece of glass beside it.
 
 - **Tiles**: at first, the apps pinned to the Windows start menu (on Windows 10 with its tile groups). Drag them to another place or another page, or onto another app to make a folder. A folder opens in a small card where it takes a name and gives apps back, and it can be removed from Start together with its apps. The sync button beside the search box brings in what is pinned in Windows and the folders of All apps at any time, and the tiles can be restored to the Windows pins.
@@ -72,6 +76,10 @@ Opened from the Windows logo at the left of the bar, or optionally the Windows k
 
 ### Launchpad
 
+<p align="center">
+  <img src="docs/images/readme/launchpad.jpg" alt="Launchpad: every app, page by page, in one large pane of glass" width="100%">
+</p>
+
 A Launchpad entry sits next to the start button. As on macOS, it lists every app, page by page, in one large pane of glass: the apps you installed first, and Windows' own apps in a System apps folder at the end (Settings stays outside).
 
 - Turn the pages with the wheel, a touchpad swipe, a drag or the arrow keys; they glide on a spring.
@@ -81,9 +89,17 @@ A Launchpad entry sits next to the start button. As on macOS, it lists every app
 
 ### File Stacks
 
+<p align="center">
+  <img src="docs/images/readme/stacks.jpg" alt="File Stacks: folders fanned out along an arc, each name on a tilted capsule of glass" width="100%">
+</p>
+
 Put the folders and files you use most on the bar: a stack entry left of the tray. Click it and they fly out of the entry one after another and fan out along an arc, each name on a capsule of glass tilted with the arc; click one to open it (an Explorer window already on it comes forward), or middle-click for a new window. Prefer things tidy? Show them as a column instead. Add folders in Settings, or pick from common ones such as Downloads and Documents.
 
 ### Now playing
+
+<p align="center">
+  <img src="docs/images/readme/now-playing.jpg" alt="Now playing: the bars on the taskbar and the player card" width="100%">
+</p>
 
 While a music or video app plays, five bars appear to the right of the status ring and move with the sound. Click them for a card with the album art, title and artist, a progress bar you can drag, previous, play/pause and next, plus like and lyrics. Scroll over the bars to change the player's volume. NetEase Cloud Music, QQ Music, Spotify and Apple Music are supported; what each one allows differs with its interface, and Settings spells it out. You can also show only chosen apps, or leave some out.
 
