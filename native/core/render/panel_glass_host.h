@@ -63,6 +63,7 @@ public:
 
     bool InkDue() const { return inkDue_; }
     bool AnyOwed() const;
+    bool AnyCaptureRequiresPolling() const;
     bool AnyReadbackPending() const;
 
     RenderResult Render(const std::vector<GlassPanel>& panels, const Settings& settings, RECT monitorRect, float barScale, ID3D11Texture2D* source,

@@ -145,8 +145,8 @@ GlassParams BarFrameParams(const Settings& settings, float scale, const BarFrame
     return params;
 }
 
-DWORD WaitNextRenderTick(bool paced, bool readback, bool paused, bool showClock, bool showClockSeconds, bool& pendingSnap, const HANDLE* handles,
-                         uint64_t& tick)
+DWORD WaitNextRenderTick(bool paced, bool readback, bool paused, bool pollCapture, bool showClock, bool showClockSeconds, bool& pendingSnap,
+                         const HANDLE* handles, uint64_t& tick)
 {
     const DWORD hc = 3 - DWORD(paused);
     if (pendingSnap) {
@@ -171,6 +171,8 @@ DWORD WaitNextRenderTick(bool paced, bool readback, bool paused, bool showClock,
         GetLocalTime(&t);
         idle = DWORD(1000 - t.wMilliseconds) + 16;
     }
+    if (!paused && pollCapture)
+        idle = std::min<DWORD>(idle, 16);
     const DWORD w = WaitForMultipleObjects(hc, handles, FALSE, paced ? 6 : readback ? 3 : idle);
     ++tick;
     return w;
@@ -229,7 +231,7 @@ struct BarRender {
             HRESULT why = S_OK;
             bool elsewhere = false;
             for (int tries = 0;; ++tries) {
-                capture = DuplicationCapture::Create(gpu, snap.hmonitor, bar.frame_, why, elsewhere);
+                capture = DuplicationCapture::Create(gpu, snap.hmonitor, why, elsewhere);
                 if (capture || !DuplicationCapture::Temporary(why))
                     break;
                 if (tries == 0)
@@ -266,7 +268,7 @@ struct BarRender {
         if (bar.capturePolicy_.ShouldProbeDuplication(needScreen, remote, captureKeepsOwnOut, monitorId, captureGeneration, tickMs)) {
             HRESULT why = S_OK;
             bool elsewhere = false;
-            if (DuplicationCapture::Create(gpu, snap.hmonitor, bar.frame_, why, elsewhere)) {
+            if (DuplicationCapture::Create(gpu, snap.hmonitor, why, elsewhere)) {
                 bar.capturePolicy_.OnDuplicationRecovered();
                 Log(L"render: desktop duplication available again");
                 stop = Bar::SessionEnd::Switch;
@@ -327,9 +329,7 @@ struct BarRender {
         if (!snap.panels.empty())
             stats.panelsMs.push_back(ElapsedMs(t0) - p0);
         hidden = nullptr;
-        // Submit the copies from the duplicated frame before handing it back: AcquireNextFrame
-        // waits for the GPU to be done with the last frame while it holds the shared device's
-        // lock, so unsubmitted copies would wait for a Flush that can no longer get the lock.
+        // Submit the copies from the duplicated frame before handing it back.
         if (needScreen) {
             gpu.context->Flush();
             capture.Release();
@@ -457,7 +457,9 @@ struct BarRender {
         const bool owed = barOwed || owedBody || owedMusic || panelHost.InkDue() || panelHost.AnyOwed();
         const bool paced = animating || panelsMoving || owed;
         const bool readback = renderer.ReadbackPending() || panelHost.AnyReadbackPending();
-        if (WaitNextRenderTick(paced, readback, paused, snap.settings.showClock, snap.settings.showClockSeconds, pendingSnap, handles, tick) == WAIT_OBJECT_0) {
+        const bool pollCapture = capture.RequiresPolling() || panelHost.AnyCaptureRequiresPolling();
+        if (WaitNextRenderTick(paced, readback, paused, pollCapture, snap.settings.showClock, snap.settings.showClockSeconds, pendingSnap, handles, tick) ==
+            WAIT_OBJECT_0) {
             stop = Bar::SessionEnd::Exit;
             return false;
         }
