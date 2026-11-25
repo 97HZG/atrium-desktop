@@ -643,6 +643,14 @@ void CheckWidgetStacking()
 }
 } // namespace
 
+void CheckLowPowerMemory()
+{
+    Require(!LowPowerMemory(0), "an unknown memory size must not switch the default material");
+    Require(LowPowerMemory(8ull * 1024 * 1024 * 1024), "8 GiB is the low-power boundary");
+    Require(LowPowerMemory(8ull * 1024 * 1024 * 1024 - 1), "just under 8 GiB is low power");
+    Require(!LowPowerMemory(8ull * 1024 * 1024 * 1024 + 1), "above 8 GiB keeps the Liquid default");
+}
+
 int main(int argc, char** argv)
 {
     try {
@@ -664,6 +672,7 @@ int main(int argc, char** argv)
         CheckNotificationQuietState();
         CheckWidgetStacking();
         CheckNotificationWithdrawAndMerge();
+        CheckLowPowerMemory();
         std::cout << "Display, fullscreen auto-hide, notification placement and animated reflow checks passed.\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

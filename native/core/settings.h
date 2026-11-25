@@ -185,4 +185,11 @@ Settings LoadSettings();
 bool LowIntegrity();
 bool IsDevelopmentBuild();
 
+// True when the machine has a known physical RAM size of 8 GiB or less.
+// Missing or corrupt settings use Frosted on these machines; a valid file is never rewritten.
+inline bool LowPowerMemory(uint64_t totalPhysicalBytes)
+{
+    return totalPhysicalBytes > 0 && totalPhysicalBytes <= 8ull * 1024 * 1024 * 1024;
+}
+
 } // namespace atrium

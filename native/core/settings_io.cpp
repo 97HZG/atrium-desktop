@@ -409,6 +409,29 @@ bool BackupCorruptSettings(const std::wstring& path, int maxBackups)
     return false;
 }
 
+bool ThisMachineIsLowPower()
+{
+    MEMORYSTATUSEX mem{sizeof(mem)};
+    return GlobalMemoryStatusEx(&mem) && LowPowerMemory(mem.ullTotalPhys);
+}
+
+// The numbers are BarSettings.Frosted(), not a second material. widgetBackdrop stays
+// wallpaper so the widgets do not keep sampling the desktop on a machine that already
+// struggled with the Liquid preset.
+void ApplyFrostedForLowPower(Settings& s)
+{
+    s.preset = L"frosted";
+    s.transparency = 0.80;
+    s.blur = 1;
+    s.refraction = 6;
+    s.edge = 10;
+    s.dispersion = 0.04;
+    s.highlight = 0.45;
+    s.shadow = 0.30;
+    s.tint = 0xF5F5FA;
+    s.widgetBackdrop = L"wallpaper";
+}
+
 Settings LoadSettingsFrom(const std::wstring& path, SettingsFileState* stateOut, bool* backupOkOut)
 {
     SettingsFileState state = SettingsFileState::Missing;
@@ -423,6 +446,10 @@ Settings LoadSettingsFrom(const std::wstring& path, SettingsFileState* stateOut,
         backupOk = !readError && BackupCorruptSettings(path, 3);
         Log(L"settings: %s is not valid JSON (%s), using defaults", path.c_str(), backupOk ? L"backed up" : L"backup failed");
         s = Settings{};
+    }
+    if ((state == SettingsFileState::Missing || state == SettingsFileState::Corrupt) && ThisMachineIsLowPower()) {
+        ApplyFrostedForLowPower(s);
+        Log(L"settings: %s missing or corrupt on a low-memory machine; starting on Frosted", path.c_str());
     }
     if (stateOut)
         *stateOut = state;

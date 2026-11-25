@@ -4,7 +4,7 @@
 
 ## 设置文件
 
-`%LOCALAPPDATA%\Atrium\settings.json`，UTF-8，一个扁平 JSON 对象，原子替换写入。缺少的键取默认值，超出范围的值被截断，格式错误的文件整体回退到默认值（Core 日志会记录）。
+`%LOCALAPPDATA%\Atrium\settings.json`，UTF-8，一个扁平 JSON 对象，原子替换写入。缺少的键取默认值，超出范围的值被截断，格式错误的文件整体回退到默认值（Core 日志会记录）。物理内存不超过 8 GiB，且文件缺失或损坏时，Core 不用下表的液态默认，而用磨砂预设（与设置中心 Frosted 相同：透明度 0.80、模糊 1、折射 6、边缘 10、色散 0.04、高光 0.45、阴影 0.30、色调 `#F5F5FA`），小组件 `widgetBackdrop` 用 `wallpaper`。已经有效的设置文件保持原样，不会被改写。
 
 | 键 | 类型 | 范围 | 默认（液态，参照 macOS Liquid Glass） | 说明 |
 | --- | --- | --- | --- | --- |
