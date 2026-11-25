@@ -7,6 +7,7 @@
 #include "log.h"
 #include "motion.h"
 #include "settings.h"
+#include "shell/screenshot_watch.h"
 #include "../posted.h"
 
 #include <dwmapi.h>
@@ -34,7 +35,7 @@ namespace {
 constexpr float kMargin = 24;
 constexpr float kGrip = 30; // DIP: the corner that resizes a widget when dragged
 constexpr double kGlideMs = 240;
-constexpr UINT_PTR kTickTimer = 1, kGlideTimer = 3, kSafetyTimer = 4, kCaretTimer = 5, kSaveTimer = 6;
+constexpr UINT_PTR kTickTimer = 1, kGlideTimer = 3, kSafetyTimer = 4, kCaretTimer = 5, kSaveTimer = 6, kShotTimer = 7;
 constexpr UINT kCaretMs = 530, kSaveMs = 800;
 constexpr ULONGLONG kPhotoMs = 10 * 60 * 1000; // a new photo every ten minutes
 constexpr size_t kMaxNoteText = 8192, kMaxReminderText = 512;
@@ -298,6 +299,7 @@ void DesktopWidgets::SetEnabled(bool on)
         uncloakHook_ = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, OnWinEvent, 0, 0, flags);
         SetTimer(host_, kTickTimer, 1000, nullptr);
         SetTimer(host_, kSafetyTimer, 3000, nullptr);
+        SetTimer(host_, kShotTimer, 400, nullptr);
         Restack();
         Log(L"widgets: on (%zu)", widgets_.size());
     } else {
@@ -306,6 +308,7 @@ void DesktopWidgets::SetEnabled(bool on)
                 UnhookWinEvent(std::exchange(*h, nullptr));
         KillTimer(host_, kTickTimer);
         KillTimer(host_, kSafetyTimer);
+        KillTimer(host_, kShotTimer);
         weather_->SetActive(false);
         bluetooth_->SetActive(false);
         network_->SetActive(false);
@@ -823,6 +826,14 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 self->Tick();
             else if (w == kSafetyTimer)
                 self->Restack();
+            else if (w == kShotTimer) {
+                if (PollScreenshotWatch()) {
+                    self->Restack();
+                    for (auto& wd : self->widgets_)
+                        if (wd->surface)
+                            wd->surface->Invalidate();
+                }
+            }
             else if (w == kGlideTimer)
                 self->Glide();
             else if (w == kSaveTimer) {

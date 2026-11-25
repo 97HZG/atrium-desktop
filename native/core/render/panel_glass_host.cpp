@@ -2,6 +2,7 @@
 
 #include "../clock.h"
 #include "../log.h"
+#include "../shell/screenshot_watch.h"
 
 #include <algorithm>
 #include <cmath>
@@ -465,7 +466,9 @@ PanelGlassHost::RenderResult PanelGlassHost::Render(const std::vector<GlassPanel
     // Widgets sample the desktop, never the windows above them; only a
     // new picture of it (or a move) draws their glass again.
     const bool widgets = std::ranges::any_of(panels, [](const GlassPanel& p) { return p.desktop && p.visible; });
-    desktop_.Update(widgets ? settings.widgetBackdrop : std::wstring(L"off"));
+    // A snip of the live desktop paints the icons onto the widget. Wallpaper does not.
+    const std::wstring backdrop = !widgets ? L"off" : ScreenshotInProgress() ? L"wallpaper" : settings.widgetBackdrop;
+    desktop_.Update(backdrop);
     FlushIdleBursts(now);
     bool moving = false;
     for (const GlassPanel& p : panels) {
