@@ -187,6 +187,4 @@ Design feedback, and reports from other hardware and Windows versions, help the 
 
 [MIT](LICENSE). Visually inspired by Apple's Liquid Glass; this project is not affiliated with Apple or Microsoft.
 
-**Redistribution of this project or its release packages without the author's permission is prohibited** (including reposting, repackaging, publishing under another name, or uploading to other download sites). To recommend Atrium, please share a link to this repository or its [Releases](https://github.com/wynter-yaxley/atrium-desktop/releases/latest) page.
-
 <sub>The pictures on this page are rendered offline at Atrium's real sizes and material settings; the app icons are original illustrations and the notifications are made up.</sub>

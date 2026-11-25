@@ -187,6 +187,4 @@ Atrium 的发布包没有代码签名，每个新版本的文件在 Windows 那�
 
 [MIT](LICENSE)。视觉灵感来自 Apple 的 Liquid Glass；本项目与 Apple、Microsoft 无关。
 
-**未经作者允许，禁止二次分发本项目及其发布包**（包括转载、重新打包、改名后发布或上传到其他下载站）。想推荐给别人，请直接分享本仓库或 [Releases](https://github.com/wynter-yaxley/atrium-desktop/releases/latest) 页面的链接。
-
 <sub>本页配图按 Atrium 的真实尺寸和材质参数离线渲染，应用图标为原创的示意图形，通知内容为虚构。</sub>
