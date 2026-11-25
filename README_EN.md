@@ -7,7 +7,7 @@
 <p align="center">
   <b>More than a desktop theme.</b><br>
   Windows as you know it, with a pane of real-time refracting liquid glass,<br>
-  and one design language joining the taskbar, start menu, control centre, notifications and widgets.
+  and one design language joining the taskbar, start menu, Launchpad, control centre, notifications and widgets.
 </p>
 
 <p align="center">
@@ -58,17 +58,34 @@ The glass bends what is behind it, with a touch of highlight and dispersion at t
 - Drag pinned apps to reorder them. When the app in front goes full screen or maximised, the bar steps aside (or keep it up, or always hidden). While a game, video or anything else fills the whole screen, the pointer at the bottom edge does not bring the bar up, just like the Windows taskbar, so a full-screen game is never pushed back to the desktop. Optionally, Win + 1…9 open the bar's apps.
 - Multiple displays: dwell at the bottom edge of another monitor to summon the dock, or pin it to the primary display, a chosen display, or all displays. Under Displays in Settings, choose whether taskbar apps appear on all displays, the primary display plus the window's display, or only the window's display, and tune the cross-display dwell time.
 - Widgets and Stage Manager can each target a chosen display; if that display disconnects, they fall back to the primary display and return automatically when it reconnects.
+- Turn on the genie effect and a minimized window pours into its icon on the bar, bending as it goes, as on macOS; restored from the bar, it pours back out the same way.
 
 ### Start menu
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/images/readme/start-pins.jpg" alt="Pinned apps in the start menu"></td>
-    <td width="50%"><img src="docs/images/readme/start-search.jpg" alt="Typing straight into the start menu's search"></td>
-  </tr>
-</table>
+Opened from the Windows logo at the left of the bar, or optionally the Windows key, at the left or in the middle of the screen. The menu is a few separate pieces of glass: a panel with the search box and the app tiles, and below it a capsule shaped like the bar with your account, network, volume, battery, the tray and power; power's choices (shut down, restart, sleep and so on) open in another piece of glass beside it.
 
-Opened from the Windows logo at the left of the bar, or optionally the Windows key. The apps pinned in the Windows start menu are here, and the sync button beside the search box brings in what was pinned there since, and the folders of All apps with their apps; drag them around, drop one onto another to make a folder and name it. Four sizes (small, medium, large, huge) with an independent icon size setting. Just start typing to search apps and folders, no need to click the search box first; pinyin initials work too (wx finds 微信). All apps lists them A to Z with a letter index to jump through, and a right-click runs an app as administrator, opens its file location, or hides an app you do not want to see. The strip below holds your account, network, volume, battery and power; the settings pick the menu's size and can leave out its tray or status buttons.
+- **Tiles**: at first, the apps pinned to the Windows start menu (on Windows 10 with its tile groups). Drag them to another place or another page, or onto another app to make a folder. A folder opens in a small card where it takes a name and gives apps back, and it can be removed from Start together with its apps. The sync button beside the search box brings in what is pinned in Windows and the folders of All apps at any time, and the tiles can be restored to the Windows pins.
+- **Size**: drag the grip at the panel's top right corner through four sizes (small, medium, large, huge: `small`/`medium`/`large`/`xlarge`); the pieces of glass spring to the new size. The icon size can be set on its own.
+- **Names and icons**: hover a long name to see it in full, rename an app from its right-click menu; an app without an icon shows its initial.
+- **Search**: just start typing to search apps and folders, no need to click the search box first; an input method's composition shows right in the box, and pinyin initials work too (wx finds 微信). All apps lists them A to Z with a letter index to jump through.
+- **Right-click**: run an app as administrator, open its file location, or hide an app you do not want to see. The settings can leave the tray or status buttons out of the capsule.
+
+### Launchpad
+
+A Launchpad entry sits next to the start button. As on macOS, it lists every app, page by page, in one large pane of glass: the apps you installed first, and Windows' own apps in a System apps folder at the end (Settings stays outside).
+
+- Turn the pages with the wheel, a touchpad swipe, a drag or the arrow keys; they glide on a spring.
+- Just start typing to search; the grid narrows with every letter.
+- Hold and drag an app to rearrange; a right-click shows the same menu as on the bar.
+- Show it as a window or across the whole screen, in the bar's glass or a darker tint.
+
+### File Stacks
+
+Put the folders and files you use most on the bar: a stack entry left of the tray. Click it and they fly out of the entry one after another and fan out along an arc, each name on a capsule of glass tilted with the arc; click one to open it (an Explorer window already on it comes forward), or middle-click for a new window. Prefer things tidy? Show them as a column instead. Add folders in Settings, or pick from common ones such as Downloads and Documents.
+
+### Now playing
+
+While a music or video app plays, five bars appear to the right of the status ring and move with the sound. Click them for a card with the album art, title and artist, a progress bar you can drag, previous, play/pause and next, plus like and lyrics. Scroll over the bars to change the player's volume. NetEase Cloud Music, QQ Music, Spotify and Apple Music are supported; what each one allows differs with its interface, and Settings spells it out. You can also show only chosen apps, or leave some out.
 
 ### Status ring and control centre
 
@@ -112,13 +129,15 @@ Three materials: the clear glass **like the taskbar**; **dusk**, the same glass 
   </tr>
 </table>
 
-The app you are using stays in the middle of the screen; the others move to one side, their windows standing at an angle in a column, one card per window, even for several windows of one app. Hover one and it turns to face you; click to bring it to the front, or Shift-click to group apps together. The side can always show (a window over it moves aside when it comes to the front; a maximized window sends it away until the pointer reaches the screen's edge), or slide out only when the pointer reaches the screen's edge. With “minimize windows to Stage Manager” on, minimizing the app in front sends its window's picture flying into the side instead of down to the taskbar. The Windows Snipping Tool is left out of Stage Manager by default, so its overlay and pause/stop controls stay on screen while recording; add other apps in Settings. Turning Stage Manager off or quitting Atrium puts every window back.
+The app you are using stays in the middle of the screen; the others move to one side, their windows standing at an angle in a column, one card per window, even for several windows of one app. Hover one and it turns to face you, with a close button at its top right; click to bring it to the front, or Shift-click it, or drop a window onto it, to group apps together. When there are more windows than the column holds, scroll the strip and the cards glide on a spring; the first and last cards blur and fade away towards their far edge, so you can tell there is more without a scrollbar. The side can always show (a window over it moves aside when it comes to the front; a maximized window sends it away until the pointer reaches the screen's edge), or slide out only when the pointer reaches the screen's edge. With “minimize windows to Stage Manager” on, minimizing the app in front sends its window's picture flying into the side instead of down to the taskbar. The Windows Snipping Tool is left out of Stage Manager by default, so its overlay and pause/stop controls stay on screen while recording; add other apps in Settings. Turning Stage Manager off or quitting Atrium puts every window back.
 
 Additional strip controls:
 
 | Input | Behaviour |
 | --- | --- |
 | Vertical or horizontal wheel / touchpad scroll | Cycle through the complete strip, wrapping at either end. Precision deltas accumulate; scrolling does not activate a window. |
+| Drop a window onto a card in the strip | The card's windows come onto the stage with it, as one group. |
+| Close button at a card's top right | Closes that card's windows (it can be turned off in Settings). |
 | Taskbar app menu → Open / Add to Current Group | Always available for apps that are not excluded. With Stage Manager on, existing windows join the group and an app without a window joins after opening; with it off, the row simply opens the app. |
 
 ## Getting started
@@ -145,7 +164,7 @@ Atrium's releases are not code-signed, so each new version's files have no reput
 
 | | |
 | :--- | :--- |
-| Ready for daily use | Taskbar, start menu, control centre, calendar, tray, notifications, desktop widgets, Stage Manager, settings |
+| Ready for daily use | Taskbar, start menu, Launchpad, File Stacks, Now playing, control centre, calendar, tray, notifications, desktop widgets, Stage Manager, settings |
 | Experimental | Windows notifications shown as Atrium cards; WeChat and Feishu messages |
 | Not yet verified | Multiple displays, HDR, high refresh rates, sleep and wake, stable releases of Windows 11 |
 | Known limits | Recorders and remote-control apps that use DXGI desktop duplication (UU Remote, ToDesk, Sunlogin) do not see Atrium unless Remote control compatibility is on under System (the glass then shows the wallpaper); on laptops with two GPUs, Atrium needs one restart after its first run |
@@ -167,5 +186,7 @@ Design feedback, and reports from other hardware and Windows versions, help the 
 ## License
 
 [MIT](LICENSE). Visually inspired by Apple's Liquid Glass; this project is not affiliated with Apple or Microsoft.
+
+**Redistribution of this project or its release packages without the author's permission is prohibited** (including reposting, repackaging, publishing under another name, or uploading to other download sites). To recommend Atrium, please share a link to this repository or its [Releases](https://github.com/wynter-yaxley/atrium-desktop/releases/latest) page.
 
 <sub>The pictures on this page are rendered offline at Atrium's real sizes and material settings; the app icons are original illustrations and the notifications are made up.</sub>
