@@ -189,6 +189,11 @@ bool PanelGlassHost::AnyOwed() const
     return std::ranges::any_of(panels_, [](const auto& e) { return e.second.owed; });
 }
 
+bool PanelGlassHost::AnyCaptureRequiresPolling() const
+{
+    return std::ranges::any_of(panelCaptures_, [](const auto& entry) { return entry.second.source->RequiresPolling(); });
+}
+
 bool PanelGlassHost::AnyReadbackPending() const
 {
     return std::ranges::any_of(panels_, [](const auto& e) { return e.second.renderer && e.second.renderer->ReadbackPending(); });
@@ -214,7 +219,7 @@ PanelGlassHost::StepResult PanelGlassHost::SyncPanelCaptures(const std::vector<G
         if (remote_)
             extra.source = std::make_unique<WallpaperCapture>(gpu_, monitor, frameEvent_);
         else
-            extra.source = DuplicationCapture::Create(gpu_, monitor, frameEvent_, why, elsewhere);
+            extra.source = DuplicationCapture::Create(gpu_, monitor, why, elsewhere);
         if (!extra.source) {
             if (!showOwnWindows_(false))
                 return StepResult::Exit;

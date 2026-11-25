@@ -207,7 +207,7 @@ bool DuplicationCapture::Temporary(HRESULT why)
     return why == E_ACCESSDENIED || why == DXGI_ERROR_SESSION_DISCONNECTED || why == DXGI_ERROR_ACCESS_LOST;
 }
 
-std::unique_ptr<DuplicationCapture> DuplicationCapture::Create(const Gpu& gpu, HMONITOR monitor, HANDLE frameEvent, HRESULT& why, bool& elsewhere)
+std::unique_ptr<DuplicationCapture> DuplicationCapture::Create(const Gpu& gpu, HMONITOR monitor, HRESULT& why, bool& elsewhere)
 {
     why = DXGI_ERROR_NOT_FOUND;
     elsewhere = false;
@@ -263,133 +263,52 @@ std::unique_ptr<DuplicationCapture> DuplicationCapture::Create(const Gpu& gpu, H
         why = DXGI_ERROR_UNSUPPORTED; // a rotated screen comes unrotated; the capture's frames fit the glass as they are
         return nullptr;
     }
-    // The waiting thread and the render thread both use the device.
-    if (auto mt = gpu.context.try_as<ID3D11Multithread>())
-        mt->SetMultithreadProtected(TRUE);
     auto c = std::make_unique<DuplicationCapture>(Tag{});
-    c->device_ = gpu.device;
-    c->context_ = gpu.context;
-    c->dup_ = dup;
-    c->frameEvent_ = frameEvent;
-    c->released_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    c->stop_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    c->resume_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
-    c->thread_ = std::thread([p = c.get()] { p->Pump(); });
+    c->dup_ = std::move(dup);
     Log(L"capture: monitor %ux%u started (DXGI Desktop Duplication)", desc.ModeDesc.Width, desc.ModeDesc.Height);
     why = S_OK;
     return c;
 }
 
-DuplicationCapture::~DuplicationCapture()
-{
-    SetEvent(stop_);
-    if (thread_.joinable())
-        thread_.join();
-    if (ready_) {
-        texture_ = nullptr;
-        held_ = nullptr;
-        dup_->ReleaseFrame();
-    }
-    CloseHandle(released_);
-    CloseHandle(stop_);
-    CloseHandle(resume_);
-}
+DuplicationCapture::~DuplicationCapture() { DuplicationCapture::Release(); }
 
-void DuplicationCapture::SetPaused(bool paused)
-{
-    if (paused == paused_.load())
-        return;
-    if (!paused) {
-        paused_ = false;
-        SetEvent(resume_);
-        return;
-    }
-    ResetEvent(resume_);
-    paused_ = true;
-    std::lock_guard g(mu_);
-    if (ready_) {
-        texture_ = nullptr;
-        held_ = nullptr;
-        ready_ = false;
-        dup_->ReleaseFrame();
-        SetEvent(released_);
-    }
-}
-
-void DuplicationCapture::Pump()
-{
-    while (WaitForSingleObject(stop_, 0) == WAIT_TIMEOUT) {
-        while (paused_) {
-            HANDLE wait[] = {stop_, resume_};
-            if (WaitForMultipleObjects(2, wait, FALSE, INFINITE) == WAIT_OBJECT_0)
-                return;
-        }
-        DXGI_OUTDUPL_FRAME_INFO info{};
-        winrt::com_ptr<IDXGIResource> res;
-        // No waiting inside: the device is shared with the render thread
-        // (multithread-protected), and a wait in AcquireNextFrame would hold
-        // it there, stalling the bar's frames for as long.
-        HRESULT hr = dup_->AcquireNextFrame(0, &info, res.put());
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-            if (WaitForSingleObject(stop_, 5) != WAIT_TIMEOUT)
-                return;
-            continue;
-        }
-        if (FAILED(hr)) {
-            Log(L"capture: duplication stopped (0x%08X)", static_cast<unsigned>(hr));
-            lost_ = true;
-            SetEvent(frameEvent_);
-            return;
-        }
-        if (info.LastPresentTime.QuadPart == 0) {
-            dup_->ReleaseFrame(); // only the pointer moved
-            continue;
-        }
-        {
-            std::lock_guard g(mu_);
-            if (paused_) {
-                dup_->ReleaseFrame();
-                continue;
-            }
-            held_ = res;
-            ready_ = true;
-        }
-        SetEvent(frameEvent_);
-        // Holds the frame until the render thread has copied it.
-        HANDLE wait[] = {stop_, released_};
-        if (WaitForMultipleObjects(2, wait, FALSE, INFINITE) == WAIT_OBJECT_0)
-            return;
-    }
-}
-
-// The acquired frame itself, as Windows.Graphics.Capture's: the glass copies
-// only its regions (the bar, the popups); released after them.
 ID3D11Texture2D* DuplicationCapture::Acquire()
 {
-    Release(); // the frame handed out last time
-    std::lock_guard g(mu_);
-    if (!ready_)
+    Release();
+    if (lost_)
         return nullptr;
-    texture_ = held_.try_as<ID3D11Texture2D>();
-    if (!texture_) {
-        held_ = nullptr;
-        ready_ = false;
-        dup_->ReleaseFrame();
-        SetEvent(released_);
+
+    DXGI_OUTDUPL_FRAME_INFO info{};
+    winrt::com_ptr<IDXGIResource> resource;
+    // Keep acquisition and release on the thread that presents with this device.
+    HRESULT hr = dup_->AcquireNextFrame(0, &info, resource.put());
+    if (hr == DXGI_ERROR_WAIT_TIMEOUT)
+        return nullptr;
+    if (FAILED(hr)) {
+        lost_ = true;
+        Log(L"capture: duplication stopped (0x%08X)", static_cast<unsigned>(hr));
+        return nullptr;
     }
+
+    acquired_ = true;
+    if (info.LastPresentTime.QuadPart != 0)
+        texture_ = resource.try_as<ID3D11Texture2D>();
+    if (!texture_)
+        Release(); // Pointer-only updates also own a frame.
     return texture_.get();
 }
 
 void DuplicationCapture::Release()
 {
-    std::lock_guard g(mu_);
-    if (!texture_)
-        return; // nothing handed out (a frame may be waiting: it stays)
+    if (!acquired_)
+        return;
     texture_ = nullptr;
-    held_ = nullptr;
-    ready_ = false;
-    dup_->ReleaseFrame();
-    SetEvent(released_);
+    acquired_ = false;
+    HRESULT hr = dup_->ReleaseFrame();
+    if (FAILED(hr)) {
+        lost_ = true;
+        Log(L"capture: duplication release failed (0x%08X)", static_cast<unsigned>(hr));
+    }
 }
 
 } // namespace atrium
