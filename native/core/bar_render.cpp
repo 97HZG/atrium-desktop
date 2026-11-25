@@ -319,7 +319,7 @@ struct BarRender {
         if (freeze) // the popups show in screenshots: they must not sample themselves
             FreezeBackdrop(gpu, frozen, hidden);
         else
-            panelHost.KeepFrame(frame, snap.panels.empty());
+            panelHost.KeepFrame(frame, panelHost.HasScreenPanelOnCaptureMonitor(snap.panels));
         const double p0 = ElapsedMs(t0);
         const PanelGlassHost::RenderResult pr =
             panelHost.Render(snap.panels, snap.settings, snap.monitor, snap.scale, hidden.get(), tick, capture.KeepsOwnWindowsOut());
@@ -405,7 +405,7 @@ struct BarRender {
         }
         const bool panelsOwed = panelHost.InkDue() || panelHost.AnyOwed();
         if (anim.MusicOnly() && !panelsMoving && !panelsOwed && !backdropDirty && snap.generation == drawnGeneration && textKey == drawnText &&
-            dark == drawnDark && darkIcons == drawnDarkIcons && !wasBody && !wasGlass && !barOwed && (nowMs - lastPresentMs) < 14.0) {
+            dark == drawnDark && darkIcons == drawnDarkIcons && !wasBody && !wasGlass && !barOwed && ShouldThrottleMusicOnlyFrame(nowMs - lastPresentMs)) {
             owedMusic |= anim.music;
             barOwed = false;
             if (hadBackdrop)
@@ -497,7 +497,7 @@ struct BarRender {
             missedFrame = false;
         }
         if (!freeze)
-            panelHost.KeepFrame(frame, snap.panels.empty());
+            panelHost.KeepFrame(frame, panelHost.HasScreenPanelOnCaptureMonitor(snap.panels));
         const double p0 = ElapsedMs(t0);
         const PanelGlassHost::RenderResult pr =
             panelHost.Render(snap.panels, snap.settings, snap.monitor, snap.scale, source.get(), tick, capture.KeepsOwnWindowsOut());

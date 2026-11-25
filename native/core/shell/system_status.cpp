@@ -16,6 +16,7 @@
 #include <mmdeviceapi.h>
 #include <netlistmgr.h>
 #include <powrprof.h>
+#include <shellapi.h>
 
 #include <winrt/base.h>
 
@@ -376,8 +377,20 @@ bool RunPowerAction(PowerAction action)
     Log(L"power: %s", names[int(action)]);
     if (action == PowerAction::Sleep)
         return SetSuspendState(FALSE, FALSE, FALSE) != FALSE;
-    if (action == PowerAction::Hibernate)
-        return SetSuspendState(TRUE, FALSE, FALSE) != FALSE;
+    if (action == PowerAction::Hibernate) {
+        if (CanHibernate()) {
+            const bool ok = SetSuspendState(TRUE, FALSE, FALSE) != FALSE;
+            if (!ok)
+                Log(L"power: SetSuspendState(hibernate) failed (%lu)", GetLastError());
+            return ok;
+        }
+        Log(L"power: hibernation is disabled; requesting elevation to enable and hibernate");
+        HINSTANCE launched = ShellExecuteW(nullptr, L"runas", L"cmd.exe", L"/c powercfg /h on && shutdown /h", nullptr, SW_HIDE);
+        const bool ok = reinterpret_cast<INT_PTR>(launched) > 32;
+        if (!ok)
+            Log(L"power: failed to elevate hibernate enablement (%Id)", reinterpret_cast<INT_PTR>(launched));
+        return ok;
+    }
     // Shutting down needs SeShutdownPrivilege enabled in the token (every
     // interactive user has it, disabled by default).
     HANDLE token = nullptr;

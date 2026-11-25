@@ -149,12 +149,18 @@ PanelGlassHost::PanelGlassHost(Gpu gpu, HMONITOR captureMonitor, HANDLE wakeEven
 {
 }
 
-void PanelGlassHost::KeepFrame(ID3D11Texture2D* frame, bool panelsEmpty)
+bool PanelGlassHost::HasScreenPanelOnCaptureMonitor(const std::vector<GlassPanel>& panels) const
+{
+    return std::ranges::any_of(
+        panels, [this](const GlassPanel& p) { return p.visible && !p.desktop && MonitorFromRect(&p.window, MONITOR_DEFAULTTONEAREST) == captureMonitor_; });
+}
+
+void PanelGlassHost::KeepFrame(ID3D11Texture2D* frame, bool hasScreenPanel)
 {
     if (!frame)
         return;
     const double now = ClockMs();
-    const double minInterval = (now - panelMovedMs_ <= 1000.0) ? 0.0 : (panelsEmpty ? 250.0 : 100.0);
+    const double minInterval = BackupKeepIntervalMs(hasScreenPanel, now - panelMovedMs_);
     if (now - keptMs_ < minInterval)
         return;
     keptMs_ = now;
@@ -394,7 +400,7 @@ PanelGlassHost::StepResult PanelGlassHost::RenderSinglePanel(const GlassPanel& p
     }
     bool newDesktop = false, under = false;
     ps.window = p.window;
-    if (moved)
+    if (moved && !p.desktop && MonitorFromRect(&p.window, MONITOR_DEFAULTTONEAREST) == captureMonitor_)
         panelMovedMs_ = now;
     r.Resize(bufferW, bufferH);
     UpdatePanelBackdrop(ps, p, source, monitorRect, now, moved, changed, newDesktop);

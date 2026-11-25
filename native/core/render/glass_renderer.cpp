@@ -1,5 +1,6 @@
 #include "glass_renderer.h"
 #include "continuous_corners.h"
+#include "../log.h"
 
 #include "compare_cs.h"
 #include "glass_ps.h"
@@ -582,7 +583,11 @@ bool GlassRenderer::DrawOverlay(const std::function<void(ID2D1DeviceContext2*)>&
     overlay(d2d_.get());
     HRESULT hr = d2d_->EndDraw();
     d2d_->SetTarget(nullptr);
-    return hr != D2DERR_RECREATE_TARGET;
+    if (FAILED(hr)) {
+        Log(L"glass: D2D EndDraw failed: 0x%08X", static_cast<unsigned>(hr));
+        return false;
+    }
+    return true;
 }
 
 bool GlassRenderer::Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty)
@@ -628,9 +633,12 @@ bool GlassRenderer::PresentSpan(std::span<const GlassParams> shapes, const std::
         hasPresented_ = hasBackdrop_;
     }
     HRESULT hr = swap_->Present(sync_, 0);
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(hr)) {
         ready_ = false;
-    return SUCCEEDED(hr);
+        return true;
+    }
+    Log(L"glass: swap chain Present failed: 0x%08X", static_cast<unsigned>(hr));
+    return false;
 }
 
 } // namespace atrium

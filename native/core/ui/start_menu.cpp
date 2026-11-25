@@ -62,11 +62,11 @@ constexpr StartIconSize kStartIcons[StartLayout::kSizes] = {
 constexpr float kRowH = 52, kRowIcon = 28, kHeadH = 34, kListTop = 84;
 constexpr float kFolderHead = 52, kFolderFoot = 24, kFolderPad = 14; // the open folder: its name above its apps, its dots below
 constexpr float kIndexW = 22, kHint = 52;           // the A-Z list's letters down its left side; the letter picked, large
-constexpr float kPowerW = 176, kPowerRowH = 44, kPowerPad = 12, kPowerInset = 8;
+constexpr float kPowerW = 176, kPowerInset = 8;
 constexpr float kGrip = 30; // the resize grip: the panel's top right corner
 constexpr double kStageMs = 260, kStaggerMs = 12, kRippleMs = 520;
 // The folder's card out of its tile, with a little overshoot; back into it quicker, without.
-constexpr motion::Spring kFolderOpen{0.46f, 0.72f}, kFolderClose{0.30f, 1.f};
+constexpr motion::Spring kFolderOpen{0.46f, 0.72f};
 constexpr double kFolderAppMs = 300, kFolderAppStaggerMs = 22; // its apps, one after another
 constexpr double kRestMs = 220, kEdgeMs = 550;           // carrying a tile: the others make room; the page turns
 constexpr float kGlideRate = 16;                         // tiles moving to their places (per second)
@@ -416,11 +416,10 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     powerOpen_ = false;
     powerGrow_ = powerV_ = 0;
     power_ = {{L"\uE708", Tr(L"Sleep"), PowerAction::Sleep},
+              {L"\uE823", Tr(L"Hibernate"), PowerAction::Hibernate},
               {L"\uE72C", Tr(L"Restart"), PowerAction::Restart},
               {L"\uE7E8", Tr(L"Shut down"), PowerAction::Shutdown},
               {L"\uE72E", Tr(L"Lock"), std::nullopt}};
-    if (CanHibernate())
-        power_.insert(power_.begin() + 1, {L"\uE823", Tr(L"Hibernate"), PowerAction::Hibernate});
     folder_ = -1;
     folderClosing_ = naming_ = false;
     drag_ = {};
@@ -888,38 +887,14 @@ void StartMenu::PaintFolderCard(Canvas& c, std::vector<ShapeDip>& shapes, float 
     }
 }
 
-void StartMenu::PaintPowerCard(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes, float dt, bool& animating)
-{
-    if (!powerOpen_ && powerGrow_ <= 0)
-        return;
-    // The power card springs out of its corner as popups open (kPop) and folds back as the folder does.
-    const float goal = powerOpen_ ? 1.f : 0.f;
-    (powerOpen_ ? motion::kPop : kFolderClose).Step(powerGrow_, powerV_, goal, dt / 1000);
-    if (motion::Spring::AtRest(powerGrow_, powerV_, goal) || (!powerOpen_ && powerGrow_ < 0.01f)) {
-        powerGrow_ = goal;
-        powerV_ = 0;
-    } else {
-        c.Continue();
-        animating = true;
-    }
-    if (powerGrow_ > 0) {
-        const D2D1_RECT_F full = PowerRect();
-        const float k = 0.5f + 0.5f * powerGrow_;
-        const D2D1_RECT_F pc = D2D1::RectF(full.right - (full.right - full.left) * k, full.bottom - (full.bottom - full.top) * k, full.right, full.bottom);
-        shapes.push_back({pc, PowerRadius() * std::min(k, 1.f)});
-        if (c.panel)
-            c.Fill(pc, PowerRadius(), t.panel);
-        PaintPower(c, t);
-    }
-}
-
 void StartMenu::Paint(Canvas& c)
 {
     visibleIcons_.clear(), tipText_.clear();
     const Theme& t = c.theme;
     const double now = c.now;
     hits_.clear();
-    dt_ = lastPaint_ > 0 ? float(std::clamp(now - lastPaint_, 0.0, 100.0)) : 16.f;
+    const double gap = now - lastPaint_;
+    dt_ = (lastPaint_ > 0 && gap > 0.0 && gap <= 50.0) ? float(gap) : 16.f;
     lastPaint_ = now;
     auto glide = [&](float& v, float target, float rate, float eps) {
         v = motion::Approach(v, target, dt_, rate);
@@ -978,6 +953,7 @@ void StartMenu::Paint(Canvas& c)
     float open = 0;
     D2D1_RECT_F card{};
     PaintFolderCard(c, shapes, dt_, open, card, animating);
+    StepPowerCard(c, dt_, animating);
     if (c.panel) // no glass (yet): plain panels keep the text readable
         for (const ShapeDip& sh : shapes)
             c.Fill(sh.rect, sh.radius, t.panel);
@@ -1004,7 +980,7 @@ void StartMenu::Paint(Canvas& c)
     if (drag_.on)
         PaintDragged(c, t);
     catalog_.SetVisibleIcons(VisibleIconsOwner::Start, visibleIcons_);
-    PaintPowerCard(c, t, shapes, dt_, animating);
+    PaintPowerCard(c, t, shapes);
     c.EndGroup();
     for (ShapeDip& sh : shapes) {
         sh.rect.left += offX;
@@ -1610,29 +1586,6 @@ void StartMenu::PaintShelf(Canvas& c, const Theme& t)
     }
     c.Text(name, D2D1::RectF(pic.right + 10, shelf.top, pic.right + 10 + nw + 2, shelf.bottom), 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     hits_.push_back({acct, L"account"});
-}
-
-// Power choices, in their own piece of glass above the power button.
-void StartMenu::PaintPower(Canvas& c, const Theme& t)
-{
-    D2D1_RECT_F card = PowerRect();
-    // The rows grow with the card from its corner; they fade in a little behind it.
-    c.BeginGroup(std::clamp((powerGrow_ - 0.15f) / 0.6f, 0.f, 1.f), 0.5f + 0.5f * powerGrow_, card.right, card.bottom);
-    constexpr float kRowInset = 8;
-    const float rowR = std::max(4.f, PowerRadius() - kRowInset); // nested in the card's corners
-    for (int i = 0; i < int(power_.size()); ++i) {
-        D2D1_RECT_F row = D2D1::RectF(card.left + kRowInset, card.top + kPowerPad + kPowerRowH * float(i), card.right - kRowInset,
-                                      card.top + kPowerPad + kPowerRowH * float(i + 1));
-        std::wstring id = L"pw:" + std::to_wstring(i);
-        float hv = Hover(c, id, hover_ == id || powerSel_ == i);
-        if (hv > 0)
-            c.Fill(row, rowR, powerSel_ == i && hover_ != id ? Alpha(t.accent, 0.24f * hv) : Alpha(t.hover, hv));
-        c.Glyph(power_[size_t(i)].glyph, D2D1::RectF(row.left + 6, row.top, row.left + 38, row.bottom), 15, t.text);
-        c.Text(power_[size_t(i)].name, D2D1::RectF(row.left + 44, row.top, row.right - 8, row.bottom), 14, t.text);
-        if (powerOpen_)
-            hits_.push_back({row, id});
-    }
-    c.EndGroup();
 }
 
 std::wstring StartMenu::HitAt(POINT pt) const
@@ -2343,7 +2296,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         if (pressed_ != L"clear")
             searchFocused_ = pressed_ == L"search";
         if (powerOpen_ && pressed_ != L"power" && !pressed_.starts_with(L"pw:"))
-            powerOpen_ = false; // a press elsewhere folds the power card away
+            return DismissPowerCard(); // a press elsewhere folds the power card away
         if (naming_ && pressed_ != namingHit_)
             FinishNaming(true);
         const float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;

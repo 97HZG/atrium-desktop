@@ -12,6 +12,8 @@ namespace atrium {
 
 namespace {
 
+D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
+
 constexpr int kOpen = 1, kPinBar = 2, kPinStart = 3, kRemove = 4, kOutOfFolder = 5, kRename = 6, kUngroup = 7, kRemoveFolder = 8, kReset = 9, kHide = 10,
               kUnhide = 11, kShowHidden = 12, kAdmin = 13, kLocation = 14, kSyncPins = 15, kSyncFolders = 16, kSyncBoth = 17, kSize = 18,
               kIcon = kSize + StartLayout::kSizes;
@@ -381,6 +383,72 @@ void StartMenu::PaintHoverTip(Canvas& c, const Theme& t)
     c.Fill(cap, capH / 2.f, t.card);
     c.Stroke(cap, capH / 2.f, t.border, 1.f);
     c.Text(tipText_, D2D1::RectF(cap.left + 10.f, cap.top, cap.right - 10.f, cap.bottom), sz, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
+}
+
+bool StartMenu::DismissPowerCard()
+{
+    powerOpen_ = false;
+    powerSel_ = -1;
+    pressed_.clear();
+    surface_.Invalidate();
+    return true;
+}
+
+void StartMenu::StepPowerCard(Canvas& c, float dt, bool& animating)
+{
+    if (!powerOpen_ && powerGrow_ <= 0)
+        return;
+    // The power card springs out of its corner as popups open (kPop) and folds back as the folder does.
+    const float goal = powerOpen_ ? 1.f : 0.f;
+    (powerOpen_ ? motion::kPop : kFolderClose).Step(powerGrow_, powerV_, goal, dt / 1000);
+    if (motion::Spring::AtRest(powerGrow_, powerV_, goal) || (!powerOpen_ && powerGrow_ < 0.01f)) {
+        powerGrow_ = goal;
+        powerV_ = 0;
+    } else {
+        c.Continue();
+        animating = true;
+    }
+}
+
+void StartMenu::PaintPowerCard(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes)
+{
+    if (powerGrow_ <= 0)
+        return;
+    const D2D1_RECT_F full = PowerRect();
+    const float k = 0.5f + 0.5f * powerGrow_;
+    const float u = std::clamp(powerGrow_, 0.f, 1.f);
+    const float glassAlpha = u * u * (3.f - 2.f * u);
+    const D2D1_RECT_F pc = D2D1::RectF(full.right - (full.right - full.left) * k, full.bottom - (full.bottom - full.top) * k, full.right, full.bottom);
+    const float r = PowerRadius() * std::min(k, 1.f);
+    ShapeDip shape{pc, r};
+    shape.fade = 1.f - glassAlpha;
+    shapes.push_back(shape);
+    if (c.panel)
+        c.Fill(pc, r, Alpha(t.panel, glassAlpha));
+    PaintPower(c, t);
+}
+
+// Power choices, in their own piece of glass above the power button.
+void StartMenu::PaintPower(Canvas& c, const Theme& t)
+{
+    D2D1_RECT_F card = PowerRect();
+    // The rows grow with the card from its corner; they fade in a little behind it.
+    c.BeginGroup(std::clamp((powerGrow_ - 0.15f) / 0.6f, 0.f, 1.f), 0.5f + 0.5f * powerGrow_, card.right, card.bottom);
+    constexpr float kRowInset = 8;
+    const float rowR = std::max(4.f, PowerRadius() - kRowInset); // nested in the card's corners
+    for (int i = 0; i < int(power_.size()); ++i) {
+        D2D1_RECT_F row = D2D1::RectF(card.left + kRowInset, card.top + kPowerPad + kPowerRowH * float(i), card.right - kRowInset,
+                                      card.top + kPowerPad + kPowerRowH * float(i + 1));
+        std::wstring id = L"pw:" + std::to_wstring(i);
+        float hv = Hover(c, id, hover_ == id || powerSel_ == i);
+        if (hv > 0)
+            c.Fill(row, rowR, powerSel_ == i && hover_ != id ? Alpha(t.accent, 0.24f * hv) : Alpha(t.hover, hv));
+        c.Glyph(power_[size_t(i)].glyph, D2D1::RectF(row.left + 6, row.top, row.left + 38, row.bottom), 15, t.text);
+        c.Text(power_[size_t(i)].name, D2D1::RectF(row.left + 44, row.top, row.right - 8, row.bottom), 14, t.text);
+        if (powerOpen_)
+            hits_.push_back({row, id});
+    }
+    c.EndGroup();
 }
 
 } // namespace atrium

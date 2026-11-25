@@ -24,6 +24,15 @@ namespace atrium {
 inline constexpr float kDarkInkAbove = 0.50f;
 inline constexpr float kLightInkBelow = 0.42f;
 
+inline constexpr double kBackupIdleIntervalMs = 250.0;
+inline constexpr double kBackupActiveIntervalMs = 100.0;
+inline constexpr double kBackupMovedWindowMs = 1000.0;
+
+inline double BackupKeepIntervalMs(bool hasScreenPanel, double sinceMovedMs)
+{
+    return sinceMovedMs <= kBackupMovedWindowMs ? 0.0 : (hasScreenPanel ? kBackupActiveIntervalMs : kBackupIdleIntervalMs);
+}
+
 GlassParams ParamsFor(const Settings& s, float scale, float insetDip = 14.f);
 float GlassLuma(const Settings& s, float backdrop);
 void PanelParams(const Settings& s, float scale, const GlassPanel& p, std::vector<GlassParams>& out);
@@ -46,7 +55,8 @@ public:
     PanelGlassHost& operator=(const PanelGlassHost&) = delete;
     ~PanelGlassHost() = default;
 
-    void KeepFrame(ID3D11Texture2D* frame, bool panelsEmpty);
+    bool HasScreenPanelOnCaptureMonitor(const std::vector<GlassPanel>& panels) const;
+    void KeepFrame(ID3D11Texture2D* frame, bool hasScreenPanel);
     ID3D11Texture2D* BackupFrame() const { return lastFrame_.get(); }
     void ReleaseBackupFrame() { lastFrame_ = nullptr; }
     unsigned TakeBackupCopyCount();

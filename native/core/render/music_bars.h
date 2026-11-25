@@ -15,6 +15,13 @@
 
 namespace atrium {
 
+// Minimum interval between music-only presents. 13 ms keeps 60 Hz at 60 fps,
+// 120 Hz and 240 Hz at 60 fps, and 144 Hz locked on 2-tick 72 fps (13.89 ms)
+// instead of slipping to 3 ticks (48 fps) under a 14 ms cutoff.
+inline constexpr double kMusicOnlyMinIntervalMs = 13.0;
+
+inline bool ShouldThrottleMusicOnlyFrame(double elapsedMs) { return elapsedMs >= 0.0 && elapsedMs < kMusicOnlyMinIntervalMs; }
+
 // What the bars move with, shared by the media watcher (which writes it, on its own thread) and
 // whatever draws the bars (each bar's render thread, the now-playing card), which read it.
 struct MusicFeed {

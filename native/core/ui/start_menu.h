@@ -81,6 +81,8 @@ public:
 
 private:
     static constexpr UINT_PTR kStatusTimer = 1, kDragTimer = 2, kCaretTimer = 3;
+    static constexpr float kPowerRowH = 44, kPowerPad = 12;
+    static constexpr motion::Spring kFolderClose{0.30f, 1.f};
     struct Hit {
         D2D1_RECT_F rect; // DIP, content coordinates
         std::wstring id;
@@ -123,7 +125,9 @@ private:
 
     void Paint(Canvas& c);
     void PaintFolderCard(Canvas& c, std::vector<ShapeDip>& shapes, float dt, float& open, D2D1_RECT_F& card, bool& animating);
-    void PaintPowerCard(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes, float dt, bool& animating);
+    void StepPowerCard(Canvas& c, float dt, bool& animating);
+    void PaintPowerCard(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes);
+    bool DismissPowerCard();
     void PaintSearch(Canvas& c, const Theme& t);
     void PaintTiles(Canvas& c, const Theme& t, float shown);
     // A tile in `r`: its icon (a folder: its first apps, small) and name. target: a carried app would go into it.

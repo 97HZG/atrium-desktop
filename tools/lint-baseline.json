@@ -81,7 +81,7 @@
   "core/ui/start_menu.cpp|complexity|StartMenu::Message(UINT,WPARAM,LPARAM,LRESULT&)": 189,
   "core/ui/start_menu.cpp|complexity|StartMenu::PaintRows(Canvas&,const Theme&,const std::vector<Row>&,float)": 59,
   "core/ui/start_menu.cpp|complexity|StartMenu::PaintShelf(Canvas&,const Theme&)": 53,
-  "core/ui/start_menu.cpp|file-lines": 2562,
+  "core/ui/start_menu.cpp|file-lines": 2515,
   "core/ui/start_menu.cpp|function-lines|StartMenu::Message(UINT,WPARAM,LPARAM,LRESULT&)": 286,
   "core/ui/surface.cpp|complexity|Surface::PaintFrame()": 45,
   "core/ui/tray_panel.cpp|complexity|MenuShown(HWINEVENTHOOK,DWORD,HWND,LONG,LONG,DWORD,DWORD)": 43,

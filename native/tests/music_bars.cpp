@@ -28,6 +28,33 @@ bool Run(MusicBars& bars, float peak, bool playing, float intensity, int ms)
     return moving;
 }
 
+void CheckMusicCadence()
+{
+    Require(!ShouldThrottleMusicOnlyFrame(-1.0), "negative elapsed time is never throttled");
+    Require(ShouldThrottleMusicOnlyFrame(0.0) && ShouldThrottleMusicOnlyFrame(12.99), "elapsed time below 13 ms is throttled");
+    Require(!ShouldThrottleMusicOnlyFrame(13.0), "exactly 13 ms is allowed");
+    for (const auto& [hz, periodMs, expectedEveryTicks] :
+         {std::tuple{60, 1000.0 / 60.0, 1}, std::tuple{120, 1000.0 / 120.0, 2}, std::tuple{144, 1000.0 / 144.0, 2}, std::tuple{240, 1000.0 / 240.0, 4}}) {
+        double lastPresent = 0.0;
+        int presents = 0;
+        int ticksSincePresent = 0;
+        for (int tick = 1; tick <= 24; ++tick) {
+            const double now = tick * periodMs;
+            ++ticksSincePresent;
+            if (!ShouldThrottleMusicOnlyFrame(now - lastPresent)) {
+                Require(ticksSincePresent == expectedEveryTicks,
+                        hz == 144 ? "144 Hz presents on every 2nd tick (72 fps)" : "refresh rate locks onto expected integer tick divisor");
+                lastPresent = now;
+                ticksSincePresent = 0;
+                ++presents;
+            }
+        }
+        Require(presents == 24 / expectedEveryTicks, "full cadence cycle presents expected frame count");
+    }
+    Require(!ShouldThrottleMusicOnlyFrame(2.0 * (1000.0 / 144.0) - 0.5),
+            "144 Hz two-tick cadence absorbs -0.5 ms compositor jitter without slipping to 48 fps");
+}
+
 } // namespace
 
 int main()
@@ -126,6 +153,8 @@ int main()
     Require(!Run(pausedAfterLoud, 0.8f, false, 1.f, 2500), "pausing after loud playback settles and stops");
     for (size_t i = 0; i < MusicBars::kCount; ++i)
         Require(std::abs(pausedAfterLoud.Height(i) - MusicBars::StillHeight(i)) < 0.005f, "pausing after loud playback settles to StillHeight");
+
+    CheckMusicCadence();
 
     std::cout << (g_failures ? "music_bars: FAILED" : "music_bars: ok") << '\n';
     return g_failures ? 1 : 0;

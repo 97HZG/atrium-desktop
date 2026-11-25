@@ -1,3 +1,4 @@
+#include "render/panel_glass_host.h"
 #include "ui/calendar_panel.h"
 #include "ui/genie_minimize.h"
 #include "ui/surface.h"
@@ -152,6 +153,10 @@ int main()
           "zero thumbnail source size is rejected");
     check(!ValidThumbnailSource(S_OK, {-1, 800}), "negative thumbnail source size is rejected");
     check(!ValidThumbnailSource(E_FAIL, {1280, 800}), "failed DwmQueryThumbnailSourceSize is rejected");
+    check(BackupKeepIntervalMs(false, 2000.0) == kBackupIdleIntervalMs, "only desktop widgets use the 250 ms backup tier");
+    check(BackupKeepIntervalMs(true, 2000.0) == kBackupActiveIntervalMs, "visible screen panels on the capture monitor use the 100 ms backup tier");
+    check(BackupKeepIntervalMs(false, 500.0) == 0.0 && BackupKeepIntervalMs(true, 1000.0) == 0.0,
+          "recent screen panel movement keeps every frame up to 1000 ms");
     CheckClickThroughAndPeek(check);
     if (fail)
         return 1;
