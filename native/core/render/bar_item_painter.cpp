@@ -239,7 +239,7 @@ void DrawStatusBatteryIcon(ID2D1DeviceContext2* d2d, ID2D1Factory* factory, ID2D
 
 void DrawItemPlates(ID2D1DeviceContext2* d2d, const BarScene& scene, ID2D1SolidColorBrush* brush, D2D1_COLOR_F wash, const D2D1_RECT_F& plateArea,
                     D2D1_POINT_2F plateAnchor, D2D1_POINT_2F plateShift, float grow, bool magnifying, float hover, float lift, float alert, float appear,
-                    double alertSince, double lastMs)
+                    float running, double alertSince, double lastMs)
 {
     if (alert > 0.001f) {
         float pulse = 0;
@@ -247,6 +247,15 @@ void DrawItemPlates(ID2D1DeviceContext2* d2d, const BarScene& scene, ID2D1SolidC
             pulse = 0.5f - 0.5f * std::cos(2 * std::numbers::pi_v<float> * float((lastMs - alertSince) / kAlertPeriodMs));
         const float clear = magnifying ? std::clamp(1.f - (grow - 1.f) * 8.f, 0.f, 1.f) : 1.f;
         brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, (0.34f + 0.22f * pulse) * alert * appear * clear));
+        d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, plateAnchor) * D2D1::Matrix3x2F::Translation(plateShift.x, plateShift.y));
+        FillContinuousRect(d2d, plateArea, scene.plateRadius, brush);
+    }
+    // The foreground app's running dot is easy to lose on a busy wallpaper.
+    // Keep a steady plate under that icon when it is not already hovered or lifted.
+    if (running > 0.6f && hover < 0.25f && lift < 0.2f) {
+        D2D1_COLOR_F steady = wash;
+        steady.a *= 0.28f * appear;
+        brush->SetColor(steady);
         d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, plateAnchor) * D2D1::Matrix3x2F::Translation(plateShift.x, plateShift.y));
         FillContinuousRect(d2d, plateArea, scene.plateRadius, brush);
     }
@@ -279,7 +288,8 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     const D2D1_POINT_2F plateAnchor = frame.ToArea(D2D1::Point2F(bx, plate.bottom));
     const D2D1_POINT_2F plateShift = BarVectorToArea(frame, cx - bx, 0);
 
-    DrawItemPlates(d2d, scene, brush, wash, plateArea, plateAnchor, plateShift, grow, magnifying, hover, lift, m.alert, m.appear, m.alertSince, lastMs_);
+    DrawItemPlates(d2d, scene, brush, wash, plateArea, plateAnchor, plateShift, grow, magnifying, hover, lift, m.alert, m.appear, m.dot, m.alertSince,
+                   lastMs_);
 
     const float k = grow * (magnifying ? 1.f : 1 + 0.06f * hover) * (1 + 0.08f * lift) * (1 - 0.08f * m.press) * (0.85f + 0.15f * m.appear) *
                     (m.leaving ? 0.45f + 0.55f * m.appear : 1.f);
