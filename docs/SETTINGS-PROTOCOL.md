@@ -53,6 +53,8 @@
 | `autoWidth` | bool | | true | 宽度随内容伸缩，最大为 `width` |
 | `showRunning` | bool | | true | 显示未固定但正在运行的应用 |
 | `showLaunchpad` | bool | | true | 开始徽标旁的启动台入口 |
+| `showTrash` | bool | | true | 任务栏上的回收站。点击打开系统回收站文件夹 |
+| `showRecentApps` | bool | | true | 任务栏上的最近打开。菜单按本机启动次数和 Windows 的应用切换记录排序，最多 16 个。没有保存过启动台顺序时，启动台图标也按同样的次数排 |
 | `launchpadMaterial` | string | `bar` / `tint` | `bar` | 启动台的材质：跟随任务栏的玻璃，或玻璃上加一层黑色蒙版（原色） |
 | `launchpadLayout` | string | `window` / `fullscreen` | `window` | 启动台的样子：屏幕中间的一个窗口；或像 macOS 那样铺满整个屏幕（跟随任务栏时是一层模糊桌面的玻璃，原色时再加黑色蒙版），图标更大 |
 | `showNowPlaying` | bool | | true | 任务栏正在播放媒体入口（仅在存在媒体会话时出现） |

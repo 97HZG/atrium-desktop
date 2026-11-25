@@ -72,6 +72,7 @@ add_library(atrium_core_lib STATIC
     shell/projection.cpp
     shell/quick_links.cpp
     shell/quick_toggles.cpp
+    shell/app_usage.cpp
     shell/games.cpp
     shell/launchpad_order.cpp
     shell/displays.cpp

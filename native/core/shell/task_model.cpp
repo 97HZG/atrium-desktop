@@ -12,6 +12,7 @@
 #include "shell/task_rules.h"
 
 #include "log.h"
+#include "shell/app_usage.h"
 
 #include <windows.h>
 #include <appmodel.h>
@@ -1210,6 +1211,7 @@ struct TaskModel::Impl {
 
     void Launch(const std::wstring& key)
     {
+        RecordAppLaunch(key);
         const TaskItem* task = Find(key);
         if (task && !task->multipleWindows) {
             for (HWND window : task->windows)

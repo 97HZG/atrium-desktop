@@ -19,6 +19,7 @@
 #include "settings.h"
 #include "settings_server.h"
 #include "shell/app_catalog.h"
+#include "shell/app_usage.h"
 #include "shell/shell_taskbar.h"
 #include "shell/app_registration.h"
 #include "shell/displays.h"
@@ -1132,6 +1133,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_CLOSE:
+        FlushAppUsage();
         if (g_app.chrome)
             g_app.chrome->RestoreForExit();
         DestroyWindow(h);
@@ -1139,6 +1141,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_ENDSESSION:
         if (w) {
             Log(L"core: session ending");
+            FlushAppUsage();
             if (g_app.chrome)
                 g_app.chrome->RestoreForExit();
         }
@@ -1372,6 +1375,7 @@ void InitializeSubsystems(HINSTANCE instance, Settings& settings)
 void ShutdownApp(HANDLE mutex, std::thread& startupThread)
 {
     g_app.displaysReady = false;
+    FlushAppUsage();
     if (g_app.chrome)
         g_app.chrome->RestoreForExit();
     g_app.stage->RestoreAll();

@@ -4,6 +4,8 @@
 
 #include "localization.h"
 
+#include <shellapi.h>
+
 #include <algorithm>
 #include <vector>
 
@@ -62,8 +64,10 @@ void Bar::ClickEntry(const std::wstring& key)
     for (auto [k, f] : {std::pair{kClockKey, &onClockClick}, {kDesktopKey, &onDesktopClick}, {kImeKey, &onImeClick}})
         if (key == k && *f)
             (*f)();
-    if ((key == kLaunchpadKey || key == kMusicKey || key == kStacksKey) && onExtraClick)
+    if ((key == kLaunchpadKey || key == kMusicKey || key == kStacksKey || key == kRecentKey) && onExtraClick)
         onExtraClick(key, anchor);
+    if (key == kTrashKey)
+        ShellExecuteW(nullptr, L"open", L"shell:RecycleBinFolder", nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 void Bar::SetMusic(std::shared_ptr<const MusicFeed> feed, bool shown, std::wstring tip)
@@ -99,6 +103,10 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
         return musicTip_.empty() ? std::wstring(Tr(L"Now Playing")) : musicTip_;
     if (key == kStacksKey)
         return Tr(L"File Stacks");
+    if (key == kTrashKey)
+        return Tr(L"Recycle Bin");
+    if (key == kRecentKey)
+        return Tr(L"Recent apps");
     if (key == kNotifyKey)
         return unread_ ? TrFormat(L"%d unread notifications", int(unread_)) : Tr(L"Notifications");
     if (key == kTrayKey)
@@ -131,7 +139,7 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
 }
 // The right-hand group on the scene: each entry a plate (the status entry and Show Desktop as wide as
 // they are), its hit cell splitting the gaps; the last one reaches to the bar's very end.
-void Bar::PlaceRight(BarScene& scene, const std::array<RightEntry, 8>& right, const EntryMetrics& m, float timePx, float datePx)
+void Bar::PlaceRight(BarScene& scene, const std::array<RightEntry, 10>& right, const EntryMetrics& m, float timePx, float datePx)
 {
     const RightEntry* last = nullptr;
     for (const auto& e : right)

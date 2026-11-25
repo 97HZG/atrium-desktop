@@ -89,6 +89,8 @@ struct Bar::LayoutMetrics {
     bool showDesktop = false;
     bool showMusic = false;
     bool showStacks = false;
+    bool showTrash = false;
+    bool showRecent = false;
     int rightCount = 0;
     int groupGap = 0;
     int sepGap = 0;
@@ -230,6 +232,8 @@ Bar::LayoutMetrics Bar::ComputeLayoutMetrics(const RelayoutTarget& target)
     m.showDesktop = showRight && st.showDesktop;
     m.showMusic = showRight && st.showNowPlaying && musicShown_;
     m.showStacks = showRight && st.showFolderStacks;
+    m.showTrash = showRight && st.showTrash;
+    m.showRecent = showRight && st.showRecentApps;
 
     // Metrics (px). Every icon sits centred on a square plate (press and drag
     // feedback); the plate has the same gap `v` to the top and bottom edge,
@@ -254,7 +258,8 @@ Bar::LayoutMetrics Bar::ComputeLayoutMetrics(const RelayoutTarget& target)
     const int statusExtra = st.statusStyle == L"icons" ? int(std::lround(m.icon * 1.3f)) : 0;
     // Show Desktop: a narrow slot at the bar's right end, a thin line in it, as the system taskbar's.
     m.deskW = m.showDesktop ? std::max(Px(10, s), int(std::lround(m.icon * 0.45))) : 0;
-    const int rightPlates = int(m.showStacks) + int(m.showTray) + int(m.showIme) + int(m.showStatus) + int(m.showMusic) + int(m.showNotifications);
+    const int rightPlates = int(m.showStacks) + int(m.showTrash) + int(m.showRecent) + int(m.showTray) + int(m.showIme) + int(m.showStatus) +
+                            int(m.showMusic) + int(m.showNotifications);
     m.rightCount = rightPlates + int(m.clockW != 0) + int(m.showDesktop);
     m.groupGap = m.rightCount ? m.sepGap : 0;
 
@@ -381,14 +386,16 @@ void Bar::BuildLayoutScene(const RelayoutTarget& target, const LayoutMetrics& m)
         cursor -= m.gap;
         return left;
     };
-    std::array<RightEntry, 8> right{{{kDesktopKey, m.deskW, L"", m.showDesktop},
-                                     {kNotifyKey, m.plate, L"\uEA8F", m.showNotifications},
-                                     {kClockKey, m.clockW, L"", m.clockW != 0},
-                                     {kMusicKey, m.plate, L"", m.showMusic},
-                                     {kStatusKey, m.statusW, L"", m.showStatus},
-                                     {kImeKey, m.plate, L"", m.showIme},
-                                     {kTrayKey, m.plate, L"\uE70E", m.showTray},
-                                     {kStacksKey, m.plate, L"", m.showStacks}}};
+    std::array<RightEntry, 10> right{{{kDesktopKey, m.deskW, L"", m.showDesktop},
+                                      {kNotifyKey, m.plate, L"\uEA8F", m.showNotifications},
+                                      {kClockKey, m.clockW, L"", m.clockW != 0},
+                                      {kMusicKey, m.plate, L"", m.showMusic},
+                                      {kStatusKey, m.statusW, L"", m.showStatus},
+                                      {kImeKey, m.plate, L"", m.showIme},
+                                      {kTrayKey, m.plate, L"\uE70E", m.showTray},
+                                      {kTrashKey, m.plate, L"\uE74D", m.showTrash},
+                                      {kStacksKey, m.plate, L"", m.showStacks},
+                                      {kRecentKey, m.plate, L"\uE823", m.showRecent}}};
     for (auto& e : right)
         e.left = rightSlot(e.width, e.shown);
     const int rightLeft = m.rightCount ? cursor + m.gap : m.insetX + m.barW - m.pad;

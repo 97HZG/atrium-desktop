@@ -63,6 +63,8 @@ struct Settings {
     bool showDesktop = false;        // the Show Desktop slot at the bar's right end
     bool showRunning = true;
     bool showLaunchpad = true;       // the Launchpad entry next to the start logo
+    bool showTrash = true;           // Recycle Bin on the bar
+    bool showRecentApps = true;      // recent applications on the bar
     std::wstring launchpadMaterial = L"bar"; // bar: the bar's glass | tint: the glass under a black veil
     std::wstring launchpadLayout = L"window"; // window: a window in the middle | fullscreen: the whole screen, as macOS
     bool showNowPlaying = true;      // the now-playing entry (visible while a player has a media session)

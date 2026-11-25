@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "localization.h"
+#include "shell/app_usage.h"
 #include "shell/launchpad_order.h"
 
 #include <algorithm>
@@ -210,6 +211,8 @@ void Launchpad::Split()
             CSTR_EQUAL;
         (app.system && !settings ? system_ : tiles_).push_back(app);
     }
+    if (order_.empty())
+        SortAppsByUsage(tiles_);
     if (!system_.empty())
         tiles_.push_back(CatalogApp{.name = Tr(L"System apps"), .id = kFolderId});
     ApplyOrder();

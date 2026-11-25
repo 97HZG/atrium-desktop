@@ -957,6 +957,8 @@
   "Add folders in Settings": "在设置中添加文件夹",
   "Now Playing": "正在播放",
   "File Stacks": "文件堆栈",
+  "Recycle Bin": "回收站",
+  "No recent apps": "没有最近打开的应用",
   "Launchpad": "启动台",
   "Show Launchpad on the taskbar": "在任务栏显示启动台",
   "An entry next to the start logo opens every app, page by page, in one large window of glass, as on macOS.": "开始按钮右边的入口：在一个大的玻璃窗口里按页列出所有应用，和 macOS 一样。",

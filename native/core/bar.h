@@ -235,7 +235,7 @@ private:
         int plate, gap, icon, hitTop, hitBottom, barEnd;
         float plateTop, iconTop;
     };
-    void PlaceRight(BarScene& scene, const std::array<RightEntry, 8>& right, const EntryMetrics& m, float timePx, float datePx);
+    void PlaceRight(BarScene& scene, const std::array<RightEntry, 10>& right, const EntryMetrics& m, float timePx, float datePx);
     void BeginDrag(POINT pt);
     void UpdateDrag(POINT pt);
     void EndDrag(bool commit);

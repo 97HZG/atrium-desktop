@@ -8,7 +8,9 @@
 #include "render/music_bars.h"
 #include "shell/folder_stacks.h"
 #include "shell/media_session.h"
+#include "shell/app_catalog.h"
 #include "ui/folder_stack_popup.h"
+#include "ui/glass_menu.h"
 #include "ui/launchpad.h"
 #include "ui/now_playing_card.h"
 
@@ -53,6 +55,7 @@ private:
     static LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l);
     static HWND CreateHost(HINSTANCE instance, ExtrasHost* self);
     void Click(Bar& bar, const std::wstring& key, RECT entry);
+    void OpenRecent(RECT entry);
     void OnMedia(const MediaSnapshot& snapshot);
     std::wstring MusicTip() const; // the entry's tooltip: the track
     void UpdateSampling();   // the player's level is read only while a bar shows it
@@ -67,6 +70,9 @@ private:
     NowPlayingCard card_;
     FolderStackModel stackModel_;
     FolderStackPopup stacks_;
+    GlassMenu recentMenu_;
+    AppCatalog& catalog_;
+    std::vector<CatalogApp> recentApps_;
     std::unique_ptr<MediaSessionWatcher> media_;
     MediaSnapshot last_;
     bool musicOn_ = false, musicShown_ = false, stacksOn_ = false, launchpadOn_ = false;

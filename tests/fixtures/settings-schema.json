@@ -43,6 +43,8 @@
     "autoWidth": {"type": "bool", "default": true},
     "showRunning": {"type": "bool", "default": true},
     "showLaunchpad": {"type": "bool", "default": true},
+    "showTrash": {"type": "bool", "default": true},
+    "showRecentApps": {"type": "bool", "default": true},
     "launchpadMaterial": {"type": "enum", "default": "bar", "values": ["bar", "tint"], "fallback": "bar"},
     "launchpadLayout": {"type": "enum", "default": "window", "values": ["window", "fullscreen"], "fallback": "window"},
     "showNowPlaying": {"type": "bool", "default": true},

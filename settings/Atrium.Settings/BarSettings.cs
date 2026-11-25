@@ -60,6 +60,8 @@ internal sealed class BarSettings
     public bool ShowDesktop { get; set; }              // the Show Desktop slot at the bar's right end
     public bool ShowRunning { get; set; } = true;
     public bool ShowLaunchpad { get; set; } = true;
+    public bool ShowTrash { get; set; } = true;
+    public bool ShowRecentApps { get; set; } = true;
     public string LaunchpadMaterial { get; set; } = "bar"; // bar | tint
     public string LaunchpadLayout { get; set; } = "window"; // window | fullscreen
     public bool ShowNowPlaying { get; set; } = true;
@@ -221,6 +223,8 @@ internal sealed class BarSettings
             ["autoWidth"] = AutoWidth,
             ["showRunning"] = ShowRunning,
             ["showLaunchpad"] = ShowLaunchpad,
+            ["showTrash"] = ShowTrash,
+            ["showRecentApps"] = ShowRecentApps,
             ["launchpadMaterial"] = LaunchpadMaterial,
             ["launchpadLayout"] = LaunchpadLayout,
             ["showNowPlaying"] = ShowNowPlaying,
@@ -518,6 +522,8 @@ internal sealed class BarSettings
         bool Flag(string k, bool d) => o?[k] is JsonValue v && v.TryGetValue(out bool b) ? b : d;
         string Str(string k, string d) => o?[k] is JsonValue v && v.TryGetValue(out string? t) && t != null ? t : d;
         s.ShowLaunchpad = Flag("showLaunchpad", f.ShowLaunchpad);
+        s.ShowTrash = Flag("showTrash", f.ShowTrash);
+        s.ShowRecentApps = Flag("showRecentApps", f.ShowRecentApps);
         s.LaunchpadMaterial = Str("launchpadMaterial", f.LaunchpadMaterial) == "tint" ? "tint" : "bar";
         s.LaunchpadLayout = Str("launchpadLayout", f.LaunchpadLayout) == "fullscreen" ? "fullscreen" : "window";
         s.ShowNowPlaying = Flag("showNowPlaying", f.ShowNowPlaying);
@@ -545,7 +551,7 @@ internal sealed class BarSettings
         ShowTray == o.ShowTray && TrayHost == o.TrayHost && StartTray == o.StartTray && StartStatus == o.StartStatus &&
         StartCentered == o.StartCentered && StartWithBar == o.StartWithBar && StartSize == o.StartSize && StartIcon == o.StartIcon &&
         ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications && ShowDesktop == o.ShowDesktop &&
-        ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad &&
+        ShowRunning == o.ShowRunning && ShowLaunchpad == o.ShowLaunchpad && ShowTrash == o.ShowTrash && ShowRecentApps == o.ShowRecentApps &&
         LaunchpadMaterial == o.LaunchpadMaterial && LaunchpadLayout == o.LaunchpadLayout &&
         ShowNowPlaying == o.ShowNowPlaying &&
         NowPlayingShowPaused == o.NowPlayingShowPaused && NowPlayingMotion == o.NowPlayingMotion && NowPlayingRhythm == o.NowPlayingRhythm &&

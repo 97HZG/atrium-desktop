@@ -1,7 +1,9 @@
 #include "extras_host.h"
 
 #include "bar.h"
+#include "localization.h"
 #include "log.h"
+#include "shell/app_usage.h"
 #include "posted.h"
 #include "settings.h"
 
@@ -72,7 +74,9 @@ ExtrasHost::ExtrasHost(HINSTANCE instance, AppCatalog& catalog, ForEachBar forBa
       launchpad_(instance, catalog),
       card_(instance),
       stackModel_(host_, WM_STACKS_READY),
-      stacks_(instance, stackModel_)
+      stacks_(instance, stackModel_),
+      recentMenu_(instance),
+      catalog_(catalog)
 {
     card_.SetFeed(feed_);
     card_.onCommand = [this](MediaCommand command, int64_t positionUs) {
@@ -150,6 +154,8 @@ void ExtrasHost::Apply(const Settings& s, float radius)
     launchpad_.SetFullscreen(s.launchpadLayout == L"fullscreen");
     if (!launchpadOn_)
         launchpad_.Close(false);
+    if (!s.showRecentApps)
+        recentMenu_.Close();
     PrewarmLaunchpad();
     card_.SetRadius(radius);
     launchpad_.SetRadius(radius);
@@ -171,6 +177,7 @@ void ExtrasHost::OnBarRetiring(const Bar* bar)
     launchpad_.Close(false);
     card_.Close();
     stacks_.Close();
+    recentMenu_.Close();
     UpdateSampling();
 }
 
@@ -223,6 +230,9 @@ void ExtrasHost::Click(Bar& bar, const std::wstring& key, RECT entry)
         }
         lastBar_ = &bar;
         stacks_.Open(entry, bar.BarRect());
+    } else if (key == L"#recent") {
+        OpenRecent(entry);
+        return;
     } else {
         return;
     }
@@ -280,10 +290,39 @@ void ExtrasHost::ClosePopups()
     launchpad_.Close(false);
     card_.Close();
     stacks_.Close();
+    recentMenu_.Close();
     UpdateSampling();
 }
 
-bool ExtrasHost::AnyPopupVisible() const { return launchpad_.Visible() || card_.Visible() || stacks_.Visible(); }
+bool ExtrasHost::AnyPopupVisible() const { return launchpad_.Visible() || card_.Visible() || stacks_.Visible() || recentMenu_.Visible(); }
+
+void ExtrasHost::OpenRecent(RECT entry)
+{
+    if (recentMenu_.Visible()) {
+        recentMenu_.Close();
+        return;
+    }
+    recentApps_.clear();
+    for (const CatalogApp& app : catalog_.Apps())
+        if (!app.system && AppCatalog::IsLaunchable(app))
+            recentApps_.push_back(app);
+    SortAppsByUsage(recentApps_);
+    if (recentApps_.size() > 16)
+        recentApps_.resize(16);
+    std::vector<MenuEntry> rows;
+    if (recentApps_.empty())
+        rows.push_back({Tr(L"No recent apps"), -1, false, true});
+    else
+        for (size_t i = 0; i < recentApps_.size(); ++i)
+            rows.push_back({recentApps_[i].name, int(i)});
+    const POINT at{entry.left, entry.top};
+    recentMenu_.Open(std::move(rows), at, MenuPlace::Above, [this](int id) {
+        if (id >= 0 && size_t(id) < recentApps_.size())
+            catalog_.Launch(recentApps_[size_t(id)]);
+    });
+    if (onPanelsChanged)
+        onPanelsChanged();
+}
 
 void ExtrasHost::Shutdown()
 {

@@ -8,7 +8,7 @@ namespace atrium {
 
 inline constexpr wchar_t kClockKey[] = L"#clock", kStartKey[] = L"#start", kNotifyKey[] = L"#notify", kTrayKey[] = L"#tray", kImeKey[] = L"#ime",
                          kStatusKey[] = L"#status", kMoreKey[] = L"#more", kDesktopKey[] = L"#desktop", kLaunchpadKey[] = L"#launchpad",
-                         kMusicKey[] = L"#music", kStacksKey[] = L"#stacks";
+                         kMusicKey[] = L"#music", kStacksKey[] = L"#stacks", kTrashKey[] = L"#trash", kRecentKey[] = L"#recent";
 
 // Bar entries and the clock start with '#'; app keys are AUMIDs or paths.
 inline bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }

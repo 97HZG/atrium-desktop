@@ -1,6 +1,7 @@
 #include "shell/app_catalog.h"
 
 #include "log.h"
+#include "shell/app_usage.h"
 #include "shell/shell_icon.h"
 #include "shell/start_layout.h"
 
@@ -558,6 +559,7 @@ bool AppCatalog::Launch(const CatalogApp& app)
         return false;
     }
     Log(L"catalog: launched %s", app.id.c_str());
+    RecordAppLaunch(app.id);
     return true;
 }
 

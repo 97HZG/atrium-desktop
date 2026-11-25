@@ -169,6 +169,8 @@ void ReadExtrasSettingsJson(const json::JsonObject& o, Settings& s)
             v = std::wstring(o.GetNamedString(k));
     };
     flag(L"showLaunchpad", s.showLaunchpad);
+    flag(L"showTrash", s.showTrash);
+    flag(L"showRecentApps", s.showRecentApps);
     str(L"launchpadMaterial", s.launchpadMaterial);
     str(L"launchpadLayout", s.launchpadLayout);
     flag(L"showNowPlaying", s.showNowPlaying);
@@ -321,6 +323,8 @@ void WriteExtrasJson(const json::JsonObject& o, const Settings& s)
     auto flag = [&](const wchar_t* k, bool v) { o.SetNamedValue(k, json::JsonValue::CreateBooleanValue(v)); };
     auto str = [&](const wchar_t* k, const std::wstring& v) { o.SetNamedValue(k, json::JsonValue::CreateStringValue(v)); };
     flag(L"showLaunchpad", s.showLaunchpad);
+    flag(L"showTrash", s.showTrash);
+    flag(L"showRecentApps", s.showRecentApps);
     str(L"launchpadMaterial", s.launchpadMaterial);
     str(L"launchpadLayout", s.launchpadLayout);
     flag(L"showNowPlaying", s.showNowPlaying);
