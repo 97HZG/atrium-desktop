@@ -145,7 +145,24 @@ Three materials: the clear glass **like the taskbar**; **dusk**, the same glass 
   </tr>
 </table>
 
-The app you are using stays in the middle of the screen; the others move to one side, their windows standing at an angle in a column, one card per window, even for several windows of one app. Hover one and it turns to face you, with a close button at its top right; click to bring it to the front, or Shift-click it, or drop a window onto it, to group apps together. When there are more windows than the column holds, scroll the strip and the cards glide on a spring; the first and last cards blur and fade away towards their far edge, so you can tell there is more without a scrollbar. The side can always show (a window over it moves aside when it comes to the front; a maximized window sends it away until the pointer reaches the screen's edge), or slide out only when the pointer reaches the screen's edge. With “minimize windows to Stage Manager” on, minimizing the app in front sends its window's picture flying into the side instead of down to the taskbar. The Windows Snipping Tool is left out of Stage Manager by default, so its overlay and pause/stop controls stay on screen while recording; add other apps in Settings. Turning Stage Manager off or quitting Atrium puts every window back.
+The app you are using stays in the middle of the screen; the others move to one side, their windows standing at an angle in a column, one card per window, even for several windows of one app. Hover one and it turns to face you; click to bring it to the front, or Shift-click to group apps together. When there are more windows than the column holds, scroll the strip and the cards glide on a spring. The side can always show (a window over it moves aside when it comes to the front; a maximized window sends it away until the pointer reaches the screen's edge), or slide out only when the pointer reaches the screen's edge. With “minimize windows to Stage Manager” on, minimizing the app in front sends its window's picture flying into the side instead of down to the taskbar. The Windows Snipping Tool is left out of Stage Manager by default, so its overlay and pause/stop controls stay on screen while recording; add other apps in Settings. Turning Stage Manager off or quitting Atrium puts every window back.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/readme/stage-group.jpg" alt="Notes dragged onto the Mail card, which lights up with a blue outline"></td>
+    <td width="50%"><img src="docs/images/readme/stage-close.jpg" alt="The pointer on the Calendar card, a close button at its top right"></td>
+  </tr>
+  <tr>
+    <td><b>Drop onto a card to group</b>: drag a window over a card in the strip and the card lights up with a blue outline; let go and the card's windows fly back to the stage, grouped with it.</td>
+    <td><b>Close from the corner</b>: hover a card and a close button appears at its top right; click it to close that card's windows (apps still ask to save). It can be turned off in Settings.</td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/images/readme/stage-fade.jpg" alt="The first and last cards in the strip blur and fade away" width="100%">
+</p>
+
+**Fading ends**: when there are more windows than the strip holds, the first and last cards blur more and more along their own perspective and fade away, so you can tell there is more without a scrollbar; scroll to reach it.
 
 Additional strip controls:
 
